@@ -1,6 +1,6 @@
 /*
  * Mar  8, 2000 by Hajimu UMEMOTO <ume@mahoroba.org>
- * $Id: getaddrinfo.c,v 1.1.2.1 2001/08/01 17:25:44 rjs3 Exp $
+ * $Id: getaddrinfo.c,v 1.1.2.2 2001/09/19 20:02:30 rjs3 Exp $
  *
  * This module is besed on ssh-1.2.27-IPv6-1.5 written by
  * KIKUCHI Takahiro <kick@kyoto.wide.ad.jp>
@@ -59,8 +59,10 @@
  */
 
 #include "config.h"
+#ifndef macintosh
 #include <sys/param.h>
 #include <arpa/inet.h>
+#endif
 #include <ctype.h>
 
 static struct addrinfo *
@@ -171,18 +173,14 @@ getaddrinfo(const char *hostname, const char *servname,
 	    port = se->s_port;
 	}
     }
-    if (hints && hints->ai_flags & AI_PASSIVE) {
-	*res = malloc_ai(port, htonl(0x00000000), socktype, proto);
-	if (*res)
-	    return 0;
-	else
-	    return EAI_MEMORY;
-    }
     if (!hostname) {
-	*res = malloc_ai(port, htonl(0x7f000001), socktype, proto);
-	if (*res)
+        if (hints && hints->ai_flags & AI_PASSIVE)
+            *res = malloc_ai(port, htonl(0x00000000), socktype, proto);
+        else
+            *res = malloc_ai(port, htonl(0x7f000001), socktype, proto);
+        if (*res)
 	    return 0;
-	else
+        else
 	    return EAI_MEMORY;
     }
     if (inet_aton(hostname, &in)) {
@@ -194,6 +192,7 @@ getaddrinfo(const char *hostname, const char *servname,
     }
     if (hints && hints->ai_flags & AI_NUMERICHOST)
 	return EAI_NODATA;
+#ifndef macintosh
     if ((hp = gethostbyname(hostname)) &&
 	hp->h_name && hp->h_name[0] && hp->h_addr_list[0]) {
 	for (i = 0; hp->h_addr_list[i]; i++) {
@@ -211,6 +210,7 @@ getaddrinfo(const char *hostname, const char *servname,
 	    prev = cur;
 	}
 	if (hints && hints->ai_flags & AI_CANONNAME && *res) {
+	    /* NOT sasl_strdup for compatibility */
 	    if (((*res)->ai_canonname = strdup(hp->h_name)) == NULL) {
 		freeaddrinfo(*res);
 		return EAI_MEMORY;
@@ -218,5 +218,6 @@ getaddrinfo(const char *hostname, const char *servname,
 	}
 	return 0;
     }
+#endif
     return EAI_NODATA;
 }
