@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.6 1999/11/05 23:07:48 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.7 1999/11/05 23:08:38 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -2265,7 +2265,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 
     assert(backend_current != NULL);
 
-    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    r = mboxname_tointernal(name, proxyd_userid, mailboxname);
     if (!r) r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
     if (!r) s = proxyd_findserver(server);
 
@@ -2318,7 +2318,7 @@ void cmd_create(char *tag, char *name, char *server)
     char mailboxname[MAX_MAILBOX_NAME+1];
     int r;
 
-    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    r = mboxname_tointernal(name, proxyd_userid, mailboxname);
 
     if (!r && !server) {
 	r = mboxlist_createmailboxcheck(mailboxname, 0, 0, proxyd_userisadmin,
@@ -2355,7 +2355,7 @@ void cmd_delete(char *tag, char *name)
     struct backend *s = NULL;
     char mailboxname[MAX_MAILBOX_NAME+1];
 
-    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    r = mboxname_tointernal(name, proxyd_userid, mailboxname);
 
     if (!r) r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
     if (!r) {
@@ -2389,8 +2389,8 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 	prot_printf(proxyd_out, 
 		    "%s NO cross-server RENAME not implemented\r\n", tag);
     } else {
-        r = mboxname_tointernal(oldname, imapd_userid, oldmailboxname);
-	if (!r) mboxname_tointernal(newname, imapd_userid, newmailboxname);
+        r = mboxname_tointernal(oldname, proxyd_userid, oldmailboxname);
+	if (!r) mboxname_tointernal(newname, proxyd_userid, newmailboxname);
 	if (!r) r = mboxlist_lookup(oldmailboxname, &server, NULL, NULL);
 	if (!r) {
 	    s = proxyd_findserver(server);
