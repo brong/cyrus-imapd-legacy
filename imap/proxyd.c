@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.8 2001/10/31 21:04:45 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.9 2001/11/07 03:53:05 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -951,7 +951,7 @@ static int mysasl_authproc(sasl_conn_t *conn,
 	    
 	    proxyd_authstate = auth_newstate(requested_user, NULL);
 	} else {
-	    sasl_seterror(conn, 0, "user is not allowed to proxy");
+	    sasl_seterror(conn, 0, "user %s is not allowed to proxy", auth_identity);
 	    
 	    auth_freestate(proxyd_authstate);
 	    

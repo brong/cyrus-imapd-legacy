@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.15 2001/10/31 21:04:43 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.16 2001/11/07 03:53:03 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -315,7 +315,7 @@ static int mysasl_authproc(sasl_conn_t *conn,
 	    
 	    imapd_authstate = auth_newstate(requested_user, NULL);
 	} else {
-	    sasl_seterror(conn, 0, "user is not allowed to proxy");
+	    sasl_seterror(conn, 0, "user %s is not allowed to proxy",auth_identity);
 	    
 	    auth_freestate(imapd_authstate);
 	    
@@ -4221,9 +4221,12 @@ void cmd_starttls(char *tag, int imaps)
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
-    if(saslprops.authid)
+    if(saslprops.authid) {
 	free(saslprops.authid);
-    saslprops.authid = xstrdup(auth_id);
+	saslprops.authid = NULL;
+    }
+    if(auth_id)
+        saslprops.authid = xstrdup(auth_id);
 
     /* tell the prot layer about our new layers */
     prot_settls(imapd_in, tls_conn);
