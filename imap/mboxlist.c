@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.42 1999/11/04 01:24:46 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.43 1999/11/04 01:32:11 leg Exp $
  */
 
 #include <stdio.h>
@@ -103,11 +103,12 @@ void mboxlist_checkconfig()
 /*
  * Convert a partition into a path
  */
-static int mboxlist_getpath(char *partition, char **pathp)
+static int mboxlist_getpath(char *partition, char *name, char **pathp)
 {
     int partitionlen;
     char optionbuf[MAX_MAILBOX_NAME+1];
     static char pathresult[MAX_MAILBOX_PATH];
+    const char *root;
 
     assert(partition && pathp);
 
@@ -143,7 +144,6 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
 {
     unsigned long offset, len, partitionlen, acllen;
     char *partition, *acl;
-    const char *root;
     static char *aclresult;
     static int aclresultalloced;
     int r;
@@ -182,12 +182,12 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
     /* construct pathname if requested */
     if (pathp) {
 	if (mboxent->mbtype & MBTYPE_REMOTE) {
-	    static presult[MAX_PARTITION_LEN];
+	    static char presult[MAX_PARTITION_LEN];
 	    
 	    strcpy(presult, mboxent->partition);
 	    *pathp = presult;
 	} else {
-	    r = mboxlist_getpath(mboxent->partition, pathp);
+	    r = mboxlist_getpath(mboxent->partition, mboxent->name, pathp);
 	    if (r) {
 		return r;
 	    }
@@ -493,8 +493,6 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	    r = IMAP_MAILBOX_BADNAME;
 	    goto done;
 	}
-    } else {
-
     }
     
     /* add the new entry */
@@ -759,8 +757,11 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     key.data = name;
     key.size = strlen(name);
-    r = mbdb->get(mbdb, tid, &key, DB_RMW);
-    if (!r) r = mboxlist_getpath(mboxent->partition, &path);
+    r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
+    if (!r) {
+	mboxent = (struct mbox_entry *) data.data;
+	r = mboxlist_getpath(mboxent->partition, mboxent->name, &path);
+    }
     switch (r) {
     case 0:
 	break;
@@ -1312,7 +1313,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	switch (r) {
 	case 0:
 	    oldent = (struct mbox_entry *) data.data;
-	    mboxlist_getpath(oldent->partition, &path);
+	    mboxlist_getpath(oldent->partition, oldent->name, &path);
 	    break;
 	case DB_NOTFOUND:
 	    r = IMAP_MAILBOX_NONEXISTENT;
