@@ -2,13 +2,15 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.1 1999/10/21 02:00:17 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.2 1999/10/21 22:42:19 leg Exp $
  */
 
 #ifndef MBOXLIST_H
 #define MBOXLIST_H
 
 #include "auth.h"
+
+#define MAX_PARTITION_LEN 10
 
 /* Lookup 'name' in the mailbox list. */
 int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid);

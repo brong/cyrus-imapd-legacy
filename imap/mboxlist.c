@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.28 1999/10/21 16:44:09 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.29 1999/10/21 22:42:17 leg Exp $
  */
 
 #include <stdio.h>
@@ -90,8 +90,6 @@ static char *mboxlist_hash_usersubs(const char *userid);
  * Maximum length of partition name.  [xxx probably no longer needed]
  * [config.c has a limit of 70]
  */
-#define MAX_PARTITION_LEN 10
-
 struct mbox_entry {
     char name[MAX_MAILBOX_NAME];
     char partition[MAX_PARTITION_LEN];
@@ -1063,19 +1061,18 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     r = mailbox_rename(oldname, oldpath, oldacl, newname, buf2, isusermbox,
 		       &olduidvalidity, &newuidvalidity);
 
-    if (r!=0) {
+    if (r != 0) {
       goto done;
     }
-    /* xxx does this need to be in the critical section??? */
-    toimsp(oldname, olduidvalidity, "RENsn", newname, newuidvalidity, 0); 
 
+    toimsp(oldname, olduidvalidity, "RENsn", newname, newuidvalidity, 0); 
 
  done:
     free(newpartition);
     free(newent);
     free(acl);
 
-    if (r!=0)
+    if (r != 0)
     {
 	txn_abort(tid);
 	return r;
@@ -1258,7 +1255,7 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
     timestamp = time(0);
     uidvalidity = mailbox.uidvalidity;
     toimsp(name, uidvalidity, "ACLsn", newacl, timestamp, 0);
-	
+
     mailbox_close(&mailbox);
     free(newacl);
 
@@ -1631,7 +1628,8 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
     txnp = dbenv.tx_info;
 
 
-    /* open the subscription file that contains the mailboxes the user is subscribed to */
+    /* open the subscription file that contains the mailboxes the 
+       user is subscribed to */
     if (r = mboxlist_opensubs(userid, 0, &subsfd, &subs_base, &subs_size,
 			      &subsfname, (char **) 0)) {
 	goto done;
@@ -2020,8 +2018,8 @@ int mboxlist_setquota(const char *root, int newquota)
      */
 
     {
-	DBC *cursor=NULL;      
-	struct mbox_entry *mboxent=NULL;
+	DBC *cursor = NULL;
+	struct mbox_entry *mboxent = NULL;
 	DBT key, data;
 	int r2;
 	
