@@ -1,7 +1,7 @@
 %{
 /* sieve.l -- sieve lexer
  * Larry Greenfield
- * $Id: sieve-lex.l,v 1.16.6.3 2002/08/22 20:06:33 jsmith2 Exp $
+ * $Id: sieve-lex.l,v 1.16.6.4 2003/01/08 23:41:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -124,12 +124,6 @@ CRLF		(\r\n|\r|\n)
 <INITIAL>:regex		return REGEX;
 <INITIAL>:count		return COUNT;
 <INITIAL>:value		return VALUE;
-<INITIAL>gt		return GT;
-<INITIAL>ge		return GE;
-<INITIAL>lt		return LT;
-<INITIAL>le		return LE;
-<INITIAL>eq		return EQ;
-<INITIAL>ne		return NE;
 <INITIAL>:over		return OVER;
 <INITIAL>:under		return UNDER;
 <INITIAL>:all		return ALL;

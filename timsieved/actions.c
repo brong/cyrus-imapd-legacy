@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.29.2.3 2002/09/10 20:31:42 rjs3 Exp $
+ * $Id: actions.c,v 1.29.2.4 2003/01/08 23:41:54 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -49,10 +49,10 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <limits.h>
-#include <sys/stat.h>
 #include <sys/param.h>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -321,6 +321,7 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
       stream = fopen(path, "w+");
   }
 
+
   if (stream == NULL) {
       prot_printf(conn, "NO \"Unable to open script for writing (%s)\"\r\n",
 		  path);
@@ -375,7 +376,7 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
 
       /* Now, open the new file */
       snprintf(bc_path, 1023, "%s.bc.NEW", string_DATAPTR(name));
-      fd = open(bc_path, O_CREAT | O_TRUNC | O_WRONLY);
+      fd = open(bc_path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
       if(fd < 0) {
 	  unlink(path);
 	  sieve_free_bytecode(&bc);

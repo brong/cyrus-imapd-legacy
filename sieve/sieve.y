@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.5 2002/08/29 16:32:30 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.6 2003/01/08 23:41:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -113,6 +113,7 @@ static int verify_mailbox(char *s);
 static int verify_address(char *s);
 static int verify_header(char *s);
 static int verify_flag(char *s);
+static int verify_relat(char *s);
 #ifdef ENABLE_REGEX
 static regex_t *verify_regex(char *s, int cflags);
 static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
@@ -155,7 +156,7 @@ extern int yylex(void);
 %type <cl> commands command action elsif block
 %type <sl> stringlist strings
 %type <test> test
-%type <nval> comptag relcomp relation sizetag addrparttag addrorenv
+%type <nval> comptag relcomp sizetag addrparttag addrorenv
 %type <testl> testlist tests
 %type <htag> htags
 %type <aetag> aetags
@@ -319,11 +320,13 @@ dtags: /* empty */		 { $$ = new_dtags(); }
 #endif
 					   $$->pattern = $3;
 				   } }
-	| dtags relcomp relation  { $$ = $1;
+	| dtags relcomp STRING  { $$ = $1;
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2;
-				     $$->relation = $3;
+				   $$->relation = verify_relat($3);
+				   if ($$->relation==-1) 
+				     {YYERROR; /*vr called yyerror()*/ }
 				   } }
 	;
 
@@ -433,14 +436,16 @@ aetags: /* empty */              { $$ = new_aetags(); }
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2; } }
-	| aetags relcomp relation{ $$ = $1;
+	| aetags relcomp STRING{ $$ = $1;
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2;
-				     $$->relation = $3;
+				   $$->relation = verify_relat($3);
+				   if ($$->relation==-1) 
+				     {YYERROR; /*vr called yyerror()*/ }
 				   } }
-	| aetags COMPARATOR STRING { $$ = $1;
-				   if ($$->comparator != NULL) { 
+        | aetags COMPARATOR STRING { $$ = $1;
+	if ($$->comparator != NULL) { 
 			yyerror("duplicate comparator tag"); YYERROR; }
 				   else if (!strcmp($3, "i;ascii-numeric") &&
 					    !parse_script->support.i_ascii_numeric) {
@@ -454,11 +459,13 @@ htags: /* empty */		 { $$ = new_htags(); }
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2; } }
-	| htags relcomp relation { $$ = $1;
+	| htags relcomp STRING { $$ = $1;
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2;
-				     $$->relation = $3;
+				   $$->relation = verify_relat($3);
+				   if ($$->relation==-1) 
+				     {YYERROR; /*vr called yyerror()*/ }
 				   } }
 	| htags COMPARATOR STRING { $$ = $1;
 				   if ($$->comparator != NULL) { 
@@ -506,13 +513,7 @@ relcomp: COUNT			 { if (!parse_script->support.relational) {
 				   }
 				   $$ = VALUE; }
 	;
-relation: GT                     { $$ = GT; }
-         | GE                     { $$ = GE; }
-         | LT                     { $$ = LT; }
-         | LE                     { $$ = LE; }
-         | EQ                     { $$ = EQ; }
-         | NE                     { $$ = NE; }
-        ;
+
 
 sizetag: OVER			 { $$ = OVER; }
 	| UNDER			 { $$ = UNDER; }
@@ -583,18 +584,13 @@ static test_t *build_address(int t, struct aetags *ae,
 
     if (ret) {
 	ret->u.ae.comptag = ae->comptag;
-	/*	ret->u.ae.comp = lookup_comp(ae->comparator, ae->comptag,
-		ae->relation, &ret->u.ae.comprock);*/
 	ret->u.ae.relation=ae->relation;
 	ret->u.ae.comparator=strdup(ae->comparator);
 	ret->u.ae.sl = sl;
 	ret->u.ae.pl = pl;
 	ret->u.ae.addrpart = ae->addrtag;
 	free_aetags(ae);
-	/*if (ret->u.ae.comp == NULL) {
-	  free_test(ret);
-	  ret = NULL;
-	  }*/
+
     }
     return ret;
 }
@@ -608,17 +604,11 @@ static test_t *build_header(int t, struct htags *h,
 
     if (ret) {
 	ret->u.h.comptag = h->comptag;
-	/*ret->u.h.comp = lookup_comp(h->comparator, h->comptag,
-				    h->relation, &ret->u.h.comprock);*/
 	ret->u.h.relation=h->relation;
 	ret->u.h.comparator=strdup(h->comparator);
 	ret->u.h.sl = sl;
 	ret->u.h.pl = pl;
 	free_htags(h);
-	/*if (ret->u.h.comp == NULL) {
-	  free_test(ret);
-	  ret = NULL;
-	  }*/
     }
     return ret;
 }
@@ -665,17 +655,10 @@ static commandlist_t *build_denotify(int t, struct dtags *d)
 
     if (ret) {
 	ret->u.d.comptag = d->comptag;
-	/*ret->u.d.comp = lookup_comp("i;ascii-casemap", d->comptag,
-	  d->relation, &ret->u.d.comprock);*/
 	ret->u.d.relation=d->relation;
-	/*	ret->u.d.comparator=strdup(d->comparator);*/
 	ret->u.d.pattern = d->pattern; d->pattern = NULL;
 	ret->u.d.priority = d->priority;
 	free_dtags(d);
-	/*	if (ret->u.d.comp == NULL) {
-	    free_tree(ret);
-	    ret = NULL;
-	    }*/
     }
     return ret;
 }
@@ -862,6 +845,27 @@ static int verify_header(char *hdr)
     return 1;
 }
  
+static int verify_relat(char *r)
+{/* this really should have been a token to begin with.*/
+    char errbuf[100];
+	lcase(r);
+	if (strcmp(r, "gt")) {return GT;}
+	else if (strcmp(r, "ge")) {return GE;}
+	else if (strcmp(r, "lt")) {return LT;}
+	else if (strcmp(r, "le")) {return LE;}
+	else if (strcmp(r, "ne")) {return NE;}
+	else if (strcmp(r, "eq")) {return EQ;}
+	else{
+	  sprintf(errbuf, "flag '%s': not a valid relational operation", r);
+	  yyerror(errbuf);
+	  return -1;
+	}
+	
+}
+
+
+
+
 static int verify_flag(char *f)
 {
     char errbuf[100];

@@ -39,7 +39,7 @@
  *
  */
 
-/* $Id: managesieve.xs,v 1.9.2.2 2002/09/10 20:31:31 rjs3 Exp $ */
+/* $Id: managesieve.xs,v 1.9.2.3 2003/01/08 23:41:51 jsmith2 Exp $ */
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +65,8 @@ static char *globalerr = NULL;
 
 #include "isieve.h"
 
+#include "xmalloc.h"
+
 static int
 not_here(s)
 char *s;
@@ -89,13 +91,10 @@ not_there:
     return 0;
 }
 
-int
-fatal(s,t)
-char *s;
-int t;
+void fatal(const char *s, int t)
 {
     croak("failure: %s", s);
-    return -1;
+    exit(-1);
 }
 
 static int

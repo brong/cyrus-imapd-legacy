@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.16 2003/01/08 18:22:32 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.17 2003/01/08 23:41:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,7 +55,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-#define DUMPCODE 0  
+#define DUMPCODE 1
 #define VERBOSE 1
 
 #if DUMPCODE
@@ -1337,7 +1337,7 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
 
 
 int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
-{/*interp is a sieve interpretor?  meaning that it knows what to do next, or it is the thing that parses and evaluates and all that every time?????????.*/
+{
   int res=0; 
   int i=*ip;
   int x,y,z;/*loop variable*/
