@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.14 2001/10/25 20:42:51 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.15 2001/10/31 21:04:43 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -1465,7 +1465,7 @@ char *passwd;
     char buf[MAX_MAILBOX_PATH];
     char *p;
     int plaintextloginpause;
-    int result, r;
+    int result=SASL_FAIL, r;
 
     canon_user = auth_canonifyid(user, 0);
 

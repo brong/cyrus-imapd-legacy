@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.7 2001/10/23 00:21:35 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.8 2001/10/31 21:04:45 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -232,6 +232,17 @@ void printastring (const char *s);
 /* XXX fix when proto-izing mboxlist.c */
 static int mailboxdata(), listdata(), lsubdata();
 static void mstringdata(char *cmd, char *name, int matchlen, int maycreate);
+
+/* Enable the resetting of a sasl_conn_t */
+static int reset_saslconn(sasl_conn_t **conn);
+
+static struct 
+{
+    char *ipremoteport;
+    char *iplocalport;    
+    sasl_ssf_t ssf;
+    char *authid;
+} saslprops = {NULL,NULL,0,NULL};
 
 #define BUFGROWSIZE 100
 
@@ -1081,7 +1092,7 @@ int service_main(int argc, char **argv, char **envp)
 	    }
 	    break;
 	case 'p': /* external protection */
-	    ssf = atoi(optarg);
+	    saslprops.ssf = ssf = atoi(optarg);
 	    break;
 	default:
 	    break;
@@ -1129,6 +1140,11 @@ int service_main(int argc, char **argv, char **envp)
 			&proxyd_saslconn) != SASL_OK) {
 	fatal("SASL failed initializing: sasl_server_new()", EC_TEMPFAIL); 
     }
+
+    if(proxyd_haveaddr) {
+        saslprops.ipremoteport = xstrdup(remoteip);
+        saslprops.iplocalport = xstrdup(localip);
+    }    
 
     secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
     sasl_setprop(proxyd_saslconn, SASL_SEC_PROPS, secprops);
@@ -1926,7 +1942,7 @@ void cmd_login(char *tag, char *user, char *passwd)
     char buf[MAX_MAILBOX_PATH];
     char *p;
     int plaintextloginpause;
-    int result, r;
+    int result=SASL_FAIL, r;
 
     canon_user = auth_canonifyid(user, 0);
 
@@ -2057,12 +2073,27 @@ void cmd_authenticate(char *tag, char *authtype)
 
     while (sasl_result == SASL_CONTINUE)
     {
+      char c;
+	
+
       /* print the message to the user */
       printauthready(proxyd_out, serveroutlen, (unsigned char *)serverout);
+
+      c = prot_getc(proxyd_in);
+      if(c == '*') {
+         eatline(proxyd_in,c);
+         prot_printf(proxyd_out,
+                     "%s NO Client canceled authentication\r\n", tag);
+         reset_saslconn(&proxyd_saslconn);
+         return;
+      } else {
+         prot_ungetc(c, proxyd_in);
+      }
 
       /* get string from user */
       clientinlen = getbase64string(proxyd_in, &clientin);
       if (clientinlen == -1) {
+	reset_saslconn(&proxyd_saslconn);
 	prot_printf(proxyd_out, "%s BAD Invalid base64 string\r\n", tag);
 	return;
       }
@@ -2084,7 +2115,8 @@ void cmd_authenticate(char *tag, char *authtype)
 	       proxyd_clienthost, authtype, sasl_errdetail(proxyd_saslconn));
 	
 	sleep(3);
-	
+
+	reset_saslconn(&proxyd_saslconn);
 	if (errorstring) {
 	    prot_printf(proxyd_out, "%s NO %s\r\n", tag, errorstring);
 	} else {
@@ -2108,6 +2140,7 @@ void cmd_authenticate(char *tag, char *authtype)
 		    tag, sasl_result);
 	syslog(LOG_ERR, "weird SASL error %d getting SASL_USERNAME", 
 	       sasl_result);
+	reset_saslconn(&proxyd_saslconn);
 	return;
     }
 
@@ -4020,6 +4053,15 @@ void cmd_starttls(char *tag, int imaps)
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
+    saslprops.ssf = ssf;
+
+    result = sasl_setprop(proxyd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
+    if (result != SASL_OK) {
+       fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
+    }
+    if(saslprops.authid)
+       free(saslprops.authid);
+    saslprops.authid = xstrdup(auth_id);
 
     /* tell the prot layer about our new layers */
     prot_settls(proxyd_in, tls_conn);
@@ -4362,4 +4404,48 @@ void* rock;
 {
     mstringdata("LSUB", name, matchlen, maycreate);
     return 0;
+}
+
+/* Reset the given sasl_conn_t to a sane state */
+static int reset_saslconn(sasl_conn_t **conn) 
+{
+    int ret;
+    sasl_security_properties_t *secprops = NULL;
+
+    sasl_dispose(conn);
+    /* do initialization typical of service_main */
+    ret = sasl_server_new("imap", config_servername,
+                         NULL, NULL, NULL,
+                         NULL, 0, conn);
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.ipremoteport)
+       ret = sasl_setprop(*conn, SASL_IPREMOTEPORT,
+                          saslprops.ipremoteport);
+    if(ret != SASL_OK) return ret;
+    
+    if(saslprops.iplocalport)
+       ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+                          saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    
+    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+    if(saslprops.ssf) {
+       ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &saslprops.ssf);
+    }
+    if(ret != SASL_OK) return ret;
+
+
+    if(saslprops.authid) {
+       ret = sasl_setprop(*conn, SASL_AUTH_EXTERNAL, saslprops.authid);
+       if(ret != SASL_OK) return ret;
+    }
+    /* End TLS/SSL Info */
+
+    return SASL_OK;
 }

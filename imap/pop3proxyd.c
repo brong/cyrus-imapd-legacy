@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.6 2001/10/01 19:54:49 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.7 2001/10/31 21:04:45 rjs3 Exp $
  */
 #include <config.h>
 
@@ -142,6 +142,17 @@ extern int proc_register(const char *progname, const char *clienthost,
 			 const char *userid, const char *mailbox);
 extern void proc_cleanup(void);
 void shut_down(int code) __attribute__ ((noreturn));
+
+/* Enable the resetting of a sasl_conn_t */
+static int reset_saslconn(sasl_conn_t **conn);
+
+static struct 
+{
+    char *ipremoteport;
+    char *iplocalport;
+    sasl_ssf_t ssf;
+    char *authid;
+} saslprops = {NULL,NULL,0,NULL};
 
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
@@ -260,11 +271,15 @@ int service_main(int argc, char **argv, char **envp)
     sasl_setprop(popd_saslconn, SASL_SEC_PROPS, secprops);
     
     if(iptostring((struct sockaddr *)&popd_localaddr,
-		  sizeof(struct sockaddr_in), localip, 60) == 0)
+		  sizeof(struct sockaddr_in), localip, 60) == 0) {
 	sasl_setprop(popd_saslconn, SASL_IPLOCALPORT, localip);
+	saslprops.iplocalport = xstrdup(localip);
+    }
     if(iptostring((struct sockaddr *)&popd_remoteaddr,
-		  sizeof(struct sockaddr_in), remoteip, 60) == 0)
+		  sizeof(struct sockaddr_in), remoteip, 60) == 0) {
 	sasl_setprop(popd_saslconn, SASL_IPREMOTEPORT, remoteip);  
+	saslprops.ipremoteport = xstrdup(remoteip);
+    }
 
     proc_register("pop3d", popd_clienthost, NULL, NULL);
 
@@ -585,7 +600,16 @@ static void cmd_starttls(int pop3s)
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
+    saslprops.ssf = ssf;
 
+    result = sasl_setprop(popd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
+    if (result != SASL_OK) {
+	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
+    }
+    if(saslprops.authid)
+        free(saslprops.authid);
+    saslprops.authid = xstrdup(auth_id);
+    
     /* tell the prot layer about our new layers */
     prot_settls(popd_in, tls_conn);
     prot_settls(popd_out, tls_conn);
@@ -865,6 +889,7 @@ void cmd_auth(char *arg)
     char *authtype;
     const char *serverout;
     unsigned int serveroutlen;
+    char *cin;
 
     /* if client didn't specify an argument we give them the list */
     if (!arg) {
@@ -904,24 +929,38 @@ void cmd_auth(char *arg)
 	int arglen = strlen(arg);
 
 	clientin.alloc = arglen + 1;
-	clientin.s = xmalloc(clientin.alloc);
+	cin = clientin.s = xmalloc(clientin.alloc);
 	sasl_result = sasl_decode64(arg, arglen, clientin.s,
 				    clientin.alloc, &clientinlen);
     } else {
 	sasl_result = SASL_OK;
+	cin = NULL;
 	clientinlen = 0;
     }
 
     /* server did specify a command, so let's try to authenticate */
     if (sasl_result == SASL_OK || sasl_result == SASL_CONTINUE)
 	sasl_result = sasl_server_start(popd_saslconn, authtype,
-					clientin.s, clientinlen,
+					cin, clientinlen,
 					&serverout, &serveroutlen);
     /* sasl_server_start will return SASL_OK or SASL_CONTINUE on success */
     while (sasl_result == SASL_CONTINUE)
     {
+	char c;
+	
 	/* print the message to the user */
 	printauthready(popd_out, serveroutlen, (unsigned char *)serverout);
+
+        c = prot_getc(popd_in);
+        if(c == '*') {
+            eatline(popd_in,c);
+            prot_printf(popd_out,
+                        "-ERR Client canceled authentication\r\n");
+            reset_saslconn(&popd_saslconn);
+            return;
+        } else {
+            prot_ungetc(c, popd_in);
+        }
 
 	/* get string from user */
 	clientinlen = getbase64string(popd_in, &clientin);
@@ -942,6 +981,8 @@ void cmd_auth(char *arg)
     if (sasl_result != SASL_OK)
     {
 	sleep(3);      
+
+	reset_saslconn(&popd_saslconn);
 	
 	/* convert the sasl error code to a string */
 	prot_printf(popd_out, "-ERR authenticating: %s\r\n",
@@ -1250,3 +1291,53 @@ static void bitpipe(void)
     return;
 }
 
+/* Reset the given sasl_conn_t to a sane state */
+static int reset_saslconn(sasl_conn_t **conn) 
+{
+    int ret;
+    sasl_security_properties_t *secprops = NULL;
+
+    sasl_dispose(conn);
+    /* do initialization typical of service_main */
+    ret = sasl_server_new("pop", config_servername,
+                         NULL, NULL, NULL,
+                         NULL, 0, conn);
+    if(ret != SASL_OK) return ret;
+    if(saslprops.ipremoteport)
+       ret = sasl_setprop(*conn, SASL_IPREMOTEPORT,
+                          saslprops.ipremoteport);
+    if(ret != SASL_OK) return ret;
+    
+    if(saslprops.iplocalport)
+       ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+                          saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+       ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+                          saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+    if(saslprops.ssf) {
+       ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &saslprops.ssf);
+    }
+
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.authid) {
+       ret = sasl_setprop(*conn, SASL_AUTH_EXTERNAL, saslprops.authid);
+       if(ret != SASL_OK) return ret;
+    }
+    /* End TLS/SSL Info */
+
+    return SASL_OK;
+}
