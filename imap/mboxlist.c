@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.34 1999/11/03 00:36:07 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.35 1999/11/03 03:44:06 leg Exp $
  */
 
 #include <stdio.h>
@@ -437,6 +437,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
 		   strerror(r));
+	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
     }
@@ -527,6 +528,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 
     if (r != 0) {
 	txn_abort(tid);
+	if (rettid) *rettid = NULL;
 	return r;
     }
 
@@ -587,6 +589,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
 		   strerror(r));
+	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
     }
@@ -619,6 +622,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
     
     if (r) {
 	txn_abort(tid);
+	if (rettid) *rettid = NULL;
     } else if (rettid) {
 	/* just get ready to commit */
 	switch (r = txn_prepare(tid)) {
@@ -680,6 +684,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
 		   strerror(r));
+	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
     }
@@ -687,6 +692,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
 	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
 
@@ -942,6 +948,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     if (r != 0) {
 	txn_abort(tid);
+	if (rettid) *rettid = NULL;
     } else if (rettid) {
 	/* just get ready to commit */
 	switch (r = txn_prepare(tid)) {
@@ -998,6 +1005,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 
     /* we just can't rename if there isn't enough info */
     if (partition && !strcmp(partition, "news")) {
+	if (rettid) *rettid = NULL;
 	return IMAP_MAILBOX_NOTSUPPORTED;
     }
 
@@ -1007,6 +1015,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
 		   strerror(r));
+	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
     }
@@ -1014,6 +1023,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
 	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
 
@@ -1193,6 +1203,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 
     if (r != 0) {
 	txn_abort(tid);
+	if (rettid) *rettid = NULL;
     } else if (rettid) {
 	/* just get ready to commit */
 	switch (r = txn_prepare(tid)) {
@@ -1264,6 +1275,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
 		   strerror(r));
+	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
     }
@@ -1273,6 +1285,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
 	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
 
@@ -1404,6 +1417,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 		   strerror(r));
 	    r = IMAP_IOERROR;
 	}
+	if (rettid) *rettid = NULL;
     } else if (rettid) {
 	/* just get ready to commit */
 	switch (r = txn_prepare(tid)) {
@@ -1436,6 +1450,8 @@ int mboxlist_commit(void *mytid)
     int r;
     DB_TXN *tid = (DB_TXN *) mytid;
 
+    assert(mytid);
+
     switch (r = txn_commit(tid)) {
     case 0: 
 	break;
@@ -1453,6 +1469,8 @@ int mboxlist_prepare(void *mytid)
     int r;
     DB_TXN *tid = (DB_TXN *) mytid;
 
+    assert(mytid);
+
     switch (r = txn_prepare(tid)) {
     case 0: 
 	break;
@@ -1469,6 +1487,8 @@ int mboxlist_abort(void *mytid)
 {
     int r;
     DB_TXN *tid = (DB_TXN *) mytid;
+
+    assert(mytid);
 
     switch (r = txn_abort(tid)) {
     case 0: 
