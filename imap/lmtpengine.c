@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26.2.6 2001/10/31 21:47:24 rjs3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.7 2001/11/07 04:19:19 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -1623,9 +1623,12 @@ void lmtpmode(struct lmtp_func *func,
 		if (r != SASL_OK)
 		    fatal("sasl_setprop(SASL_AUTH_EXTERNAL) failed: STARTTLS",
 			  EC_TEMPFAIL);
-		if(saslprops.authid)
+		if(saslprops.authid) {
 		    free(saslprops.authid);
-		saslprops.authid = xstrdup(auth_id);		
+		    saslprops.authid = NULL;
+		}
+		if(auth_id)
+		    saslprops.authid = xstrdup(auth_id);		
 
 		/* tell the prot layer about our new layers */
 		prot_settls(pin, tls_conn);

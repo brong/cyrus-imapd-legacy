@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.9 2001/11/07 03:53:05 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.10 2001/11/07 04:19:19 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -4059,9 +4059,12 @@ void cmd_starttls(char *tag, int imaps)
     if (result != SASL_OK) {
        fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
-    if(saslprops.authid)
-       free(saslprops.authid);
-    saslprops.authid = xstrdup(auth_id);
+    if(saslprops.authid) {
+	free(saslprops.authid);
+	saslprops.authid = NULL;
+    }
+    if(auth_id)
+        saslprops.authid = xstrdup(auth_id);
 
     /* tell the prot layer about our new layers */
     prot_settls(proxyd_in, tls_conn);

@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.14 2001/10/31 21:04:44 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.15 2001/11/07 04:19:19 rjs3 Exp $
  */
 #include <config.h>
 
@@ -816,9 +816,12 @@ static void cmd_starttls(int pop3s)
     if (result != SASL_OK) {
         fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
-    if(saslprops.authid)
+    if(saslprops.authid) {
 	free(saslprops.authid);
-    saslprops.authid = xstrdup(auth_id);
+	saslprops.authid = NULL;
+    }
+    if(auth_id)
+	saslprops.authid = xstrdup(auth_id);
 
     /* tell the prot layer about our new layers */
     prot_settls(popd_in, tls_conn);
