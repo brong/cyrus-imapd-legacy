@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.33 1999/11/02 23:47:31 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.34 1999/11/03 00:36:07 leg Exp $
  */
 
 #include <stdio.h>
@@ -2439,7 +2439,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	    break;
 	}
 
-	if (!r) {
+	if (r) { /* error! */
 	    break;
 	}
 
