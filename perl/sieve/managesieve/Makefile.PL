@@ -51,7 +51,7 @@ WriteMakefile(
     'NAME'	=> 'Cyrus::SIEVE::managesieve',
     'ABSTRACT'  => 'Cyurs Sieve management interface',
     'VERSION_FROM' => 'managesieve.pm', # finds $VERSION
-    'MYEXTLIB'  => '../lib/libisieve.a ../../../lib/libcyrus.a',
+    'MYEXTLIB'  => '../lib/isieve.o ../lib/lex.o ../lib/mystring.o ../lib/request.o ../../../lib/libcyrus.a',
     'LIBS'	=> ["$SASL_LIB -lssl -lcrypto"], 
     'DEFINE'	=> '-DPERL_POLLUTE',     # e.g., '-DHAVE_SOMETHING' 
     'INC'	=> "-I../lib/ -I../../../lib/ $SASL_INC",

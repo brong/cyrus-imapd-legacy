@@ -47,7 +47,7 @@ my $SASL_LIB = $ENV{SASL_LIB} || "-lsasl2";
 WriteMakefile(
     'NAME'	=> 'Cyrus::SIEVE::acap',
     'VERSION_FROM' => 'acap.pm', # finds $VERSION
-    'MYEXTLIB'  => '../../../acap/libacap.a ../../../lib/libcyrus.a',
+    'MYEXTLIB'  => '../../../acap/acap.o ../../../acap/acap_err.o ../../../acap/acapsieve.o ../../../acap/skip-list.o ../../../lib/libcyrus.a',
     'LIBS'	=> ["$SASL_LIB -lssl -lcrypto"],   # e.g., '-lm' 
     'DEFINE'	=> '-DPERL_POLLUTE',     # e.g., '-DHAVE_SOMETHING' 
     'INC'	=> "-I../../../acap/ $SASL_INC",     # e.g., '-I/usr/include/other' 

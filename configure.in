@@ -42,7 +42,7 @@ dnl
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.198.2.5 2001/10/01 19:54:28 rjs3 Exp $
+dnl $Id: configure.in,v 1.198.2.6 2001/11/19 23:13:02 rjs3 Exp $
 dnl
 
 
@@ -163,15 +163,6 @@ if test "$sievedir" != "no"; then
 
 	PRE_SUBDIRS="${PRE_SUBDIRS} $sievedir"
 	EXTRA_OUTPUT="${EXTRA_OUTPUT} $sievedir/Makefile"
-fi
-
-dnl for timsieved
-if test "$sievedir" != "no"; then
-	EXTRA_SUBDIRS="${EXTRA_SUBDIRS} timsieved"
-	EXTRA_OUTPUT="${EXTRA_OUTPUT} timsieved/Makefile"
-
-	PERL_SUBDIRS="${PERL_SUBDIRS} sieve"
-	EXTRA_OUTPUT="${EXTRA_OUTPUT} perl/sieve/Makefile perl/sieve/lib/Makefile"
 fi
 
 dnl for et routines
@@ -708,6 +699,16 @@ AC_ARG_ENABLE(fulldirhash,
 		AC_DEFINE(USE_DIR_FULL)
 	fi)
 
+AC_MSG_CHECKING(to use old sieve service name)
+AC_ARG_ENABLE(oldsievename,
+	[  --enable-oldsievename   enable the use of 'imap' as the sieve service name],
+	if test "$enableval" = yes; then
+		AC_MSG_RESULT(yes)
+		AC_DEFINE(OLD_SIEVE_SERVICE_NAME)
+	else
+		AC_MSG_RESULT(no)
+	fi)
+
 AC_ARG_ENABLE(netscapehack,
 	[  --enable-netscapehack   enable Netscape hack for the menu option
                           in Communicator to Administrate Mail],
@@ -741,6 +742,14 @@ dnl and compile perl/cyradm
     PERL_SUBDIRS="imap"
 fi
 
+dnl for timsieved
+if test "$sievedir" != "no"; then
+	EXTRA_SUBDIRS="${EXTRA_SUBDIRS} timsieved"
+	EXTRA_OUTPUT="${EXTRA_OUTPUT} timsieved/Makefile"
+
+	PERL_SUBDIRS="${PERL_SUBDIRS} sieve"
+	EXTRA_OUTPUT="${EXTRA_OUTPUT} perl/sieve/Makefile perl/sieve/lib/Makefile"
+fi
 
 dnl
 dnl Check for sasl_checkapop()

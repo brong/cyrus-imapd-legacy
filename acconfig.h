@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.17.6.3 2001/10/01 19:54:28 rjs3 Exp $ */
+/* $Id: acconfig.h,v 1.17.6.4 2001/11/19 23:13:02 rjs3 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -68,6 +68,9 @@
 
 /* do we support XNETSCAPE */
 #undef ENABLE_X_NETSCAPE_HACK
+
+/* are we using the old sieve service name (imap) */
+#undef OLD_SIEVE_SERVICE_NAME
 
 /* we better have berkeley db 3.x */
 #undef HAVE_LIBDB
@@ -154,6 +157,12 @@ typedef int rlim_t;
 
 #ifndef	NI_WITHSCOPEID
 #define	NI_WITHSCOPEID	0
+#endif
+
+#ifdef OLD_SIEVE_SERVICE_NAME
+#define SIEVE_SERVICE_NAME "imap"
+#else
+#define SIEVE_SERVICE_NAME "sieve"
 #endif
 
 /* compile time options; think carefully before modifying */

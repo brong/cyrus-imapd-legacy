@@ -295,7 +295,7 @@ static int init_sasl(char *serverFQDN, int port, int ssf)
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
   /* client new connection */
-  saslresult=sasl_client_new("imap",
+  saslresult=sasl_client_new(SIEVE_SERVICE_NAME,
 			     serverFQDN,
 			     NULL,
 			     0,

@@ -174,7 +174,7 @@ int init_sasl(isieve_t *obj,
       return -1;
 
   /* client new connection */
-  saslresult=sasl_client_new("sieve",
+  saslresult=sasl_client_new(SIEVE_SERVICE_NAME,
 			     obj->serverFQDN,
 			     localip, remoteip,
 			     NULL,
