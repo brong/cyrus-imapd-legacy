@@ -1,5 +1,5 @@
 /* imclient.c -- Streaming IMxP client library
- * $Id: imclient.c,v 1.58.2.2 2001/07/31 17:39:47 rjs3 Exp $
+ * $Id: imclient.c,v 1.58.2.3 2001/08/02 21:45:20 rjs3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -158,9 +158,9 @@ struct imclient {
     int saslcompleted;
 
 #ifdef HAVE_SSL
-  SSL_CTX *tls_ctx;
-  SSL *tls_conn;
-  int tls_on; /* wheather we are under a layer or not */
+    SSL_CTX *tls_ctx;
+    SSL *tls_conn;
+    int tls_on; /* wheather we are under a layer or not */
 #endif /* HAVE_SSL */
 };
 
@@ -228,7 +228,7 @@ int imclient_connect(struct imclient **imclient,
     struct sockaddr_in addr;
     static struct imclient zeroimclient;
     int saslresult;
-    static didinit;
+    static int didinit;
 
     hp = gethostbyname(host);
     if (!hp) return -1;
