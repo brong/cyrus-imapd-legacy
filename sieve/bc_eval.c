@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.8 2003/01/30 22:54:12 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.9 2003/02/03 22:39:36 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -623,18 +623,24 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	case B_IF:/*6*/
 	{
 	    int testend=bc[ip+1].value;
+	    int result;
+	   
 	    ip+=2;
+	    result=eval_bc_test(i,m, bc, &ip);
 	    
-	    if (eval_bc_test(i,m, bc, &ip)==-1)
+	    if (result==-1)
 	    {
 		*errmsg = "Invalid test";
 		return SIEVE_FAIL;
 	    }
 	    
-	    else if (eval_bc_test(i,m, bc, &ip))
+	    else if (result)
 	    {	/*skip over jump instruction*/
 		testend+=2;
+		printf("wwe");
+		
 	    }
+	    	printf("egh");
 	    ip=testend;
 	    
 	    break;

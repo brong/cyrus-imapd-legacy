@@ -326,8 +326,8 @@ void dump2(bytecode_t *d, int len)
 	    break;
 	     
 	case B_IF:/*6*/
-	    printf("%d: IF ",i);
-	    i = dump2_test(d,i+1);
+	    printf("%d: IF (ends at %d)",i, d[i+1].value);
+	    i = dump2_test(d,i+2);/* there is no short circuiting involved here*/
 	    printf("\n");
 	    break;
 
