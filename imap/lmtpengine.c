@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26.2.3 2001/08/07 21:00:24 rjs3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.4 2001/08/09 20:51:31 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -1546,13 +1546,139 @@ static void chop(char *s)
     }
 }
 
-/* xxx fill in this function 
+static int mysasl_getauthline(struct protstream *p, char **line, 
+			      unsigned int *linelen)
+{
+    char buf[2096];
+    char *str = (char *) buf;
+    
+    if (!prot_fgets(str, sizeof(buf), p)) {
+	return SASL_FAIL;
+    }
+    if (str[0] == '2') { return SASL_OK; }
+    if (str[0] == '5') { return SASL_BADAUTH; }
+    if (str[0] != '3') { return SASL_BADPROT; }
+    else {
+	size_t len;
+	str += 4; /* jump past the "334 " */
 
-   perform authentication against connection 'conn'
+	len = strlen(str) + 1;
+
+	*line = xmalloc(strlen(str) + 1);
+	if (*str != '\r') {	/* decode it */
+	    int r;
+	    
+	    r = sasl_decode64(str, strlen(str), *line, len, linelen);
+	    if (r != SASL_OK) {
+		return r;
+	    }
+	    
+	    return SASL_CONTINUE;
+	} else {		/* blank challenge */
+	    *line = NULL;
+	    *linelen = 0;
+
+	    return SASL_CONTINUE;
+	}
+    }
+}
+
+/* perform authentication against connection 'conn'
    returns the SMTP error code from the AUTH attempt */
 static int do_auth(struct lmtp_conn *conn)
 {
-    /* pretend success for now */
+    int r;
+    sasl_security_properties_t *secprops = NULL;
+    struct sockaddr_in saddr_l;
+    struct sockaddr_in saddr_r;
+    socklen_t addrsize;
+    char buf[2048];
+    char optstr[128];
+    char *in, *p;
+    const char *out;
+    unsigned int inlen, outlen;
+    const char *mechusing;
+    unsigned b64len;
+    char localip[60], remoteip[60];
+    const char *pass;
+
+    secprops = mysasl_secprops(0);
+    r = sasl_setprop(conn->saslconn, SASL_SEC_PROPS, secprops);
+    if (r != SASL_OK) {
+	return r;
+    }
+
+    /* set the IP addresses */
+    addrsize=sizeof(struct sockaddr_in);
+    if (getpeername(conn->sock, (struct sockaddr *)&saddr_r, &addrsize) != 0)
+	return SASL_FAIL;
+    addrsize=sizeof(struct sockaddr_in);
+    if (getsockname(conn->sock, (struct sockaddr *)&saddr_l,&addrsize)!=0)
+	return SASL_FAIL;
+
+    if (iptostring((struct sockaddr *)&saddr_r,
+		   sizeof(struct sockaddr_in), remoteip, 60) != 0)
+	return SASL_FAIL;
+    if (iptostring((struct sockaddr *)&saddr_l,
+		   sizeof(struct sockaddr_in), localip, 60) != 0)
+	return SASL_FAIL;
+
+    r = sasl_setprop(conn->saslconn, SASL_IPLOCALPORT, localip);
+    if (r != SASL_OK) return r;
+    r = sasl_setprop(conn->saslconn, SASL_IPREMOTEPORT, remoteip);
+    if (r != SASL_OK) return r;
+
+    strcpy(buf, conn->host);
+    p = strchr(buf, '.');
+    *p = '\0';
+    strcat(buf, "_mechs");
+
+    /* we now do the actual SASL exchange */
+    r = sasl_client_start(conn->saslconn, 
+			  config_getstring(buf, "KERBEROS_V4"),
+			  NULL, &out, &outlen, &mechusing);
+    if ((r != SASL_OK) && (r != SASL_CONTINUE)) {
+	return r;
+    }
+    if (out == NULL || outlen == 0) {
+	prot_printf(conn->pout, "AUTH %s\r\n", mechusing);
+    } else {
+	/* send initial challenge */
+	r = sasl_encode64(out, outlen, buf, sizeof(buf), &b64len);
+	if (r != SASL_OK)
+	    return r;
+	prot_printf(conn->pout, "AUTH %s %s\r\n", mechusing, buf);
+    }
+
+    in = NULL;
+    inlen = 0;
+    r = mysasl_getauthline(conn->pin, &in, &inlen);
+    while (r == SASL_CONTINUE) {
+	r = sasl_client_step(conn->saslconn, in, inlen, NULL, &out, &outlen);
+	if (in) { 
+	    free(in);
+	}
+	if (r != SASL_OK && r != SASL_CONTINUE) {
+	    return r;
+	}
+
+	r = sasl_encode64(out, outlen, buf, sizeof(buf), &b64len);
+	if (r != SASL_OK) {
+	    return r;
+	}
+
+	prot_write(conn->pout, buf, b64len);
+	prot_printf(conn->pout, "\r\n");
+
+	r = mysasl_getauthline(conn->pin, &in, &inlen);
+    }
+
+    if (r == SASL_OK) {
+	prot_setsasl(conn->pin, conn->saslconn);
+	prot_setsasl(conn->pout, conn->saslconn);
+    }
+
+    /* success */
     return 250;
 }
 

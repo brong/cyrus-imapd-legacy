@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.4 2001/08/07 21:51:22 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.5 2001/08/09 20:51:32 rjs3 Exp $
  */
 #include <config.h>
 
@@ -942,7 +942,9 @@ void cmd_auth(char *arg)
 				       clientin.s,
 				       clientinlen,
 				       &serverout, &serveroutlen);
+    syslog(LOG_NOTICE, "pop3d step - through it again");
     }
+    syslog(LOG_NOTICE, "pop3d step- done");
 
     /* failed authentication */
     if (sasl_result != SASL_OK)
@@ -1039,10 +1041,8 @@ static int proxy_authenticate(const char *hostname)
 {
     int r;
     sasl_security_properties_t *secprops = NULL;
-    struct sockaddr_in *saddr_l = 
-	(struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
-    struct sockaddr_in *saddr_r = 
-	(struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+    struct sockaddr_in saddr_l;
+    struct sockaddr_in saddr_r;
     socklen_t addrsize;
     sasl_callback_t *cb;
     char buf[2048];
@@ -1079,16 +1079,16 @@ static int proxy_authenticate(const char *hostname)
 
     /* set the IP addresses */
     addrsize=sizeof(struct sockaddr_in);
-    if (getpeername(backend_sock, (struct sockaddr *)saddr_r, &addrsize) != 0)
+    if (getpeername(backend_sock, (struct sockaddr *)&saddr_r, &addrsize) != 0)
 	return SASL_FAIL;
     addrsize=sizeof(struct sockaddr_in);
-    if (getsockname(backend_sock, (struct sockaddr *)saddr_l,&addrsize)!=0)
+    if (getsockname(backend_sock, (struct sockaddr *)&saddr_l,&addrsize)!=0)
 	return SASL_FAIL;
 
-    if (iptostring((struct sockaddr *)saddr_r,
+    if (iptostring((struct sockaddr *)&saddr_r,
 		   sizeof(struct sockaddr_in), remoteip, 60) != 0)
 	return SASL_FAIL;
-    if (iptostring((struct sockaddr *)saddr_l,
+    if (iptostring((struct sockaddr *)&saddr_l,
 		   sizeof(struct sockaddr_in), localip, 60) != 0)
 	return SASL_FAIL;
 
