@@ -70,7 +70,7 @@ all: imtest pop3test
 
 install:
 	$(INSTALL) -s -m 755 imtest $(DESTDIR)$(exec_prefix)/bin
-	$(IMSTALL) -s -m 755 pop3test $(DESTDIR)$(exec_prefix)/bin
+	$(INSTALL) -s -m 755 pop3test $(DESTDIR)$(exec_prefix)/bin
 
 .c.o:
 	$(CC) -c $(CPPFLAGS) $(DEFS) $(CFLAGS) $<
