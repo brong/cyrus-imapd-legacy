@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.39 1999/11/03 17:52:37 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.40 1999/11/03 18:51:46 leg Exp $
  */
 
 #include <stdio.h>
@@ -1429,6 +1429,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
 		   strerror(r));
 	    r = IMAP_IOERROR;
+	    *rettid = NULL;
 	    break;
 	}
     } else {
