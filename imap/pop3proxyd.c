@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.1 2001/08/01 22:11:15 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.2 2001/08/01 22:16:00 rjs3 Exp $
  */
 #include <config.h>
 
@@ -135,8 +135,8 @@ static void openproxy(void);
 static void bitpipe(void);
 
 extern void setproctitle_init(int argc, char **argv, char **envp);
-extern int proc_register(char *progname, char *clienthost, 
-			 char *userid, char *mailbox);
+extern int proc_register(const char *progname, const char *clienthost, 
+			 const char *userid, const char *mailbox);
 extern void proc_cleanup(void);
 void shut_down(int code) __attribute__ ((noreturn));
 

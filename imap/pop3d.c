@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.8 2001/08/01 22:11:14 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.9 2001/08/01 22:16:00 rjs3 Exp $
  */
 #include <config.h>
 
@@ -150,8 +150,8 @@ void shut_down(int code) __attribute__ ((noreturn));
 
 
 extern void setproctitle_init(int argc, char **argv, char **envp);
-extern int proc_register(char *progname, char *clienthost, 
-			 char *userid, char *mailbox);
+extern int proc_register(const char *progname, const char *clienthost, 
+			 const char *userid, const char *mailbox);
 extern void proc_cleanup(void);
 
 static struct sasl_callback mysasl_cb[] = {

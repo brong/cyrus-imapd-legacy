@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.5 2001/08/01 20:18:03 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.6 2001/08/01 22:15:58 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -217,8 +217,8 @@ static int mailboxdata(), listdata(), lsubdata();
 static void mstringdata(char *cmd, char *name, int matchlen, int maycreate);
 
 extern void setproctitle_init(int argc, char **argv, char **envp);
-extern int proc_register(char *progname, char *clienthost, 
-			 char *userid, char *mailbox);
+extern int proc_register(const char *progname, const char *clienthost, 
+			 const char *userid, const char *mailbox);
 extern void proc_cleanup(void);
 
 static int hash_simple (const char *str);
