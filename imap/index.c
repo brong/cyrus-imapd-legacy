@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.140 2000/09/20 19:17:48 ken3 Exp $
+ * $Id: index.c,v 1.140.4.1 2000/09/30 01:48:47 ken3 Exp $
  */
 #include <config.h>
 
@@ -162,7 +162,6 @@ typedef struct msgdata {
     char *msgid;		/* message ID */
     char **ref;			/* array of references */
     int nref;			/* number of references */
-    time_t arrival;		/* internal arrival date & time of message */
     time_t date;		/* sent date & time of message
 				   from Date: header (adjusted by time zone) */
     char *cc;			/* local-part of first "cc" address */
@@ -171,8 +170,10 @@ typedef struct msgdata {
     char *xsubj;		/* extracted subject text */
     unsigned xsubj_hash;	/* hash of extracted subject text */
     int is_refwd;		/* is message a reply or forward? */
-    unsigned size;		/* size of message */
     struct msgdata *next;
+
+    /* SORT2 keys */
+    char *bcc;			/* local-part of first "bcc" address */
 } MsgData;
 
 typedef struct thread {
@@ -264,14 +265,19 @@ static void index_thread_orderedsubj P((unsigned *msgno_list, int nmsg,
 static void index_thread_sort P((Thread *root, struct sortcrit *sortcrit));
 static void index_thread_print P((Thread *threads, int usinguid));
 #ifdef ENABLE_THREAD_REF
-static void index_thread_ref P((unsigned *msgno_list, int nmsg,
-				int usinguid));
+static void index_thread_ref P((unsigned *msgno_list, int nmsg, int usinguid));
+static void index_thread_ref_unread P((unsigned *msgno_list, int nmsg,
+				       int usinguid));
+static void index_thread_ref_watchedunread P((unsigned *msgno_list, int nmsg,
+					      int usinguid));
 #endif
 
 static struct thread_algorithm thread_algs[] = {
     { "ORDEREDSUBJECT", index_thread_orderedsubj },
 #ifdef ENABLE_THREAD_REF
     { "REFERENCES", index_thread_ref },
+    { "REFERENCES.UNREAD", index_thread_ref_unread },
+    { "REFERENCES.WATCHEDUNREAD", index_thread_ref_watchedunread },
 #endif
     { NULL, NULL }
 };
@@ -1083,7 +1089,10 @@ index_sort(struct mailbox *mailbox,
 #if 0
     {
 	char *key_names[] = { "SEQUENCE", "ARRIVAL", "CC", "DATE", "FROM",
-			      "SIZE", "SUBJECT", "TO", "ANNOTATION" };
+			      "SIZE", "SUBJECT", "TO", "ANNOTATION",
+			      "ANSWERED", "BCC", "DELETED", "DRAFT", "FLAGGED",
+			      "HEADER", "KEYWORD", "NEW", "PARTS", "RECENT",
+			      "REPLYTO", "SEEN", "SENDER", "UID" };
 	char buf[1024] = "";
 
 	while (sortcrit->key) {
@@ -2827,7 +2836,9 @@ int size;
 
     p = index_readheader(msgfile->base, msgfile->size, format, 0, size);
     index_pruneheader(p, &header, 0);
-    q = charset_decode1522(p, NULL, 0);
+    if (!*p) return 0;		/* Header not present, fail */
+    if (!*substr) return 1;	/* Only checking existence, succeed */
+    q = charset_decode1522(strchr(p, ':') + 1, NULL, 0);
     r = charset_searchstring(substr, pat, q, strlen(q));
     free(q);
     return r;
@@ -2872,7 +2883,7 @@ comp_pat *pat;
     index_pruneheader(buf, &header, 0);
     if (!*buf) return 0;	/* Header not present, fail */
     if (!*substr) return 1;	/* Only checking existence, succeed */
-    q = charset_decode1522(buf, NULL, 0);
+    q = charset_decode1522(strchr(buf, ':') + 1, NULL, 0);
     r = charset_searchstring(substr, pat, q, strlen(q));
     free(q);
     return r;
@@ -2951,14 +2962,14 @@ void *rock;
 /*
  * Creates a list of msgdata.
  *
- * We fill these structs with the info that will be needed
+ * We fill these structs with the processed info that will be needed
  * by the specified sort criteria.
  */
 static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 				   struct sortcrit *sortcrit)
 {
     MsgData *md, *cur;
-    const char *cacheitem, *env, *headers, *from, *to, *cc, *subj;
+    const char *cacheitem, *env, *headers, *from, *to, *cc, *bcc, *subj;
     int i, j;
     char *tmpenv;
     char *envtokens[NUMENVTOKENS];
@@ -2988,7 +2999,9 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 
 	    if ((label == SORT_CC || label == SORT_DATE ||
 		 label == SORT_FROM || label == SORT_SUBJECT ||
-		 label == SORT_TO || label == LOAD_IDS) &&
+		 label == SORT_TO || label == SORT_BCC ||
+		 label == SORT_REPLYTO || label == SORT_SENDER ||
+		 label == LOAD_IDS) &&
 		!did_cache) {
 
 		/* fetch cached info */
@@ -3000,13 +3013,14 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 		from = CACHE_ITEM_NEXT(headers);
 		to = CACHE_ITEM_NEXT(from);
 		cc = CACHE_ITEM_NEXT(to);
-		cacheitem = CACHE_ITEM_NEXT(cc); /* bcc */
-		subj = CACHE_ITEM_NEXT(cacheitem);
+		bcc = CACHE_ITEM_NEXT(cc);
+		subj = CACHE_ITEM_NEXT(bcc);
 
 		did_cache++;
 	    }
 
-	    if ((label == SORT_DATE || label == LOAD_IDS) &&
+	    if ((label == SORT_DATE || label == SORT_REPLYTO ||
+		 label == SORT_SENDER || label == LOAD_IDS) &&
 		!did_env) {
 
 		/* make a working copy of envelope -- strip outer ()'s */
@@ -3019,9 +3033,6 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 	    }
 
 	    switch (label) {
-	    case SORT_ARRIVAL:
-		cur->arrival = INTERNALDATE(cur->msgno);
-		break;
 	    case SORT_CC:
 		cur->cc = get_localpart_addr(cc+4);
 		break;
@@ -3032,9 +3043,6 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 	    case SORT_FROM:
 		cur->from = get_localpart_addr(from+4);
 		break;
-	    case SORT_SIZE:
-		cur->size = SIZE(cur->msgno);
-		break;
 	    case SORT_SUBJECT:
 		cur->xsubj = index_extract_subject(subj+4, &cur->is_refwd);
 		cur->xsubj_hash = hash(cur->xsubj);
@@ -3042,6 +3050,26 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 	    case SORT_TO:
 		cur->to = get_localpart_addr(to+4);
 		break;
+
+		/***  SORT2 keys  ***/
+	    case SORT_BCC:
+		cur->bcc = get_localpart_addr(bcc+4);
+		break;
+	    case SORT_HEADER:
+		break;
+	    case SORT_PARTS:
+		break;
+	    case SORT_REPLYTO:
+		prot_printf(imapd_out, "replyto (%d): '%s'\n",
+			    cur->msgno, envtokens[ENV_REPLYTO]);
+		break;
+	    case SORT_SENDER:
+		prot_printf(imapd_out, "sender (%d): '%s'\n",
+			    cur->msgno,
+			    envtokens[ENV_SENDER]);
+		break;
+
+		/***  load message-ids for threading  ***/
 	    case LOAD_IDS:
 		index_get_ids(cur, envtokens, headers+4);
 		break;
@@ -3293,7 +3321,7 @@ static char *_index_extract_subject(char *s, int *is_refwd)
  * any string having the format "< ... @ ... >" and assume that the mail
  * client created a properly formatted message-id.
  */
-char *find_msgid(char *str, int *len)
+static char *find_msgid(char *str, int *len)
 {
     char *start, *at, *end;
 
@@ -3380,9 +3408,18 @@ static void index_sort_setnext(MsgData *node, MsgData *next)
 /*
  * Function for comparing two integers.
  */
-static int numcmp(int x, int y)
+static int numcmp(unsigned i1, unsigned i2)
 {
-    return ((x < y) ? -1 : (x > y) ? 1 : 0);
+    return ((i1 < i2) ? -1 : (i1 > i2) ? 1 : 0);
+}
+
+/*
+ * Function for comparing two flags.
+ * Set flags have a higher priority than unset flags.
+ */
+static int flagcmp(bit32 f1, bit32 f2)
+{
+    return ((f1 > f2) ? -1 : (f1 < f2) ? 1 : 0);
 }
 
 /*
@@ -3404,7 +3441,7 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	    ret = numcmp(md1->msgno, md2->msgno);
 	    break;
 	case SORT_ARRIVAL:
-	    ret = numcmp(md1->arrival, md2->arrival);
+	    ret = numcmp(INTERNALDATE(md1->msgno), INTERNALDATE(md2->msgno));
 	    break;
 	case SORT_CC:
 	    ret = strcmp(md1->cc, md2->cc);
@@ -3416,13 +3453,66 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	    ret = strcmp(md1->from, md2->from);
 	    break;
 	case SORT_SIZE:
-	    ret = numcmp(md1->size, md2->size);
+	    ret = numcmp(SIZE(md1->msgno), SIZE(md2->msgno));
 	    break;
 	case SORT_SUBJECT:
 	    ret = strcmp(md1->xsubj, md2->xsubj);
 	    break;
 	case SORT_TO:
 	    ret = strcmp(md1->to, md2->to);
+	    break;
+
+	    /***  SORT2 keys  ***/
+	case SORT_ANSWERED:
+	    ret = flagcmp(SYSTEM_FLAGS(md1->msgno) & FLAG_ANSWERED,
+			  SYSTEM_FLAGS(md2->msgno) & FLAG_ANSWERED);
+	    break;
+	case SORT_BCC:
+	    ret = strcmp(md1->bcc, md2->bcc);
+	    break;
+	case SORT_DELETED:
+	    ret = flagcmp(SYSTEM_FLAGS(md1->msgno) & FLAG_DELETED,
+			  SYSTEM_FLAGS(md2->msgno) & FLAG_DELETED);
+	    break;
+	case SORT_DRAFT:
+	    ret = flagcmp(SYSTEM_FLAGS(md1->msgno) & FLAG_DRAFT,
+			  SYSTEM_FLAGS(md2->msgno) & FLAG_DRAFT);
+	    break;
+	case SORT_FLAGGED:
+	    ret = flagcmp(SYSTEM_FLAGS(md1->msgno) & FLAG_FLAGGED,
+			  SYSTEM_FLAGS(md2->msgno) & FLAG_FLAGGED);
+	    break;
+	case SORT_HEADER:
+	    break;
+	case SORT_KEYWORD: {
+	    int flag = sortcrit[i].args.flag;
+	    ret = flagcmp(USER_FLAGS(md1->msgno, flag/32) & 1<<(flag&31),
+			  USER_FLAGS(md2->msgno, flag/32) & 1<<(flag&31));
+	    break;
+	}
+	case SORT_NEW:
+	    ret = flagcmp((md1->msgno > lastnotrecent) && !seenflag[md1->msgno],
+			  (md2->msgno > lastnotrecent) && !seenflag[md2->msgno]);
+	    break;
+	case SORT_PARTS:
+	    break;
+	case SORT_RECENT:
+	    ret = flagcmp(md1->msgno > lastnotrecent,
+			  md2->msgno > lastnotrecent);
+	    break;
+	case SORT_REPLYTO:
+	    break;
+	case SORT_SEEN:
+	    ret = flagcmp(seenflag[md1->msgno], seenflag[md2->msgno]);
+	    break;
+	case SORT_SENDER:
+	    break;
+	case SORT_UID:
+	    ret = numcmp(UID(md1->msgno), UID(md2->msgno));
+	    break;
+
+	    /* ANNOTATION key */
+	case SORT_ANNOTATION:
 	    break;
 	}
     } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
@@ -3511,9 +3601,9 @@ static void index_thread_orderedsubj(unsigned *msgno_list, int nmsg,
 				     int usinguid)
 {
     MsgData *msgdata, *freeme;
-    struct sortcrit sortcrit[] = {{ SORT_SUBJECT,  {0,0} },
-				  { SORT_DATE,     {0,0} },
-				  { SORT_SEQUENCE, {0,0} }};
+    struct sortcrit sortcrit[] = {{ SORT_SUBJECT,  0 },
+				  { SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
     unsigned psubj_hash = 0;
     char *psubj;
     Thread *head, *newnode, *cur, *parent;
@@ -3929,6 +4019,9 @@ static void ref_prune_tree(Thread *parent)
     }
 }
 
+/*
+ * Group threads with same subject.
+ */
 void ref_group_subjects(Thread *root, unsigned nroot, Thread **newnode)
 {
     Thread *cur, *old, *prev, *next, *child;
@@ -4075,21 +4168,91 @@ void ref_group_subjects(Thread *root, unsigned nroot, Thread **newnode)
 }
 
 /*
- * Thread a list of messages using the REFERENCES algorithm.
+ * Free an entire thread.
  */
-void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
+static void index_thread_free(Thread *thread)
+{
+    Thread *child;
+
+    /* free the head node */
+    if (thread->msgdata) index_msgdata_free(thread->msgdata);
+
+    /* free the children recursively */
+    child = thread->child;
+    while (child) {
+	index_thread_free(child);
+	child = child->next;
+    }
+}
+
+/*
+ * Guts of thread searching.  Recurses over children when necessary.
+ */
+static int _index_thread_search(Thread *thread, int (*searchproc) (MsgData *))
+{
+    Thread *child;
+
+    /* test the head node */
+    if (thread->msgdata && searchproc(thread->msgdata)) return 1;
+
+    /* test the children recursively */
+    child = thread->child;
+    while (child) {
+	if (_index_thread_search(child, searchproc)) return 1;
+	child = child->next;
+    }
+
+    /* if we get here, we struck out */
+    return 0;
+}
+
+/*
+ * Search a thread to see if it contains a message which matches searchproc().
+ *
+ * This is a wrapper around _index_thread_search() which iterates through
+ * each thread and removes any which fail the searchproc().
+ */
+static void index_thread_search(Thread *root, int (*searchproc) (MsgData *))
+{
+    Thread *cur, *prev, *next;
+
+    for (prev = NULL, cur = root->child, next = cur->next;
+	 cur;
+	 prev = cur, cur= next, next = (cur ? cur->next : NULL)) {
+	if (!_index_thread_search(cur, searchproc)) {
+	    /* unlink the thread from the list */
+	    if (!prev)	/* first thread */
+		root->child = cur->next;
+	    else
+		prev->next = cur->next;
+
+	    /* free all nodes in the thread */
+	    index_thread_free(cur);
+
+	    /* we just removed cur from our list,
+	     * so we need to keep the same prev for the next pass
+	     */
+	    cur = prev;
+	}
+    }
+}
+
+/*
+ * Guts of the REFERENCES algorithms.  Behavior is tweaked with loadcrit[],
+ * searchproc() and sortcrit[].
+ */
+static void _index_thread_ref(unsigned *msgno_list, int nmsg,
+		       struct sortcrit loadcrit[],
+		       int (*searchproc) (MsgData *),
+		       struct sortcrit sortcrit[], int usinguid)
 {
     MsgData *msgdata, *freeme, *md;
-    struct sortcrit sortcrit[] = {{ LOAD_IDS,      {0,0} },
-				  { SORT_SUBJECT,  {0,0} },
-				  { SORT_DATE,     {0,0} },
-				  { SORT_SEQUENCE, {0,0} }};
     int tref, nnode;
     Thread *newnode;
     struct hash_table id_table;
 
     /* Create/load the msgdata array */
-    freeme = msgdata = index_msgdata_load(msgno_list, nmsg, sortcrit);
+    freeme = msgdata = index_msgdata_load(msgno_list, nmsg, loadcrit);
 
     /* calculate the sum of the number of references for all messages */
     for (md = msgdata, tref = 0; md; md = md->next)
@@ -4140,10 +4303,11 @@ void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
     /* Step 5: group root set by subject */
     ref_group_subjects(root, nroot, &newnode);
 
-    /* Step 6: done threading */
+    /* Step 6: search threads */
+    if (searchproc) index_thread_search(root, searchproc);
 
-    /* Step 7: sort threads by date */
-    index_thread_sort(root, sortcrit+2);
+    /* Step 7: sort threads */
+    if (sortcrit) index_thread_sort(root, sortcrit);
 
     /* Output the threaded messages */ 
     index_thread_print(root, usinguid);
@@ -4153,5 +4317,65 @@ void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
 
     /* free the msgdata array */
     free(freeme);
+}
+
+/*
+ * Thread a list of messages using the REFERENCES algorithm.
+ */
+static void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
+{
+    struct sortcrit loadcrit[] = {{ LOAD_IDS,      0 },
+				  { SORT_SUBJECT,  0 },
+				  { SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit sortcrit[] = {{ SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+
+    _index_thread_ref(msgno_list, nmsg, loadcrit, NULL, sortcrit, usinguid);
+}
+
+/*
+ * Thread a list of messages using the REFERENCES.UNREAD algorithm.
+ */
+static int msg_unread(MsgData *md)
+{
+    return !seenflag[md->msgno];
+}
+
+static void index_thread_ref_unread(unsigned *msgno_list, int nmsg,
+				    int usinguid)
+{
+    struct sortcrit loadcrit[] = {{ LOAD_IDS,      0 },
+				  { SORT_SUBJECT,  0 },
+				  { SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit sortcrit[] = {{ SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+
+    _index_thread_ref(msgno_list, nmsg, loadcrit,
+		      (int (*)(MsgData*)) msg_unread, sortcrit, usinguid);
+}
+
+/*
+ * Thread a list of messages using the REFERENCES.WATCHEDUNREAD algorithm.
+ */
+static int msg_watchedunread(MsgData *md)
+{
+    return (!seenflag[md->msgno] && (SYSTEM_FLAGS(md->msgno) & FLAG_FLAGGED));
+}
+
+static void index_thread_ref_watchedunread(unsigned *msgno_list, int nmsg,
+					   int usinguid)
+{
+    struct sortcrit loadcrit[] = {{ LOAD_IDS,      0 },
+				  { SORT_SUBJECT,  0 },
+				  { SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit sortcrit[] = {{ SORT_DATE,     0 },
+				  { SORT_SEQUENCE, 0 }};
+
+    _index_thread_ref(msgno_list, nmsg, loadcrit,
+		      (int (*)(MsgData*)) msg_watchedunread, sortcrit,
+		      usinguid);
 }
 #endif /* ENABLE_THREAD_REF */
