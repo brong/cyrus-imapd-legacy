@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.36 1999/11/03 03:53:12 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.37 1999/11/03 17:39:18 leg Exp $
  */
 
 #include <stdio.h>
@@ -319,8 +319,7 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
 	    partition = xmalloc(parentpartitionlen + 1);
 	    memcpy(partition, parentpartition, parentpartitionlen);
 	    partition[parentpartitionlen] = '\0';
-	}
-	else {
+	} else {
 	    partition = xstrdup(partition);
 	}
 
@@ -473,8 +472,9 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	    r = IMAP_MAILBOX_BADNAME;
 	    goto done;
 	}
-    }
+    } else {
 
+    }
     
     /* add the new entry */
     mboxent = (struct mbox_entry *) xmalloc(sizeof(struct mbox_entry) +

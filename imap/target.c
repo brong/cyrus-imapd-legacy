@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.6 1999/11/03 03:52:55 leg Exp $
+ * $Id: target.c,v 1.1.2.7 1999/11/03 17:39:20 leg Exp $
  */
 
 #include <stdio.h>
@@ -354,8 +354,7 @@ int do_txn(char *host, struct inmsg *msg, void **txn)
 	       msg->u.rmb.partition);
 	r = real_mboxlist_renamemailbox(msg->name,
 					msg->u.rmb.newname,
-					*msg->u.rmb.partition ?
-					msg->u.rmb.partition : NULL, 
+					host,
 					msg->isadmin,
 					msg->userid,
 					authstate,
@@ -380,6 +379,7 @@ int do_txn(char *host, struct inmsg *msg, void **txn)
 	break;
     }
 
+    if (authstate) auth_freestate(authstate);
     *txn = mytxn;
 
     return r;
