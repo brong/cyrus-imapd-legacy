@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.27 1999/10/21 02:00:13 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.28 1999/10/21 16:44:09 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -142,6 +142,10 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
 	partitionlen=strlen(mboxent->partition);
 	acllen=strlen(mboxent->acls);
 	break;
+
+    case EAGAIN:
+      return EAGAIN;
+      break;
 
     case DB_NOTFOUND:
 	return IMAP_MAILBOX_NONEXISTENT;
@@ -597,7 +601,13 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	if (!isadmin) { r = IMAP_PERMISSION_DENIED; goto done; }
 
 	r = mboxlist_lookup_writelock(name, &path, &acl, tid);
-	if (r) {
+	
+	if (r==EAGAIN)
+	{
+	  goto retry;	  
+	}
+
+	if (r!=0) {
 	  goto done;
 	}
 	
@@ -625,6 +635,11 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     /* if we already have the writelock, this doesn't hurt */
     r = mboxlist_lookup_writelock(name, &path, &acl, tid);
+
+    if (r==EAGAIN)
+    {
+      goto retry;	  
+    }
 
     if (r!=0) {
       goto done;
