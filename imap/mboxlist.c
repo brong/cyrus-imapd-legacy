@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.15 1999/10/18 18:49:26 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.16 1999/10/18 21:27:22 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -724,18 +724,56 @@ int checkacl;
       goto done;
     }
 
-#if 0
     /* should we delete the quota root?  are there any other mailboxes
        in this quota root? */
-    if (mailbox.quota.root &&
-	bsearch_mem(mailbox.quota.root, 1, list_base, list_size, 0, 0) == offset &&
-	(list_size <= offset + len + strlen(mailbox.quota.root) ||
-	 strncmp(list_base+offset+len, mailbox.quota.root, strlen(mailbox.quota.root)) != 0 ||
-	 (list_base[offset+len+strlen(mailbox.quota.root)] != '.' &&
-	  list_base[offset+len+strlen(mailbox.quota.root)] != '\t'))) {
-	delete_quota_root = 1;
+    if (mailbox.quota.root!=NULL) /* if the mailbox has a quota root */
+    {
+      DBC *cursor;      
+      struct mbox_entry *mboxent=NULL;
+
+      r=mbdb->cursor(mbdb, tid, &cursor, 0);
+      if (r!=0) { 
+	syslog(LOG_ERR, "Unable to create cursor in delete");
+	goto done;
+      }
+
+      memset(&data, 0, sizeof(data));
+      memset(&key, 0, sizeof(key));
+      key.data = mailbox.quota.root; 
+      key.size = strlen(mailbox.quota.root);
+      
+      r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
+      
+      if (r == DB_NOTFOUND) {
+	delete_quota_root=1;
+      } else {
+	switch (r) {
+	case 0:
+	  mboxent = (struct mbox_entry *) data.data;
+
+	  /* if this entry is not in the quota root then we can delete the quota root */
+	  if ( strlen(mboxent->name) >= strlen(mailbox.quota.root)+1)
+	    if (strncmp(mboxent->name, mailbox.quota.root, strlen(mailbox.quota.root))!=0)
+	      if ((mboxent->name[strlen(mailbox.quota.root)]=='.') ||
+		  (mboxent->name[strlen(mailbox.quota.root)]=='\t'))
+		delete_quota_root=1;
+
+	  break;
+
+	case EAGAIN:
+	    syslog(LOG_WARNING, "unexpected deadlock in mboxlist.c");
+	    goto retry;
+	    break;
+	    
+	default:
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    r = IMAP_IOERROR;
+	    goto done;
+	}
+
+      }
     }
-#endif
+
     
     /* Remove the mailbox and move new mailbox list file into place */
     uidvalidity = mailbox.uidvalidity;
@@ -1524,16 +1562,41 @@ int (*proc)();
     long matchlen, minmatch;
     char *acl;
     char *inboxcase;
+    DBT key, data;
+    DB_TXN *tid;
+    DB_TXNMGR *txnp;
 
+    txnp = dbenv.tx_info;
+
+
+    /* open the subscription file that contains the mailboxes the user is subscribed to */
     if (r = mboxlist_opensubs(userid, 0, &subsfd, &subs_base, &subs_size,
 			      &subsfname, (char **) 0)) {
-	return r;
+	goto done;
     }
 
     list_doingfind++;
 
     g = glob_init(pattern, GLOB_HIERARCHY|GLOB_INBOXCASE);
     inboxcase = glob_inboxcase(g);
+
+    /* transaction restart place */
+    if (0) {
+      retry:
+	if ((r = txn_abort(tid)) != 0) {
+	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
+		   strerror(r));
+	    return IMAP_IOERROR;
+	}
+    }
+
+    /* begin the transaction */
+    if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	return IMAP_IOERROR;
+    }
+
+
 
     /* Build usermboxname */
     if (userid && !strchr(userid, '.') &&
@@ -1549,14 +1612,12 @@ int (*proc)();
     /* Check for INBOX first of all */
     if (userid) {
 	if (GLOB_TEST(g, "INBOX") != -1) {
+
 	    (void) bsearch_mem(usermboxname, 1, subs_base, subs_size, 0, &len);
 	    if (len) {
 		r = (*proc)(inboxcase, 5, 1);
 		if (r) {
-		    mboxlist_closesubs(subsfd, subs_base, subs_size);
-		    glob_free(&g);
-		    list_doingfind--;
-		    return r;
+		  goto done;
 		}
 	    }
 	}
@@ -1566,10 +1627,7 @@ int (*proc)();
 	    if (len) {
 		r = (*proc)(inboxcase, 5, 1);
 		if (r) {
-		    mboxlist_closesubs(subsfd, subs_base, subs_size);
-		    glob_free(&g);
-		    list_doingfind--;
-		    return r;
+		  goto done;
 		}
 	    }
 	}
@@ -1611,6 +1669,7 @@ int (*proc)();
 	    if (!p || !endname || endname - name > MAX_MAILBOX_NAME) {
 		syslog(LOG_ERR, "IOERROR: corrupted subscription file %s",
 		       subsfname);
+		/* xxx fatal inside a transaction */
 		fatal("corrupted subscription file", EC_OSFILE);
 	    }
 
@@ -1636,24 +1695,35 @@ int (*proc)();
 				     namelen-inboxoffset, &minmatch);
 		if (matchlen == -1) break;
 
-#if NEEDSTODB		
-		(void) bsearch_mem(namebuf, 1, list_base, list_size, 0,
-				   &listlinelen);
-#endif
-		
-		if (listlinelen) {
-		    r = (*proc)(namematchbuf+inboxoffset, matchlen, 1);
-		    if (r) {
-			mboxlist_closesubs(subsfd, subs_base, subs_size);
-			glob_free(&g);
-			list_doingfind--;
-			return r;
-		    }
+
+
+		/* make sure it's in the mailboxes db */
+		r = mboxlist_lookup(namebuf, (char **)0, NULL, tid);
+
+		switch (r) {
+		case 0:
+		  /* found the entry; output it */
+		  r = (*proc)(namematchbuf+inboxoffset, matchlen, 1);
+		  if (r) {
+		    goto done;
+		  }
+		  break;
+		  
+		case DB_NOTFOUND:
+		  /* didn't find the entry; take away the subscription */
+		  mboxlist_changesub(namebuf, userid, auth_state, 0);
+		  break;
+		case EAGAIN:
+		  goto retry;
+		  break;
+		default:
+		  syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+			 name, strerror(r));
+		  r = IMAP_IOERROR;
+		  goto done;
+		  break;
 		}
-		else {
-		    mboxlist_changesub(namebuf, userid, auth_state, 0);
-		    break;
-		}
+
 	    }
 	    offset += len;
 	}
@@ -1671,6 +1741,7 @@ int (*proc)();
 	if (!p || !endname || endname - name > MAX_MAILBOX_NAME) {
 	    syslog(LOG_ERR, "IOERROR: corrupted subscription file %s",
 		   subsfname);
+	    /* xxx fatal inside transaction */
 	    fatal("corrupted subscription file", EC_OSFILE);
 	}
 
@@ -1692,29 +1763,70 @@ int (*proc)();
 	    memcpy(namebuf, name, namelen);
 	    namebuf[namelen] = '\0';
 
-	    r = mboxlist_lookup(namebuf, (char **)0, &acl, NULL);
-	    if (r == 0) {
-		r = (*proc)(namebuf, matchlen,
-			    (acl_myrights(auth_state, acl) & ACL_CREATE));
-		if (r) {
-		    mboxlist_closesubs(subsfd, subs_base, subs_size);
-		    glob_free(&g);
-		    list_doingfind--;
-		    return r;
-		}
+	    r = mboxlist_lookup(namebuf, (char **)0, &acl, tid);
+
+	    switch (r) {
+	    case 0:
+	      /* found the entry; output it */
+	      r = (*proc)(namebuf, matchlen,
+			  (acl_myrights(auth_state, acl) & ACL_CREATE));
+	      if (r) {
+		goto done;
+	      }
+	      break;
+		  
+	    case DB_NOTFOUND:
+	      /* didn't find the entry; take away the subscription */
+	      mboxlist_changesub(namebuf, userid, auth_state, 0);	      
+	      break;
+	    case EAGAIN:
+	      goto retry;
+	      break;
+	    default:
+	      syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+		     name, strerror(r));
+	      r = IMAP_IOERROR;
+	      goto done;
+	      break;
 	    }
-	    else {
-		mboxlist_changesub(namebuf, userid, auth_state, 0);
-		break;
-	    }
+
 	}
 	offset += len;
     }
 	
+
+  done:
+
     mboxlist_closesubs(subsfd, subs_base, subs_size);
     glob_free(&g);
     list_doingfind--;
-    return 0;
+
+
+    if (r == 0) {
+	r = txn_commit(tid);
+
+	switch (r) {
+	case 0:
+	    break;
+	case EINVAL:
+	    syslog(LOG_WARNING, 
+		   "tried to commit an already aborted transaction");
+	    break;
+	default:
+	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
+		   strerror(r));
+	    r = IMAP_IOERROR;
+	    break;
+	}
+    } else {
+	if (txn_abort(tid) != 0) {
+	    syslog(LOG_ERR, "DBERROR: error aborting txn %s",
+		   strerror(r));
+	    r = IMAP_IOERROR;
+	}
+    }
+
+    return r;
 }
 
 /*
@@ -2016,7 +2128,7 @@ int *seen;
     if (r == 0) {
 	r = txn_commit(tid);
 
-	switch (txn_commit(tid)) {
+	switch (r) {
 	case 0:
 	    break;
 	case EINVAL:
@@ -2030,7 +2142,7 @@ int *seen;
 	    break;
 	}
     } else {
-	if ((r = txn_abort(tid)) != 0) {
+	if (txn_abort(tid) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn %s",
 		   strerror(r));
 	    r = IMAP_IOERROR;
