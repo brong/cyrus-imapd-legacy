@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.11 1999/10/18 04:19:30 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.12 1999/10/18 16:37:26 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -405,6 +405,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     char *acl;
     char buf2[MAX_MAILBOX_PATH];
     const char *root;
+    char *newpartition=NULL;
     int newlistfd;
     struct iovec iov[10];
     int n;
@@ -436,7 +437,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 
     /* Check ability to create mailbox */
     r = mboxlist_createmailboxcheck(name, format, partition, isadmin, userid,
-				    auth_state, &acl, &partition, tid);
+				    auth_state, &acl, &newpartition, tid);
     if (r == EAGAIN) {
 	goto retry;
     }
@@ -446,17 +447,13 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     }
 
     /* Get partition's path */
-    sprintf(buf2, "partition-%s", partition);
+    sprintf(buf2, "partition-%s", newpartition);
     root = config_getstring(buf2, (char *)0);
     if (!root) {
-	free(partition);
-	free(acl);
 	r=IMAP_PARTITION_UNKNOWN;
 	goto done;
     }
     if (strlen(root)+strlen(name)+20 > MAX_MAILBOX_PATH) {
-	free(partition);
-	free(acl);
 	r=IMAP_MAILBOX_BADNAME;
 	goto done;
     }
@@ -472,7 +469,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 
     /* fill in its parameters */
     strcpy(mboxent->name, name);
-    strcpy(mboxent->partition, partition);
+    strcpy(mboxent->partition, newpartition);
     strcpy(mboxent->acls, acl);
 
     memset(&key, 0, sizeof(key));
@@ -507,7 +504,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 
  done:
     free(mboxent);
-    free(partition);
+    free(newpartition);
     free(acl);
 
     if (r != 0)
@@ -560,7 +557,6 @@ int checkacl;
     DB_TXNMGR *txnp = dbenv.tx_info;
     DBT key, data;
     DBC *cursor;
-
 
     /* restart transaction place */
     if (0) {
