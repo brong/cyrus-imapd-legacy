@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62 2001/03/15 22:55:15 leg Exp $
+ * $Id: imtest.c,v 1.62.6.1 2001/07/31 17:15:21 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -62,8 +62,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-#include <sasl.h>
-#include <saslutil.h>
+#include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include <pwd.h>
 
@@ -567,26 +567,67 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   return ret;
 }
 
+/* FIXME: This only parses IPV4 addresses */
+static int iptostring(const struct sockaddr_in *addr,
+		      char *out, unsigned outlen) {
+    unsigned char a[4];
+    int i;
+    
+    /* FIXME: Weak bounds check, are we less than the largest possible size? */
+    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
+    if(outlen <= 21) return SASL_BUFOVER;
+    if(!addr || !out) return SASL_BADPARAM;
+
+    memset(out, 0, outlen);
+
+    for(i=3; i>=0; i--) {
+	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
+    }
+    
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
+	                                 (int)a[1],(int)a[0],
+	                                 (int)addr->sin_port);
+
+    return SASL_OK;
+}
+
 /*
  * Initialize SASL and set necessary options
  */
-
 static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
 {
   int saslresult;
   sasl_security_properties_t *secprops=NULL;
-  socklen_t addrsize=sizeof(struct sockaddr_in);
-  struct sockaddr_in *saddr_l=malloc(sizeof(struct sockaddr_in));
-  struct sockaddr_in *saddr_r=malloc(sizeof(struct sockaddr_in));
+  socklen_t addrsize;
+  char localip[60], remoteip[60];
+  struct sockaddr_in saddr_l;
+  struct sockaddr_in saddr_r;
 
   /* attempt to start sasl */
   saslresult=sasl_client_init(callbacks);
 
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
+  addrsize=sizeof(struct sockaddr_in);
+  if (getpeername(sock,(struct sockaddr *)&saddr_r,&addrsize)!=0)
+      return IMTEST_FAIL;
+
+  addrsize=sizeof(struct sockaddr_in);
+  if (getsockname(sock,(struct sockaddr *)&saddr_l,&addrsize)!=0)
+      return IMTEST_FAIL;
+
+  if(iptostring(&saddr_l, localip, 60) != SASL_OK)
+      return IMTEST_FAIL;
+
+  if(iptostring(&saddr_r, remoteip, 60) != SASL_OK)
+      return IMTEST_FAIL;
+  
+
   /* client new connection */
   saslresult=sasl_client_new("imap",
 			     serverFQDN,
+			     localip,
+			     remoteip,
 			     NULL,
 			     0,
 			     &conn);
@@ -600,24 +641,6 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
     sasl_setprop(conn, SASL_SEC_PROPS, secprops);
     free(secprops);
   }
-
-  if (getpeername(sock,(struct sockaddr *)saddr_r,&addrsize)!=0)
-    return IMTEST_FAIL;
-
-  if (sasl_setprop(conn, SASL_IP_REMOTE, saddr_r)!=SASL_OK)
-    return IMTEST_FAIL;
-  
-  addrsize=sizeof(struct sockaddr_in);
-  if (getsockname(sock,(struct sockaddr *)saddr_l,&addrsize)!=0)
-    return IMTEST_FAIL;
-
-  if (sasl_setprop(conn, SASL_IP_LOCAL, saddr_l)!=SASL_OK)
-    return IMTEST_FAIL;
-
-
-  /* should be freed */
-  free(saddr_l);
-  free(saddr_r);
   
   return IMTEST_OK;
 }
@@ -628,6 +651,7 @@ imt_stat getauthline(char **line, int *linelen)
 {
   char buf[BUFSIZE];
   int saslresult;
+  unsigned len;
   char *str=(char *) buf;
   
   str = prot_fgets(str, BUFSIZE, pin);
@@ -639,7 +663,8 @@ imt_stat getauthline(char **line, int *linelen)
 
   str += 2; /* jump past the "+ " */
 
-  *line = malloc(strlen(str)+1);
+  len = strlen(str) + 1;
+  *line = malloc(len);
   if ((*line)==NULL) {
       return STAT_NO;
   }
@@ -647,7 +672,7 @@ imt_stat getauthline(char **line, int *linelen)
   if (*str != '\r') {
       /* decode this line */
       saslresult = sasl_decode64(str, strlen(str), 
-				 *line, (unsigned *) linelen);
+				 *line, len, (unsigned *) linelen);
       if (saslresult != SASL_OK) {
 	  printf("base64 decoding error\n");
 	  return STAT_NO;
@@ -768,7 +793,7 @@ int auth_sasl(char *mechlist)
 {
   sasl_interact_t *client_interact=NULL;
   int saslresult=SASL_INTERACT;
-  char *out;
+  const char *out;
   unsigned int outlen;
   char *in;
   int inlen;
@@ -781,20 +806,13 @@ int auth_sasl(char *mechlist)
   /* call sasl client start */
   while (saslresult==SASL_INTERACT)
   {
-#if (SASL_VERSION_MAJOR == 1) && (SASL_VERSION_MINOR == 5) && (SASL_VERSION_STEP < 26)
     saslresult = sasl_client_start(conn, mechlist,
-				   NULL, &client_interact,
-				   &out, &outlen,
-				   &mechusing);
-#else
-    saslresult = sasl_client_start(conn, mechlist,
-				   NULL, &client_interact,
+				   &client_interact,
 				   NULL, NULL,
 				   &mechusing);
-#endif
+
     if (saslresult==SASL_INTERACT)
       fillin_interactions(client_interact); /* fill in prompts */      
-
   }
 
   if ((saslresult != SASL_OK) && 
@@ -836,7 +854,6 @@ int auth_sasl(char *mechlist)
     if (saslresult != SASL_OK) return saslresult;
 
     free(in);
-    if (out != NULL) free(out);
 
     /* send to server */
     printf("C: %s\n",inbase64);
@@ -1169,7 +1186,7 @@ int main(int argc, char **argv)
   char *filename=NULL;
 
   char *mechlist;
-  int *ssfp;
+  const int *ssfp;
   int maxssf = 128;
   int minssf = 0;
   int c;
@@ -1268,8 +1285,9 @@ int main(int argc, char **argv)
 #ifdef HAVE_SSL
   if ((dotls==1) && (server_supports_tls==1))
   {
-    sasl_external_properties_t externalprop;
-
+    unsigned ssf;
+    char *auth_id;
+      
     prot_printf(pout,"S01 STARTTLS\r\n");
     prot_flush(pout);
     
@@ -1280,7 +1298,7 @@ int main(int argc, char **argv)
     {
       printf("Start TLS engine failed\n");
     } else {
-      result=tls_start_clienttls(&externalprop.ssf, &externalprop.auth_id);
+      result=tls_start_clienttls(&ssf, &auth_id);
       
       if (result!=IMTEST_OK)
 	printf("TLS negotiation failed!\n");
@@ -1291,8 +1309,12 @@ int main(int argc, char **argv)
     /* tell SASL about the negotiated layer */
     result=sasl_setprop(conn,
 			SASL_SSF_EXTERNAL,
-			&externalprop);
+			&ssf);
+    if (result!=SASL_OK) imtest_fatal("Error setting SASL property");
 
+    result=sasl_setprop(conn,
+			SASL_AUTH_EXTERNAL,
+			&auth_id);
     if (result!=SASL_OK) imtest_fatal("Error setting SASL property");
 
     prot_settls (pin,  tls_conn);
@@ -1306,7 +1328,6 @@ int main(int argc, char **argv)
     imtest_fatal("STARTTLS not supported by the server!\n");
   }
 #endif /* HAVE_SSL */
-
 
   if (mechanism) {
       if (!strcasecmp(mechanism, "login")) {
@@ -1334,7 +1355,7 @@ int main(int argc, char **argv)
       printf("Authentication failed. %s\n", s);
   }
 
-  result = sasl_getprop(conn, SASL_SSF, (void **)&ssfp);
+  result = sasl_getprop(conn, SASL_SSF, (const void **)&ssfp);
   if (result != SASL_OK) {
       printf("SSF: unable to determine (SASL ERROR %d)\n", result);
   } else {
