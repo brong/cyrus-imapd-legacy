@@ -51,6 +51,7 @@
 #include <string.h>
 
 #include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include "isieve.h"
 #include "lex.h"
@@ -250,6 +251,7 @@ static int getauthline(isieve_t *obj, char **line, unsigned int *linelen,
   lexstate_t state;
   int res;
   int ret;
+  size_t len;
   mystring_t *errstr;
 
   /* now let's see what the server said */
@@ -267,10 +269,12 @@ static int getauthline(isieve_t *obj, char **line, unsigned int *linelen,
     }
   }
 
-  *line=(char *) malloc(state.str->len*2+1);
+  len = state.str->len*2+1;
+  *line=(char *) malloc(len);
+  if(!*line) return STAT_NO;
 
   sasl_decode64(string_DATAPTR(state.str), state.str->len,
-		*line, linelen);
+		*line, len, linelen);
 
   if (yylex(&state, obj->pin)!=EOL)
       return STAT_NO;
