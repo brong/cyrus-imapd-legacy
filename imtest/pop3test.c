@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.6 2001/11/15 18:08:44 ken3 Exp $
+ * $Id: pop3test.c,v 1.1.2.7 2001/11/15 20:03:13 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -88,8 +88,6 @@ static SSL *tls_conn = NULL;
 
 #define IMTEST_OK    0
 #define IMTEST_FAIL -1
-
-char *apop_chal=NULL;
 
 typedef enum {
     STAT_CONT = 0,
@@ -315,6 +313,20 @@ static void apps_ssl_info_callback(SSL * s, int where, int ret)
 }
 
 
+/*
+ * Seed the random number generator.
+ */
+static int tls_rand_init(void)
+{
+#ifdef EGD_SOCKET
+    return (RAND_egd(EGD_SOCKET));
+#else
+    /* otherwise let OpenSSL do it internally */
+    return 0;
+#endif
+}
+
+
 char *var_tls_CAfile="";
 char *var_tls_CApath="";
  /*
@@ -338,6 +350,10 @@ static int tls_init_clientengine(int verifydepth, char *var_tls_cert_file, char 
 
     SSL_load_error_strings();
     SSLeay_add_ssl_algorithms();
+    if (tls_rand_init() == -1) {
+	printf("TLS engine: cannot seed PRNG\n");
+	return IMTEST_FAIL;
+    }
 
     tls_ctx = SSL_CTX_new(TLSv1_client_method());
     if (tls_ctx == NULL) {
@@ -626,7 +642,7 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
   
 
   /* client new connection */
-  saslresult=sasl_client_new("pop",
+  saslresult=sasl_client_new("pop3",
 			     serverFQDN,
 			     localip,
 			     remoteip,
@@ -782,10 +798,10 @@ static int waitfor(char *tag)
     return 0;
 }
 
-static int auth_login(void)
+static int auth_user(void)
 {
   char str[1024];
-  /* we need username and password to do "login" */
+  /* we need username and password to do USER/PASS */
   char *username;
   unsigned int userlen;
   char *pass;
@@ -821,7 +837,7 @@ static int auth_login(void)
   }
 }
 
-static int auth_apop(void)
+static int auth_apop(char *apop_chal)
 {
   char str[1024];
   /* we need username and password to do "APOP" */
@@ -978,7 +994,7 @@ int init_net(char *serverFQDN, int port)
 }
 
 /***********************
- * Parse a mech list of the form: ... AUTH=foo AUTH=bar ...
+ * Parse a mech list of the form: ... SASL foo bar ...
  *
  * Return: string with mechs seperated by spaces
  *
@@ -1013,32 +1029,7 @@ static char *parsemechlist(char *str)
 static char *ask_capability(int *supports_starttls)
 {
   char str[1024];
-  char *start, *end;
   char *ret;
-
-  /* Get header line */
-  if(prot_fgets(str,sizeof(str),pin) == NULL) {
-      imtest_fatal("prot layer failure");
-  }
-
-  printf("S: %s",str);
-  
-  if(strncmp(str, "+OK", 3)) {
-      imtest_fatal("bad POP3 header");
-  }
-  
-  start = str + 4;
-  if(*start == '<') {
-      end = strchr(start, '>');
-      if(!end) {
-	  imtest_fatal("bad APOP challenge in header");
-      }
-      end += 1;
-      *end = '\0';
-      apop_chal = malloc(strlen(start) + 1);
-      if(!apop_chal) imtest_fatal("memory error");
-      strcpy(apop_chal, start);
-  }  
 
   /* request capabilities of server */
   prot_printf(pout, "CAPA\r\n");
@@ -1052,13 +1043,13 @@ static char *ask_capability(int *supports_starttls)
       if (prot_fgets(str,sizeof(str),pin) == NULL) {
 	  imtest_fatal("prot layer failure");
       }
-      if(strstr(str,"SASL")) {
+      printf("S: %s", str);
+      if (!strncasecmp(str,"SASL ",5)) {
 	  ret=parsemechlist(str);
       }
-      if(strstr(str,"STLS")) {
+      if (!strncasecmp(str,"STLS",4)) {
 	  *supports_starttls=1;
       }
-      printf("S: %s", str);
   } while (strncasecmp(str, ".", 1));
 
   return ret;
@@ -1185,7 +1176,7 @@ void usage(void)
   printf("  -u user  : authorization name to use\n");
   printf("  -a user  : authentication name to use\n");
   printf("  -v       : verbose\n");
-  printf("  -m mech  : SASL mechanism to use (\"login\" for LOGIN, \"apop\" for APOP)\n");
+  printf("  -m mech  : SASL mechanism to use (\"user\" for USER/PASS, \"apop\" for APOP)\n");
   printf("  -f file  : pipe file into connection after authentication\n");
   printf("  -r realm : realm\n");
 #ifdef HAVE_SSL
@@ -1220,6 +1211,8 @@ int main(int argc, char **argv)
   int run_stress_test=0;
   int dotls=0;
   int server_supports_tls;
+  char str[1024], *start, *cp;
+  char *apop_chal=NULL;
 
   struct stringlist *cur, *cur_next;
 
@@ -1302,7 +1295,33 @@ int main(int argc, char **argv)
   pin = prot_new(sock, 0);
   pout = prot_new(sock, 1); 
 
-  mechlist=ask_capability(&server_supports_tls);   /* get the * line also */
+  /* Get header line */
+  if(prot_fgets(str,sizeof(str),pin) == NULL) {
+      imtest_fatal("prot layer failure");
+  }
+
+  printf("S: %s",str);
+  
+  if(strncmp(str, "+OK", 3)) {
+      imtest_fatal("bad POP3 header");
+  }
+  
+  /* look for APOP challenge in header '<...@...>' */
+  cp = str+4;
+  while (cp && (start = strchr(cp, '<'))) {
+      cp = start + 1;
+      while (*cp && *cp != '@' && *cp != '<' && *cp != '>') cp++;
+      if (*cp != '@') continue;
+      while (*cp && *cp != '<' && *cp != '>') cp++;
+      if (*cp == '>') {
+	  *(++cp) = '\0';
+	  apop_chal = strdup(start);
+	  if (!apop_chal) imtest_fatal("memory error");
+	  break;
+      }	    
+  }
+
+  mechlist=ask_capability(&server_supports_tls);
 
 #ifdef HAVE_SSL
   if ((dotls==1) && (server_supports_tls==1))
@@ -1356,21 +1375,23 @@ int main(int argc, char **argv)
 
   if (mechanism) {
       if (!strcasecmp(mechanism, "apop")) {
-	  result = auth_apop();
-      } else if (!strcasecmp(mechanism, "login")) {
-	  result = auth_login();
+	  result = auth_apop(apop_chal);
+      } else if (!strcasecmp(mechanism, "user")) {
+	  result = auth_user();
       } else {
 	  result = auth_sasl(mechanism);
       }
   } else {
       if (*mechlist) {
 	  result = auth_sasl(mechlist);
+      } else if (apop_chal) {
+	  result = auth_apop(apop_chal);
       } else {
-	  result = auth_login();
+	  result = auth_user();
       }
   }
 
-  if(apop_chal) {
+  if (apop_chal) {
       free(apop_chal);
       apop_chal = NULL;
   }
