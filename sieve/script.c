@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.10.4.2 2000/01/13 01:29:21 leg Exp $
+ * $Id: script.c,v 1.10.4.3 2000/01/15 00:23:25 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -70,6 +70,11 @@ int script_require(sieve_script_t *s, char *req)
 	} else {
 	    return 0;
 	}
+#ifdef ENABLE_REGEX
+    } else if (!strcmp("regex", req)) {
+	s->support.regex = 1;
+	return 1;
+#endif
     } else if (!strcmp("comparator-i;octet", req)) {
 	return 1;
     } else if (!strcmp("comparator-i;ascii-casemap", req)) {
@@ -93,7 +98,8 @@ int sieve_script_parse(sieve_interp_t *interp, FILE *script,
     s = (sieve_script_t *) xmalloc(sizeof(sieve_script_t));
     s->interp = *interp;
     s->script_context = script_context;
-    s->support.fileinto = s->support.reject = s->support.envelope = 0;
+    s->support.fileinto = s->support.reject = s->support.envelope = 
+	s->support.vacation = s->support.regex = 0;
     s->err = 0;
 
     s->cmds = sieve_parse(s, script);
@@ -181,7 +187,8 @@ static int look_for_me(char *myaddr, stringlist_t *myaddrs, char **body)
 static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 {
     testlist_t *tl;
-    stringlist_t *s1, *s2;
+    stringlist_t *sl;
+    patternlist_t *pl;
     int res = 0;
     int addrpart = 0;
 
@@ -194,17 +201,17 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 	case LOCALPART: addrpart = ADDRESS_LOCALPART; break;
 	case DOMAIN: addrpart = ADDRESS_DOMAIN; break;
 	}
-	for (s1 = t->u.ae.s1; s1 != NULL && !res; s1 = s1->next) {
+	for (sl = t->u.ae.sl; sl != NULL && !res; sl = sl->next) {
 	    int l;
 	    char **body;
 
 	    /* use getheader for address, getenvelope for envelope */
 	    if (((t->type == ADDRESS) ? 
-		   i->getheader(m, s1->s, &body) :
-		   i->getenvelope(m, s1->s, &body)) != SIEVE_OK) {
+		   i->getheader(m, sl->s, &body) :
+		   i->getenvelope(m, sl->s, &body)) != SIEVE_OK) {
 		continue; /* try next header */
 	    }
-	    for (s2 = t->u.ae.s2; s2 != NULL && !res; s2 = s2->next) {
+	    for (pl = t->u.ae.pl; pl != NULL && !res; pl = pl->next) {
 		for (l = 0; body[l] != NULL && !res; l++) {
 		    /* loop through each header */
 		    void *data = NULL, *marker = NULL;
@@ -214,7 +221,7 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
                     val = get_address(addrpart, &data, &marker);
 		    while (val != NULL && !res) { 
 			/* loop through each address */
-			res |= t->u.ae.comp(s2->s, val);
+			res |= t->u.ae.comp(pl->p, val);
 			val = get_address(addrpart, &data, &marker);
        		    }
 		    free_address(&data, &marker);
@@ -236,9 +243,9 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 	break;
     case EXISTS:
 	res = 1;
-	for (s1 = t->u.sl; s1 != NULL && res; s1 = s1->next) {
+	for (sl = t->u.sl; sl != NULL && res; sl = sl->next) {
 	    char **headbody = NULL;
-	    res &= (i->getheader(m, s1->s, &headbody) == SIEVE_OK);
+	    res &= (i->getheader(m, sl->s, &headbody) == SIEVE_OK);
 	}
 	break;
     case FALSE:
@@ -249,14 +256,14 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 	break;
     case HEADER:
 	res = 0;
-	for (s1 = t->u.h.s1; s1 != NULL && !res; s1 = s1->next) {
+	for (sl = t->u.h.sl; sl != NULL && !res; sl = sl->next) {
 	    char **val;
 	    int l;
-	    if (i->getheader(m, s1->s, &val) != SIEVE_OK)
+	    if (i->getheader(m, sl->s, &val) != SIEVE_OK)
 		continue;
-	    for (s2 = t->u.h.s2; s2 != NULL && !res; s2 = s2->next) {
+	    for (pl = t->u.h.pl; pl != NULL && !res; pl = pl->next) {
 		for (l = 0; val[l] != NULL && !res; l++) {
-		    res |= t->u.h.comp(s2->s, val[l]);
+		    res |= t->u.h.comp(pl->p, val[l]);
 		}
 	    }
 	}

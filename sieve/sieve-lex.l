@@ -89,6 +89,7 @@ CRLF		(\r\n|\r|\n)
 <INITIAL>:is		return IS;
 <INITIAL>:contains	return CONTAINS;
 <INITIAL>:matches	return MATCHES;
+<INITIAL>:regex		return REGEX;
 <INITIAL>:over		return OVER;
 <INITIAL>:under		return UNDER;
 <INITIAL>:all		return ALL;

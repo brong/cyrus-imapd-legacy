@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.5 1999/10/04 18:23:07 leg Exp $
+ * $Id: sieve.y,v 1.5.4.1 2000/01/15 00:23:26 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -57,9 +57,9 @@ static commandlist_t *ret;
 static sieve_script_t *parse_script;
 static int check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *s1, stringlist_t *s2);
+			     stringlist_t *sl, patternlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *s1, stringlist_t *s2);
+			    stringlist_t *sl, patternlist_t *pl);
 static commandlist_t *build_vacation(int t, struct vtags *h, char *s);
 static struct aetags *new_aetags(void);
 static struct aetags *canon_aetags(struct aetags *ae);
@@ -73,6 +73,9 @@ static void free_vtags(struct vtags *v);
 
 static int verify_mailboxes(stringlist_t *sl);
 static int verify_addresses(stringlist_t *sl);
+#ifdef ENABLE_REGEX
+static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
+#endif
 static int ok_header(char *s);
 
 int yyerror(char *msg);
@@ -98,7 +101,7 @@ extern int yylex(void);
 %token IF ELSIF ELSE
 %token REJCT FILEINTO FORWARD KEEP STOP DISCARD VACATION REQUIRE
 %token ANYOF ALLOF EXISTS FALSE TRUE HEADER NOT SIZE ADDRESS ENVELOPE
-%token COMPARATOR IS CONTAINS MATCHES OVER UNDER ALL LOCALPART DOMAIN
+%token COMPARATOR IS CONTAINS MATCHES REGEX OVER UNDER ALL LOCALPART DOMAIN
 %token DAYS ADDRESSES SUBJECT MIME
 
 %type <cl> commands command action elsif block
@@ -213,12 +216,32 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 	| FALSE			 { $$ = new_test(FALSE); }
 	| TRUE			 { $$ = new_test(TRUE); }
 	| HEADER htags stringlist stringlist
-				 { $$ = build_header(HEADER, canon_htags($2), 
-						     $3, $4);
+				 { patternlist_t *pl;
+				   $2 = canon_htags($2);
+#ifdef ENABLE_REGEX
+				   if ($2->comptag == REGEX) {
+				     pl = verify_regexs($4, $2->comparator);
+				     if (!pl) { YYERROR; }
+				   }
+				   else
+#endif
+				     pl = (patternlist_t *) $4;
+				       
+				   $$ = build_header(HEADER, $2, $3, pl);
 				   if ($$ == NULL) { YYERROR; } }
 	| addrorenv aetags stringlist stringlist
-				 { $$ = build_address($1, canon_aetags($2), 
-						      $3, $4); 
+				 { patternlist_t *pl;
+				   $2 = canon_aetags($2);
+#ifdef ENABLE_REGEX
+				   if ($2->comptag == REGEX) {
+				     pl = verify_regexs($4, $2->comparator);
+				     if (!pl) { YYERROR; }
+				   }
+				   else
+#endif
+				     pl = (patternlist_t *) $4;
+				       
+				   $$ = build_address($1, $2, $3, pl);
 				   if ($$ == NULL) { YYERROR; } }
 	| NOT test		 { $$ = new_test(NOT); $$->u.t = $2; }
 	| SIZE sizetag NUMBER    { $$ = new_test(SIZE); $$->u.sz.t = $2;
@@ -266,6 +289,11 @@ addrparttag: ALL                 { $$ = ALL; }
 comptag: IS			 { $$ = IS; }
 	| CONTAINS		 { $$ = CONTAINS; }
 	| MATCHES		 { $$ = MATCHES; }
+	| REGEX			 { if (!parse_script->support.regex) {
+				     yyerror("regex not required");
+				     YYERROR;
+				   }
+				   $$ = REGEX; }
 	;
 
 sizetag: OVER			 { $$ = OVER; }
@@ -328,16 +356,17 @@ static int check_reqs(stringlist_t *sl)
 }
 
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *s1, stringlist_t *s2)
+			     stringlist_t *sl, patternlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be either ADDRESS or ENVELOPE */
 
     assert((t == ADDRESS) || (t == ENVELOPE));
 
     if (ret) {
+	ret->u.ae.comptag = ae->comptag;
 	ret->u.ae.comp = lookup_comp(ae->comparator, ae->comptag);
-	ret->u.ae.s1 = s1;
-	ret->u.ae.s2 = s2;
+	ret->u.ae.sl = sl;
+	ret->u.ae.pl = pl;
 	ret->u.ae.addrpart = ae->addrtag;
 	free_aetags(ae);
 	if (ret->u.ae.comp == NULL) {
@@ -349,18 +378,19 @@ static test_t *build_address(int t, struct aetags *ae,
 }
 
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *s1, stringlist_t *s2)
+			    stringlist_t *sl, patternlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be HEADER */
 
     assert(t == HEADER);
 
     if (ret) {
+	ret->u.h.comptag = h->comptag;
 	ret->u.h.comp = lookup_comp(h->comparator, h->comptag);
-	ret->u.h.s1 = s1;
-	ret->u.h.s2 = s2;
+	ret->u.h.sl = sl;
+	ret->u.h.pl = pl;
 	free_htags(h);
-	if (ret->u.ae.comp == NULL) {
+	if (ret->u.h.comp == NULL) {
 	    free_test(ret);
 	    ret = NULL;
 	}
@@ -465,9 +495,19 @@ static void free_vtags(struct vtags *v)
     free(v);
 }
 
+char *addrptr;
+char addrerr[100];
+
 static int verify_address(char *s)
 {
-    /* if not an address, call yyerror */
+    char errbuf[500];
+
+    addrptr = s;
+    if (addrparse()) {
+	sprintf(errbuf, "address '%s': %s", s, addrerr);
+	yyerror(errbuf);
+	return 0;
+    }
     return 1;
 }
 
@@ -488,6 +528,48 @@ static int verify_mailboxes(stringlist_t *sl)
     for (; sl != NULL && verify_mailbox(sl->s); sl = sl->next) ;
     return (sl == NULL);
 }
+
+#ifdef ENABLE_REGEX
+static regex_t *verify_regex(char *s, int cflags)
+{
+    int ret;
+    char errbuf[100];
+    regex_t *reg = (regex_t *) xmalloc(sizeof(regex_t));
+
+    if ((ret = regcomp(reg, s, cflags)) != 0) {
+	(void) regerror(ret, reg, errbuf, sizeof(errbuf));
+	yyerror(errbuf);
+	free(reg);
+	return NULL;
+    }
+    return reg;
+}
+
+static patternlist_t *verify_regexs(stringlist_t *sl, char *comp)
+{
+    stringlist_t *sl2;
+    patternlist_t *pl = NULL;
+    int cflags = REG_EXTENDED | REG_NOSUB;
+    regex_t *reg;
+
+    if (!strcmp(comp, "i;ascii-casemap")) {
+	cflags |= REG_ICASE;
+    }
+
+    for (sl2 = sl; sl2 != NULL; sl2 = sl2->next) {
+	if ((reg = verify_regex(sl2->s, cflags)) == NULL) {
+	    free_pl(pl, REGEX);
+	    break;
+	}
+	pl = (patternlist_t *) new_pl(reg, pl);
+    }
+    if (sl2 == NULL) {
+	free_sl(sl);
+	return pl;
+    }
+    return NULL;
+}
+#endif
 
 /* is it ok to put this in an RFC822 header body? */
 static int ok_header(char *s)
