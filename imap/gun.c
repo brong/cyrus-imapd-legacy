@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.3 1999/11/02 21:52:31 leg Exp $
+ * $Id: gun.c,v 1.1.2.4 1999/11/03 00:01:40 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -174,6 +174,19 @@ void init_proxy(int sock)
     struct cb *ret = xmalloc(sizeof(struct cb));
     int r;
     int ch;
+    int flag;
+
+    /* want blocking i/o */
+    if ((flag = fcntl(sock, F_GETFL)) < 0) {
+	close(sock);
+	return;
+    }
+    flag &= ~O_NONBLOCK;
+
+    if (fcntl(sock, F_SETFL, flag) < 0) {
+	close(sock);
+	return;
+    }
 
     ret->in = prot_new(sock, 0);
     ret->out = prot_new(sock, 1);
