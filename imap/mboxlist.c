@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.43 1999/11/04 01:32:11 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.44 1999/11/04 01:42:29 leg Exp $
  */
 
 #include <stdio.h>
@@ -1410,7 +1410,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     }
 
 
-    if (!(newent->mbtype != MBTYPE_REMOTE)) {
+    if (!(newent->mbtype & MBTYPE_REMOTE)) {
         /* set it in the /var/spool part */
         free(mailbox.acl);
 	mailbox.acl = xstrdup(newacl);
