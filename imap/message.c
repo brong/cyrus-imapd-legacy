@@ -27,7 +27,7 @@
  */
 
 /*
- * $Id: message.c,v 1.70.4.1 2000/07/06 18:46:25 ken3 Exp $
+ * $Id: message.c,v 1.70.4.2 2000/08/17 18:13:06 ken3 Exp $
  */
 
 #ifdef HAVE_UNISTD_H
@@ -1357,6 +1357,8 @@ unsigned flags;
 	    int offset;
 
 	    message_parse_rfc822space(&hdr);
+	    if (!hdr) goto baddate;
+
 	    if (*hdr == '+' || *hdr == '-') {
 		/* Parse numeric offset */
 		int east = 1;
