@@ -1,6 +1,6 @@
 # Makefile.in - sieve makefile
 # @configure_input@
-# $Id: Makefile.in,v 1.25.10.1 2001/12/18 23:09:56 rjs3 Exp $
+# $Id: Makefile.in,v 1.25.10.2 2002/05/29 22:20:24 jsmith2 Exp $
 ################################################################
 #        Copyright 1998 by Carnegie Mellon University
 #
@@ -50,7 +50,7 @@ BUILT_SOURCES = addr.c addr.h addr-lex.c \
 	sieve.c sieve.h sieve-lex.c \
 	sieve_err.h sieve_err.c
 
-all: libsieve.a sievec
+all: libsieve.a sievec sieved
 
 dist: $(BUILT_SOURCES)
 
@@ -63,26 +63,35 @@ test: $(DEPLIBS) libsieve.a test.o
 	 test.o $(LIBS) $(DEPLIBS)
 
 OBJS = sieve_err.o \
-        sieve.o sieve-lex.o comparator.o interp.o message.o script.o \
-	tree.o md5.o addr.o addr-lex.o bytecode.o
+       sieve.o sieve-lex.o comparator_bc.o comparator.o interp.o message.o \
+       script.o tree.o addr.o addr-lex.o @MD5OBJ@ bytecode.o
+
+sieve-lex.c: sieve-lex.l sieve.h
 
 sieve.c sieve.h: sieve.y
 	$(YACC) $(YFLAGS) $(srcdir)/sieve.y
 	mv -f y.tab.c sieve.c
 	mv -f y.tab.h sieve.h
 
+
+addr-lex.c: addr-lex.l addr.h
+#taken out by new makefile
+#	$(LEX) -t -Paddr $(srcdir)/addr-lex.l > $@
+
 addr.c addr.h: addr.y
 	$(YACC) $(YFLAGS) -p addr $(srcdir)/addr.y
 	mv -f y.tab.c addr.c
 	mv -f y.tab.h addr.h
 
-# This is needed because 'makedepend' leaves it out
-addr.o: addr.h
 
-addr-lex.c: addr-lex.l addr.h
-	$(LEX) -t -Paddr $(srcdir)/addr-lex.l > $@
+# This is needed because 'makedepend' leaves it out 
+#(this is not in newer version, is it still needed?)
+#addr.o: addr.h  
 
-libsieve.a: sieve.c sieve.h sieve_err.h sieve_err.c $(OBJS)
+
+#libsieve.a: sieve.c sieve.h sieve_err.h sieve_err.c $(OBJS)
+#changed to...
+libsieve.a: $(OBJS)
 	rm -f libsieve.a
 	ar cr libsieve.a $(OBJS)
 	$(RANLIB) libsieve.a
@@ -90,13 +99,19 @@ libsieve.a: sieve.c sieve.h sieve_err.h sieve_err.c $(OBJS)
 sievec: sievec.o libsieve.a
 	$(CC) $(LDFLAGS) -o sievec sievec.o libsieve.a $(DEPLIBS) $(LIBS)
 
+sieved: sieved.o libsieve.a
+	$(CC) $(LDFLAGS) -o sieved sieved.o libsieve.a $(DEPLIBS) $(LIBS)
+
+
 sieve_interface.h: sieve_err.h
 
-sieve_err.h sieve_err.c: sieve_err.et
+sieve_err.h sieve_err.c: sieve_err.etsieved: sieved.o libsieve.a
+	$(CC) $(LDFLAGS) -o sieved sieved.o libsieve.a $(DEPLIBS) $(LIBS)
+
 	$(COMPILE_ET) $(srcdir)/sieve_err.et
 
 clean:
-	rm -f test *.o *.a Makefile.bak makedepend.log
+	rm -f test *~ *.o *.a Makefile.bak makedepend.log
 
 distclean: clean
 	rm -f Makefile

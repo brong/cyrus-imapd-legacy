@@ -1,6 +1,6 @@
 /* message.h
  * Larry Greenfield
- * $Id: message.h,v 1.11 2000/11/17 19:31:35 ken3 Exp $
+ * $Id: message.h,v 1.11.12.1 2002/05/29 22:20:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -34,7 +34,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 typedef struct Action action_list_t;
 
 typedef enum {
-    ACTION_NONE,
+    ACTION_NULL = -1,
+    ACTION_NONE = 0,
     ACTION_REJECT,
     ACTION_FILEINTO,
     ACTION_KEEP,
@@ -80,7 +81,7 @@ struct Action {
     char *vac_msg;
     int vac_days;
 };
-
+/*this should be fixed so that it is whatever is the cool thing to be using now-the list, i guess*/
 typedef struct notify_action_s {
 
     int exists; /* 0 = no +/-1 = yes (-1 flags default action) */
@@ -90,6 +91,21 @@ typedef struct notify_action_s {
     stringlist_t *headers;
 
 } notify_action_t;
+
+
+/*end of funny extra struct*/
+
+
+typedef struct notify_list_s {
+    int isactive;
+    char *id;
+    char *method;
+    stringlist_t **options;
+    const char *priority;
+    char *message;
+    struct notify_list_s *next;
+
+} notify_list_t;
 
 /* header parsing */
 typedef enum {
@@ -104,14 +120,15 @@ int parse_address(const char *header, void **data, void **marker);
 char *get_address(address_part_t addrpart, void **data, void **marker,
 		  int canon_domain);
 int free_address(void **data, void **marker);
-notify_action_t *default_notify_action(void);
+notify_list_t *new_notify_list(void);
+void free_notify_list(notify_list_t *n);
 
 /* actions; return negative on failure.
  * these don't actually perform the actions, they just add it to the
  * action list */
 int do_reject(action_list_t *m, char *msg);
 int do_fileinto(action_list_t *m, char *mbox, sieve_imapflags_t *imapflags);
-int do_forward(action_list_t *m, char *addr);
+int do_redirect(action_list_t *m, char *addr);
 int do_keep(action_list_t *m, sieve_imapflags_t *imapflags);
 int do_discard(action_list_t *m);
 int do_vacation(action_list_t *m, char *addr, char *fromaddr,
@@ -122,9 +139,11 @@ int do_addflag(action_list_t *m, char *flag);
 int do_removeflag(action_list_t *m, char *flag);
 int do_mark(action_list_t *m);
 int do_unmark(action_list_t *m);
-int do_notify(sieve_interp_t *i,void *m, notify_action_t *notify,
-	      const char *priority, char *message, stringlist_t *sl);
-int do_denotify(notify_action_t *notify);
+int do_notify(notify_list_t *n, char *id,
+	      char *method, stringlist_t **options,
+	      const char *priority, char *message);
+int do_denotify(notify_list_t *n, comparator_t *comp, void *pat,
+		void *comprock, const char *priority);
 
 
 #endif

@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.1 2001/12/18 23:09:57 rjs3 Exp $
+ * $Id: sieve.y,v 1.12.2.2 2002/05/29 22:20:26 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -33,6 +33,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
+#include <ctype.h>
 #include "xmalloc.h"
 #include "comparator.h"
 #include "interp.h"
@@ -55,12 +56,29 @@ struct vtags {
 struct htags {
     char *comparator;
     int comptag;
+    char *relation;
 };
 
 struct aetags {
     int addrtag;
     char *comparator;
     int comptag;
+    char *relation;
+};
+
+struct ntags {
+    char *method;
+    char *id;
+    stringlist_t *options;
+    const char *priority;
+    char *message;
+};
+
+struct dtags {
+    int comptag;
+    char *relation;
+    void *pattern;
+    char *priority;
 };
 
 static commandlist_t *ret;
@@ -69,8 +87,10 @@ static int check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
 			     stringlist_t *sl, stringlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, stringlist_t *pl);
+			    stringlist_t *sl, patternlist_t *pl);
 static commandlist_t *build_vacation(int t, struct vtags *h, char *s);
+static commandlist_t *build_notify(int t, struct ntags *n);
+static commandlist_t *build_denotify(int t, struct dtags *n);
 static struct aetags *new_aetags(void);
 static struct aetags *canon_aetags(struct aetags *ae);
 static void free_aetags(struct aetags *ae);
@@ -80,12 +100,20 @@ static void free_htags(struct htags *h);
 static struct vtags *new_vtags(void);
 static struct vtags *canon_vtags(struct vtags *v);
 static void free_vtags(struct vtags *v);
+static struct ntags *new_ntags(void);
+static struct ntags *canon_ntags(struct ntags *n);
+static void free_ntags(struct ntags *n);
+static struct dtags *new_dtags(void);
+static void free_dtags(struct dtags *d);
 
-static int verify_mailboxes(stringlist_t *sl);
-static int verify_addresses(stringlist_t *sl);
-static int verify_flags(stringlist_t *sl);
+static int verify_stringlist(stringlist_t *sl, int (*verify)(char *));
+static int verify_mailbox(char *s);
+static int verify_address(char *s);
+static int verify_header(char *s);
+static int verify_flag(char *s);
 #ifdef ENABLE_REGEX
-static int verify_regexs(stringlist_t *sl, char *comp);
+static regex_t *verify_regex(char *s, int cflags);
+static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
 #endif
 static int ok_header(char *s);
 
@@ -105,29 +133,32 @@ extern int yylex(void);
     struct vtags *vtag;
     struct aetags *aetag;
     struct htags *htag;
+    struct ntags *ntag;
+    struct dtags *dtag;
 }
 
 %token <nval> NUMBER
 %token <sval> STRING
 %token IF ELSIF ELSE
-%token REJCT FILEINTO FORWARD KEEP STOP DISCARD VACATION REQUIRE
+%token REJCT FILEINTO REDIRECT KEEP STOP DISCARD VACATION REQUIRE
 %token SETFLAG ADDFLAG REMOVEFLAG MARK UNMARK
 %token NOTIFY DENOTIFY
 %token ANYOF ALLOF EXISTS SFALSE STRUE HEADER NOT SIZE ADDRESS ENVELOPE
-%token COMPARATOR IS CONTAINS MATCHES REGEX OVER UNDER
+%token COMPARATOR IS CONTAINS MATCHES REGEX COUNT VALUE OVER UNDER
 %token ALL LOCALPART DOMAIN USER DETAIL
 %token DAYS ADDRESSES SUBJECT MIME
-%token LOW MEDIUM HIGH
+%token METHOD ID OPTIONS LOW NORMAL HIGH MESSAGE
 
 %type <cl> commands command action elsif block
 %type <sl> stringlist strings
 %type <test> test
-%type <nval> comptag sizetag addrparttag addrorenv
+%type <nval> comptag relcomp sizetag addrparttag addrorenv
 %type <testl> testlist tests
 %type <htag> htags
 %type <aetag> aetags
 %type <vtag> vtags
-%type <sl> optional_headers
+%type <ntag> ntags
+%type <dtag> dtags
 %type <sval> priority
 
 %%
@@ -165,20 +196,20 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
 				     YYERROR;
 				   }
 				   $$ = new_command(REJCT); $$->u.str = $2; }
-	| FILEINTO stringlist	 { if (!parse_script->support.fileinto) {
+	| FILEINTO STRING	 { if (!parse_script->support.fileinto) {
 				     yyerror("fileinto not required");
 	                             YYERROR;
                                    }
-				   if (!verify_mailboxes($2)) {
+				   if (!verify_mailbox($2)) {
 				     YYERROR; /* vm should call yyerror() */
 				   }
 	                           $$ = new_command(FILEINTO);
-				   $$->u.sl = $2; }
-	| FORWARD stringlist     { $$ = new_command(FORWARD);
-				   if (!verify_addresses($2)) {
+				   $$->u.str = $2; }
+	| REDIRECT STRING         { $$ = new_command(REDIRECT);
+				   if (!verify_address($2)) {
 				     YYERROR; /* va should call yyerror() */
 				   }
-				   $$->u.sl = $2; }
+				   $$->u.str = $2; }
 	| KEEP			 { $$ = new_command(KEEP); }
 	| STOP			 { $$ = new_command(STOP); }
 	| DISCARD		 { $$ = new_command(DISCARD); }
@@ -194,7 +225,7 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
                                     yyerror("imapflags not required");
                                     YYERROR;
                                    }
-                                  if (!verify_flags($2)) {
+                                  if (!verify_stringlist($2, verify_flag)) {
                                     YYERROR; /* vf should call yyerror() */
                                   }
                                   $$ = new_command(SETFLAG);
@@ -203,7 +234,7 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
                                     yyerror("imapflags not required");
                                     YYERROR;
                                     }
-                                  if (!verify_flags($2)) {
+                                  if (!verify_stringlist($2, verify_flag)) {
                                     YYERROR; /* vf should call yyerror() */
                                   }
                                   $$ = new_command(ADDFLAG);
@@ -212,7 +243,7 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
                                     yyerror("imapflags not required");
                                     YYERROR;
                                     }
-                                  if (!verify_flags($2)) {
+                                  if (!verify_stringlist($2, verify_flag)) {
                                     YYERROR; /* vf should call yyerror() */
                                   }
                                   $$ = new_command(REMOVEFLAG);
@@ -228,37 +259,75 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
                                     }
                                   $$ = new_command(UNMARK); }
 
-         | NOTIFY priority STRING optional_headers
-                                    {
-					if (!parse_script->support.notify) {
-					    yyerror("notify not required");
-					    YYERROR;
-					}
-
-					$$ = new_command(NOTIFY); 
-					$$->u.n.priority = $2;
-					$$->u.n.message = $3;
-					$$->u.n.headers_list = $4;
-				    }
-         | DENOTIFY               { if (!parse_script->support.notify) {
-                                    yyerror("notify not required");
-                                    YYERROR;
-                                    }
-	                            $$ = new_command(DENOTIFY); }
-
+         | NOTIFY ntags           { if (!parse_script->support.notify) {
+				       yyerror("notify not required");
+				       $$ = new_command(NOTIFY); 
+				       YYERROR;
+	 			    } else {
+				      $$ = build_notify(NOTIFY,
+				             canon_ntags($2));
+				    } }
+         | DENOTIFY dtags         { if (!parse_script->support.notify) {
+                                       yyerror("notify not required");
+				       $$ = new_command(DENOTIFY);
+				       YYERROR;
+				    } else {
+					$$ = build_denotify(DENOTIFY, $2);
+					if ($$ == NULL) { 
+			yyerror("unable to find a compatible comparator");
+			YYERROR; } } }
 	;
 
-priority: /* nothing */ { $$ = "medium"; }
-	| LOW    { $$ = "low"; }
-        | MEDIUM { $$ = "medium"; }
-        | HIGH { $$ = "high"; }
-        ;
+ntags: /* empty */		 { $$ = new_ntags(); }
+	| ntags ID STRING	 { if ($$->id != NULL) { 
+					yyerror("duplicate :method"); YYERROR; }
+				   else { $$->id = $3; } }
+	| ntags METHOD STRING	 { if ($$->method != NULL) { 
+					yyerror("duplicate :method"); YYERROR; }
+				   else { $$->method = $3; } }
+	| ntags OPTIONS stringlist { if ($$->options != NULL) { 
+					yyerror("duplicate :options"); YYERROR; }
+				     else { $$->options = $3; } }
+	| ntags priority	 { if ($$->priority != NULL) { 
+					yyerror("duplicate :priority"); YYERROR; }
+				   else { $$->priority = $2; } }
+	| ntags MESSAGE STRING	 { if ($$->message != NULL) { 
+					yyerror("duplicate :message"); YYERROR; }
+				   else { $$->message = $3; } }
+	;
 
-optional_headers: /* empty */ { 	                        
-				$$ = NULL;
-	                      }
-                 | stringlist { $$ = $1; }
-                 ;
+dtags: /* empty */		 { $$ = new_dtags(); }
+	| dtags priority	 { if ($$->priority != NULL) { 
+				yyerror("duplicate priority level"); YYERROR; }
+				   else { $$->priority = $2; } }
+	| dtags comptag STRING 	 { if ($$->comptag != -1) { 
+			yyerror("duplicate comparator type tag"); YYERROR;
+				   } else {
+				       $$->comptag = $2;
+#ifdef ENABLE_REGEX
+				       if ($$->comptag == REGEX) {
+					   int cflags = REG_EXTENDED |
+					       REG_NOSUB | REG_ICASE;
+					   $$->pattern =
+					       (void*) verify_regex($3, cflags);
+					   if (!$$->pattern) { YYERROR; }
+				       }
+				       else
+#endif
+					   $$->pattern = $3;
+				   } }
+	| dtags relcomp STRING	 { $$ = $1;
+				   if ($$->comptag != -1) { 
+			yyerror("duplicate comparator type tag"); YYERROR; }
+				   else { $$->comptag = $2;
+				     $$->relation = $3;
+				   } }
+	;
+
+priority: LOW    { $$ = "low"; }
+        | NORMAL { $$ = "normal"; }
+        | HIGH   { $$ = "high"; }
+        ;
 
 vtags: /* empty */		 { $$ = new_vtags(); }
 	| vtags DAYS NUMBER	 { if ($$->days != -1) { 
@@ -267,7 +336,8 @@ vtags: /* empty */		 { $$ = new_vtags(); }
 	| vtags ADDRESSES stringlist { if ($$->addresses != NULL) { 
 					yyerror("duplicate :addresses"); 
 					YYERROR;
-				       } else if (!verify_addresses($3)) {
+				       } else if (!verify_stringlist($3,
+							verify_address)) {
 					  YYERROR;
 				       } else {
 					 $$->addresses = $3; } }
@@ -301,7 +371,12 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 	| SFALSE		 { $$ = new_test(SFALSE); }
 	| STRUE			 { $$ = new_test(STRUE); }
 	| HEADER htags stringlist stringlist
-				 { 
+
+				 { patternlist_t *pl;
+                                   if (!verify_stringlist($3, verify_header)) {
+                                     YYERROR; /* vh should call yyerror() */
+                                   }
+
 				   $2 = canon_htags($2);
 #ifdef ENABLE_REGEX
 				   /* Just verify them, we can't compile
@@ -311,10 +386,20 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 				     { YYERROR; }
 				   }
 #endif
-				   $$ = build_header(HEADER, $2, $3, $4);
-				   if ($$ == NULL) { YYERROR; } }
-	| addrorenv aetags stringlist stringlist
-				 {
+				     pl = (patternlist_t *) $4;
+				       
+				   $$ = build_header(HEADER, $2, $3, pl);
+				   if ($$ == NULL) { 
+			yyerror("unable to find a compatible comparator");
+			YYERROR; } }
+
+           | addrorenv aetags stringlist stringlist
+
+				 { patternlist_t *pl;
+                                   if (!verify_stringlist($3, verify_header)) {
+                                     YYERROR; /* vh should call yyerror() */
+                                   }
+
 				   $2 = canon_aetags($2);
 #ifdef ENABLE_REGEX
 				   /* Just verify them, we can't compile
@@ -324,8 +409,12 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 				     { YYERROR; }
 				   }
 #endif
-				   $$ = build_address($1, $2, $3, $4);
-				   if ($$ == NULL) { YYERROR; } }
+				     pl = (patternlist_t *) $4;
+				       
+				   $$ = build_address($1, $2, $3, pl);
+				   if ($$ == NULL) { 
+			yyerror("unable to find a compatible comparator");
+			YYERROR; } }
 	| NOT test		 { $$ = new_test(NOT); $$->u.t = $2; }
 	| SIZE sizetag NUMBER    { $$ = new_test(SIZE); $$->u.sz.t = $2;
 		                   $$->u.sz.n = $3; }
@@ -346,9 +435,19 @@ aetags: /* empty */              { $$ = new_aetags(); }
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2; } }
+	| aetags relcomp STRING	 { $$ = $1;
+				   if ($$->comptag != -1) { 
+			yyerror("duplicate comparator type tag"); YYERROR; }
+				   else { $$->comptag = $2;
+				     $$->relation = $3;
+				   } }
 	| aetags COMPARATOR STRING { $$ = $1;
 				   if ($$->comparator != NULL) { 
 			yyerror("duplicate comparator tag"); YYERROR; }
+				   else if (!strcmp($3, "i;ascii-numeric") &&
+					    !parse_script->support.i_ascii_numeric) {
+			yyerror("comparator-i;ascii-numeric not required");
+			YYERROR; }
 				   else { $$->comparator = $3; } }
 	;
 
@@ -357,10 +456,20 @@ htags: /* empty */		 { $$ = new_htags(); }
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
 				   else { $$->comptag = $2; } }
+	| htags relcomp STRING	 { $$ = $1;
+				   if ($$->comptag != -1) { 
+			yyerror("duplicate comparator type tag"); YYERROR; }
+				   else { $$->comptag = $2;
+				     $$->relation = $3;
+				   } }
 	| htags COMPARATOR STRING { $$ = $1;
 				   if ($$->comparator != NULL) { 
 			yyerror("duplicate comparator tag");
 					YYERROR; }
+				   else if (!strcmp($3, "i;ascii-numeric") &&
+					    !parse_script->support.i_ascii_numeric) { 
+			yyerror("comparator-i;ascii-numeric not required");
+			YYERROR; }
 				   else { $$->comparator = $3; } }
 	;
 
@@ -389,8 +498,21 @@ comptag: IS			 { $$ = IS; }
 				   $$ = REGEX; }
 	;
 
+relcomp: COUNT			 { if (!parse_script->support.relational) {
+				     yyerror("relational not required");
+				     YYERROR;
+				   }
+				   $$ = COUNT; }
+	| VALUE			 { if (!parse_script->support.relational) {
+				     yyerror("relational not required");
+				     YYERROR;
+				   }
+				   $$ = VALUE; }
+	;
+
 sizetag: OVER			 { $$ = OVER; }
 	| UNDER			 { $$ = UNDER; }
+	;
 
 testlist: '(' tests ')'		 { $$ = $2; }
 	;
@@ -457,7 +579,8 @@ static test_t *build_address(int t, struct aetags *ae,
 
     if (ret) {
 	ret->u.ae.comptag = ae->comptag;
-	ret->u.ae.comp = lookup_comp(ae->comparator, ae->comptag);
+	ret->u.ae.comp = lookup_comp(ae->comparator, ae->comptag,
+				     ae->relation, &ret->u.ae.comprock);
 	ret->u.ae.sl = sl;
 	ret->u.ae.pl = pl;
 	ret->u.ae.addrpart = ae->addrtag;
@@ -471,7 +594,7 @@ static test_t *build_address(int t, struct aetags *ae,
 }
 
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, stringlist_t *pl)
+			    stringlist_t *sl, patternlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be HEADER */
 
@@ -479,7 +602,8 @@ static test_t *build_header(int t, struct htags *h,
 
     if (ret) {
 	ret->u.h.comptag = h->comptag;
-	ret->u.h.comp = lookup_comp(h->comparator, h->comptag);
+	ret->u.h.comp = lookup_comp(h->comparator, h->comptag,
+				    h->relation, &ret->u.h.comprock);
 	ret->u.h.sl = sl;
 	ret->u.h.pl = pl;
 	free_htags(h);
@@ -508,12 +632,50 @@ static commandlist_t *build_vacation(int t, struct vtags *v, char *reason)
     return ret;
 }
 
+static commandlist_t *build_notify(int t, struct ntags *n)
+{
+    commandlist_t *ret = new_command(t);
+
+    assert(t == NOTIFY);
+
+    if (ret) {
+	ret->u.n.method = n->method; n->method = NULL;
+	ret->u.n.id = n->id; n->id = NULL;
+	ret->u.n.options = n->options; n->options = NULL;
+	ret->u.n.priority = n->priority;
+	ret->u.n.message = n->message; n->message = NULL;
+	free_ntags(n);
+    }
+    return ret;
+}
+
+static commandlist_t *build_denotify(int t, struct dtags *d)
+{
+    commandlist_t *ret = new_command(t);
+
+    assert(t == DENOTIFY);
+
+    if (ret) {
+	ret->u.d.comptag = d->comptag;
+	ret->u.d.comp = lookup_comp("i;ascii-casemap", d->comptag,
+				    d->relation, &ret->u.d.comprock);
+	ret->u.d.pattern = d->pattern; d->pattern = NULL;
+	ret->u.d.priority = d->priority;
+	free_dtags(d);
+	if (ret->u.d.comp == NULL) {
+	    free_tree(ret);
+	    ret = NULL;
+	}
+    }
+    return ret;
+}
+
 static struct aetags *new_aetags(void)
 {
     struct aetags *r = (struct aetags *) xmalloc(sizeof(struct aetags));
 
     r->addrtag = r->comptag = -1;
-    r->comparator = NULL;
+    r->comparator = r->relation = NULL;
 
     return r;
 }
@@ -529,6 +691,7 @@ static struct aetags *canon_aetags(struct aetags *ae)
 static void free_aetags(struct aetags *ae)
 {
     free(ae->comparator);
+    if (ae->relation) free(ae->relation);
     free(ae);
 }
 
@@ -537,7 +700,7 @@ static struct htags *new_htags(void)
     struct htags *r = (struct htags *) xmalloc(sizeof(struct htags));
 
     r->comptag = -1;
-    r->comparator = NULL;
+    r->comparator = r->relation = NULL;
 
     return r;
 }
@@ -552,6 +715,7 @@ static struct htags *canon_htags(struct htags *h)
 static void free_htags(struct htags *h)
 {
     free(h->comparator);
+    if (h->relation) free(h->relation);
     free(h);
 }
 
@@ -588,6 +752,59 @@ static void free_vtags(struct vtags *v)
     free(v);
 }
 
+static struct ntags *new_ntags(void)
+{
+    struct ntags *r = (struct ntags *) xmalloc(sizeof(struct ntags));
+
+    r->method = NULL;
+    r->id = NULL;
+    r->options = NULL;
+    r->priority = NULL;
+    r->message = NULL;
+
+    return r;
+}
+
+static struct ntags *canon_ntags(struct ntags *n)
+{
+    if (n->priority == NULL) { n->priority = "normal"; }
+    if (n->message == NULL) { n->message = strdup("$from$: $subject$"); }
+
+    return n;
+}
+
+static void free_ntags(struct ntags *n)
+{
+    if (n->method) { free(n->method); }
+    if (n->id) { free(n->id); }
+    if (n->options) { free_sl(n->options); }
+    if (n->message) { free(n->message); }
+    free(n);
+}
+
+static struct dtags *new_dtags(void)
+{
+    struct dtags *r = (struct dtags *) xmalloc(sizeof(struct dtags));
+
+    r->comptag = -1;
+    r->relation = r->pattern = r->priority = NULL;
+
+    return r;
+}
+
+static void free_dtags(struct dtags *d)
+{
+    if (d->relation) free(d->relation);
+    if (d->pattern) free(d->pattern);
+    free(d);
+}
+
+static int verify_stringlist(stringlist_t *sl, int (*verify)(char *))
+{
+    for (; sl != NULL && verify(sl->s); sl = sl->next) ;
+    return (sl == NULL);
+}
+
 char *addrptr;		/* pointer to address string for address lexer */
 char addrerr[500];	/* buffer for address parser error messages */
 
@@ -605,24 +822,33 @@ static int verify_address(char *s)
     return 1;
 }
 
-static int verify_addresses(stringlist_t *sl)
+static int verify_mailbox(char *s __attribute__((unused)))
 {
-    for (; sl != NULL && verify_address(sl->s); sl = sl->next) ;
-    return (sl == NULL);
-}
-
-static int verify_mailbox(char *s)
-{
-    /* if not a mailbox, call yyerror */
+    /* xxx if not a mailbox, call yyerror */
     return 1;
 }
 
-static int verify_mailboxes(stringlist_t *sl)
+static int verify_header(char *hdr)
 {
-    for (; sl != NULL && verify_mailbox(sl->s); sl = sl->next) ;
-    return (sl == NULL);
-}
+    char *h = hdr;
+    char errbuf[100];
 
+    while (*h) {
+	/* field-name      =       1*ftext
+	   ftext           =       %d33-57 / %d59-126         
+	   ; Any character except
+	   ;  controls, SP, and
+	   ;  ":". */
+	if (!((*h >= 33 && *h <= 57) || (*h >= 59 && *h <= 126))) {
+	    sprintf(errbuf, "header '%s': not a valid header", hdr);
+	    yyerror(errbuf);
+	    return 0;
+	}
+	h++;
+    }
+    return 1;
+}
+ 
 static int verify_flag(char *f)
 {
     char errbuf[100];
@@ -646,49 +872,50 @@ static int verify_flag(char *f)
     return 1;
 }
  
-static int verify_flags(stringlist_t *sl)
-{
-    for (; sl != NULL && verify_flag(sl->s); sl = sl->next) ;
-    return (sl == NULL);
-}
-
-
 #ifdef ENABLE_REGEX
-static int verify_regex(char *s, int cflags)
+static regex_t *verify_regex(char *s, int cflags)
 {
     int ret;
-    regex_t reg;
     char errbuf[100];
+    regex_t *reg = (regex_t *) xmalloc(sizeof(regex_t));
 
-    if ((ret = regcomp(&reg, s, cflags)) != 0) {
-	(void) regerror(ret, &reg, errbuf, sizeof(errbuf));
+    if ((ret = regcomp(reg, s, cflags)) != 0) {
+	(void) regerror(ret, reg, errbuf, sizeof(errbuf));
 	yyerror(errbuf);
-	return 0;
+	free(reg);
+	return NULL;
     }
-    return 1;
+    return reg;
 }
 
-static int verify_regexs(stringlist_t *sl, char *comp)
+static patternlist_t *verify_regexs(stringlist_t *sl, char *comp)
 {
-    stringlist_t *cur;
+    stringlist_t *sl2;
+    patternlist_t *pl = NULL;
     int cflags = REG_EXTENDED | REG_NOSUB;
+    regex_t *reg;
 
     if (!strcmp(comp, "i;ascii-casemap")) {
 	cflags |= REG_ICASE;
     }
 
-    for (cur = sl; cur != NULL; cur = cur->next) {
-	if (!verify_regex(cur->s, cflags)) {
-	    return 0;
+    for (sl2 = sl; sl2 != NULL; sl2 = sl2->next) {
+	if ((reg = verify_regex(sl2->s, cflags)) == NULL) {
+	    free_pl(pl, REGEX);
+	    break;
 	}
+	pl = (patternlist_t *) new_pl(reg, pl);
     }
-
-    return 1;
+    if (sl2 == NULL) {
+	free_sl(sl);
+	return pl;
+    }
+    return NULL;
 }
 #endif
 
-/* is it ok to put this in an RFC822 header body? */
-static int ok_header(char *s)
+/* xxx is it ok to put this in an RFC822 header body? */
+static int ok_header(char *s __attribute__((unused)))
 {
     return 1;
 }

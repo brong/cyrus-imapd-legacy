@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.2 2002/05/24 18:49:05 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.3 2002/05/29 22:20:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -38,6 +38,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include "xmalloc.h"
 
@@ -102,47 +103,19 @@ int script_require(sieve_script_t *s, char *req)
     } else if (!strcmp("subaddress", req)) {
 	s->support.subaddress = 1;
 	return 1;
+    } else if (!strcmp("relational", req)) {
+	s->support.relational = 1;
+	return 1;
     } else if (!strcmp("comparator-i;octet", req)) {
 	return 1;
     } else if (!strcmp("comparator-i;ascii-casemap", req)) {
 	return 1;
+    } else if (!strcmp("comparator-i;ascii-numeric", req)) {
+	s->support.i_ascii_numeric = 1;
+	return 1;
     }
     return 0;
 }
-
-/*confusion about this fcn*/
-/* Load a compiled script */
-int sieve_script_load(sieve_interp_t *interp, int fd, const char *name,
-		      void *script_context, sieve_bytecode_t **ret) 
-{
-    struct stat sbuf;
-    sieve_bytecode_t *r;
-   
-    if(!ret || !interp) return SIEVE_FAIL;
-    if(!name) name = "";
-    
-    if (fstat(fd, &sbuf) == -1) {
-	syslog(LOG_ERR, "IOERROR: fstating sieve script: %m");
-	return SIEVE_FAIL;
-    }
-
-    r = (sieve_bytecode_t *)xmalloc(sizeof(sieve_bytecode_t));
-    if(!r) return SIEVE_NOMEM;
-    
-    memset(r, 0, sizeof(*r));
-
-    r->fd = fd;
-    r->interp = interp;
-    r->script_context = script_context;
-    
-    map_refresh(fd, 1, &r->data, &r->len, sbuf.st_size,
-		"sievescript", name);
-
-    *ret = r;
-    return SIEVE_OK;
-}
-
-
 
 /* given an interpretor and a script, produce an executable script */
 int sieve_script_parse(sieve_interp_t *interp, FILE *script,
@@ -163,6 +136,7 @@ int sieve_script_parse(sieve_interp_t *interp, FILE *script,
     /* clear all support bits */
     memset(&s->support, 0, sizeof(struct sieve_support));
 
+    s->imapflags.flag = NULL; s->imapflags.nflags = 0;
     s->err = 0;
 
     yylineno = 1;		/* reset line number */
@@ -179,24 +153,26 @@ int sieve_script_parse(sieve_interp_t *interp, FILE *script,
     return res;
 }
 
-char **stringlist_to_chararray(stringlist_t *list)
+char **stringlist_to_chararray(stringlist_t **list)
 {
     int size = 0;
-    stringlist_t *tmp = list;
+    stringlist_t *tmp; 
     stringlist_t *tofree;
     char **ret;
     int lup;
 
-    while (tmp!=NULL)
-    {
+    assert(list != NULL);
+
+    tmp = *list;
+    while (tmp != NULL) {
 	size++;
-	tmp=tmp->next;
+	tmp = tmp->next;
     }
 
     ret = malloc( sizeof(char *) * (size+1));
     if (ret == NULL) return NULL;
 
-    tmp = list;
+    tmp = *list;
 
     for (lup = 0;lup<size;lup++)
     {
@@ -207,7 +183,7 @@ char **stringlist_to_chararray(stringlist_t *list)
     ret[size]=NULL;
 
     /* free element holders */
-    tmp = list;
+    tmp = *list;
 
     while (tmp!=NULL)
     {
@@ -215,34 +191,33 @@ char **stringlist_to_chararray(stringlist_t *list)
 	tmp=tmp->next;
 	free(tofree);
     }
-        
+
+    *list = NULL;
+
     return ret;
 }
 
+void free_imapflags(sieve_imapflags_t *imapflags)
+{
+    while (imapflags->nflags)
+	free(imapflags->flag[--imapflags->nflags]);
+    free(imapflags->flag);
+    
+    imapflags->flag = NULL;
+}
+  
 int sieve_script_free(sieve_script_t **s)
 {
     if (*s) {
 	if ((*s)->cmds) {
 	    free_tree((*s)->cmds);
 	}
+	free_imapflags(&(*s)->imapflags);
 	free(*s);
-	*s = NULL;
     }
 
     return SIEVE_OK;
 }
-
-int sieve_script_unload(sieve_bytecode_t **s) 
-{
-    if(s && *s) {
-	map_free(&((*s)->data), &((*s)->len));
-	close((*s)->fd);
-	free(*s);
-	*s = NULL;
-    } 
-    return SIEVE_FAIL;
-}
-
 
 static int sysaddr(char *addr)
 {
@@ -280,7 +255,7 @@ static char* look_for_me(char *myaddr, stringlist_t *myaddrs, const char **body)
 	/* loop through each address in the header */
 	while (!found && ((addr = get_address(ADDRESS_ALL, 
 					      &data, &marker, 1)) != NULL)) {
-	    if (!strcmp(addr, myaddr)) {
+	    if (!strcasecmp(addr, myaddr)) {
 		found = myaddr;
 		break;
 	    }
@@ -292,7 +267,7 @@ static char* look_for_me(char *myaddr, stringlist_t *myaddrs, const char **body)
 		/* is this address one of my addresses? */
 		parse_address(sl->s, &altdata, &altmarker);
 		altaddr = get_address(ADDRESS_ALL, &altdata, &altmarker, 1);
-		if (!strcmp(addr, altaddr))
+		if (!strcasecmp(addr, altaddr))
 		    found = sl->s;
 
 		free_address(&altdata, &altmarker);
@@ -308,8 +283,6 @@ static char* look_for_me(char *myaddr, stringlist_t *myaddrs, const char **body)
  */
 static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 {
-#if 0
-/* FIXME, relies on old-style pattern lists */
     testlist_t *tl;
     stringlist_t *sl;
     patternlist_t *pl;
@@ -320,37 +293,75 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
     case ADDRESS:
     case ENVELOPE:
 	res = 0;
-	switch (t->u.ae.addrpart) {
-	case ALL: addrpart = ADDRESS_ALL; break;
-	case LOCALPART: addrpart = ADDRESS_LOCALPART; break;
-	case DOMAIN: addrpart = ADDRESS_DOMAIN; break;
-	case USER: addrpart = ADDRESS_USER; break;
-	case DETAIL: addrpart = ADDRESS_DETAIL; break;
-	}
-	for (sl = t->u.ae.sl; sl != NULL && !res; sl = sl->next) {
-	    int l;
-	    const char **body;
+	if (t->u.h.comptag == COUNT) {
+	    unsigned count = 0;
+	    char cbuf[20];
 
-	    /* use getheader for address, getenvelope for envelope */
-	    if (((t->type == ADDRESS) ? 
-		   i->getheader(m, sl->s, &body) :
-		   i->getenvelope(m, sl->s, &body)) != SIEVE_OK) {
-		continue; /* try next header */
-	    }
-	    for (pl = t->u.ae.pl; pl != NULL && !res; pl = pl->next) {
+	    /* count the headers */
+	    for (sl = t->u.ae.sl; sl != NULL && !res; sl = sl->next) {
+		int l;
+		const char **body;
+
+		/* use getheader for address, getenvelope for envelope */
+		if (((t->type == ADDRESS) ? 
+		     i->getheader(m, sl->s, &body) :
+		     i->getenvelope(m, sl->s, &body)) != SIEVE_OK) {
+		    continue; /* try next header */
+		}
 		for (l = 0; body[l] != NULL && !res; l++) {
 		    /* loop through each header */
 		    void *data = NULL, *marker = NULL;
 		    char *val;
 
 		    parse_address(body[l], &data, &marker);
-                    val = get_address(addrpart, &data, &marker, 0);
-		    while (val != NULL && !res) { 
+		    val = get_address(ADDRESS_ALL, &data, &marker, 0);
+		    while (val != NULL) { 
 			/* loop through each address */
-			res |= t->u.ae.comp(pl->p, val);
-			val = get_address(addrpart, &data, &marker, 0);
-       		    }
+			count++;
+			val = get_address(ADDRESS_ALL, &data, &marker, 0);
+		    }
 		    free_address(&data, &marker);
+		}
+	    }
+	    /* compare the patterns against our count */
+	    sprintf(cbuf, "%u", count);
+	    for (pl = t->u.ae.pl; pl != NULL && !res; pl = pl->next) {
+		res |= t->u.ae.comp(cbuf, pl->p, t->u.ae.comprock);
+	    }
+	}
+	else {
+	    switch (t->u.ae.addrpart) {
+	    case ALL: addrpart = ADDRESS_ALL; break;
+	    case LOCALPART: addrpart = ADDRESS_LOCALPART; break;
+	    case DOMAIN: addrpart = ADDRESS_DOMAIN; break;
+	    case USER: addrpart = ADDRESS_USER; break;
+	    case DETAIL: addrpart = ADDRESS_DETAIL; break;
+	    }
+	    for (sl = t->u.ae.sl; sl != NULL && !res; sl = sl->next) {
+		int l;
+		const char **body;
+
+		/* use getheader for address, getenvelope for envelope */
+		if (((t->type == ADDRESS) ? 
+		     i->getheader(m, sl->s, &body) :
+		     i->getenvelope(m, sl->s, &body)) != SIEVE_OK) {
+		    continue; /* try next header */
+		}
+		for (pl = t->u.ae.pl; pl != NULL && !res; pl = pl->next) {
+		    for (l = 0; body[l] != NULL && !res; l++) {
+			/* loop through each header */
+			void *data = NULL, *marker = NULL;
+			char *val;
+
+			parse_address(body[l], &data, &marker);
+			val = get_address(addrpart, &data, &marker, 0);
+			while (val != NULL && !res) { 
+			    /* loop through each address */
+			    res |= t->u.ae.comp(val, pl->p, t->u.ae.comprock);
+			    val = get_address(addrpart, &data, &marker, 0);
+			}
+			free_address(&data, &marker);
+		    }
 		}
 	    }
 	}
@@ -382,14 +393,34 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 	break;
     case HEADER:
 	res = 0;
-	for (sl = t->u.h.sl; sl != NULL && !res; sl = sl->next) {
-	    const char **val;
-	    int l;
-	    if (i->getheader(m, sl->s, &val) != SIEVE_OK)
-		continue;
+	if (t->u.h.comptag == COUNT) {
+	    unsigned count = 0;
+	    char cbuf[20];
+
+	    /* count the headers */
+	    for (sl = t->u.h.sl; sl != NULL && !res; sl = sl->next) {
+		const char **val;
+		int l;
+		if (i->getheader(m, sl->s, &val) != SIEVE_OK)
+		    continue;
+		for (l = 0; val[l] != NULL; l++) count++;
+	    }
+	    /* compare the patterns against our count */
+	    sprintf(cbuf, "%u", count);
 	    for (pl = t->u.h.pl; pl != NULL && !res; pl = pl->next) {
-		for (l = 0; val[l] != NULL && !res; l++) {
-		    res |= t->u.h.comp(pl->p, val[l]);
+		res |= t->u.h.comp(cbuf, pl->p, t->u.h.comprock);
+	    }
+	}
+    	else {
+	    for (sl = t->u.h.sl; sl != NULL && !res; sl = sl->next) {
+		const char **val;
+		int l;
+		if (i->getheader(m, sl->s, &val) != SIEVE_OK)
+		    continue;
+		for (pl = t->u.h.pl; pl != NULL && !res; pl = pl->next) {
+		    for (l = 0; val[l] != NULL && !res; l++) {
+			res |= t->u.h.comp(val[l], pl->p, t->u.h.comprock);
+		    }
 		}
 	    }
 	}
@@ -414,11 +445,7 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
     }
 
     return res;
-#endif
-    return 0;
 }
-
-/* evaluate bytecode data*/
 
 /* evaluate the script c.  returns negative if error was encountered,
    0 if it exited off the end, or positive if a stop action was encountered.
@@ -427,8 +454,8 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
    the naivest way.  if we implement some sort of depth limit, we'll
    be ok here; otherwise we'd want to transform it a little smarter */
 static int eval(sieve_interp_t *i, commandlist_t *c, 
-		void *m, action_list_t *actions,
-		notify_action_t *notify_action,
+		sieve_imapflags_t *imapflags,
+		void *m, action_list_t *actions, notify_list_t *notify_list,
 		const char **errmsg)
 {
     int res = 0;
@@ -438,9 +465,11 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 	switch (c->type) {
 	case IF:
 	    if (evaltest(i, c->u.i.t, m))
-		res = eval(i, c->u.i.do_then, m, actions, notify_action, errmsg);
+		res = eval(i, c->u.i.do_then, imapflags, m, actions,
+			   notify_list, errmsg);
 	    else
-		res = eval(i, c->u.i.do_else, m, actions, notify_action, errmsg);
+		res = eval(i, c->u.i.do_else, imapflags, m, actions,
+			   notify_list, errmsg);
 	    break;
 	case REJCT:
 	    res = do_reject(actions, c->u.str);
@@ -448,22 +477,17 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 		*errmsg = "Reject can not be used with any other action";
 	    break;
 	case FILEINTO:
-	    for (sl = c->u.sl; res == 0 && sl != NULL; sl = sl->next) {
-		res = do_fileinto(actions, sl->s, &i->curflags);
-		if (res == SIEVE_RUN_ERROR)
-		    *errmsg = "Fileinto can not be used with Reject";
-
-	    }
+	    res = do_fileinto(actions, c->u.str, imapflags);
+	    if (res == SIEVE_RUN_ERROR)
+		*errmsg = "Fileinto can not be used with Reject";
 	    break;
-	case FORWARD:
-	    for (sl = c->u.sl; res == 0 && sl != NULL; sl = sl->next) {
-		res = do_forward(actions, sl->s);
-		if (res == SIEVE_RUN_ERROR)
-		    *errmsg = "Redirect can not be used with Reject";
-	    }
+	case REDIRECT:
+	    res = do_redirect(actions, c->u.str);
+	    if (res == SIEVE_RUN_ERROR)
+		*errmsg = "Redirect can not be used with Reject";
 	    break;
 	case KEEP:
-	    res = do_keep(actions, &i->curflags);
+	    res = do_keep(actions, imapflags);
 	    if (res == SIEVE_RUN_ERROR)
 		*errmsg = "Keep can not be used with Reject";
 
@@ -486,6 +510,18 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 		    /* skip leading white-space */
 		    while (*body[0] && isspace((int) *body[0])) body[0]++;
 		    if (strcasecmp(body[0], "no")) l = SIEVE_DONE;
+		}
+
+		/* is there a Precedence keyword of "junk | bulk | list"? */
+		strcpy(buf, "precedence");
+		if (i->getheader(m, buf, &body) == SIEVE_OK) {
+		    /* we don't deal with comments, etc. here */
+		    /* skip leading white-space */
+		    while (*body[0] && isspace((int) *body[0])) body[0]++;
+		    if (!strcasecmp(body[0], "junk") ||
+			!strcasecmp(body[0], "bulk") ||
+			!strcasecmp(body[0], "list"))
+			l = SIEVE_DONE;
 		}
 
 		/* Note: the domain-part of all addresses are canonicalized */
@@ -637,11 +673,13 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 		*errmsg = "Unmark can not be used with Reject";
 	    break;
 	case NOTIFY:
-	    res = do_notify(i,m,notify_action, c->u.n.priority, c->u.n.message, 
-			    c->u.n.headers_list);
+	    res = do_notify(notify_list, c->u.n.id, c->u.n.method,
+			    &c->u.n.options, c->u.n.priority, c->u.n.message);
+			    
 	    break;
 	case DENOTIFY:
-	    res = do_denotify(notify_action);
+	    res = do_denotify(notify_list, c->u.d.comp, c->u.d.pattern,
+			      c->u.d.comprock, c->u.d.priority);
 	    break;
 
 	}
@@ -658,19 +696,22 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 
 #define GROW_AMOUNT 100
 
-static void add_header(sieve_interp_t *i, char *header, 
+static void add_header(sieve_interp_t *i, int isenv, char *header, 
 		       void *message_context, char **out, 
 		       int *outlen, int *outalloc)
 {
     const char **h;
     int addlen;
     /* get header value */
-    i->getheader(message_context, header, &h);	
+    if (isenv)
+	i->getenvelope(message_context, header, &h);	
+    else
+	i->getheader(message_context, header, &h);	
 
     if (!h || !h[0])
 	return;
 
-    addlen = strlen(header) + 2 + strlen(h[0]) + 1;
+    addlen = strlen(h[0]) + 1;
 
     /* realloc if necessary */
     if ( (*outlen) + addlen >= *outalloc)
@@ -679,36 +720,55 @@ static void add_header(sieve_interp_t *i, char *header,
 	*out = xrealloc(*out, *outalloc);
     }
 
-    /* add header name and value */
-    strcat(*out,header);
-    strcat(*out,": ");
+    /* add header value */
     strcat(*out,h[0]);
-    strcat(*out,"\n");
 
     *outlen += addlen;
 }
 
-static int fillin_headers(sieve_interp_t *i, stringlist_t *sl, 
+static int fillin_headers(sieve_interp_t *i, char *msg, 
 			  void *message_context, char **out, int *outlen)
 {
     int allocsize = GROW_AMOUNT;
+    char *c;
+    int n;
+
     *out = xmalloc(GROW_AMOUNT);
     *outlen = 0;
-
     (*out)[0]='\0';
 
-    if (sl == NULL)
-    {
-	add_header(i,"To", message_context, out, outlen, &allocsize);
-	add_header(i,"From", message_context, out, outlen, &allocsize);
-	add_header(i,"Subject", message_context, out, outlen, &allocsize);
-    } else {
-	
-	while (sl!=NULL)
-	{
-	    add_header(i,sl->s,message_context, out, outlen, &allocsize);
+    if (msg == NULL) return SIEVE_OK;
 
-	    sl=sl->next;
+    /* construct the message */
+    c = msg;
+    while (*c) {
+	/* expand variables */
+	if (!strncasecmp(c, "$from$", 6)) {
+	    add_header(i, 0 ,"From", message_context, out, outlen, &allocsize);
+	    c += 6;
+	}
+	else if (!strncasecmp(c, "$env-from$", 10)) {
+	    add_header(i, 1, "From", message_context, out, outlen, &allocsize);
+	    c += 10;
+	}
+	else if (!strncasecmp(c, "$subject$", 9)) {
+	    add_header(i, 0, "Subject", message_context, out, outlen, &allocsize);
+	    c += 9;
+	}
+	/* XXX need to do $text$ variables */
+	else {
+	    /* find length of plaintext up to next potential variable */
+	    n = strcspn(c+1, "$") + 1; /* skip opening '$' */
+	    /* realloc if necessary */
+	    if ( (*outlen) + n+1 >= allocsize) {
+		allocsize = (*outlen) + n+1 + GROW_AMOUNT;
+		*out = xrealloc(*out, allocsize);
+	    }
+	    /* copy the plaintext */
+	    strncat(*out, c, n);
+	    (*out)[*outlen+n]='\0';
+	    (*outlen) += n;
+	    c += n;
 	}
     }
 
@@ -763,39 +823,47 @@ static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
     return SIEVE_OK;
 }
 
-static int send_notify_callback(sieve_interp_t *interp, void *message_context, 
-				void *script_context,
-				notify_action_t *notify, char *actions_string,
+static int send_notify_callback(sieve_script_t *s, void *message_context, 
+				notify_list_t *notify, char *actions_string,
 				const char **errmsg)
 {
-    char *headers;
-    int headerslen;    
+    sieve_notify_context_t nc;
+    char *out_msg;
+    int out_msglen;    
     int ret;
 
-    sieve_notify_context_t nc;
+    assert(notify->isactive);
 
-    fillin_headers(interp, notify->headers, message_context, 
-		   &headers, &headerslen);
-
-    nc.message = xmalloc(strlen(notify->message) + headerslen + 
-			 strlen(actions_string) + 30);
-
-    strcpy(nc.message,notify->message);
-    strcat(nc.message,"\n\n");
-    
-    strcat(nc.message,headers);
-    strcat(nc.message,"\n");
-    free(headers);
-
-    strcat(nc.message,actions_string);
+    nc.method = notify->method;
+    nc.options = notify->options ? 
+	stringlist_to_chararray(notify->options) : NULL;
     nc.priority = notify->priority;
 
-    ret =  interp->notify(&nc,
-			  interp->interp_context,
-			  script_context,
-			  message_context,
-			  errmsg);    
+    fillin_headers(&(s->interp), notify->message, message_context, 
+		   &out_msg, &out_msglen);
 
+    nc.message = xmalloc(out_msglen + strlen(actions_string) + 30);
+
+    strcpy(nc.message, out_msg);
+    strcat(nc.message, "\n\n");
+    free(out_msg);
+
+    strcat(nc.message,actions_string);
+
+    ret = s->interp.notify(&nc,
+			   s->interp.interp_context,
+			   s->script_context,
+			   message_context,
+			   errmsg);    
+
+    if (nc.options) {
+	char **opts = nc.options;
+	while (opts && *opts) {
+	    free(*opts);
+	    opts++;
+	}
+	free(nc.options);
+    }
     free(nc.message);
 
     return ret;
@@ -853,6 +921,335 @@ static int makehash(unsigned char hash[HASHSIZE], char *s1, char *s2)
 
     return SIEVE_OK;
 }
+
+/* execute a script on a message, producing side effects via callbacks.
+   it is the responsibility of the caller to save a message if this
+   returns anything but SIEVE_OK. */
+int sieve_execute_script(sieve_script_t *s, void *message_context)
+{
+    int ret = 0;
+    int implicit_keep = 0;
+    action_list_t *actions = NULL, *a;
+    action_t lastaction = ACTION_NULL;
+    notify_list_t *notify_list = NULL;
+    char actions_string[4096] = "";
+    const char *errmsg = NULL;
+
+    if (s->support.notify) {
+	notify_list = new_notify_list();
+	if (notify_list == NULL)
+	    return SIEVE_NOMEM;
+    }
+
+    actions = new_action_list();
+    if (actions == NULL) {
+	ret = SIEVE_NOMEM;
+	goto error;
+    }
+ 
+    if (eval(&s->interp, s->cmds, &s->imapflags, message_context, actions,
+	     notify_list, &errmsg) < 0)
+	return SIEVE_RUN_ERROR;
+  
+    strcpy(actions_string,"Action(s) taken:\n");
+  
+    /* now perform actions attached to m */
+    a = actions;
+    implicit_keep = 1;
+    while (a != NULL) {
+	lastaction = a->a;
+	errmsg = NULL;
+ 
+	switch (a->a) {
+	case ACTION_REJECT:
+	    implicit_keep = 0;
+	    if (!s->interp.reject)
+		return SIEVE_INTERNAL_ERROR;
+	    ret = s->interp.reject(&a->u.rej,
+				   s->interp.interp_context,
+				   s->script_context,
+				   message_context,
+				   &errmsg);
+	    
+	    if (ret == SIEVE_OK)
+		snprintf(actions_string+strlen(actions_string),
+			 sizeof(actions_string)-strlen(actions_string), 
+			 "Rejected with: %s\n", a->u.rej.msg);
+
+	    break;
+	case ACTION_FILEINTO:
+	    implicit_keep = 0;
+	    if (!s->interp.fileinto)
+		return SIEVE_INTERNAL_ERROR;
+	    ret = s->interp.fileinto(&a->u.fil,
+				     s->interp.interp_context,
+				     s->script_context,
+				     message_context,
+				     &errmsg);
+
+	    if (ret == SIEVE_OK)
+		snprintf(actions_string+strlen(actions_string),
+			 sizeof(actions_string)-strlen(actions_string),
+			 "Filed into: %s\n",a->u.fil.mailbox);
+	    break;
+	case ACTION_KEEP:
+	    implicit_keep = 0;
+	    if (!s->interp.keep)
+		return SIEVE_INTERNAL_ERROR;
+	    ret = s->interp.keep(&a->u.keep,
+				 s->interp.interp_context,
+				 s->script_context,
+				 message_context,
+				 &errmsg);
+	    if (ret == SIEVE_OK)
+		snprintf(actions_string+strlen(actions_string),
+			 sizeof(actions_string)-strlen(actions_string),
+			 "Kept\n");
+	    break;
+	case ACTION_REDIRECT:
+	    implicit_keep = 0;
+	    if (!s->interp.redirect)
+		return SIEVE_INTERNAL_ERROR;
+	    ret = s->interp.redirect(&a->u.red,
+				     s->interp.interp_context,
+				     s->script_context,
+				     message_context,
+				     &errmsg);
+	    if (ret == SIEVE_OK)
+		snprintf(actions_string+strlen(actions_string),
+			 sizeof(actions_string)-strlen(actions_string),
+			 "Redirected to %s\n", a->u.red.addr);
+	    break;
+	case ACTION_DISCARD:
+	    implicit_keep = 0;
+	    if (s->interp.discard) /* discard is optional */
+		ret = s->interp.discard(NULL, s->interp.interp_context,
+					s->script_context,
+					message_context,
+					&errmsg);
+	    if (ret == SIEVE_OK)
+		snprintf(actions_string+strlen(actions_string),
+			 sizeof(actions_string)-strlen(actions_string),
+			 "Discarded\n");
+	    break;
+
+	case ACTION_VACATION:
+	    {
+		unsigned char hash[HASHSIZE];
+
+		if (!s->interp.vacation)
+		    return SIEVE_INTERNAL_ERROR;
+
+		/* first, let's figure out if we should respond to this */
+		ret = makehash(hash, a->u.vac.send.addr,
+			       a->u.vac.send.msg);
+		if (ret == SIEVE_OK) {
+		    a->u.vac.autoresp.hash = hash;
+		    a->u.vac.autoresp.len = HASHSIZE;
+		    ret = s->interp.vacation->autorespond(&a->u.vac.autoresp,
+							  s->interp.interp_context,
+							  s->script_context,
+							  message_context,
+							  &errmsg);
+		}
+		if (ret == SIEVE_OK) {
+		    /* send the response */
+		    ret = s->interp.vacation->send_response(&a->u.vac.send,
+							    s->interp.interp_context,
+							    s->script_context, 
+							    message_context,
+							    &errmsg);
+
+		    if (ret == SIEVE_OK)
+			snprintf(actions_string+strlen(actions_string),
+				 sizeof(actions_string)-strlen(actions_string),
+				 "Sent vacation reply\n");
+
+		} else if (ret == SIEVE_DONE) {
+		    snprintf(actions_string+strlen(actions_string),
+			     sizeof(actions_string)-strlen(actions_string),
+			     "Vacation reply suppressed\n");
+
+		    ret = SIEVE_OK;
+		}
+	    
+		break;
+	    }
+
+ 
+	case ACTION_SETFLAG:
+	    free_imapflags(&s->imapflags);
+	    ret = sieve_addflag(&s->imapflags, a->u.fla.flag);
+	    break;
+	case ACTION_ADDFLAG:
+	    ret = sieve_addflag(&s->imapflags, a->u.fla.flag);
+	    break;
+	case ACTION_REMOVEFLAG:
+	    ret = sieve_removeflag(&s->imapflags, a->u.fla.flag);
+	    break;
+	case ACTION_MARK:
+	    {
+		int n = s->interp.markflags->nflags;
+
+		ret = SIEVE_OK;
+		while (n && ret == SIEVE_OK) {
+		    ret = sieve_addflag(&s->imapflags,
+					s->interp.markflags->flag[--n]);
+		}
+		break;
+	    }
+	case ACTION_UNMARK:
+	    {
+		int n = s->interp.markflags->nflags;
+
+		ret = SIEVE_OK;
+		while (n && ret == SIEVE_OK) {
+		    ret = sieve_removeflag(&s->imapflags,
+					   s->interp.markflags->flag[--n]);
+		}
+		break;
+	    }
+
+	case ACTION_NONE:
+	    break;
+
+	default:
+	    ret = SIEVE_INTERNAL_ERROR;
+	    break;
+	}
+
+	a = a->next;
+
+	if (ret != SIEVE_OK) {
+	    /* uh oh! better bail! */
+	    break;
+	}
+    }
+
+ error: /* report run-time errors */
+ 
+    if (ret != SIEVE_OK) {
+	if (lastaction == ACTION_NULL) /* we never executed an action */
+	    snprintf(actions_string+strlen(actions_string),
+		     sizeof(actions_string)-strlen(actions_string),
+		     "script execution failed: %s\n",
+		     errmsg ? errmsg : sieve_errstr(ret));
+	else
+	    snprintf(actions_string+strlen(actions_string),
+		     sizeof(actions_string)-strlen(actions_string),
+		     "%s action failed: %s\n",
+		     action_to_string(lastaction),
+		     errmsg ? errmsg : sieve_errstr(ret));
+    }
+ 
+    if ((ret != SIEVE_OK) && s->interp.err) {
+	char buf[1024];
+	if (lastaction == -1) /* we never executed an action */
+	    sprintf(buf, "%s", errmsg ? errmsg : sieve_errstr(ret));
+	else
+	    sprintf(buf, "%s: %s", action_to_string(lastaction),
+		    errmsg ? errmsg : sieve_errstr(ret));
+ 
+	ret |= s->interp.execute_err(buf, s->interp.interp_context,
+				     s->script_context, message_context);
+    }
+
+    if (implicit_keep) {
+	sieve_keep_context_t keep_context;
+	int keep_ret;
+
+	implicit_keep = 0;	/* don't try an implicit keep again */
+
+	keep_context.imapflags = &s->imapflags;
+ 
+	lastaction = ACTION_KEEP;
+	keep_ret = s->interp.keep(&keep_context, s->interp.interp_context,
+			     s->script_context, message_context, &errmsg);
+	ret |= keep_ret;
+        if (keep_ret == SIEVE_OK)
+            snprintf(actions_string+strlen(actions_string),
+		     sizeof(actions_string)-strlen(actions_string),
+		     "Kept\n");
+	else {
+	    goto error;		/* process the implicit keep error */
+	}
+    }
+
+    /* Process notify actions */
+    if (s->support.notify && notify_list) {
+	notify_list_t *n = notify_list;
+	int notify_ret = SIEVE_OK;
+
+	while (n != NULL) {
+	    if (n->isactive) {
+		lastaction = ACTION_NOTIFY;
+		notify_ret = send_notify_callback(s, message_context, n,
+						  actions_string, &errmsg);
+		ret |= notify_ret;
+	    }
+	    n = n->next;
+	}
+
+	if (notify_list) free_notify_list(notify_list);
+	notify_list = NULL;	/* don't try any notifications again */
+
+	if (notify_ret != SIEVE_OK) {
+	    goto error;		/* process the notify error */
+	}
+    }
+ 
+    if (actions)
+	free_action_list(actions);
+  
+    return ret;
+}
+
+
+/*confusion about this fcn*/
+/* Load a compiled script */
+int sieve_script_load(sieve_interp_t *interp, int fd, const char *name,
+		      void *script_context, sieve_bytecode_t **ret) 
+{
+    struct stat sbuf;
+    sieve_bytecode_t *r;
+   
+    if(!ret || !interp) return SIEVE_FAIL;
+    if(!name) name = "";
+    
+    if (fstat(fd, &sbuf) == -1) {
+	syslog(LOG_ERR, "IOERROR: fstating sieve script: %m");
+	return SIEVE_FAIL;
+    }
+
+    r = (sieve_bytecode_t *)xmalloc(sizeof(sieve_bytecode_t));
+    if(!r) return SIEVE_NOMEM;
+    
+    memset(r, 0, sizeof(*r));
+
+    r->fd = fd;
+    r->interp = interp;
+    r->script_context = script_context;
+    
+    map_refresh(fd, 1, &r->data, &r->len, sbuf.st_size,
+		"sievescript", name);
+
+    *ret = r;
+    return SIEVE_OK;
+}
+
+
+
+int sieve_script_unload(sieve_bytecode_t **s) 
+{
+    if(s && *s) {
+	map_free(&((*s)->data), &((*s)->len));
+	close((*s)->fd);
+	free(*s);
+	*s = NULL;
+    } 
+    return SIEVE_FAIL;
+}
+
 
 #define ACTIONS_STRING_LEN 4096
 
@@ -1154,35 +1551,3 @@ int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context)
 			  actions, notify_action, actions_string, errmsg);
 }
 
-/* execute a script on a message, producing side effects via callbacks.
-   it is the responsibility of the caller to save a message if this
-   returns anything but SIEVE_OK. */
-int sieve_execute_script(sieve_script_t *s, void *message_context)
-{
-    action_list_t *actions = NULL;
-    notify_action_t *notify_action;
-    int ret;
-    action_t lastaction = -1;
-    char actions_string[ACTIONS_STRING_LEN] = "";
-    const char *errmsg = NULL;
-    
-    notify_action = default_notify_action();
-    if (notify_action == NULL)
-	return SIEVE_NOMEM;
-
-    actions = new_action_list();
-    if (actions == NULL) {
-	ret = SIEVE_NOMEM;
-	return do_sieve_error(ret, &s->interp, s->script_context,
-			      message_context,
-			      actions, notify_action, lastaction, 0,
-			      actions_string, errmsg);
-    }
- 
-    if (eval(&s->interp, s->cmds, message_context, actions,
-	     notify_action, &errmsg) < 0)
-	return SIEVE_RUN_ERROR;
-  
-    return do_action_list(&s->interp, s->script_context, message_context,
-			  actions, notify_action, actions_string, errmsg);
-}

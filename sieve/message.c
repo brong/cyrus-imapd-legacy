@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.22 2001/11/19 21:33:45 leg Exp $
+ * $Id: message.c,v 1.22.2.1 2002/05/29 22:20:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -47,7 +47,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 /* reject message m with message msg
  *
- * incompatible with: fileinto, forward
+ * incompatible with: fileinto, redirect
  */
 int do_reject(action_list_t *a, char *msg)
 {
@@ -110,11 +110,11 @@ int do_fileinto(action_list_t *a, char *mbox, sieve_imapflags_t *imapflags)
     return 0;
 }
 
-/* forward message m to to addr
+/* redirect message m to to addr
  *
  * incompatible with: reject
  */
-int do_forward(action_list_t *a, char *addr)
+int do_redirect(action_list_t *a, char *addr)
 {
     action_list_t *b = NULL;
 
@@ -360,60 +360,35 @@ int do_unmark(action_list_t *a)
     return 0;
 }
 
-static int priority_tonum(const char *str)
-{
-    switch (*str) {
-    case 'l':
-	if (strcasecmp(str,"low")==0) return 1;
-	break;
-
-    case 'm':
-	if (strcasecmp(str,"medium")==0) return 2;
-	break;
-
-    case 'h':
-	if (strcasecmp(str,"high")==0) return 3;
-	break;
-    }
-
-    /* didn't match */
-    return -1;
-}
-/* returns 1 if new is less than old */
-static int priority_compare(const char *old, const char *new)
-{
-    if (priority_tonum(new) < priority_tonum(old)) return 1;
-
-    return 0;
-}
-
 /* notify
  *
- * incomaptible with: none
+ * incompatible with: none
  */
-int do_notify(sieve_interp_t *i,void *m, notify_action_t *notify,
-	      const char *priority, char *message, stringlist_t *sl)
+int do_notify(notify_list_t *a, char *id,
+	      char *method, stringlist_t **options,
+	      const char *priority, char *message)
 {
-    /* if non-default action exists, and
-     * priority is < old priority then leave current one
-     */
-    if ((notify->exists > 0) && (priority_compare(notify->priority, priority)==1))
-	return 0;
+    notify_list_t *b = NULL;
 
-    /* free old stuff if exists */
-    if (notify->exists)
-    {
-	if (notify->message)
-	    free(notify->message);
-	if (notify->headers)
-	    free_sl(notify->headers);
+    /* find the end of the notify list */
+    while (a != NULL) {
+	b = a;
+	a = a->next;
     }
 
-    notify->exists = 1;
-    notify->priority = priority;
-    notify->message = message;
-    notify->headers = sl;
+    /* add to the notify list */
+    a = (notify_list_t *) xmalloc(sizeof(notify_list_t));
+    if (a == NULL)
+	return SIEVE_NOMEM;
 
+    b->next = a;
+    a->isactive = 1;
+    a->id = id;
+    a->method = method;
+    a->options = options;
+    a->priority = priority;
+    a->message = message;
+    a->next = NULL;
     return 0;
 }
 
@@ -421,19 +396,17 @@ int do_notify(sieve_interp_t *i,void *m, notify_action_t *notify,
  *
  * incomaptible with: none
  */
-int do_denotify(notify_action_t *notify)
+int do_denotify(notify_list_t *n, comparator_t *comp, void *pat,
+		void *comprock, const char *priority)
 {
-
-    /* free old stuff if exists */
-    if (notify->exists)
-    {
-	if (notify->message)
-	    free(notify->message);
-	if (notify->headers)
-	    free_sl(notify->headers);
+    while (n != NULL) {
+	if (n->isactive && 
+	    (!priority || !strcasecmp(n->priority, priority)) &&
+	    (!comp || (n->id && comp(n->id, pat, comprock)))) {
+	    n->isactive = 0;
+	}
+	n = n->next;
     }
-    
-    notify->exists = 0;
 
     return 0;
 }
@@ -460,7 +433,9 @@ int parse_address(const char *header, void **data, void **marker)
     return SIEVE_OK;
 }
 
-char *get_address(address_part_t addrpart, void **data, void **marker,
+char *get_address(address_part_t addrpart,
+		  void **data __attribute__((unused)),
+		  void **marker,
 		  int canon_domain)
 {
     char *ret = NULL;
@@ -546,18 +521,29 @@ int free_address(void **data, void **marker)
     return SIEVE_OK;
 }
 
-#define NEWMAIL_MSG "You have new mail"
-
-notify_action_t *default_notify_action(void)    
+notify_list_t *new_notify_list(void)    
 {
-    notify_action_t *ret = xmalloc(sizeof(notify_action_t));
-    
-    ret->exists   = -1; /* flag as default action */
-    ret->priority = "medium";
-    ret->message  = xstrdup(NEWMAIL_MSG);
-    ret->headers  = NULL; /* subject, to, from */
+    notify_list_t *ret = xmalloc(sizeof(notify_list_t));
 
+    if (ret != NULL) {
+	ret->isactive = 0;
+	ret->id       = NULL;
+	ret->method   = NULL;
+	ret->options  = NULL;
+	ret->priority = NULL;
+	ret->message  = NULL;
+	ret->next     = NULL;
+    }
     return ret;
+}
+
+void free_notify_list(notify_list_t *n)
+{
+    while (n) {
+	notify_list_t *b = n->next;
+	free(n);
+	n = b;
+    }
 }
 
 action_list_t *new_action_list(void)

@@ -137,10 +137,9 @@ int write_list(int list_len, int i, bytecode_t * d)
  i++;
  for (x=0; x<list_len; x++)
    {
-     printf("%s (takes up %d )\n", &(d[i+1].str), (ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+     printf("%s (takes up %d )\n", (char*)&(d[i+1].str), (ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
 
       i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
-      /*      printf("%d %d %d %d",ROUNDUP(0),ROUNDUP(1),ROUNDUP(2),ROUNDUP(3));*/
    }
  /*  printf("%d (predicted %d)\n", i, endoflist/4);*/
  return i;
@@ -277,7 +276,7 @@ void dump2(bytecode_t *d, int len)
 	    break;
 	    
 	case B_REJECT:/*3*/
-	    printf("%d: REJECT {%d}\n%s\n",i,d[i+1].len,&(d[i+2].str));
+	    printf("%d: REJECT {%d}\n%s\n",i,d[i+1].len,(char *)&(d[i+2].str));
 	    printf("%d words\n", (ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
 	    i+=(1+(ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
 	    i++;
@@ -342,28 +341,29 @@ void dump2(bytecode_t *d, int len)
 	    
 	case B_NOTIFY: /*13*/
 	    printf("%d: NOTIFY PRIORITY({%d}%s) MESSAGE({%d}%s)\n",i,
-		   d[i+1].len,&(d[i+2].str),
-		   d[i+3].len,&(d[i+4].str));
+		   d[i+1].len,(char*)&(d[i+2].str),
+		   d[i+3].len,(char*)&(d[i+4].str));
 	    i+=4;
 	    i+=1+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t)+(ROUNDUP(d[i+3].len+1))/sizeof(bytecode_t));
 	    i++;/*?*/
 	    break;
 
 	case B_VACATION:/*15*/
-	  i++;
+	  printf("%d: VACATION\n",i);
 	  /*add address list here!*/
-
-
-
-	  printf("%d: VACATION \nSUBJ((%db)%s) \n", i,
-		 d[i].len, (d[i].len == -1 ? "[nil]" : &(d[i+1].str)));
+	  i=write_list(d[i+1].len,i+2,d);
+	  
+	  printf("%d SUBJ((%d b)%s) \n",i,
+		 d[i].len, (d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
 	  i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
-	  printf("MESG((%db)%s) \n",
-		 d[i].len, (d[i].len == -1 ? "[nil]" : &(d[i+1].str)));
-		
+
+	  printf("%d MESG((%d b)%s) \n", i,
+		 d[i].len, (d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
 	  i+=1+(ROUNDUP(d[i].len+1))/sizeof(bytecode_t);
+
 	  printf("DAYS(%d) MIME(%d)\n",d[i].value, d[i+1].value);
-	  i+=2;;/*?*/
+	  i+=2;
+
 	  break;
 	  
 	default:

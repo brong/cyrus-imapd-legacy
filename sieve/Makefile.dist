@@ -1,3 +1,5 @@
+# $Id: Makefile.dist,v 1.4.12.1 2002/05/29 22:20:24 jsmith2 Exp $
+
 YACC = bison -y
 YFLAGS = -d
 LEX = flex
@@ -13,9 +15,6 @@ addr.c addr.h: addr.y
 	$(YACC) $(YFLAGS) -p addr addr.y
 	mv -f y.tab.c addr.c
 	mv -f y.tab.h addr.h
-
-addr-lex.c: addr-lex.l addr.h
-	$(LEX) -t -Paddr addr-lex.l > $@
 
 sieve.c sieve.h: sieve.y
 	$(YACC) $(YFLAGS) sieve.y

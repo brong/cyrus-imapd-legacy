@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.1 2002/05/23 17:16:52 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.2 2002/05/29 22:20:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -32,27 +32,79 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
-#include <fnmatch.h>
 
 #include "comparator.h"
 #include "tree.h"
 #include "sieve.h"
 
+/* --- relational comparators --- */
+
+/* these are generic wrappers in which 'rock' is the compare function */
+
+static int rel_eq(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) == 0);
+}
+
+static int rel_ne(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) != 0);
+}
+
+static int rel_gt(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) > 0);
+}
+
+static int rel_ge(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) >= 0);
+}
+
+static int rel_lt(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) < 0);
+}
+
+static int rel_le(const char *text, const char *pat, void *rock)
+{
+    int (*compar)(const void *, const void *) = rock;
+
+    return (compar(text, pat) <= 0);
+}
+
 /* --- i;octet comparators --- */
 
 /* just compare the two; these should be NULL terminated */
-static int octet_is(const char *pat, const char *text)
+static int octet_cmp(const char *text, const char *pat)
 {
-    int sl;
-    sl = strlen(pat);
+    size_t sl;
+    int r;
 
-    return (sl == strlen(text)) && !memcmp(pat, text, sl);
+    sl = strlen(text) < strlen(pat) ? strlen(text) : strlen(pat);
+
+    r = memcmp(text, pat, sl);
+
+    if (r == 0)
+	return (strlen(text) - strlen(pat));
+    else 
+	return r;
 }
 
 /* we implement boyer-moore for hell of it, since this is probably
  not very useful for sieve */
 #if 0
-int boyer_moore(char *pat, char *text)
+int boyer_moore(char *text, char *pat)
 {
     int i, j; /* indexes */
     int M = strlen(pat); /* length of pattern */
@@ -86,18 +138,80 @@ int boyer_moore(char *pat, char *text)
 #endif
 
 /* we do a brute force attack */
-static int octet_contains(const char *pat, const char *text)
+static int octet_contains(const char *text, const char *pat, void *rock)
 {
     return (strstr(text, pat) != NULL);
 }
 
-static int octet_matches(const char *pat, const char *text)
+static int octet_matches_(const char *text, const char *pat, int casemap)
 {
-    return !fnmatch(pat, text, 0);
+    const char *p;
+    const char *t;
+    char c;
+
+    t = text;
+    p = pat;
+    for (;;) {
+	if (*p == '\0') {
+	    /* ran out of pattern */
+	    return (*t == '\0');
+	}
+	c = *p++;
+	switch (c) {
+	case '?':
+	    if (*t == '\0') {
+		return 0;
+	    }
+	    t++;
+	    break;
+	case '*':
+	    while (*p == '*' || *p == '?') {
+		if (*p == '?') {
+		    /* eat the character now */
+		    if (*t == '\0') {
+			return 0;
+		    }
+		    t++;
+		}
+		/* coalesce into a single wildcard */
+		p++;
+	    }
+	    if (*p == '\0') {
+		/* wildcard at end of string, any remaining text is ok */
+		return 1;
+	    }
+
+	    while (*t != '\0') {
+		/* recurse */
+		if (octet_matches_(p, t, casemap)) return 1;
+		t++;
+	    }
+	case '\\':
+	    p++;
+	    /* falls through */
+	default:
+	    if (casemap && (toupper(c) == toupper(*t))) {
+		t++;
+	    } else if (!casemap && (c == *t)) {
+		t++;
+	    } else {
+		/* literal char doesn't match */
+		return 0;
+	    }
+	}
+    }
+    /* never reaches */
+    abort();
 }
 
+static int octet_matches(const char *text, const char *pat, void *rock)
+{
+    return octet_matches_(text, pat, 0);
+}
+
+
 #ifdef ENABLE_REGEX
-static int octet_regex(const char *pat, const char *text)
+static int octet_regex(const char *text, const char *pat, void *rock)
 {
     return (!regexec((regex_t *) pat, text, 0, NULL, 0));
 }
@@ -106,16 +220,12 @@ static int octet_regex(const char *pat, const char *text)
 
 /* --- i;ascii-casemap comparators --- */
 
-static int ascii_casemap_is(const char *pat, const char *text)
-{
-    int sl;
-    sl = strlen(pat);
 
-    return (sl == strlen(text)) && !strncasecmp(pat, text, sl);
-}
+/* use strcasecmp() as the compare function */
 
 /* sheer brute force */
-static int ascii_casemap_contains(const char *pat, const char *text)
+static int ascii_casemap_contains(const char *text, const char *pat,
+				  void *rock)
 {
     int N = strlen(text);
     int M = strlen(pat);
@@ -133,48 +243,56 @@ static int ascii_casemap_contains(const char *pat, const char *text)
     return (j == M); /* we found a match! */
 }
 
-static int ascii_casemap_matches(const char *pat, const char *text)
+static int ascii_casemap_matches(const char *text, const char *pat, void *rock)
 {
-    int ret;
-    char *p, *t;
-    int i;
-
-    /* sigh, i'll just make local copies of these guys */
-    p = strdup(pat); t = strdup(text);
-    for (i = 0; p[i] != '\0'; i++)
-	p[i] = toupper(p[i]);
-    for (i = 0; t[i] != '\0'; i++)
-	t[i] = toupper(t[i]);
-
-    ret = !fnmatch(p, t, 0);
-    free(p); free(t);
-
-    return ret;
+    return octet_matches_(text, pat, 1);
 }
 
-/* i;ascii-numeric; only supports "is"
- equality: numerically equal, or both not numbers */
-static int ascii_numeric_is(const char *pat, const char *text)
+/* i;ascii-numeric; only supports relational tests
+ *
+ *  A \ B    number   not-num 
+ *  number   A ? B    B > A 
+ *  not-num  A > B    A == B
+ */
+static int ascii_numeric_cmp(const char *text, const char *pat)
 {
     if (isdigit((int) *pat)) {
 	if (isdigit((int) *text)) {
-	    return (atoi(pat) == atoi(text));
+	    return (atoi(text) - atoi(pat));
 	} else {
-	    return 0;
+	    return 1;
 	}
-    } else if (isdigit((int) *text)) return 0;
-    else return 1; /* both not digits */
+    } else if (isdigit((int) *text)) return -1;
+    else return 0; /* both not digits */
 }
 
-comparator_t *lookup_comp(const char *comp, int mode)
+static comparator_t *lookup_rel(const char *relation)
 {
     comparator_t *ret;
 
     ret = NULL;
+    if (!strcmp(relation, "eq")) ret = &rel_eq;
+    else if (!strcmp(relation, "ne")) ret = &rel_ne;
+    else if (!strcmp(relation, "gt")) ret = &rel_gt;
+    else if (!strcmp(relation, "ge")) ret = &rel_ge;
+    else if (!strcmp(relation, "lt")) ret = &rel_lt;
+    else if (!strcmp(relation, "le")) ret = &rel_le;
+
+    return ret;
+}
+
+comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
+			  void **comprock)
+{
+    comparator_t *ret;
+
+    ret = NULL;
+    *comprock = NULL;
     if (!strcmp(comp, "i;octet")) {
  	switch (mode) {
 	case IS:
-	    ret = &octet_is;
+	    ret = &rel_eq;
+	    *comprock = &octet_cmp;
 	    break;
 	case CONTAINS:
 	    ret = &octet_contains;
@@ -187,11 +305,16 @@ comparator_t *lookup_comp(const char *comp, int mode)
 	    ret = &octet_regex;
 	    break;
 #endif
+	case VALUE:
+	    ret = lookup_rel(relation);
+	    *comprock = &octet_cmp;
+	    break;
 	}
     }else if (!strcmp(comp, "i;ascii-casemap")) {
 	switch (mode) {
 	case IS:
-	    ret = &ascii_casemap_is;
+	    ret = &rel_eq;
+	    *comprock = &strcasecmp;
 	    break;
 	case CONTAINS:
 	    ret = &ascii_casemap_contains;
@@ -206,11 +329,21 @@ comparator_t *lookup_comp(const char *comp, int mode)
 	    ret = &octet_regex;
 	    break;
 #endif
+	case VALUE:
+	    ret = lookup_rel(relation);
+	    *comprock = &strcasecmp;
+	    break;
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {
 	case IS:
-	    ret = &ascii_numeric_is;
+	    ret = &rel_eq;
+	    *comprock = &ascii_numeric_cmp;
+	    break;
+	case COUNT:
+	case VALUE:
+	    ret = lookup_rel(relation);
+	    *comprock = &ascii_numeric_cmp;
 	    break;
 	}
     }

@@ -1,5 +1,5 @@
 /* sieve_interface.h -- interface for deliver
- * $Id: sieve_interface.h,v 1.15.2.2 2002/05/23 17:16:53 jsmith2 Exp $
+ * $Id: sieve_interface.h,v 1.15.2.3 2002/05/29 22:20:26 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -29,7 +29,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #include <stdio.h>
 
-#define SIEVE_VERSION "CMU Sieve 2.0"
+#define SIEVE_VERSION "CMU Sieve 2.2"
 
 /* error codes */
 #define SIEVE_OK (0)
@@ -89,6 +89,8 @@ typedef struct sieve_keep_context {
 } sieve_keep_context_t;
 
 typedef struct sieve_notify_context {
+    char *method;
+    char **options;
     const char *priority;
     char *message;
 } sieve_notify_context_t;

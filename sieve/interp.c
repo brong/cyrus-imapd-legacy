@@ -1,6 +1,6 @@
 /* interp.c -- sieve script interpretor builder
  * Larry Greenfield
- * $Id: interp.c,v 1.20 2001/10/02 21:08:13 ken3 Exp $
+ * $Id: interp.c,v 1.20.2.1 2002/05/29 22:20:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -60,7 +60,6 @@ int sieve_interp_alloc(sieve_interp_t **interp, void *interp_context)
     i->vacation = NULL;
     i->notify = NULL;
 
-    i->curflags.flag = NULL; i->curflags.nflags = 0;
     i->markflags = NULL;
 
     i->interp_context = interp_context;
@@ -71,7 +70,7 @@ int sieve_interp_alloc(sieve_interp_t **interp, void *interp_context)
 }
 
 static const char *sieve_extensions = "fileinto reject envelope vacation"
-                                      " imapflags notify subaddress" 
+                                      " imapflags notify subaddress relational"
 #ifdef ENABLE_REGEX
 " regex";
 #else
@@ -83,18 +82,8 @@ const char *sieve_listextensions(void)
     return sieve_extensions;
 }
 
-void free_imapflags(sieve_imapflags_t *imapflags)
-{
-    while (imapflags->nflags)
-	free(imapflags->flag[--imapflags->nflags]);
-    free(imapflags->flag);
-    
-    imapflags->flag = NULL;
-}
-  
 int sieve_interp_free(sieve_interp_t **interp)
 {
-    free_imapflags(&(*interp)->curflags);
     free(*interp);
     
     return SIEVE_OK;

@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.1 2001/12/18 23:09:58 rjs3 Exp $
+ * $Id: tree.h,v 1.3.14.2 2002/05/29 22:20:26 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -62,12 +62,14 @@ struct Test {
 	struct { /* it's a header test */
 	    int comptag;
 	    comparator_t *comp;
-	    stringlist_t *sl; /* headers */
-	    stringlist_t *pl; /* patterns */
+	    void *comprock;
+	    stringlist_t *sl;
+	    patternlist_t *pl;
 	} h;
 	struct { /* it's an address or envelope test */
 	    int comptag;
 	    comparator_t *comp;
+	    void *comprock;
 	    stringlist_t *sl;
 	    stringlist_t *pl;
             int addrpart;
@@ -103,15 +105,25 @@ struct Commandlist {
 	    int mime;
 	} v;
 	struct { /* it's a notify action */
-	    char *priority;
+	    char *method;
+	    char *id;
+	    stringlist_t *options;
+	    const char *priority;
 	    char *message;
-	    stringlist_t *headers_list;
 	} n;
+	struct { /* it's a denotify action */
+	    int comptag;
+	    comparator_t *comp;
+	    void *comprock;
+	    void *pattern;
+	    const char *priority;
+	} d;
     } u;
     struct Commandlist *next;
 };
 
 stringlist_t *new_sl(char *s, stringlist_t *n);
+patternlist_t *new_pl(void *pat, patternlist_t *n);
 tag_t *new_tag(int type, char *s);
 taglist_t *new_taglist(tag_t *t, taglist_t *n);
 test_t *new_test(int type);
@@ -120,6 +132,7 @@ commandlist_t *new_command(int type);
 commandlist_t *new_if(test_t *t, commandlist_t *y, commandlist_t *n);
 
 void free_sl(stringlist_t *sl);
+void free_pl(patternlist_t *pl, int comptag);
 void free_test(test_t *t);
 void free_tree(commandlist_t *cl);
 

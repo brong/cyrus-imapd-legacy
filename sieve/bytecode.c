@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.4 2002/05/24 18:49:04 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.5 2002/05/29 22:20:24 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -419,6 +419,9 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 
 	    if(!atleast(retval,codep+7)) return -1;
 	    retval->data[codep++].op = B_VACATION;
+
+	    codep = bc_stringlist_generate(codep,retval,c->u.n.headers_list);
+
 	    if(c->u.v.subject) {
 	      retval->data[codep++].len = strlen(c->u.v.subject);
 	      retval->data[codep++].str = c->u.v.subject;
@@ -436,7 +439,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
             retval->data[codep++].value = c->u.v.days;
             retval->data[codep++].value = c->u.v.mime;
 	    retval->curlen+=7;
-	    codep = bc_stringlist_generate(codep,retval,c->u.n.headers_list);
+
 
 	    if(codep == -1) return -1;
 	    break;
@@ -914,8 +917,17 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	        break;
 
 	    case B_VACATION:
-		/* Subject String, Message String, Days (word), Mime (word) */
-		for(i=0; i<2; i++) {
+		/* Address list, Subject String, Message String, Days (word), Mime (word) */
+	   
+	        /*new code-this might be broken*/
+	        ret = emit_stringlist(fd, &codep, bc);
+		if(ret < 0) return -1;
+		filelen += ret;
+		/*end of new code*/
+
+		for(i=0; i<2; i++) {/*writing strings*/
+
+		  /*write length of string*/
 		    len = bc->data[codep++].len;
 		    if(write(fd,&len,sizeof(len)) == -1)
 			return -1;
@@ -928,11 +940,10 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 			codep++;
 			continue;
 		    }
-
+		    /*write string*/
        		    if(write(fd,bc->data[codep++].str,len) == -1)
 			return -1;
-		    filelen += sizeof(int);
-
+		 
 		    ret = align_string(fd, len);
 		    if(ret == -1) return -1;
 		
@@ -942,10 +953,12 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 			 sizeof(bc->data[codep++].value)) == -1)
 		   return -1;
 		filelen += sizeof(int);
+
 		if(write(fd,&bc->data[codep++].value,
 			 sizeof(bc->data[codep++].value)) == -1)
 		   return -1;
 		filelen += sizeof(int);
+
 		break;
 
 	    case B_STOP:
@@ -1014,6 +1027,28 @@ void sieve_free_bytecode(bytecode_info_t **p)
 /**************************************************************************/
 /**************************************************************************/
 /**************************************************************************/
+
+
+static int sysaddr(char *addr)
+{
+    if (!strncasecmp(addr, "MAILER-DAEMON", 13))
+	return 1;
+
+    if (!strncasecmp(addr, "LISTSERV", 8))
+	return 1;
+
+    if (!strncasecmp(addr, "majordomo", 9))
+	return 1;
+
+    if (strstr(addr, "-request"))
+	return 1;
+
+    if (!strncmp(addr, "owner-", 6))
+	return 1;
+
+    return 0;
+}
+
 /* look for myaddr and myaddrs in the body of a header - return the match */
 static char* look_for_me(char *myaddr, int numaddresses, bytecode_t *bc, int i, const char **body)
 {
@@ -1053,7 +1088,7 @@ static char* look_for_me(char *myaddr, int numaddresses, bytecode_t *bc, int i, 
  
 
 
-int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t* bc, int i, char * found, char *reply_to )
+int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t* bc, int i, char ** from, char **to )
 {
   const char **body;
   char buf[128];
@@ -1062,6 +1097,8 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
   void *data = NULL, *marker = NULL;
   char *tmp;
   int curra, x;
+  char * found;
+  char * reply_to;
   
   /* is there an Auto-Submitted keyword other than "no"? */
   strcpy(buf, "auto-submitted");
@@ -1071,20 +1108,23 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
     while (*body[0] && isspace((int) *body[0])) body[0]++;
     if (strcasecmp(body[0], "no")) l = SIEVE_DONE;
   }
-  
   /* Note: the domain-part of all addresses are canonicalized */
-  
   /* grab my address from the envelope */
   if (l == SIEVE_OK) {
     strcpy(buf, "to");
     l = interp->getenvelope(m, buf, &body);
-    if (body[0]) {
+   
+	
+    if (body[0]) {  
+
       parse_address(body[0], &data, &marker);
       tmp = get_address(ADDRESS_ALL, &data, &marker, 1);
       myaddr = (tmp != NULL) ? xstrdup(tmp) : NULL;
       free_address(&data, &marker);
     }  
-  }
+  }  
+   printf("%s\n",myaddr);
+
   if (l == SIEVE_OK) {
     strcpy(buf, "from");
     l = interp->getenvelope(m, buf, &body);
@@ -1096,7 +1136,7 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
     tmp = get_address(ADDRESS_ALL, &data, &marker, 1);
     reply_to = (tmp != NULL) ? xstrdup(tmp) : NULL;
     free_address(&data, &marker);
-    
+   printf("%s\n",reply_to);
     /* first, is there a reply-to address? */
     if (reply_to == NULL) {
       l = SIEVE_DONE;
@@ -1106,7 +1146,7 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
     if (l == SIEVE_OK && !strcmp(myaddr, reply_to)) {
       l = SIEVE_DONE;
     }
-    
+   
     /* ok, is it any of the other addresses i've
        specified? */
     if (l == SIEVE_OK)
@@ -1118,13 +1158,13 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
 	    curra+=1+((ROUNDUP(bc[curra].len+1))/sizeof(bytecode_t));
 	  }
       }
-    
+   
     /* ok, is it a system address? */
     if (l == SIEVE_OK && sysaddr(reply_to)) {
       l = SIEVE_DONE;
     }
   }
-  
+       printf("wert-ok %d",l); 
   if (l == SIEVE_OK) {
     /* ok, we're willing to respond to the sender.
        but is this message to me?  that is, is my address
@@ -1132,20 +1172,24 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
     if (strcpy(buf, "to"), 
 	interp->getheader(m, buf, &body) == SIEVE_OK)
       found = look_for_me(myaddr, numaddresses ,bc, i, body);
-    
+     printf("wert %d",l); 
     if (!found && (strcpy(buf, "cc"),
 		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
       found = look_for_me(myaddr, numaddresses, bc, i, body);
-    
+     printf("wert %d",l); 
     if (!found && (strcpy(buf, "bcc"),
 		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
       found = look_for_me(myaddr, numaddresses, bc, i, body);
-    
+     printf("wert %d",found); 
     if (!found)
       l = SIEVE_DONE;
   }
+  printf("wert %d",l); 
   /* ok, ok, if we got here maybe we should reply */
   if (myaddr) free(myaddr);
+  *from=found;
+  *to=reply_to;
+  printf("\n\n\n\n\n\n%s %s", found, reply_to);
   return l;
 }
 
@@ -1417,7 +1461,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	      } 
 	    break;
 	  }
-      case B_IF:
+      case B_IF:/*6*/
 	  {int testtemp=ip;
 	  printf("if");
        
@@ -1432,7 +1476,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    }
 	  break;
 	    }
-      case B_IFELSE:
+      case B_IFELSE:/*7*/
 	  {int testtemp=ip;
 	  printf("ifelse");
 	  ip+=4;
@@ -1452,15 +1496,15 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    }
 	  }
 	  break;
-      case B_MARK:
+      case B_MARK:/*8*/
 	  res = do_mark(actions);
 	  ip++;
 	  break;
-      case B_UNMARK:
+      case B_UNMARK:/*9*/
 	  res = do_unmark(actions);
 	  ip++;
 	  break;
-      case B_ADDFLAG: 
+      case B_ADDFLAG:/*10*/ 
 	  {
 	    int x;
 	    int l=bc[ip+1].len;
@@ -1506,8 +1550,15 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    break;
 	  }
       case B_NOTIFY:
+	/*res = do_notify(notify_list, c->u.n.id, c->u.n.method,
+	  &c->u.n.options, c->u.n.priority, c->u.n.message);
+	*/	    
+	break;
       case B_DENOTIFY:
-	printf("(de)notify not done");
+	/*res = do_denotify(notify_list, c->u.d.comp, c->u.d.pattern,
+	  c->u.d.comprock, c->u.d.priority);
+	*/
+	printf("(de)notify not yet implemented");
 	break;
       case B_VACATION:
 	  {
@@ -1517,11 +1568,18 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    int messageip=0;
 	    char buf[128];
 	    ip++;
-	    respond=shouldRespond(m,i, bc[ip].len, bc, ip+2, fromaddr, toaddr);
+	    respond=shouldRespond(m,i, bc[ip].len, bc, ip+2, &fromaddr, &toaddr);
+	    
+	    printf("\nFROM:%s\n", fromaddr);
+	    printf("TO:%s\n", toaddr);
+	    printf("Before:%d", ip);
+	    ip=bc[ip+1].value/4;	
 	    if (respond==SIEVE_OK)
-	      {
-		ip=bc[ip+1].value/4;		
-		if ((&bc[ip+1].str) == NULL) {
+	      {	 
+		/*ip=bc[ip+1].value/4;*/	
+		printf("After:%d\n", ip);
+		
+		if ((bc[ip].value) == -1) {
 		/* we have to generate a subject */
 		const char **s;
 		
@@ -1542,17 +1600,25 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 		/* user specified subject */
 		strncpy(buf, (char *)&(bc[ip+1].str), sizeof(buf));
 	      }
+		printf ("%d Subject:%s\n ", ip,buf);
 	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	      messageip=ip;
+	      messageip=ip+1;
+	      printf("%d Message%s\n", ip, &(bc[ip+1].str));
+	      printf ("From: To: %s", toaddr);
 	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
 	      res = do_vacation(actions, toaddr, strdup(fromaddr),
-				strdup(buf),(char *)&(bc[messageip].str),
+				strdup(buf),strdup((char *)&(bc[messageip].str)),
 				bc[ip].value, bc[ip+1].value);
 	      ip+=2;		
 	      if (res == SIEVE_RUN_ERROR)
 	      *errmsg = "Vacation can not be used with Reject or Vacation";
 	      }
-	    else if (respond != SIEVE_DONE) res = -1; /* something is bad */ 
+	    else if (respond == SIEVE_DONE) {
+	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));/*skip subj*/
+	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));/*skip msg*/
+	      ip+=2;/*skip days and mime flag*/
+	    }
+	    else res = -1; /* something is bad */ 
 	  break;
 	  }
       default:
@@ -1758,12 +1824,15 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_VACATION:
-	    printf("%d: VACATION SUBJ({%d}%s) MESG({%d}%s) DAYS(%d) MIME(%d)\n", i,
+	  printf("%d:VACATION\n",i);
+	  i++;
+	    i=dump_sl(d,i);
+	    printf("SUBJ({%d}%s) MESG({%d}%s)\n DAYS(%d) MIME(%d)\n", 
 		   d->data[i+1].len, (d->data[i+1].len == -1 ? "[nil]" : d->data[i+2].str),
 		   d->data[i+3].len, (d->data[i+3].len == -1 ? "[nil]" : d->data[i+4].str),
 		   d->data[i+5].value, d->data[i+6].value);
-	    i+=7;
-	    i=dump_sl(d,i);
+	    i+=6;
+	
 	    break;
 
 	default:

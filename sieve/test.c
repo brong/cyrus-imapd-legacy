@@ -2,7 +2,7 @@
   
  * test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.15.12.1 2002/05/23 17:16:53 jsmith2 Exp $
+ * $Id: test.c,v 1.15.12.2 2002/05/29 22:20:26 jsmith2 Exp $
  *
  * usage: "test message script"
  */
@@ -44,6 +44,9 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <stdlib.h>
 
 #include "sieve_interface.h"
+#include "comparator.h"
+#include "tree.h"
+#include "sieve.h"
 
 #define HEADERCACHESIZE 1019
 
@@ -316,7 +319,7 @@ int getenvelope(void *v, const char *head, const char ***body)
 
     if (buf[0] == NULL) { buf[0] = malloc(sizeof(char) * 256); buf[1] = NULL; }
     printf("Envelope body of '%s'? ", head);
-    scanf("%s", buf[0]);
+    scanf("%s", (char*) buf[0]);
     *body = buf;
 
     return SIEVE_OK;
@@ -326,29 +329,39 @@ int redirect(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_redirect_context_t *rc = (sieve_redirect_context_t *) ac;
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
+
     printf("redirecting message '%s' to '%s'\n", m->name, rc->addr);
-    return SIEVE_OK;
+
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 int discard(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
+
     printf("discarding message '%s'\n", m->name);
-    return SIEVE_OK;
+
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 int reject(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_reject_context_t *rc = (sieve_reject_context_t *) ac;
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
+
     printf("rejecting message '%s' with '%s'\n", m->name, rc->msg);
-    return SIEVE_OK;
+
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 int fileinto(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_fileinto_context_t *fc = (sieve_fileinto_context_t *) ac;
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
 
     printf("filing message '%s' into '%s'\n", m->name, fc->mailbox);
 
@@ -360,13 +373,14 @@ int fileinto(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 	printf("\n");
     }
 
-    return SIEVE_OK;
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 int keep(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_keep_context_t *kc = (sieve_keep_context_t *) ac;
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
 
     printf("keeping message '%s'\n", m->name);
 
@@ -378,16 +392,31 @@ int keep(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 	printf("\n");
     }
 
-    return SIEVE_OK;
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 int notify(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_notify_context_t *nc = (sieve_notify_context_t *) ac;
+    int *force_fail = (int*) ic;
+    int flag = 0;
 
-    printf("notify msg = '%s' with priority = %s\n",nc->message, nc->priority);
+    printf("notify ");
+    if (nc->method) {
+	char **opts = nc->options;
 
-    return SIEVE_OK;
+	printf("%s(", nc->method);
+	while (opts && *opts) {
+	    if (flag) printf(", ");
+	    printf("%s", *opts);
+	    opts++;
+	    flag = 1;
+	}
+	printf("), ");
+    }
+    printf("msg = '%s' with priority = %s\n",nc->message, nc->priority);
+
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
  
 int mysieve_error(int lineno, const char *msg, void *i, void *s)
@@ -428,9 +457,12 @@ int send_response(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     sieve_send_response_context_t *src = (sieve_send_response_context_t *) ac;
     message_data_t *m = (message_data_t *) mc;
+    int *force_fail = (int*) ic;
+
     printf("echo '%s' | mail -s '%s' '%s' for message '%s'\n",
 	   src->msg, src->subj, src->addr, m->name);
-    return SIEVE_OK;
+
+    return (*force_fail ? SIEVE_FAIL : SIEVE_OK);
 }
 
 sieve_vacation_t vacation = {
@@ -443,23 +475,249 @@ sieve_vacation_t vacation = {
 char *markflags[] = { "\\flagged" };
 sieve_imapflags_t mark = { markflags, 1 };
 
+struct testcase {
+    const char *comp; 
+    int mode;
+    const char *pat;
+    const char *text;
+    int result;
+};
+
+struct testcase tc[] =
+{ { "i;octet", IS, "", "", 1 },
+  { "i;octet", IS, "a", "", 0 },
+  { "i;octet", IS, "", "a", 0 },
+  { "i;octet", IS, "a", "a", 1 },
+  { "i;octet", IS, "a", "A", 0 },
+
+  { "i;ascii-casemap", IS, "", "", 1 },
+  { "i;ascii-casemap", IS, "a", "", 0 },
+  { "i;ascii-casemap", IS, "", "a", 0 },
+  { "i;ascii-casemap", IS, "a", "a", 1 },
+  { "i;ascii-casemap", IS, "a", "A", 1 },
+
+  { "i;octet", CONTAINS, "", "", 1 },
+  { "i;octet", CONTAINS, "", "a", 1 },
+  { "i;octet", CONTAINS, "a", "", 0 },
+  { "i;octet", CONTAINS, "a", "a", 1 },
+  { "i;octet", CONTAINS, "a", "ab", 1 },
+  { "i;octet", CONTAINS, "a", "ba", 1 },
+  { "i;octet", CONTAINS, "a", "aba", 1 },
+  { "i;octet", CONTAINS, "a", "bab", 1 },
+  { "i;octet", CONTAINS, "a", "bb", 0 },
+  { "i;octet", CONTAINS, "a", "bbb", 0 },
+
+  { "i;octet", MATCHES, "", "", 1 },
+  { "i;octet", MATCHES, "", "a", 0 },
+  { "i;octet", MATCHES, "a", "", 0 },
+  { "i;octet", MATCHES, "a", "a", 1 },
+  { "i;octet", MATCHES, "a", "ab", 0 },
+  { "i;octet", MATCHES, "a", "ba", 0 },
+  { "i;octet", MATCHES, "a", "aba", 0 },
+  { "i;octet", MATCHES, "a", "bab", 0 },
+  { "i;octet", MATCHES, "a", "bb", 0 },
+  { "i;octet", MATCHES, "a", "bbb", 0 },
+
+  { "i;octet", MATCHES, "*", "", 1 },
+  { "i;octet", MATCHES, "*", "a", 1 },
+  { "i;octet", MATCHES, "*a*", "", 0 },
+  { "i;octet", MATCHES, "*a*", "a", 1 },
+  { "i;octet", MATCHES, "*a*", "ab", 1 },
+  { "i;octet", MATCHES, "*a*", "ba", 1 },
+  { "i;octet", MATCHES, "*a*", "aba", 1 },
+  { "i;octet", MATCHES, "*a*", "bab", 1 },
+  { "i;octet", MATCHES, "*a*", "bb", 0 },
+  { "i;octet", MATCHES, "*a*", "bbb", 0 },
+
+  { "i;octet", MATCHES, "*a", "", 0 },
+  { "i;octet", MATCHES, "*a", "a", 1 },
+  { "i;octet", MATCHES, "*a", "ab", 0 },
+  { "i;octet", MATCHES, "*a", "ba", 1 },
+  { "i;octet", MATCHES, "*a", "aba", 1 },
+  { "i;octet", MATCHES, "*a", "bab", 0 },
+  { "i;octet", MATCHES, "*a", "bb", 0 },
+  { "i;octet", MATCHES, "*a", "bbb", 0 },
+
+  { "i;octet", MATCHES, "a*", "", 0 },
+  { "i;octet", MATCHES, "a*", "a", 1 },
+  { "i;octet", MATCHES, "a*", "ab", 1 },
+  { "i;octet", MATCHES, "a*", "ba", 0 },
+  { "i;octet", MATCHES, "a*", "aba", 1 },
+  { "i;octet", MATCHES, "a*", "bab", 0 },
+  { "i;octet", MATCHES, "a*", "bb", 0 },
+  { "i;octet", MATCHES, "a*", "bbb", 0 },
+
+  { "i;octet", MATCHES, "a*b", "", 0 },
+  { "i;octet", MATCHES, "a*b", "a", 0 },
+  { "i;octet", MATCHES, "a*b", "ab", 1 },
+  { "i;octet", MATCHES, "a*b", "ba", 0 },
+  { "i;octet", MATCHES, "a*b", "aba", 0 },
+  { "i;octet", MATCHES, "a*b", "bab", 0 },
+  { "i;octet", MATCHES, "a*b", "bb", 0 },
+  { "i;octet", MATCHES, "a*b", "bbb", 0 },
+  { "i;octet", MATCHES, "a*b", "abbb", 1 },
+  { "i;octet", MATCHES, "a*b", "acb", 1 },
+  { "i;octet", MATCHES, "a*b", "acbc", 0 },
+
+  { "i;octet", MATCHES, "a?b", "", 0 },
+  { "i;octet", MATCHES, "a?b", "a", 0 },
+  { "i;octet", MATCHES, "a?b", "ab", 0 },
+  { "i;octet", MATCHES, "a?b", "ba", 0 },
+  { "i;octet", MATCHES, "a?b", "aba", 0 },
+  { "i;octet", MATCHES, "a?b", "bab", 0 },
+  { "i;octet", MATCHES, "a?b", "bb", 0 },
+  { "i;octet", MATCHES, "a?b", "bbb", 0 },
+  { "i;octet", MATCHES, "a?b", "abbb", 0 },
+  { "i;octet", MATCHES, "a?b", "acb", 1 },
+  { "i;octet", MATCHES, "a?b", "acbc", 0 },
+
+  { "i;octet", MATCHES, "a*?b", "", 0 },
+  { "i;octet", MATCHES, "a*?b", "a", 0 },
+  { "i;octet", MATCHES, "a*?b", "ab", 0 },
+  { "i;octet", MATCHES, "a*?b", "ba", 0 },
+  { "i;octet", MATCHES, "a*?b", "aba", 0 },
+  { "i;octet", MATCHES, "a*?b", "bab", 0 },
+  { "i;octet", MATCHES, "a*?b", "bb", 0 },
+  { "i;octet", MATCHES, "a*?b", "bbb", 0 },
+  { "i;octet", MATCHES, "a*?b", "abbb", 1 },
+  { "i;octet", MATCHES, "a*?b", "acb", 1 },
+  { "i;octet", MATCHES, "a*?b", "acbc", 0 },
+
+  { "i;octet", MATCHES, "a?*b", "", 0 },
+  { "i;octet", MATCHES, "a?*b", "a", 0 },
+  { "i;octet", MATCHES, "a?*b", "ab", 0 },
+  { "i;octet", MATCHES, "a?*b", "ba", 0 },
+  { "i;octet", MATCHES, "a?*b", "aba", 0 },
+  { "i;octet", MATCHES, "a?*b", "bab", 0 },
+  { "i;octet", MATCHES, "a?*b", "bb", 0 },
+  { "i;octet", MATCHES, "a?*b", "bbb", 0 },
+  { "i;octet", MATCHES, "a?*b", "abbb", 1 },
+  { "i;octet", MATCHES, "a?*b", "acb", 1 },
+  { "i;octet", MATCHES, "a?*b", "acbc", 0 },
+
+  { "i;octet", MATCHES, "a*?*b", "", 0 },
+  { "i;octet", MATCHES, "a*?*b", "a", 0 },
+  { "i;octet", MATCHES, "a*?*b", "ab", 0 },
+  { "i;octet", MATCHES, "a*?*b", "ba", 0 },
+  { "i;octet", MATCHES, "a*?*b", "aba", 0 },
+  { "i;octet", MATCHES, "a*?*b", "bab", 0 },
+  { "i;octet", MATCHES, "a*?*b", "bb", 0 },
+  { "i;octet", MATCHES, "a*?*b", "bbb", 0 },
+  { "i;octet", MATCHES, "a*?*b", "abbb", 1 },
+  { "i;octet", MATCHES, "a*?*b", "acb", 1 },
+  { "i;octet", MATCHES, "a*?*b?", "acbc", 1 },
+
+  { "i;ascii-casemap", MATCHES, "a*b", "", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "a", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "ab", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "ba", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "aba", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "bab", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "bb", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "bbb", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "abbb", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "acb", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "acbc", 0 },
+
+  { "i;ascii-casemap", MATCHES, "a*b", "", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "A", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "Ab", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "BA", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "ABA", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "BAb", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "BB", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "BBB", 0 },
+  { "i;ascii-casemap", MATCHES, "a*b", "aBBB", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "ACB", 1 },
+  { "i;ascii-casemap", MATCHES, "a*b", "ACBC", 0 },
+
+  { NULL, 0, NULL, NULL, 0 } };
+
+static int test_comparator(void)
+{
+    struct testcase *t;
+    int didfail = 0;
+
+    for (t = tc; t->comp != NULL; t++) {
+	comparator_t *c = lookup_comp(t->comp, t->mode, NULL, NULL);
+	int res;
+	char *mode;
+
+	if (t->mode == IS) mode = "IS";
+	else if (t->mode == CONTAINS) mode = "CONTAINS";
+	else if (t->mode == MATCHES) mode = "MATCHES";
+	else if (t->mode == REGEX) mode = "REGEX";
+	else mode = "<unknown mode>";
+	
+	if (!c) {
+	    printf("FAIL: can't find a comparator %s/%s\n", 
+		   t->comp, mode);
+	    didfail++;
+	    continue;
+	}
+	res = c(t->text, t->pat, NULL);
+	if (res != t->result) {
+	    printf("FAIL: %s/%s(%s, %s) = %d, not %d\n", 
+		   t->comp, mode, t->pat, t->text, res, t->result);
+	    didfail++;
+	}
+    }
+    if (didfail) {
+	fprintf(stderr, "failed %d tests\n", didfail);
+	exit(1);
+    } else {
+	exit(0);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     sieve_interp_t *i;
     sieve_bytecode_t *bc;
     message_data_t *m;
     int script_fd;
+    /*from cvs=======
+    char *script = NULL, *message = NULL;
+    int c, force_fail = 0, usage_error = 0;
+    FILE *f;
+    */
     int fd, res;
     struct stat sbuf;
 
-    if (argc != 3) {
+    while ((c = getopt(argc, argv, "v:cf")) != EOF)
+	switch (c) {
+	case 'v':
+	    script = optarg;
+	    break;
+	case 'c':
+	    test_comparator();
+	    /* test_comparator exits for us */
+	    break;
+	case 'f':
+	    force_fail = 1;
+	    break;
+	default:
+	    usage_error = 1;
+	    break;
+	}
+
+    if (!script) {
+	if ((argc - optind) < 2)
+	    usage_error = 1;
+	else {
+	    message = argv[optind];
+	    script = argv[optind+1];
+	}
+    }
+
+    if (usage_error) {
 	fprintf(stderr, "usage:\n");
 	fprintf(stderr, "%s message script\n", argv[0]);
 	fprintf(stderr, "%s -v script\n", argv[0]);
 	exit(1);
     }
 
-    res = sieve_interp_alloc(&i, NULL);
+    res = sieve_interp_alloc(&i, &force_fail);
     if (res != SIEVE_OK) {
 	printf("sieve_interp_alloc() returns %d\n", res);
 	exit(1);
@@ -540,10 +798,14 @@ int main(int argc, char *argv[])
         exit(1);
     }   
 
-
     script_fd = open(argv[2], O_RDONLY);
     if (script_fd == -1) {
 	printf("can not open script '%s'\n", argv[2]);
+	/*from cvs
+    f = fopen(script, "r");
+    if (!f) {
+	printf("can not open script '%s'\n", script);
+	*/
 	exit(1);
     }
 
@@ -555,14 +817,15 @@ int main(int argc, char *argv[])
 
     close(script_fd);
 
-    if (strcmp(argv[1], "-v") != 0) {
-	fd = open(argv[1], O_RDONLY);
+    if (message) {
+	fd = open(message, O_RDONLY);
 	res = fstat(fd, &sbuf);
 	if (res != 0) {
 	    perror("fstat");
 	}
 
-	m = new_msg(fdopen(fd, "r"), sbuf.st_size, argv[1]);
+
+	m = new_msg(fdopen(fd, "r"), sbuf.st_size, message);
 	if (res != SIEVE_OK) {
 	    printf("sieve_msg_parse() returns %d\n", res);
 	    exit(1);
