@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.7 1999/10/17 22:35:19 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.8 1999/10/17 23:55:04 leg Exp $
  */
 
 #include <stdio.h>
@@ -2230,11 +2230,13 @@ static unsigned char convert_to_compare[256] = {
     0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
-static int MIN(int a, int b)
+__inline__ static int MIN(int a, int b)
 {
-  if (a <= b) return a;
-
-  return b;
+    if (a < b) {
+	return a;
+    } else {
+	return b;
+    }
 }
 
 static int mbdb_order(const DBT *a, const DBT *b)

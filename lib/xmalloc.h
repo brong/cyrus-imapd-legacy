@@ -1,5 +1,5 @@
 /* xmalloc.h -- Allocation package that calls fatal() when out of memory
- * $Id: xmalloc.h,v 1.13 1999/09/30 07:33:05 leg Exp $
+ * $Id: xmalloc.h,v 1.13.4.1 1999/10/17 23:55:09 leg Exp $
  *
  *        Copyright 1998 by Carnegie Mellon University
  *
@@ -28,6 +28,7 @@
 #ifndef __GNUC__
 /* can't use attributes... */
 #define __attribute__(foo)
+#define __inline__
 #endif
 
 
