@@ -1,6 +1,6 @@
 /* lmtpproxyd.c -- Program to proxy mail delivery
  *
- * $Id: lmtpproxyd.c,v 1.56 2003/10/22 18:50:07 rjs3 Exp $
+ * $Id: lmtpproxyd.c,v 1.56.2.1 2003/12/19 18:33:36 ken3 Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -259,6 +259,7 @@ int service_main(int argc __attribute__((unused)),
     /* free session state */
     if (deliver_in) prot_free(deliver_in);
     if (deliver_out) prot_free(deliver_out);
+    deliver_in = deliver_out = NULL;
 
     if (deliver_logfd != -1) {
         close(deliver_logfd);
@@ -418,12 +419,13 @@ static int adddest(struct mydata *mydata,
 	r = mupdate_find(mhandle, buf, &mailboxdata);
     }
 
-    if (r == MUPDATE_NOCONN) {
-	/* yuck; our error handling for now will be to exit;
-	   this txn will be retried later */
-	fatal("mupdate server not responding", EC_TEMPFAIL);
-    } else if (r == MUPDATE_MAILBOX_UNKNOWN) {
+    if (r == MUPDATE_MAILBOX_UNKNOWN) {
 	r = IMAP_MAILBOX_NONEXISTENT;
+    } else if (r) {
+	/* xxx -- yuck: our error handling for now will be to exit;
+	   this txn will be retried later -- to do otherwise means
+	   that we may have to restart this transaction from scratch */
+	fatal("error communicating with MUPDATE server", EC_TEMPFAIL);
     }
 
     if (r) {
@@ -695,7 +697,7 @@ void fatal(const char* s, int code)
 void shut_down(int code) __attribute__((noreturn));
 void shut_down(int code)
 {
-    prot_flush(deliver_out);
+    if (deliver_out) prot_flush(deliver_out);
     if (mhandle) {
 	mupdate_disconnect(&mhandle);
     }
