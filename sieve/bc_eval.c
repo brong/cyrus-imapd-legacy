@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.7 2003/01/30 16:54:46 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.8 2003/01/30 22:54:12 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -404,7 +404,10 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 			    if (isReg)
 			    {
 				reg= bc_compile_regex((char*)&bc[currd+1].str, ctag, errbuf);
-				if (!reg) exit (1);
+				if (!reg) {
+				    res=-1;
+				    goto aedone;/* sieve is going to die now*/
+				}
 				res|= comp(val[y], reg, comprock);
 				free(reg);
 			    }
@@ -433,6 +436,8 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	    }
 	}
 	i=(bc[datai+1].value/4);
+	aedone:
+	
 	break;
     }
     case BC_HEADER:/*9*/
@@ -501,7 +506,12 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 			if (isReg)
 			{
 			    reg= bc_compile_regex((char *)&bc[currd+1].str, ctag, errbuf);
-			    if (!reg) exit (1);
+			    if (!reg)
+			    {
+				res=-1;
+				goto headerdone; /* sieve is going to die now*/
+			    }
+			    
 			    res|= comp(val[y],reg, comprock);
 			    free( reg);
 			}
@@ -536,13 +546,15 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	}
 	
 	i=(bc[datai+1].value/4);
+        headerdone:
+	
 	break;
     }
     default:
 #if VERBOSE
 	printf("WERT, can't evaluate if statement.%d is not a valid command", bc[i].value);
 #endif     
-	exit(1);
+	return(-1);
     }
   
     
@@ -613,9 +625,14 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    int testend=bc[ip+1].value;
 	    ip+=2;
 	    
-	    if (eval_bc_test(i,m, bc, &ip))
+	    if (eval_bc_test(i,m, bc, &ip)==-1)
 	    {
-		/*skip over jump instruction*/
+		*errmsg = "Invalid test";
+		return SIEVE_FAIL;
+	    }
+	    
+	    else if (eval_bc_test(i,m, bc, &ip))
+	    {	/*skip over jump instruction*/
 		testend+=2;
 	    }
 	    ip=testend;
