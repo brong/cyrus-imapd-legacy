@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_emit.c,v 1.1.2.2 2003/01/16 17:39:57 jsmith2 Exp $
+ * $Id: bc_emit.c,v 1.1.2.3 2003/01/16 18:33:40 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -59,18 +59,16 @@ static int align_string(int fd, int string_len)
     /* Keep in mind that we always want to pad a string with *at least*
      * one zero, that's why sometimes we have to pad with 4 */
     int needed = sizeof(int) - (string_len % sizeof(int));
-    int i;
-    
-    for(i = 0; i < needed; i++) 
+    if (needed>= 0 && needed <=4)
       {
-	if(write(fd, "\0", 1) == -1) return -1;
+    	if(write(fd, "\0\0\0\0", needed) == -1) return -1;
       }
     return needed;
 }
 
 /* Write out a stringlist to a given file descriptor.
  * return # of bytes written on success and -1 on error */
-static int emit_stringlist(int fd, int *codep, bytecode_info_t *bc) 
+static int bc_stringlist_emit(int fd, int *codep, bytecode_info_t *bc) 
 {
     int len = bc->data[(*codep)++].len;
     int i;
@@ -109,11 +107,11 @@ static int emit_stringlist(int fd, int *codep, bytecode_info_t *bc)
     return wrote;
 }
 
-static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc);
+static int bc_test_emit(int fd, int codep, bytecode_info_t *bc);
 
 /* Write out a testlist to a given file descriptor.
  * return # of bytes written on success and -1 on error */
-static int emit_testlist(int fd, int *codep, bytecode_info_t *bc) 
+static int bc_testlist_emit(int fd, int *codep, bytecode_info_t *bc) 
 {
     int len = bc->data[(*codep)++].len;
     int i;
@@ -131,7 +129,7 @@ static int emit_testlist(int fd, int *codep, bytecode_info_t *bc)
     for(i=0; i < len; i++) {
 	int nextcodep = bc->data[(*codep)++].jump;
 	
-	ret = emit_bytecode_test(fd, *codep, bc);
+	ret = bc_test_emit(fd, *codep, bc);
 	if(ret == -1) return -1;
 	
 	wrote+=ret;
@@ -143,7 +141,7 @@ static int emit_testlist(int fd, int *codep, bytecode_info_t *bc)
 
 /* emit the bytecode for a test.  returns -1 on failure or size of
  * emitted bytecode on success */
-static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc) 
+static int bc_test_emit(int fd, int codep, bytecode_info_t *bc) 
 {/*general opinion is that the 4 makes no sense*/
   int filelen=0;/* = 4; *//* Relative offset to account for interleaved strings */
  
@@ -164,7 +162,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
         case BC_NOT:
 	  {
 	    /* Single parameter: another test */
-	    ret = emit_bytecode_test(fd, codep, bc);
+	    ret = bc_test_emit(fd, codep, bc);
 	    if(ret != -1)
 		filelen+=ret;
 	    else
@@ -176,7 +174,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
         case BC_ANYOF:
 	  /*where we jump to?*/
 	    /* Just drop a testlist */
-	    ret = emit_testlist(fd, &codep, bc);
+	    ret = bc_testlist_emit(fd, &codep, bc);
 	    if(ret != -1)
 		filelen+=ret;
 	    else
@@ -199,7 +197,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
         case BC_EXISTS:
         {
 	    int ret;
-	    ret = emit_stringlist(fd, &codep, bc);
+	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen += ret;
 	    break;
@@ -224,11 +222,11 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
 	    filelen += sizeof(int);
 	    codep++;
 	    /* Now drop headers */
-	    ret = emit_stringlist(fd, &codep, bc);
+	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen+=ret;
 	    /* Now drop data */
-	    ret = emit_stringlist(fd, &codep, bc);
+	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen+=ret;
 	    break;
@@ -260,11 +258,11 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
 	    filelen += sizeof(int);
 	    codep++;
 	    /* Now drop headers */
-	    ret = emit_stringlist(fd, &codep, bc);
+	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen+=ret;
 	    /* Now drop data */
-	    ret = emit_stringlist(fd, &codep, bc);
+	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen+=ret;
 	    break;
@@ -282,7 +280,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
  * returns -1 on failure, size of emitted bytecode on success.
  *
  * this takes care of everything except the comparisons */
-static int emit_bytecode_act(int fd, int codep, int stopcodep,
+static int bc_action_emit(int fd, int codep, int stopcodep,
 			     bytecode_info_t *bc, int filelen) 
 {
     int len; /* Temporary Length Variable */
@@ -321,7 +319,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		testend += 2 * sizeof(int);
 
 		/* spew the test */
-		testdist = emit_bytecode_test(fd, codep+2, bc);
+		testdist = bc_test_emit(fd, codep+2, bc);
 	
 		if(testdist == -1)
 		    return -1;
@@ -329,7 +327,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		
 		realend = testend;
 		/* spew the then code */
-		enddist = emit_bytecode_act(fd, bc->data[codep].value,
+		enddist = bc_action_emit(fd, bc->data[codep].value,
 					    bc->data[codep+1].value, bc,
 					    filelen + testdist + 2*sizeof(int));
 	       
@@ -370,15 +368,14 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		/* spew the test */
 		location=lseek(fd,0,SEEK_CUR);
 
-		testdist = emit_bytecode_test(fd, codep+3, bc);
-		if(testdist == -1)
-		    return -1;
+		testdist = bc_test_emit(fd, codep+3, bc);
+		if(testdist == -1)return -1;
 		testend += testdist;
 		location=lseek(fd,0,SEEK_CUR);
 
 		thenend = testend;
 		/* spew the then code */ 
-		thendist = emit_bytecode_act(fd, bc->data[codep].value,
+		thendist = bc_action_emit(fd, bc->data[codep].value,
 					     bc->data[codep+1].value, bc,
 					     filelen + testdist + 3*sizeof(int));
 		/*thendist-=sizeof(int);*/
@@ -386,7 +383,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	
 		realend = thenend;
 		/* spew the else code */
-		enddist = emit_bytecode_act(fd, bc->data[codep+1].value,
+		enddist = bc_action_emit(fd, bc->data[codep+1].value,
 					    bc->data[codep+2].value, bc,
 					    filelen + testdist + thendist
 					      + 3*sizeof(int));
@@ -436,7 +433,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    case B_ADDFLAG:
 	    case B_REMOVEFLAG:
 		/* Dump just a stringlist */
-		ret = emit_stringlist(fd, &codep, bc);
+		ret = bc_stringlist_emit(fd, &codep, bc);
 		if(ret < 0) return -1;
 		filelen += ret;
 		break;
@@ -458,7 +455,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		
 		    filelen += len + ret;
 		}
-		ret = emit_stringlist(fd, &codep, bc);
+		ret = bc_stringlist_emit(fd, &codep, bc);
 		if(ret < 0) return -1;
 		filelen+=ret;
 
@@ -506,7 +503,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		/* Address list, Subject String, Message String, Days (word), Mime (word) */
 	   
 	        /*new code-this might be broken*/
-	        ret = emit_stringlist(fd, &codep, bc);
+	        ret = bc_stringlist_emit(fd, &codep, bc);
 		if(ret < 0) return -1;
 		filelen += ret;
 		/*end of new code*/
@@ -575,7 +572,7 @@ int sieve_emit_bytecode(int fd, bytecode_info_t *bc)
     dump(bc);
 #endif
     /*the 4 is to account for the version # at the begining*/
-    return emit_bytecode_act(fd, 0, bc->scriptend, bc, 4);
+    return bc_action_emit(fd, 0, bc->scriptend, bc, 4);
 }
 
 void sieve_free_bytecode(bytecode_info_t **p) 

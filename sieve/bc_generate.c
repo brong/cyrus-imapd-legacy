@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_generate.c,v 1.1.2.2 2003/01/16 17:39:58 jsmith2 Exp $
+ * $Id: bc_generate.c,v 1.1.2.3 2003/01/16 18:33:40 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -366,7 +366,7 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 /* returns address of next instruction or -1 on error*/
 /* needs current instruction, buffer for the code, and a current parse tree */
 /* sieve is cool because everything is immediate! */
-static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c) 
+static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t *c) 
 {
     int jumploc,baseloc;
 
@@ -578,7 +578,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	     * we want to write this code starting at the offset we
 	     * just found */
 	
-	    jumpVal= bc_generate(jumpVal,retval, c->u.i.do_then);
+	    jumpVal= bc_action_generate(jumpVal,retval, c->u.i.do_then);
 	    if(jumpVal == -1) 
 	      {return -1;}
 	    else 
@@ -589,7 +589,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    if(c->u.i.do_else) {
 	      codep++;
 	      
-	      jumpVal= bc_generate(jumpVal,retval, c->u.i.do_else);
+	      jumpVal= bc_action_generate(jumpVal,retval, c->u.i.do_else);
 	      if(jumpVal == -1) 
 		{return -1;}
 	      else 
@@ -639,5 +639,5 @@ int sieve_generate_bytecode(bytecode_info_t **retval, sieve_script_t *s)
 
     memset(*retval, 0, sizeof(bytecode_info_t));
 
-    return bc_generate(0, *retval, c);
+    return bc_action_generate(0, *retval, c);
 }
