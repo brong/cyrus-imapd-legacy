@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.25 1999/10/20 20:36:07 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.26 1999/10/20 20:39:13 leg Exp $
  */
 
 #include <stdio.h>
@@ -120,7 +120,8 @@ void mboxlist_checkconfig()
  * is placed in the char * pointed to by it.  If 'acl' is non-nil, a pointer
  * to the mailbox ACL is placed in the char * pointed to by it.
  */
-int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
+static int mboxlist_mylookup(const char* name, char** pathp, char** aclp, 
+			     DB_TXN *tid, int flags)
 {
     unsigned long offset, len, partitionlen, acllen;
     char optionbuf[MAX_MAILBOX_NAME+1];
@@ -139,9 +140,7 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
     key.data = (char *) name;
     key.size = strlen(name);
 
-    /* we don't bother with a transaction for this one */
-    r = mbdb->get(mbdb, tid, &key, &data, 0);
-
+    r = mbdb->get(mbdb, tid, &key, &data, flags);
     switch (r) {
     case 0:
 	/* copy out interesting parts */
@@ -190,7 +189,6 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
     return 0;
 }
 
-
 /*
  * Lookup 'name' in the mailbox list.
  * The capitalization of 'name' is canonicalized to the way it appears
@@ -199,74 +197,16 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
  * is placed in the char * pointed to by it.  If 'acl' is non-nil, a pointer
  * to the mailbox ACL is placed in the char * pointed to by it.
  */
-int mboxlist_lookup_writelock(const char* name, char** pathp, char** aclp, DB_TXN *tid)
+int mboxlist_lookup(const char *name, char **pathp, char **aclp, DB_TXN *tid)
 {
-    unsigned long offset, len, partitionlen, acllen;
-    char optionbuf[MAX_MAILBOX_NAME+1];
-    char *partition, *acl;
-    const char *root;
-    static char pathresult[MAX_MAILBOX_PATH];
-    static char *aclresult;
-    static int aclresultalloced;
-    int r;
-    DBT key, data;
-    struct mbox_entry *mboxent;
+    return mboxlist_mylookup(name, pathp, aclp, tid, 0);
+}
 
-    memset(&data, 0, sizeof(key));
-
-    memset(&key, 0, sizeof(key));
-    key.data = (char *) name;
-    key.size = strlen(name);
-
-    /* we don't bother with a transaction for this one */
-    r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
-
-    switch (r) {
-    case 0:
-	/* copy out interesting parts */
-	mboxent=(struct mbox_entry *) data.data;
-	partitionlen=strlen(mboxent->partition);
-	acllen=strlen(mboxent->acls);
-	break;
-
-    case DB_NOTFOUND:
-	return IMAP_MAILBOX_NONEXISTENT;
-	break;
-    default:
-	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-	       name, strerror(r));
-	return IMAP_IOERROR;
-	break;
-    }
-    mboxent = (struct mbox_entry *) data.data;
-
-    /* construct pathname if requested */
-    if (pathp) {
-	if (partitionlen > sizeof(optionbuf)-11) {
-	    return IMAP_PARTITION_UNKNOWN;
-	}
-	strcpy(optionbuf, "partition-");
-	strcat(optionbuf, mboxent->partition);
-	
-	root = config_getstring(optionbuf, (char *)0);
-	if (!root) {
-	    return IMAP_PARTITION_UNKNOWN;
-	}
-	mailbox_hash_mbox(pathresult, root, name);
-	*pathp = pathresult;
-    }
-
-    /* return ACL if requested */
-    if (aclp) {
-	if ((strlen(mboxent->acls) + 1) > aclresultalloced) {
-	    aclresultalloced = strlen(mboxent->acls) + 100;
-	    aclresult = xrealloc(aclresult, aclresultalloced);
-	}
-	strcpy(aclresult, mboxent->acls);
-
-	*aclp = aclresult;
-    }
-    return 0;
+/* same thing, but grab writelocks while doing the read */
+int mboxlist_lookup_writelock(const char *name, char** pathp, char** aclp, 
+			      DB_TXN *tid)
+{
+    return mboxlist_mylookup(name, pathp, aclp, tid, DB_RMW);
 }
 
 /*
