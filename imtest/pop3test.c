@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.4 2001/11/08 20:54:40 ken3 Exp $
+ * $Id: pop3test.c,v 1.1.2.5 2001/11/09 20:05:07 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -102,7 +102,7 @@ sasl_conn_t *conn;
 int sock; /* socket descriptor */
 
 int verbose=0;
-int dochallenge=1;
+int dochallenge=0;
 
 struct protstream *pout, *pin;
 
@@ -126,6 +126,8 @@ struct stringlist *strlist_head = NULL;
 static sasl_callback_t callbacks[] = {
   {
     SASL_CB_ECHOPROMPT, NULL, NULL    
+  }, {
+    SASL_CB_NOECHOPROMPT, NULL, NULL    
   }, {
 #ifdef SASL_CB_GETREALM
     SASL_CB_GETREALM, NULL, NULL
@@ -602,7 +604,7 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
   struct sockaddr_in saddr_r;
 
   /* attempt to start sasl */
-  saslresult=sasl_client_init(callbacks+(!dochallenge ? 1 : 0));
+  saslresult=sasl_client_init(callbacks+(dochallenge ? 0 : 2));
 
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
@@ -729,11 +731,18 @@ void interaction (int id, const char *challenge, const char *prompt,
     } else {
 	int c;
 	
-	if (challenge) printf("Server challenge: %s\n", challenge);
+	if (((id==SASL_CB_ECHOPROMPT) || (id=SASL_CB_NOECHOPROMPT)) &&
+	    (challenge != NULL)) {
+	    printf("Server challenge: %s\n", challenge);
+	}
 	printf("%s: ",prompt);
-	fgets(result, sizeof(result) - 1, stdin);
-	c = strlen(result);
-	result[c - 1] = '\0';
+	if (id==SASL_CB_NOECHOPROMPT) {
+	    strcpy(result, getpass(""));
+	} else {
+	    fgets(result, sizeof(result) - 1, stdin);
+	    c = strlen(result);
+	    result[c - 1] = '\0';
+	}
     }
 
     *tlen = strlen(result);
@@ -1183,8 +1192,8 @@ void usage(void)
   printf("  -t file  : Enable TLS. file has the TLS public and private keys\n"
 	 "             (specify \"\" to not use TLS for authentication)\n");
 #endif /* HAVE_SSL */
-  printf("  -c       : turn off challenge prompt callbacks\n"
-	 "             (enter secret pass-phrase instead of one-time password)\n");
+  printf("  -c       : enable challenge prompt callbacks\n"
+	 "             (enter one-time password instead of secret pass-phrase)\n");
 
   exit(1);
 }
@@ -1223,7 +1232,7 @@ int main(int argc, char **argv)
   while ((c = getopt(argc, argv, "cvk:l:p:u:a:m:f:r:t:")) != EOF)
     switch (c) {
     case 'c':
-	dochallenge=0;
+	dochallenge=1;
 	break;
     case 'v':
 	verbose=1;
