@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.5 1999/11/03 00:36:26 leg Exp $
+ * $Id: gun.c,v 1.1.2.6 1999/11/03 03:08:25 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -163,8 +163,7 @@ foreach_res send_mbox_to_proxy(void *rock, struct mbox_entry **mboxent)
     /* send size */
     r = prot_printf(prox->out, "M%dM", sz);
     if (!r) {
-	prot_write(prox->out, (char *) *mboxent, 
-		   sizeof(struct mbox_entry));
+	prot_write(prox->out, (char *) *mboxent, sz);
     }
 
     *mboxent = NULL;

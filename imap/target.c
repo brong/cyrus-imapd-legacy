@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.3 1999/11/03 00:55:47 leg Exp $
+ * $Id: target.c,v 1.1.2.4 1999/11/03 03:08:25 leg Exp $
  */
 
 #include <stdio.h>
@@ -226,12 +226,13 @@ void be_connect(struct be *ptr)
 	ch = prot_getc(ptr->in);
 	while (isdigit(ch)) {
 	    sz = 10 * sz + (ch - '0');
+	    ch = prot_getc(ptr->in);
 	}
 	fprintf(stderr, "looking for %d bytes...", sz);
 	if (ch != 'M') {
 	    break;
 	}
-	toread = sizeof(struct mbox_entry) + sz;
+	toread = sz;
 	if (n == num) {
 	    mboxent = xrealloc(mboxent, sizeof(struct mbox_entry *) * 
 			       (num += 1000));
@@ -240,7 +241,7 @@ void be_connect(struct be *ptr)
 	got = 0;
 	while (got < toread) {
 	    r = prot_read(ptr->in, ((char *) mboxent[n]) + got, toread - got);
-	    got -= r;
+	    got += r;
 	    if (r == 0) {
 		goto out;
 	    }
@@ -260,10 +261,10 @@ void be_connect(struct be *ptr)
     if (!cr) {
 	rock = (struct be_mblist *) xmalloc(sizeof(struct be_mblist));
 
-	fprintf(stderr, "got %d mailboxes\n", num);
+	fprintf(stderr, "got %d mailboxes\n", n);
 
 	rock->ents = mboxent;
-	rock->num = num;
+	rock->num = n;
 	rock->saw = (int *) xmalloc(sizeof(int) * num);
 	memset(rock->saw, 0, sizeof(int) * num);
 	rock->n = 0;
@@ -274,7 +275,7 @@ void be_connect(struct be *ptr)
 
     /* ok, now we add all the mailboxes that we didn't already have,
        and we free the memory up */
-    for (n = 0; n < num; n++) {
+    while (n--) {
 	if (!cr && !rock->saw[n]) {
 	    /* insert it */
 	    cr = mboxlist_insertremote(mboxent[n]->name,
