@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.23 1999/10/19 15:52:10 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.24 1999/10/20 18:20:58 leg Exp $
  */
 
 #include <stdio.h>
@@ -2107,83 +2107,68 @@ int newquota;
      * Have to create a new quota root
      */
 
-
-
-    /* should we delete the quota root?  are there any other mailboxes
-       in this quota root? */
     {
-      DBC *cursor=NULL;      
-      struct mbox_entry *mboxent=NULL;
-      DBT key, data;
-
-      r=mbdb->cursor(mbdb, NULL, &cursor, 0);
-      if (r!=0) { 
-	syslog(LOG_ERR, "Unable to create cursor in delete");
-	return r;
-      }
-
-      memset(&data, 0, sizeof(data));
-      memset(&key, 0, sizeof(key));
-      key.data = quota.root; 
-      key.size = strlen(quota.root);
-      
-      r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
-
-      switch (r) {
-      case 0:
-	mboxent = (struct mbox_entry *) data.data;
-	
-	/* if this entry is not in the quota root then fail */
-	if ( strlen(mboxent->name) < strlen(quota.root))
-	{
-	  r = IMAP_MAILBOX_NONEXISTENT;
-	  goto done;
-	}
-	
-	if (strncmp(mboxent->name, quota.root, strlen(quota.root))!=0)
-	{
-	  r = IMAP_MAILBOX_NONEXISTENT;
-	  goto done;
-	}
-	
-	if (strlen(mboxent->name) > strlen(quota.root))
-	  if (mboxent->name[ strlen(quota.root) ] != '.')
-	  {
-	    r = IMAP_MAILBOX_NONEXISTENT;
-	    goto done;
-	  }
-
-	break;
-	
-      case DB_NOTFOUND:
-	r = IMAP_MAILBOX_NONEXISTENT;
-	goto done;
-	break;
-	
-      default:
-	syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
-	r = IMAP_IOERROR;
-	goto done;
-	break;
-      }
-      
-    
-      done:
-      {
+	DBC *cursor=NULL;      
+	struct mbox_entry *mboxent=NULL;
+	DBT key, data;
 	int r2;
+	
+	r = mbdb->cursor(mbdb, NULL, &cursor, 0);
+	if (r != 0) { 
+	    syslog(LOG_ERR, "DBERROR: couldn't create cursor in createqr: %s",
+		   strerror(r));
+	    return r;
+	}
+	
+	memset(&data, 0, sizeof(data));
+	memset(&key, 0, sizeof(key));
+	key.data = quota.root; 
+	key.size = strlen(quota.root);
+
+	/* look for a mailbox in the proposed quotaroot */
+	r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
+	switch (r) {
+	case 0:
+	    mboxent = (struct mbox_entry *) data.data;
+	    
+	    if ( strlen(mboxent->name) < strlen(quota.root)) {
+		/* found mailbox shorter than qr name */
+		r = IMAP_MAILBOX_NONEXISTENT;
+	    } else if (strncmp(mboxent->name, quota.root, 
+			       strlen(quota.root)) != 0) {
+		/* the prefix of the mailbox doesn't match the qr */
+		r = IMAP_MAILBOX_NONEXISTENT;
+	    } else if (strlen(mboxent->name) > strlen(quota.root) &&
+		       (mboxent->name[ strlen(quota.root) ] != '.')) {
+		/* the prefix matches, but it's not a seperator */
+		r = IMAP_MAILBOX_NONEXISTENT;
+	    }
+	    break;
+	    
+	case DB_NOTFOUND:
+	    /* no mailbox */
+	    r = IMAP_MAILBOX_NONEXISTENT;
+	    break;
+	    
+	default:
+	    syslog(LOG_ERR, "DBERROR: error search for mbox: %s", strerror(r));
+	    r = IMAP_IOERROR;
+	    break;
+	}
+	
 	switch (r2 = cursor->c_close(cursor)) {
 	case 0:
-	  if (r!=0) return r;
-	  break;
+	    if (r != 0) {
+		/* cursor close is ok, but don't create the qr */
+		return r;
+	    }
+	    break;
 	default:
-	  syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
-		 strerror(r2));
-	  return IMAP_IOERROR;
-	  break;
+	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
+		   strerror(r2));
+	    return IMAP_IOERROR;
+	    break;
 	}
-      }
-	
-
     }
 
     /* perhaps create .NEW, lock, check if it got recreated, move in place */
