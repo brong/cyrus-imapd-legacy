@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62.6.3 2001/08/01 17:25:42 rjs3 Exp $
+ * $Id: imtest.c,v 1.62.6.4 2001/08/01 20:18:06 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -602,11 +602,11 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
       return IMTEST_FAIL;
 
   if(iptostring((struct sockaddr *)&saddr_l, sizeof(struct sockaddr_in),
-		localip, 60) != SASL_OK)
+		localip, 60))
       return IMTEST_FAIL;
 
   if(iptostring((struct sockaddr *)&saddr_r, sizeof(struct sockaddr_in),
-		remoteip, 60) != SASL_OK)
+		remoteip, 60))
       return IMTEST_FAIL;
   
 

@@ -55,6 +55,7 @@
 #include "isieve.h"
 #include "lex.h"
 #include "request.h"
+#include "iptostring.h"
 
 #include <prot.h>
 
@@ -133,30 +134,6 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   return ret;
 }
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
-}
-
 /*
  * Initialize SASL and set necessary options
  */
@@ -186,10 +163,12 @@ int init_sasl(isieve_t *obj,
   /* set the port manually since getsockname is stupid and doesn't */
   saddr_l.sin_port = htons(obj->port);
 
-  if (iptostring(&saddr_r, remoteip, 60) != SASL_OK)
+  if (iptostring((struct sockaddr *)&saddr_r,
+		 sizeof(struct sockaddr_in), remoteip, 60))
       return -1;
 
-  if (iptostring(&saddr_l, localip, 60) != SASL_OK)
+  if (iptostring((struct sockaddr *)&saddr_l,
+		 sizeof(struct sockaddr_in), localip, 60))
       return -1;
 
   /* client new connection */

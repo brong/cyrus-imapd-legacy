@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.6 2001/08/01 18:04:08 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.7 2001/08/01 20:18:04 rjs3 Exp $
  */
 #include <config.h>
 
@@ -73,7 +73,6 @@
 #include "iptostring.h"
 #include "imapconf.h"
 #include "tls.h"
-
 
 #include "exitcodes.h"
 #include "imap_err.h"
@@ -306,10 +305,10 @@ int service_main(int argc, char **argv, char **envp)
     sasl_setprop(popd_saslconn, SASL_SEC_PROPS, secprops);
     
     if(iptostring((struct sockaddr *)&popd_localaddr,
-		  sizeof(struct sockaddr_in), localip, 60) == SASL_OK)
+		  sizeof(struct sockaddr_in), localip, 60) == 0)
 	sasl_setprop(popd_saslconn, SASL_IPLOCALPORT, localip);
     if(iptostring((struct sockaddr *)&popd_remoteaddr,
-		  sizeof(struct sockaddr_in), remoteip, 60) == SASL_OK)
+		  sizeof(struct sockaddr_in), remoteip, 60) == 0)
 	sasl_setprop(popd_saslconn, SASL_IPREMOTEPORT, remoteip);  
 
     proc_register("pop3d", popd_clienthost, NULL, NULL);

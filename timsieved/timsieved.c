@@ -311,10 +311,10 @@ int service_main(int argc, char **argv, char **envp)
 	fatal("SASL failed initializing: sasl_server_new()", -1); 
 
     if(iptostring((struct sockaddr *)&sieved_remoteaddr,
-		  sizeof(struct sockaddr_in), remoteip, 60) == SASL_OK)
+		  sizeof(struct sockaddr_in), remoteip, 60) == 0)
 	sasl_setprop(sieved_saslconn, SASL_IPREMOTEPORT, remoteip);  
     if(iptostring((struct sockaddr *)&sieved_remoteaddr,
-		  sizeof(struct sockaddr_in), localip, 60) == SASL_OK)
+		  sizeof(struct sockaddr_in), localip, 60) == 0)
 	sasl_setprop(sieved_saslconn, SASL_IPLOCALPORT, localip);
 
     /* will always return something valid */

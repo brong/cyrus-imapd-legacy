@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26.2.1 2001/07/31 20:54:04 rjs3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.2 2001/08/01 20:18:04 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -75,6 +75,7 @@
 #include "auth.h"
 #include "prot.h"
 #include "imapconf.h"
+#include "iptostring.h"
 #include "exitcodes.h"
 #include "imap_err.h"
 #include "xmalloc.h"
@@ -954,30 +955,6 @@ static char *process_recipient(char *addr,
     return NULL;
 }    
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
-}
-
 void lmtpmode(struct lmtp_func *func,
 	      struct protstream *pin, 
 	      struct protstream *pout,
@@ -1028,9 +1005,11 @@ void lmtpmode(struct lmtp_func *func,
 	salen = sizeof(localaddr);
 	if (!getsockname(fd, (struct sockaddr *)&localaddr, &salen)) {
 	    /* set the ip addresses here */
-	    if(iptostring(&localaddr, localip, 60) == SASL_OK)
+	    if(iptostring((struct sockaddr *)&localaddr,
+			  sizeof(struct sockaddr_in), localip, 60) == 0)
 		sasl_setprop(conn, SASL_IPLOCALPORT,  &localaddr );
-	    if(iptostring(&remoteaddr, remoteip, 60) == SASL_OK)
+	    if(iptostring((struct sockaddr *)&remoteaddr,
+			  sizeof(struct sockaddr_in), remoteip, 60) == 0)
 		sasl_setprop(conn, SASL_IPREMOTEPORT, &remoteaddr);  
 	} else {
 	    fatal("can't get local addr", EC_SOFTWARE);

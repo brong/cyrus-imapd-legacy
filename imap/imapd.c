@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.4 2001/08/01 17:25:04 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.5 2001/08/01 20:18:03 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -530,10 +530,10 @@ int service_main(int argc, char **argv, char **envp)
 	if (getsockname(0, (struct sockaddr *)&imapd_localaddr, &salen) == 0) {
 	      if(iptostring((struct sockaddr *)&imapd_remoteaddr,
 			    sizeof(struct sockaddr_in),
-			    remoteip, 60) == SASL_OK
+			    remoteip, 60) == 0
 		 && iptostring((struct sockaddr *)&imapd_localaddr,
 			       sizeof(struct sockaddr_in),
-			       localip, 60) == SASL_OK) {
+			       localip, 60) == 0) {
 		  imapd_haveaddr = 1;
 	      }
 	}
