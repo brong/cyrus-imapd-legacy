@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.1 2001/07/31 20:54:02 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.2 2001/07/31 23:11:09 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -252,33 +252,18 @@ const char *auth_identity;
 
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
-static int mysasl_authproc(void *context,
-		       const char *auth_identity,
-		       const char *requested_user,
-		       const char **user)
+static int mysasl_authproc(sasl_conn_t *conn,
+			   void *context,
+			   const char *requested_user, unsigned rlen,
+			   const char *auth_identity, unsigned alen,
+			   const char *def_realm, unsigned urlen,
+			   struct propctx *propctx)
 {
     const char *val;
-    char *canon_authuser, *canon_requser;
     char *realm;
-    static char replybuf[100];
-
-    canon_authuser = auth_canonifyid(auth_identity);
-    if (!canon_authuser) {
-	sasl_seterror(context, 0, "bad userid authenticated");
-	return SASL_BADAUTH;
-    }
-    canon_authuser = xstrdup(canon_authuser);
-
-    if (!requested_user) requested_user = auth_identity;
-    canon_requser = auth_canonifyid(requested_user);
-    if (!canon_requser) {
-	sasl_seterror(context, 0, "bad userid requested");
-	return SASL_BADAUTH;
-    }
-    canon_requser = xstrdup(canon_requser);
 
     /* check if remote realm */
-    if ((realm = strchr(canon_authuser, '@'))!=NULL) {
+    if ((realm = strchr(auth_identity, '@'))!=NULL) {
 	realm++;
 	val = config_getstring("loginrealms", "");
 	while (*val) {
@@ -291,51 +276,90 @@ static int mysasl_authproc(void *context,
 	    while (*val && isspace((int) *val)) val++;
 	}
 	if (!*val) {
-	    snprintf(replybuf, 100, "cross-realm login %s denied", 
-		     canon_authuser);
-	    sasl_seterror(context, 0, replybuf);
+	    sasl_seterror(context, 0, "cross-realm login %s denied",
+			  auth_identity);
 	    return SASL_BADAUTH;
 	}
     }
 
-    imapd_authstate = auth_newstate(canon_authuser, NULL);
+    imapd_authstate = auth_newstate(auth_identity, NULL);
 
     /* ok, is auth_identity an admin? */
     imapd_userisadmin = authisa(imapd_authstate, "imap", "admins");
 
-    if (strcmp(canon_authuser, canon_requser)) {
+    if (strcmp(auth_identity, requested_user)) {
 	/* we want to authenticate as a different user; we'll allow this
 	   if we're an admin or if we've allowed ACL proxy logins */
 	int use_acl = config_getswitch("loginuseacl", 0);
 
 	if (imapd_userisadmin ||
-	    (use_acl && acl_ok(canon_requser, canon_authuser)) ||
+	    (use_acl && acl_ok(requested_user, auth_identity)) ||
 	    authisa(imapd_authstate, "imap", "proxyservers")) {
 	    /* proxy ok! */
 
 	    imapd_userisadmin = 0;	/* no longer admin */
 	    auth_freestate(imapd_authstate);
 	    
-	    imapd_authstate = auth_newstate(canon_requser, NULL);
+	    imapd_authstate = auth_newstate(requested_user, NULL);
 	} else {
 	    sasl_seterror(context, 0, "user is not allowed to proxy");
 	    
-	    free(canon_authuser);
-	    free(canon_requser);
 	    auth_freestate(imapd_authstate);
 	    
 	    return SASL_BADAUTH;
 	}
     }
 
-    free(canon_authuser);
-    *user = canon_requser;
+    return SASL_OK;
+}
+
+int mysasl_canon_user(sasl_conn_t *conn,
+		      void *context,
+		      const char *user, unsigned ulen,
+		      const char *authid, unsigned alen,
+		      unsigned flags,
+		      const char *user_realm,
+		      char *out_user,
+		      unsigned out_max, unsigned *out_ulen,
+		      char *out_authid,
+		      unsigned out_amax, unsigned *out_alen) 
+{
+    char *canon_authuser = NULL, *canon_requser = NULL;
+
+    canon_authuser = auth_canonifyid(authid);
+    if (!canon_authuser) {
+	sasl_seterror(conn, 0, "bad userid authenticated");
+	return SASL_BADAUTH;
+    }
+    *out_alen = strlen(canon_authuser);
+    if(*out_alen > strlen(canon_authuser) > out_amax+1) {
+	sasl_seterror(conn, 0, "buffer overflow while canonicalizing");
+	return SASL_BUFOVER;
+    }
+    
+    strncpy(out_authid, canon_authuser, out_amax);
+    
+    if (!user) user = authid;
+    canon_requser = auth_canonifyid(user);
+    if (!canon_requser) {
+	sasl_seterror(conn, 0, "bad userid requested");
+	return SASL_BADAUTH;
+    }
+    *out_ulen = strlen(canon_requser);
+    if(*out_ulen > out_max+1) {
+	sasl_seterror(conn, 0, "buffer overflow while canonicalizing");
+	return SASL_BUFOVER;
+    }
+    
+    strncpy(out_user, canon_requser, out_max);
+
     return SASL_OK;
 }
 
 static const struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
     { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -478,10 +502,10 @@ static int iptostring(const struct sockaddr_in *addr,
     for(i=3; i>=0; i--) {
 	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
     }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
+
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[0],(int)a[1],
+	                                 (int)a[2],(int)a[3],
+	                                 (int)ntohs(addr->sin_port));
 
     return SASL_OK;
 }
@@ -526,8 +550,8 @@ int service_main(int argc, char **argv, char **envp)
 	strcat(imapd_clienthost, "]");
 	salen = sizeof(imapd_localaddr);
 	if (getsockname(0, (struct sockaddr *)&imapd_localaddr, &salen) == 0) {
-	      if(iptostring(&imapd_localaddr, localip, 60) == SASL_OK
-		 && iptostring(&imapd_remoteaddr, remoteip, 60) == SASL_OK) {
+	      if(iptostring(&imapd_remoteaddr, remoteip, 60) == SASL_OK
+		 && iptostring(&imapd_localaddr, localip, 60) == SASL_OK) {
 		  imapd_haveaddr = 1;
 	      }
 	}
@@ -542,9 +566,7 @@ int service_main(int argc, char **argv, char **envp)
 
     secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
     sasl_setprop(imapd_saslconn, SASL_SEC_PROPS, secprops);
-
     sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
-/*	sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, ); */
 
     if (imapd_haveaddr) {
 	sasl_setprop(imapd_saslconn, SASL_IPREMOTEPORT,
