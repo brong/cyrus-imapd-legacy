@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.9 1999/11/06 23:38:14 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.10 1999/11/06 23:39:05 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1129,6 +1129,7 @@ void shut_down(int code)
 
     proc_cleanup();
 
+    i = 0;
     while (backend_cached[i]) {
 	proxyd_downserver(backend_cached[i]);
 
