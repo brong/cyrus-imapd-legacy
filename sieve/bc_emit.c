@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_emit.c,v 1.1.2.5 2003/01/22 22:54:30 jsmith2 Exp $
+ * $Id: bc_emit.c,v 1.1.2.6 2003/01/23 01:15:31 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -516,10 +516,10 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
 
 		
 	case B_DENOTIFY:
-	    /* priority num,comptype  num, comp string*/ 
+	    /* priority num,comptype  num,relat num, comp string*/ 
 
-	    /* priority and comptype*/
-	    for(i=0; i<2; i++) 
+	    /* priority and comptype and relational*/
+	    for(i=0; i<3; i++) 
 	    {
 		if(write(fd, &bc->data[codep].value,
 			 sizeof(bc->data[codep].value)) == -1)

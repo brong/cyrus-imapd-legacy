@@ -368,8 +368,8 @@ void dump2(bytecode_t *d, int len)
 	case B_DENOTIFY:/*14*/
 	    printf("%d: DENOTIFY\n",i);
 	    i++; 
-	    printf("            PRIORITY(%d) Comparison type %d \n",d[i].value,d[i+1].value);
-	    i+=2;
+	    printf("            PRIORITY(%d) Comparison type %d (relat %d)\n",d[i].value,d[i+1].value, d[i+2].value);
+	    i+=3;
 	    
 	    printf("           ({%d}%s)\n", d[i].len,(d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
       	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));

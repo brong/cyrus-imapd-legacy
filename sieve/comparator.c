@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.10 2003/01/22 01:11:02 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.11 2003/01/23 01:15:31 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -309,7 +309,7 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
     ret = NULL;
     *comprock = NULL;
 #if VERBOSE
-    printf("%d %d %d     \n", comp, mode, relation); 
+    printf("comp%d mode%d relat%d     \n", comp, mode, relation); 
 #endif
     switch (comp)
       {

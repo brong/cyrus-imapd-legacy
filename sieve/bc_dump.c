@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_dump.c,v 1.1.2.3 2003/01/22 22:54:30 jsmith2 Exp $
+ * $Id: bc_dump.c,v 1.1.2.4 2003/01/23 01:15:31 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -233,12 +233,13 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_DENOTIFY:
-	    printf("%d: DENOTIFY priority %d,comp %d   %s\n", 
+	    printf("%d: DENOTIFY priority %d,comp %d %d  %s\n", 
 		   i,
 		   d->data[i+1].value,
 		   d->data[i+2].value,
-		   (d->data[i+3].len == -1 ? "[nil]" : d->data[i+4].str));
-	    i+=4;
+		   d->data[i+3].value,
+		   (d->data[i+4].len == -1 ? "[nil]" : d->data[i+5].str));
+	    i+=5;
 	    break;
 
 	case B_NOTIFY: 

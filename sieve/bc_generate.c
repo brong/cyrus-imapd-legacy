@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_generate.c,v 1.1.2.6 2003/01/22 22:54:30 jsmith2 Exp $
+ * $Id: bc_generate.c,v 1.1.2.7 2003/01/23 01:15:31 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -447,6 +447,7 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		default:
 		    return -1;
 		}
+		codep = bc_relation_generate(codep, retval, c->u.d.relation);
 	
 		if(c->u.d.pattern)
 		{
