@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.8 1999/10/17 23:55:04 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.9 1999/10/18 00:07:13 leg Exp $
  */
 
 #include <stdio.h>
@@ -445,7 +445,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     }
 
     if (r != 0) {
-	tmp_log_string("create mailboxes returned with error\n");
+	tmp_log_string("createmailboxcheck returned with error\n");
 	goto done;
     }
 
@@ -471,9 +471,10 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     mboxent = (struct mbox_entry *) malloc(sizeof(struct mbox_entry) +
 					   strlen(acl));
 
-    memset(mboxent, 0, sizeof(struct mbox_entry)); /* xxx this shouldn't be necessary */
+    memset(mboxent, 0, sizeof(struct mbox_entry)); 
+				/* xxx this shouldn't be necessary */
 
-    /* fill in it's parameters */
+    /* fill in its parameters */
     strcpy(mboxent->name, name);
     strcpy(mboxent->partition, partition);
     strcpy(mboxent->acls, acl);
@@ -509,7 +510,6 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     mailbox_close(&newmailbox);
 
  done:
-
     free(mboxent);
     free(partition);
     free(acl);
@@ -526,7 +526,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     default:
 	syslog(LOG_ERR, "DBERROR: failed on commit: %s",
 	       strerror(r));
-	r = IMAP_IOERROR;
+	return IMAP_IOERROR;
     }
 
     toimsp(name, newmailbox.uidvalidity,
