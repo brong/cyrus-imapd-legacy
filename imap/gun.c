@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.4 1999/11/03 00:01:40 leg Exp $
+ * $Id: gun.c,v 1.1.2.5 1999/11/03 00:36:26 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -104,7 +104,12 @@ void fatal(const char *s, int code)
 
 void handler(int sig)
 {
-    fatal("received signal", 0);
+    if (sig != SIGALRM) {
+        fatal("received signal", 0);
+    } else {
+        fprintf(stderr, "riiiiiiing...\n");
+        signal(sig, &handler);
+    }
 }
 
 int init_listen(void)
@@ -152,6 +157,8 @@ foreach_res send_mbox_to_proxy(void *rock, struct mbox_entry **mboxent)
     int r;
     int sz = sizeof(struct mbox_entry) + strlen((*mboxent)->acls);
 
+    fprintf(stderr, "sending '%s'\n", (*mboxent)->name);
+
     /* we pay no attention to network byte order stuff here; we should */
     /* send size */
     r = prot_printf(prox->out, "M%dM", sz);
@@ -175,6 +182,8 @@ void init_proxy(int sock)
     int r;
     int ch;
     int flag;
+
+    fprintf(stderr, "sending to connection...\n");
 
     /* want blocking i/o */
     if ((flag = fcntl(sock, F_GETFL)) < 0) {
@@ -203,6 +212,7 @@ void init_proxy(int sock)
     if (!r) {
 	r = prot_putc('-', ret->out);
     }
+    fprintf(stderr, "done... now reading...\n");
     if (!r) {
 	if (prot_getc(ret->in) == 'o' &&
 	    prot_getc(ret->in) == 'k') {
@@ -213,9 +223,11 @@ void init_proxy(int sock)
     }
 
     if (!r) {
+        fprintf(stderr, "adding to list\n");
 	ret->next = head;
-	head->next = ret;
+	head = ret;
     } else {
+        fprintf(stderr, "something went wrong!\n");
 	close(sock);
 	free(ret);
     }
@@ -372,7 +384,8 @@ int main(int argc, char *argv[], char *envp[])
 
     signal(SIGTERM, &handler);
     signal(SIGINT, &handler);
-    signal(SIGALRM, SIG_IGN);
+    signal(SIGALRM, &handler);
+    /* signal(SIGALRM, SIG_IGN); */
 
     if ((msqin = msgget(COMMANDS, IPC_CREAT | 0600)) < 0) {
         perror("msgget");
@@ -499,6 +512,8 @@ int main(int argc, char *argv[], char *envp[])
 	    int len = sizeof(sin);
 	    int fd;
 
+	    printf("timed out waiting for queue...\n");
+
 	    /* ok, we timed out waiting for a command from the IMAP server;
 	       let's see if any new proxies have connected to me */
 	    errno = 0;
@@ -508,10 +523,13 @@ int main(int argc, char *argv[], char *envp[])
 	    }
 
 	    if (!errno) {
+  	        printf("got connection\n");
 		/* we got a new connection */
 		syslog(LOG_NOTICE, "got connection from %s",
 		       inet_ntoa(sin.sin_addr));
 		init_proxy(fd);
+	    } else {
+                printf("no connection waiting\n");
 	    }
 	}
     }
