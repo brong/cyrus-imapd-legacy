@@ -1,7 +1,7 @@
 %{
 /* sieve.l -- sieve lexer
  * Larry Greenfield
- * $Id: sieve-lex.l,v 1.16.6.1 2002/05/29 22:20:26 jsmith2 Exp $
+ * $Id: sieve-lex.l,v 1.16.6.2 2002/06/07 21:50:36 ken3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -132,7 +132,8 @@ CRLF		(\r\n|\r|\n)
 <INITIAL>:user		return USER;
 <INITIAL>:detail	return DETAIL;
 <INITIAL>[ \t\n\r] ;	/* ignore whitespace */
-<INITIAL>#.* ;		/* ignore comments */
+<INITIAL>#.* ;		/* ignore hash comments */
+<INITIAL>"/*"([^\*]|\*[^\/])*\*?"*/" ;	/* ignore bracket comments */
 .			return yytext[0];
 
 %%
