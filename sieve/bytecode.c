@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.1 2001/12/18 23:09:57 rjs3 Exp $
+ * $Id: bytecode.c,v 1.1.2.2 2002/03/06 01:55:38 rjs3 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -865,7 +865,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		realend += enddist;
 		
 		/* now, jump back to the two offset locations and write them */
-		if(lseek(fd, teststart, SEEK_SET) == -1)
+		if(lseek(fd, teststart+sizeof(int), SEEK_SET) == -1)
 		    return -1;
 		if(write(fd,&testend,sizeof(testend)) == -1)
 		    return -1;
