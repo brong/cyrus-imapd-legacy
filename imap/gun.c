@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.8 1999/11/03 03:40:02 leg Exp $
+ * $Id: gun.c,v 1.1.2.9 1999/11/03 03:45:37 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -499,10 +499,10 @@ int main(int argc, char *argv[], char *envp[])
 		/* abort it */
   	        if (mytxn) {
 		    mboxlist_abort(mytxn);
-		}
 
-		/* tell the proxies */
-		tell_proxies_abort();
+		    /* tell the proxies */
+		    tell_proxies_abort();
+		}
 	    }
 
 	    outbuf.mtype = inbuf.pid;
