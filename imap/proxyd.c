@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.1 1999/11/02 20:56:42 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.2 1999/11/04 20:16:08 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -2374,7 +2374,7 @@ void cmd_list(char *tag, int subscribed, char *reference, char *pattern)
 	}
 
 	if (backend_inbox) {
-	    prot_printf(backend_inbox->in, 
+	    prot_printf(backend_inbox->out, 
 			"%s Lsub {%d+}\r\n%s {%d+}\r\n%s\r\n",
 			tag, strlen(reference), reference,
 			strlen(pattern), pattern);
