@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.4 1999/10/18 02:47:28 tmartin Exp $ */
+/* $Id: imapd.c,v 1.180.4.5 1999/11/02 20:56:37 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -166,10 +166,10 @@ void freesearchargs P((struct searchargs *s));
 
 void printauthready P((int len, unsigned char *data));
 
-/* XXX fix when proto-izing mboxlist.c */
+#include "mboxlist.h"
+
 static int mailboxdata(), listdata(), lsubdata();
-static void mstringdata P((char *cmd, char *name, int matchlen, int maycreate));
-void mboxlist_close P((void));
+static void mstringdata(char *cmd, char *name, int matchlen, int maycreate);
 
 /* This creates a structure that defines the allowable
  *   security properties 
@@ -2501,15 +2501,17 @@ char *partition;
     }
 
     if (!r) {
-	r = mboxlist_createmailbox(mailboxname, MAILBOX_FORMAT_NORMAL, partition,
-				   imapd_userisadmin, imapd_userid, imapd_authstate);
+	r = mboxlist_createmailbox(mailboxname, 0, partition,
+				   imapd_userisadmin, 
+				   imapd_userid, imapd_authstate);
 
 	if (r == IMAP_PERMISSION_DENIED && !strcasecmp(name, "INBOX") &&
 	    (autocreatequota = config_getint("autocreatequota", 0))) {
 
 	    /* Auto create */
-	    r = mboxlist_createmailbox(mailboxname, MAILBOX_FORMAT_NORMAL,
-				       partition, 1, imapd_userid, imapd_authstate);
+	    r = mboxlist_createmailbox(mailboxname, 0,
+				       partition, 1, imapd_userid,
+				       imapd_authstate);
 	    
 	    if (!r && autocreatequota > 0) {
 		(void) mboxlist_setquota(mailboxname, autocreatequota);
@@ -2622,8 +2624,9 @@ char *pattern;
     }
 
     if (!strcmp(namespace, "mailboxes")) {
-	mboxlist_findsub(pattern, imapd_userisadmin, imapd_userid, imapd_authstate,
-			 mailboxdata);
+	mboxlist_findsub(pattern, imapd_userisadmin, 
+			 imapd_userid, imapd_authstate,
+			 mailboxdata, NULL);
     }
     else if (!strcmp(namespace, "all.mailboxes")) {
 	mboxlist_findall(pattern, imapd_userisadmin, imapd_userid,

@@ -1,5 +1,5 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.80.4.1 1999/10/19 15:52:09 tmartin Exp $
+# $Id: Makefile.in,v 1.80.4.2 1999/11/02 20:56:35 leg Exp $
 # 
 # @configure_input@
 #
@@ -83,7 +83,7 @@ LOBJS= append.o mailbox.o mboxlist.o mboxname.o message.o \
 	config.o imap_err.o proc.o toimsp.o setproctitle.o convert_code.o \
 	$(SEEN) $(NOTIFY)
 
-IMAPDOBJS= imapd.o index.o
+IMAPDOBJS=index.o imapd.o
 
 PROGS = collectnews syncnews imapd pop3d \
 	arbitron fud reconstruct quota dump_deliverdb mbpath
@@ -139,6 +139,16 @@ dump_deliverdb: dump_deliver.o libimap.a $(DEPLIBS)
 imapd: $(IMAPDOBJS) libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o imapd \
 	 $(IMAPDOBJS) libimap.a $(DEPLIBS) $(LIBS)
+
+proxyd: proxyd.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o proxyd \
+	 proxyd.o libimap.a $(DEPLIBS) $(LIBS)
+
+gun: gun.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o gun gun.o libimap.a $(DEPLIBS) $(LIBS)
+
+target: target.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o target target.o libimap.a $(DEPLIBS) $(LIBS)
 
 imapd.pure: $(IMAPDOBJS) libimap.a $(DEPLIBS)
 	$(PURIFY) $(PUREOPT) \

@@ -27,7 +27,7 @@
  */
 
 /*
- * $Id: syncnews.c,v 1.13 1999/10/02 00:43:07 leg Exp $
+ * $Id: syncnews.c,v 1.13.4.1 1999/11/02 20:56:43 leg Exp $
  */
 
 #include <stdio.h>
@@ -213,7 +213,7 @@ do_syncnews()
     for (i = 0; i < group_num; i++) {
 	if (!group_seen[i]) {
 	    r = mboxlist_createmailbox(group[i],
-				       MAILBOX_FORMAT_NETNEWS, "news",
+				       MBTYPE_NETNEWS, "news",
 				       1, "anonymous", 0);
 
 	    if (r == IMAP_MAILBOX_BADNAME) {

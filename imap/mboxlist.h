@@ -2,21 +2,59 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.2 1999/10/21 22:42:19 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.3 1999/11/02 20:56:42 leg Exp $
  */
 
-#ifndef MBOXLIST_H
-#define MBOXLIST_H
+#ifndef INCLUDED_MBOXLIST_H
+#define INCLUDED_MBOXLIST_H
 
 #include "auth.h"
 
-#define MAX_PARTITION_LEN 10
+/*
+ * Maximum length of partition name. [config.c has a limit of 70]
+ */
+#define MAX_PARTITION_LEN 64
+
+/* flags for types of mailboxes */
+#define MBTYPE_REMOTE 0x01
+#define MBTYPE_CONFLICT 0x02
+#define MBTYPE_NETNEWS 0x04
+
+
+/* each mailbox has the following data */
+struct mbox_entry {
+    char name[MAX_MAILBOX_NAME];
+    int mbtype;
+    char partition[MAX_PARTITION_LEN];
+				/* holds remote machine for REMOTE mailboxes */
+    char acls[1];
+};
+
+typedef enum {
+    MB_NEXT,
+    MB_REMOVE,
+    MB_UPDATE,
+    MB_FATAL
+} foreach_res;
+
+/* commit a previously started transaction */
+int mboxlist_commit(void *tid);
+
+/* prepare a transaction; step 1 of a two-phase commit */
+int mboxlist_prepare(void *mytid);
+
+/* abort a previously started transaction */
+int mboxlist_abort(void *tid);
 
 /* Lookup 'name' in the mailbox list. */
 int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid);
 
-/* create mailbox */
-int mboxlist_createmailbox(char *name, int format, char *partition, 
+/* insert a stub entry */
+int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
+			  void **rettid);
+
+/* create mailbox; don't commit if tid != NULL */
+int mboxlist_createmailbox(char *name, int mbtype, char *partition, 
 			   int isadmin, char *userid, 
 			   struct auth_state *auth_state);
 
@@ -37,9 +75,13 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
 int mboxlist_findall(char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock);
 
+typedef foreach_res foreach_proc(void *rock, struct mbox_entry **mboxent);
+  
+int mboxlist_foreach(foreach_proc *p, void *rock, int rw);
+
 /* Find subscribed mailboxes that match 'pattern'. */
 int mboxlist_findsub(char *pattern, int isadmin, char *userid, 
-		     struct auth_state *auth_state, int (*proc)());
+		     struct auth_state *auth_state, int (*proc)(), void *rock);
 
 /* Change 'user's subscription status for mailbox 'name'. */
 int mboxlist_changesub(const char *name, const char *userid, 
@@ -52,7 +94,7 @@ int mboxlist_setquota(const char *root, int newquota);
 int mboxlist_syncnews(int num, char **group, int *seen);
 
 /* open the mailboxes db */
-void mboxlist_open(void);
+void mboxlist_open();
 
 /* close the database */
 void mboxlist_close(void);
