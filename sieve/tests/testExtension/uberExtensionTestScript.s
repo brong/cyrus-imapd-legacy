@@ -10,7 +10,7 @@ require ["regex", "relational", "comparator-i;ascii-numeric", "subaddress", "env
 #header regex
 
 if header :regex "Date" "Tue,(.*)Feb(.*)"
-{redirect "me+goodheaderregex@blah.com";}
+{redirect "me++goodheaderregex@blah.com";}
 
 
 

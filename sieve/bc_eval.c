@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.9 2003/02/03 22:39:36 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.10 2003/02/21 23:00:24 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -408,11 +408,15 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 				    res=-1;
 				    goto aedone;/* sieve is going to die now*/
 				}
+
 				res|= comp(val[y], reg, comprock);
 				free(reg);
 			    }
 			    else
 			    {
+#if VERBOSE
+	printf("%s compared to %s(from script)\n",addr, (char*)&(bc[currd+1].str ));
+#endif 
 				res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 			    }
 			    currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
@@ -637,10 +641,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    else if (result)
 	    {	/*skip over jump instruction*/
 		testend+=2;
-		printf("wwe");
-		
 	    }
-	    	printf("egh");
 	    ip=testend;
 	    
 	    break;

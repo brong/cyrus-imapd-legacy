@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.9 2003/01/23 21:27:50 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.10 2003/02/21 23:00:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -677,7 +677,7 @@ static struct aetags *new_aetags(void)
 
 static struct aetags *canon_aetags(struct aetags *ae)
 {
-    if (ae->addrtag == -1) { ae->addrtag = ANY; }
+    if (ae->addrtag == -1) { ae->addrtag = ALL; }
     if (ae->comparator == NULL) { ae->comparator = strdup("i;ascii-casemap"); }
     if (ae->comptag == -1) { ae->comptag = IS; }
     return ae;

@@ -31,7 +31,6 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #define DUMPCODE 0
 #define VERBOSE 0
 
-
 /*for finding correctly aligned bytes on strings*/
 /* bump to the next multiple of 4 bytes */
 #define ROUNDUP(num) (((num) + 3) & 0xFFFFFFFC)

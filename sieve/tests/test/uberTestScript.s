@@ -89,39 +89,39 @@ if true
 {redirect "me+goodtrue@blah.com";}
 
 if false
-{redirect "me+badfalse@good.com";}
+{redirect "me+badfalse@blah.com";}
 
 if not false
-{redirect "me+goodnot@good.com";}
+{redirect "me+goodnot@blah.com";}
 
 if true
-{redirect "me+goodif@good.com";}
+{redirect "me+goodif@blah.com";}
 else
-{redirect "me+badif@bad.com";}
+{redirect "me+badif@blah.com";}
 
 if false
-{redirect "me+badelseif@bad.com";}
+{redirect "me+badelseif@blah.com";}
 elsif true
-{redirect "me+goodelseif@good.com";}
+{redirect "me+goodelseif@blah.com";}
 else
-{redirect "me+badelseif@bad.com";}
+{redirect "me+badelseif@blah.com";}
 
 if false
-{redirect "me+badelse@bad.com";}
+{redirect "me+badelse@blah.com";}
 elsif false
-{redirect "me+badelse@bad.com";}
+{redirect "me+badelse@blah.com";}
 else
-{redirect "me+goodelse@good.com";}
+{redirect "me+goodelse@blah.com";}
 
 if false
 {}
 else
-{redirect "me+goodnull@good.com";}
+{redirect "me+goodnull@blah.com";}
 
 if true
   {if true
      {if true
-        {redirect "me+goodnesting@good.com";}
+        {redirect "me+goodnesting@blah.com";}
      }
   }
 

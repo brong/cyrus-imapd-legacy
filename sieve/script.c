@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.11 2002/09/05 17:19:58 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.12 2003/02/21 23:00:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -785,7 +785,6 @@ static int do_action_list(sieve_interp_t *interp,
 	   
 		int n = interp->markflags->nflags;
 		ret = SIEVE_OK;
-		printf("bleep");
 		while (n && ret == SIEVE_OK) {
 		    ret = sieve_removeflag(imapflags,
 					   interp->markflags->flag[--n]);
