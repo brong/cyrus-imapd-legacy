@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.17 2001/11/08 16:58:17 ken3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.18 2001/11/08 16:59:02 ken3 Exp $ */
 
 #include <config.h>
 
@@ -62,7 +62,6 @@
 #include <arpa/inet.h>
 
 #include <sasl/sasl.h>
-#include <db.h>			/* for cmd_id() 'environment' info */
 
 #include "acl.h"
 #include "util.h"
