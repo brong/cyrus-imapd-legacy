@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.31.6.1 2000/07/06 18:46:23 ken3 Exp $
+ * $Id: imapd.h,v 1.31.6.2 2000/10/26 20:20:14 ken3 Exp $
  *
  * Copyright 1999 Carnegie Mellon University
  * 
@@ -156,8 +156,14 @@ struct searchargs {
 
 /* Sort criterion */
 struct sortcrit {
-    unsigned key;		/* sort key + modifier as defined below */
-    char *args[2];		/* argument(s) to the sort key */
+    unsigned key;		/* sort key */
+    int flags;			/* key modifiers as defined below */
+    union {			/* argument(s) to the sort key */
+	struct {
+	    char *entry;
+	    char *attrib;
+	} annot;
+    } args;
 };
 
 /* Values for sort keys */
@@ -175,7 +181,7 @@ enum {
 };
 
 /* Sort key modifier flag bits */
-#define SORT_REVERSE		(1<<15)
+#define SORT_REVERSE		(1<<0)
 
 /* Bitmask for status queries */
 #define STATUS_MESSAGES		(1<<0)
