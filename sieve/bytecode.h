@@ -28,8 +28,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 /* for debugging*/
-#define DUMPCODE 1
-#define VERBOSE 1
+#define DUMPCODE 0
+#define VERBOSE 0
 
 
 /*for finding correctly aligned bytes on strings*/
