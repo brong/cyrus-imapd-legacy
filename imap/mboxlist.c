@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.13 1999/10/18 16:47:38 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.14 1999/10/18 18:40:04 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -552,6 +552,7 @@ int checkacl;
     int n;
     struct mailbox mailbox;
     int delete_quota_root = 0;
+    char *path;
     bit32 uidvalidity;
     DB_TXN *tid;
     DB_TXNMGR *txnp = dbenv.tx_info;
@@ -587,7 +588,7 @@ int checkacl;
 	/* Only admins may delete user */
 	if (!isadmin) return IMAP_PERMISSION_DENIED;
 
-	r = mboxlist_lookup(name, (char **)0, &acl, tid);
+	r = mboxlist_lookup(name, &path, &acl, tid);
 	if (r) return r;
 	
 	/* Check ACL before doing anything stupid
@@ -610,7 +611,7 @@ int checkacl;
 	    free(fname);
 	}
     }
-    r = mboxlist_lookup(name, (char **)0, &acl, tid);
+    r = mboxlist_lookup(name, &path, &acl, tid);
     if (r!=0) {
 	return r;
     }
@@ -715,7 +716,15 @@ int checkacl;
      * orphaned quota roots on renaming or when inside the
      * ``if (deleteuser)'' code above.
      */
-#if NEEDSTODB
+
+    r = mailbox_open_header_path(name, path, acl, 0, &mailbox, 0);
+
+    if (r!=0)
+    {
+      goto done;
+    }
+
+#if 0
     if (mailbox.quota.root &&
 	bsearch_mem(mailbox.quota.root, 1, list_base, list_size, 0, 0) == offset &&
 	(list_size <= offset + len + strlen(mailbox.quota.root) ||
@@ -724,26 +733,16 @@ int checkacl;
 	  list_base[offset+len+strlen(mailbox.quota.root)] != '\t'))) {
 	delete_quota_root = 1;
     }
+#endif
     
     /* Remove the mailbox and move new mailbox list file into place */
     uidvalidity = mailbox.uidvalidity;
     if (!r) r = mailbox_delete(&mailbox, delete_quota_root);
     if (r) {
-	close(newlistfd);
-	return r;
+	goto done;
     }
-
-    if (mboxlist_safe_rename(newlistfname, listfname, newlistfd) == -1) {
-	syslog(LOG_ERR, "IOERROR: renaming %s: %m", listfname);
-	close(newlistfd);
-	/* XXX We're left in an inconsistent state here */
-    	return IMAP_IOERROR;
-    }
-
-    close(newlistfd);
 
     toimsp(name, uidvalidity, "RENsn", "", 0, 0);
-#endif
 
   done:
     switch (txn_commit(tid)) {
