@@ -1,6 +1,6 @@
 /* mupdate.c -- cyrus murder database master 
  *
- * $Id: mupdate.c,v 1.10 2001/07/27 23:09:34 leg Exp $
+ * $Id: mupdate.c,v 1.10.2.1 2001/08/01 22:11:14 rjs3 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -68,11 +68,12 @@
 #include <arpa/inet.h>
 
 #include <pthread.h>
-#include <sasl.h>
+#include <sasl/sasl.h>
 
 #include <skip-list.h>
 
 #include "xmalloc.h"
+#include "iptostring.h"
 #include "mailbox.h"
 #include "exitcodes.h"
 #include "prot.h"
@@ -524,6 +525,7 @@ void *start(void *rock)
     struct sockaddr_in localaddr, remoteaddr;
     int haveaddr = 0;
     int salen;
+    char localip[60], remoteip[60];
     char clienthost[250];
     struct hostent *hp;
 
@@ -548,21 +550,22 @@ void *start(void *rock)
 	strcat(clienthost, inet_ntoa(remoteaddr.sin_addr));
 	strcat(clienthost, "]");
 	salen = sizeof(localaddr);
-	if (getsockname(0, (struct sockaddr *)&localaddr, &salen) == 0) {
+	if (getsockname(0, (struct sockaddr *)&localaddr, &salen) == 0
+	    && iptostring((struct sockaddr *)&remoteaddr,
+			  sizeof(struct sockaddr_in), remoteip, 60)
+	    && iptostring((struct sockaddr *)&localaddr,
+			  sizeof(struct sockaddr_in), localip, 60)) {
 	    haveaddr = 1;
 	}
     }
 
     /* create sasl connection */
     if (sasl_server_new("imap", config_servername, 
-			NULL, NULL, SASL_SECURITY_LAYER, 
+			(haveaddr ? localip : NULL),
+			(haveaddr ? remoteip : NULL),
+			NULL, NULL, 0, 
 			&c->saslconn) != SASL_OK) {
 	fatal("SASL failed initializing: sasl_server_new()", EC_TEMPFAIL);
-    }
-
-    if (haveaddr) {
-	sasl_setprop(c->saslconn, SASL_IP_REMOTE, &remoteaddr);
-	sasl_setprop(c->saslconn, SASL_IP_LOCAL, &localaddr);
     }
 
     cmdloop(c);
@@ -975,7 +978,7 @@ void sendupdates(struct conn *C)
     struct pending *p, *q;
     struct timeval now;
     struct timespec timeout;
-    int r, ch;
+    int r;
 
     pthread_mutex_lock(&C->m);
 

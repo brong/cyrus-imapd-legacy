@@ -1,5 +1,5 @@
 /* proc.c -- Server process registry
- $Id: proc.c,v 1.21 2001/03/15 22:31:11 leg Exp $
+ $Id: proc.c,v 1.21.6.1 2001/08/01 22:11:15 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -63,10 +63,10 @@ extern void setproctitle_init(int argc, char **argv, char **envp);
 extern void setproctitle(const char *fmt, ...);
 
 int proc_register(progname, clienthost, userid, mailbox)
-char *progname;
-char *clienthost;
-char *userid;
-char *mailbox;
+const char *progname;
+const char *clienthost;
+const char *userid;
+const char *mailbox;
 {
     unsigned pid;
 

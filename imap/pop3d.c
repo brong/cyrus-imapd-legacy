@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.7 2001/08/01 20:18:04 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.8 2001/08/01 22:11:14 rjs3 Exp $
  */
 #include <config.h>
 
@@ -780,14 +780,13 @@ static void cmd_starttls(int pop3s)
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
 
-    result = sasl_setprop(popd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
-
-    if (result != SASL_OK) {
-	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
-    }
-
     /* if authenticated set that */
     if (auth_id != NULL) {
+	result = sasl_setprop(popd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
+	if (result != SASL_OK) {
+	    fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
+	}
+
 	popd_userid = auth_id;
     }
 

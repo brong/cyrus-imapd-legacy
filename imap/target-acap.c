@@ -40,7 +40,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: target-acap.c,v 1.26 2001/02/22 19:27:20 ken3 Exp $
+ * $Id: target-acap.c,v 1.26.6.1 2001/08/01 22:11:16 rjs3 Exp $
  */
 
 #include <config.h>
@@ -61,7 +61,6 @@
 #include <sys/time.h>
 #include <signal.h>
 
-#include <sasl.h>
 #include <acap.h>
 #include <skip-list.h>
 
