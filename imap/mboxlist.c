@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.59 2000/01/28 19:04:46 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.60 2000/01/28 20:41:26 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -277,6 +277,7 @@ int mboxlist_acapinit(void)
     r = acap_conn_connect(str, &acap_conn);
     free(str);
     if (r != SASL_OK) {
+	acap_conn = NULL; /* xxx leaked? */
 	syslog(LOG_ERR,"acap_conn_connect() failed");
 	return -5;
     }
