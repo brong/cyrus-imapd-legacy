@@ -119,7 +119,7 @@ int actions_init(void);
  *
  */
 
-int actions_setuser(char *userid);
+int actions_setuser(const char *userid);
 
 
 

@@ -1,6 +1,6 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.62 2001/05/21 18:21:47 leg Exp $
+ * $Id: lmtpd.c,v 1.62.2.1 2001/07/31 20:54:03 rjs3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,7 @@
  *
  */
 
-/*static char _rcsid[] = "$Id: lmtpd.c,v 1.62 2001/05/21 18:21:47 leg Exp $";*/
+/*static char _rcsid[] = "$Id: lmtpd.c,v 1.62.2.1 2001/07/31 20:54:03 rjs3 Exp $";*/
 
 #include <config.h>
 
@@ -74,8 +74,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sasl.h>
-#include <saslutil.h>
+#include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include "acl.h"
 #include "assert.h"

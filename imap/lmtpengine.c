@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26 2001/07/07 01:40:25 ken3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.1 2001/07/31 20:54:04 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -67,8 +67,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sasl.h>
-#include <saslutil.h>
+#include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include "assert.h"
 #include "util.h"
@@ -954,6 +954,30 @@ static char *process_recipient(char *addr,
     return NULL;
 }    
 
+/* FIXME: This only parses IPV4 addresses */
+static int iptostring(const struct sockaddr_in *addr,
+		      char *out, unsigned outlen) {
+    unsigned char a[4];
+    int i;
+    
+    /* FIXME: Weak bounds check, are we less than the largest possible size? */
+    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
+    if(outlen <= 21) return SASL_BUFOVER;
+    if(!addr || !out) return SASL_BADPARAM;
+
+    memset(out, 0, outlen);
+
+    for(i=3; i>=0; i--) {
+	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
+    }
+    
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
+	                                 (int)a[1],(int)a[0],
+	                                 (int)addr->sin_port);
+
+    return SASL_OK;
+}
+
 void lmtpmode(struct lmtp_func *func,
 	      struct protstream *pin, 
 	      struct protstream *pout,
@@ -966,12 +990,15 @@ void lmtpmode(struct lmtp_func *func,
     char *err;
 
     struct sockaddr_in localaddr, remoteaddr;
+    char localip[60], remoteip[60];
     socklen_t salen;
+
+    sasl_ssf_t ssf;
+    char *auth_id;
 
     sasl_conn_t *conn = NULL;
     int secflags = 0;
     sasl_security_properties_t *secprops = NULL;
-    sasl_external_properties_t *extprops = NULL;
     int authenticated = 0;	/* -1: external auth'd, but no AUTH issued
 				    0: no auth
 				    1: did AUTH */
@@ -979,7 +1006,8 @@ void lmtpmode(struct lmtp_func *func,
     struct auth_state *authstate = NULL;
 
     msg_new(&msg);
-    if (sasl_server_new("lmtp", NULL, NULL, NULL, 0, &conn) != SASL_OK) {
+    if (sasl_server_new("lmtp", NULL, NULL, NULL,
+			NULL, NULL, 0, &conn) != SASL_OK) {
 	fatal("SASL failed initializing: sasl_server_new()", EC_TEMPFAIL);
     }
 
@@ -1000,8 +1028,10 @@ void lmtpmode(struct lmtp_func *func,
 	salen = sizeof(localaddr);
 	if (!getsockname(fd, (struct sockaddr *)&localaddr, &salen)) {
 	    /* set the ip addresses here */
-	    sasl_setprop(conn, SASL_IP_REMOTE, &remoteaddr);  
-	    sasl_setprop(conn, SASL_IP_LOCAL,  &localaddr );
+	    if(iptostring(&localaddr, localip, 60) == SASL_OK)
+		sasl_setprop(conn, SASL_IPLOCALPORT,  &localaddr );
+	    if(iptostring(&remoteaddr, remoteip, 60) == SASL_OK)
+		sasl_setprop(conn, SASL_IPREMOTEPORT, &remoteaddr);  
 	} else {
 	    fatal("can't get local addr", EC_SOFTWARE);
 	}
@@ -1018,11 +1048,10 @@ void lmtpmode(struct lmtp_func *func,
     if (func->preauth) {
 	authenticated = -1;	/* we'll allow commands, 
 				   but we still accept the AUTH command */
-	extprops = (sasl_external_properties_t *) 
-	    xmalloc(sizeof(sasl_external_properties_t));
-	extprops->ssf = 2;
-	extprops->auth_id = "postman";
-	sasl_setprop(conn, SASL_SSF_EXTERNAL, extprops);
+	ssf = 2;
+	auth_id = "postman";
+	sasl_setprop(conn, SASL_SSF_EXTERNAL, &ssf);
+	sasl_setprop(conn, SASL_AUTH_EXTERNAL, auth_id);
     }
 
     prot_printf(pout, "220 %s LMTP Cyrus %s ready\r\n", 
@@ -1050,10 +1079,10 @@ void lmtpmode(struct lmtp_func *func,
       case 'A':
 	  if (!strncasecmp(buf, "auth ", 5)) {
 	      char mech[128];
-	      char *in = NULL, *out = NULL;
+	      char *in = NULL;
+	      const char *out = NULL;
 	      unsigned int inlen, outlen;
-	      const char *errstr;
-	      char *user;
+	      const char *user;
 	      
 	      if (authenticated > 0) {
 		  prot_printf(pout,
@@ -1079,8 +1108,9 @@ void lmtpmode(struct lmtp_func *func,
 	      }
 	      strlcpy(mech, buf + 5, sizeof(mech));
 	      if (p != NULL) {
-		  in = xmalloc(strlen(p));
-		  r = sasl_decode64(p, strlen(p), in, &inlen);
+		  unsigned len = strlen(p);
+		  in = xmalloc(len);
+		  r = sasl_decode64(p, len, in, len, &inlen);
 		  if (r != SASL_OK) {
 		      prot_printf(pout,
 				  "501 5.5.4 cannot base64 decode\r\n");
@@ -1094,8 +1124,7 @@ void lmtpmode(struct lmtp_func *func,
 	      
 	      r = sasl_server_start(conn, mech,
 				    in, inlen,
-				    &out, &outlen,
-				    &errstr);
+				    &out, &outlen);
 	      if (in) { free(in); in = NULL; }
 	      if (r == SASL_NOMECH) {
 		  prot_printf(pout, 
@@ -1105,11 +1134,12 @@ void lmtpmode(struct lmtp_func *func,
 	      
 	      while (r == SASL_CONTINUE) {
 		  char inbase64[4096];
+		  unsigned len;
 		  
 		  r = sasl_encode64(out, outlen, 
 				    inbase64, sizeof(inbase64), NULL);
-	  if (r != SASL_OK) break;
-
+		  if (r != SASL_OK) break;
+	  
 		  /* send out */
 		  prot_printf(pout,"334 %s\r\n", inbase64);
 		  
@@ -1121,51 +1151,40 @@ void lmtpmode(struct lmtp_func *func,
 		  if (p >= buf && *p == '\n') *p-- = '\0';
 		  if (p >= buf && *p == '\r') *p-- = '\0';
 		  
-		  in = xmalloc(strlen(buf));
-		  r = sasl_decode64(buf, strlen(buf), in, &inlen);
+		  len = strlen(buf);
+		  in = xmalloc(len);
+		  r = sasl_decode64(buf, len, in, len, &inlen);
 		  if (r != SASL_OK) {
 		      prot_printf(pout,
 				  "501 5.5.4 cannot base64 decode\r\n");
 		      goto nextcmd; /* what's the state of our sasl_conn_t? */
 		  }
 
-		  if (out) { free(out); out = NULL; }
 		  r = sasl_server_step(conn,
 				       in, inlen,
-				       &out, &outlen,
-				       &errstr);
+				       &out, &outlen);
 		  if (in) { free(in); in = NULL; }
 	      }
 	      
 	      if (in) { free(in); in = NULL; }
-	      if (out) { free(out); out = NULL; }
 	      if ((r != SASL_OK) && (r != SASL_CONTINUE)) {
-		  if (errstr) {
-		      syslog(LOG_ERR, "badlogin: %s %s %s [%s]",
-			     remoteaddr.sin_family == AF_INET ?
-			        inet_ntoa(remoteaddr.sin_addr) :
-			        "[unix socket]",
-			     mech,
-			     sasl_errstring(r, NULL, NULL), 
-			     errstr);
-		  } else {
-		      syslog(LOG_ERR, "badlogin: %s %s %s",
-			     remoteaddr.sin_family == AF_INET ?
-			        inet_ntoa(remoteaddr.sin_addr) :
-			        "[unix socket]",
-			     mech,
-			     sasl_errstring(r, NULL, NULL));
-		  }
+		  syslog(LOG_ERR, "badlogin: %s %s %s",
+			 remoteaddr.sin_family == AF_INET ?
+			 inet_ntoa(remoteaddr.sin_addr) :
+			 "[unix socket]",
+			 mech,
+			 sasl_errdetail(conn));
 		  
 		  snmp_increment_args(AUTHENTICATION_NO, 1,
 				      VARIABLE_AUTH, hash_simple(mech), 
 				      VARIABLE_LISTEND);
 
 		  prot_printf(pout, "501 5.5.4 %s\r\n",
-			      sasl_errstring(sasl_usererr(r), NULL, NULL));
+		       sasl_errstring((r == SASL_NOUSER ? SASL_BADAUTH : r),
+				      NULL, NULL));
 		  continue;
 	      }
-	      r = sasl_getprop(conn, SASL_USERNAME, (void **) &user);
+	      r = sasl_getprop(conn, SASL_USERNAME, (const void **) &user);
 	      if (r != SASL_OK) user = "[sasl error]";
 
 	      /* authenticated successfully! */
@@ -1225,7 +1244,7 @@ void lmtpmode(struct lmtp_func *func,
       case 'L':
 	  if (!strncasecmp(buf, "lhlo ", 5)) {
 	      unsigned int mechcount;
-	      char *mechs;
+	      const char *mechs;
 	      
 	      prot_printf(pout, "250-%s\r\n"
 			  "250-IGNOREQUOTA\r\n"
@@ -1236,7 +1255,6 @@ void lmtpmode(struct lmtp_func *func,
 				NULL, &mechcount) == SASL_OK && 
 		  mechcount > 0) {
 		  prot_printf(pout,"250-%s\r\n", mechs);
-		  free(mechs);
 	      }
 	      prot_printf(pout, "250 PIPELINING\r\n");
 	      
@@ -1443,7 +1461,6 @@ void lmtpmode(struct lmtp_func *func,
 
     /* security */
     if (conn) sasl_dispose(&conn);
-    if (extprops) free(extprops);
     if (authuser) free(authuser);
     if (authstate) auth_freestate(authstate);
 }
@@ -1570,8 +1587,9 @@ int lmtp_connect(const char *phost,
     struct lmtp_conn *conn;
     char buf[8192];
     int code;
-    sasl_external_properties_t *extprops = NULL;
-
+    unsigned ssf;
+    const char *auth_id;
+    
     assert(host);
     assert(ret);
 
@@ -1592,10 +1610,8 @@ int lmtp_connect(const char *phost,
 	}
 
 	/* set external properties */
-	extprops = (sasl_external_properties_t *) 
-	    xmalloc(sizeof(sasl_external_properties_t));
-	extprops->ssf = 2;
-	extprops->auth_id = "postman";
+	ssf = 2;
+	auth_id = "postman";
 
 	/* change host to 'config_servername' */
 	free(host);
@@ -1715,7 +1731,7 @@ int lmtp_connect(const char *phost,
 
     /* AUTH */
     if ((conn->capability & CAPA_AUTH) && (conn->mechs)) {
-	sasl_client_new("lmtp", host, cb, 0, &conn->saslconn);
+	sasl_client_new("lmtp", host, NULL, NULL, cb, 0, &conn->saslconn);
 	code = do_auth(conn);
     }
 

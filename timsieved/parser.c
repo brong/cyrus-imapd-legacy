@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.9 2001/01/29 21:15:06 leg Exp $
+ * $Id: parser.c,v 1.9.6.1 2001/07/31 20:54:07 rjs3 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -53,8 +53,8 @@
 #include <syslog.h>
 
 #include <string.h>
-#include <sasl.h>
-#include <saslutil.h>
+#include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include "prot.h"
 #include "lex.h"
@@ -374,21 +374,21 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
   char *clientin = NULL;
   unsigned int clientinlen = 0;
 
-  char *serverout=NULL;
+  const char *serverout=NULL;
   unsigned int serveroutlen;
   const char *errstr=NULL;
-  char *username;
+  const char *username;
 
   clientinstr = initial_challenge;
   if (clientinstr!=NULL)
   {
-
       clientin=(char *) malloc(clientinstr->len*2);
       
       if (clientinstr->len) {
 	  sasl_result=sasl_decode64(string_DATAPTR(clientinstr), 
 				    clientinstr->len,
-				    clientin, &clientinlen);
+				    clientin, clientinstr->len*2,
+				    &clientinlen);
       } else {
 	  clientinlen = 0;
 	  sasl_result = SASL_OK;
@@ -405,8 +405,7 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
 
   sasl_result = sasl_server_start(sieved_saslconn, mech,
 				  clientin, clientinlen,
-				  &serverout, &serveroutlen,
-				  &errstr);
+				  &serverout, &serveroutlen);
 
   while (sasl_result==SASL_CONTINUE)
   {
@@ -433,7 +432,7 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
       clientin=(char *) malloc(str->len*2);
 
       sasl_result=sasl_decode64(string_DATAPTR(str), str->len,
-		    clientin, &clientinlen);
+				clientin, str->len*2, &clientinlen);
 
       if (sasl_result!=SASL_OK)
       {
@@ -453,14 +452,10 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
     /* we want to see a STRING followed by EOL */
     if ((token1==STRING) && (token2==EOL))
     {
-      
       sasl_result = sasl_server_step(sieved_saslconn,
 				     clientin,
 				     clientinlen,
-				     &serverout, &serveroutlen,
-				     &errstr);
-
-
+				     &serverout, &serveroutlen);
     } else {
       *errmsg = "expected a STRING followed by an EOL";
       syslog(LOG_NOTICE, "badlogin: %s %s %s",
@@ -473,7 +468,8 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
   if (sasl_result!=SASL_OK)
   {
       /* convert to user error code */
-      sasl_result = sasl_usererr(sasl_result);
+      if(sasl_result == SASL_NOUSER)
+	  sasl_result = SASL_BADAUTH;
       *errmsg = (const char *) sasl_errstring(sasl_result,NULL,NULL);
       if (errstr!=NULL) {
 	  syslog(LOG_NOTICE, "badlogin: %s %s %d %s",
@@ -487,7 +483,8 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
   }
 
   /* get the userid from SASL */
-  sasl_result=sasl_getprop(sieved_saslconn, SASL_USERNAME,(void **) &username);
+  sasl_result=sasl_getprop(sieved_saslconn, SASL_USERNAME,
+			   (const void **) &username);
   if (sasl_result!=SASL_OK)
   {
     *errmsg = "Internal SASL error";

@@ -47,7 +47,7 @@
 #include <config.h>
 #endif
 
-#include <sasl.h> /* yay! sasl */
+#include <sasl/sasl.h> /* yay! sasl */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -224,12 +224,37 @@ void service_abort(void)
     return;
 }
 
+/* FIXME: This only parses IPV4 addresses */
+static int iptostring(const struct sockaddr_in *addr,
+		      char *out, unsigned outlen) {
+    unsigned char a[4];
+    int i;
+    
+    /* FIXME: Weak bounds check, are we less than the largest possible size? */
+    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
+    if(outlen <= 21) return SASL_BUFOVER;
+    if(!addr || !out) return SASL_BADPARAM;
+
+    memset(out, 0, outlen);
+
+    for(i=3; i>=0; i--) {
+	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
+    }
+    
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
+	                                 (int)a[1],(int)a[0],
+	                                 (int)addr->sin_port);
+
+    return SASL_OK;
+}
+
 int service_main(int argc, char **argv, char **envp)
 {
     socklen_t salen;
     struct hostent *hp;
     int timeout;
     int secflags = 0;
+    char remoteip[60], localip[60];
     sasl_security_properties_t *secprops = NULL;
 
     /* set up the prot streams */
@@ -262,7 +287,8 @@ int service_main(int argc, char **argv, char **envp)
 	strcat(sieved_clienthost, inet_ntoa(sieved_remoteaddr.sin_addr));
 	strcat(sieved_clienthost, "]");
 	salen = sizeof(sieved_localaddr);
-	if (getsockname(0, (struct sockaddr *)&sieved_localaddr, &salen) == 0) {
+	if (getsockname(0, (struct sockaddr *)&sieved_localaddr, &salen) == 0)
+	{
 	    sieved_haveaddr = 1;
 	}
     }
@@ -278,10 +304,15 @@ int service_main(int argc, char **argv, char **envp)
 	fatal("SASL failed initializing: sasl_server_init()", -1); 
 
     /* other params should be filled in */
-    if (sasl_server_new("imap", config_servername, NULL, 
-			NULL, SASL_SECURITY_LAYER, &sieved_saslconn)
+    if (sasl_server_new("imap", config_servername, NULL,
+			NULL, NULL, NULL, 0, &sieved_saslconn)
 	   != SASL_OK)
 	fatal("SASL failed initializing: sasl_server_new()", -1); 
+
+    if(iptostring(&sieved_remoteaddr, remoteip, 60) == SASL_OK)
+	sasl_setprop(sieved_saslconn, SASL_IPREMOTEPORT, remoteip);  
+    if(iptostring(&sieved_remoteaddr, localip, 60) == SASL_OK)
+	sasl_setprop(sieved_saslconn, SASL_IPLOCALPORT, localip);
 
     /* will always return something valid */
     /* should be configurable! */
@@ -291,9 +322,6 @@ int service_main(int argc, char **argv, char **envp)
     }
     secprops = mysasl_secprops(secflags);
     sasl_setprop(sieved_saslconn, SASL_SEC_PROPS, secprops);
-    
-    sasl_setprop(sieved_saslconn, SASL_IP_REMOTE, &sieved_remoteaddr);  
-    sasl_setprop(sieved_saslconn, SASL_IP_LOCAL, &sieved_localaddr);  
 
     if (actions_init() != TIMSIEVE_OK)
       fatal("Error initializing actions",-1);

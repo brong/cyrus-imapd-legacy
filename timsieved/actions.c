@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.25 2001/01/16 01:03:11 leg Exp $
+ * $Id: actions.c,v 1.25.8.1 2001/07/31 20:54:07 rjs3 Exp $
  * 
  */
 /*
@@ -93,8 +93,7 @@ int actions_init(void)
   return TIMSIEVE_OK;
 }
 
-
-int actions_setuser(char *userid)
+int actions_setuser(const char *userid)
 {
   char hash;
   char *foo=sieve_dir;
@@ -147,7 +146,7 @@ int scriptname_valid(mystring_t *name)
 
 int capabilities(struct protstream *conn, sasl_conn_t *saslconn)
 {
-    char *sasllist;
+    const char *sasllist;
     unsigned mechcount;
 
     /* implementation */

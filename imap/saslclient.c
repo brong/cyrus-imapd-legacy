@@ -39,14 +39,14 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: saslclient.c,v 1.7 2001/03/15 22:31:11 leg Exp $ */
+/* $Id: saslclient.c,v 1.7.6.1 2001/07/31 20:54:04 rjs3 Exp $ */
 
 #include <config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sasl.h>
+#include <sasl/sasl.h>
 
 #include "xmalloc.h"
 
@@ -96,9 +96,6 @@ static int mysasl_getsecret_cb(sasl_conn_t *conn,
 {
     const char *pass;
     size_t len;
-    /*    struct backend *s = (struct backend *) context; */
-    
-    
 
     if (!conn || !result || id != SASL_CB_PASS) {
 	return SASL_BADPARAM;

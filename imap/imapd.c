@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309 2001/07/06 01:51:20 ken3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.1 2001/07/31 20:54:02 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -62,7 +62,7 @@
 #include <arpa/inet.h>
 #include <sys/utsname.h>
 
-#include <sasl.h>
+#include <sasl/sasl.h>
 #include <db.h>			/* for cmd_id() 'environment' info */
 
 #include "acl.h"
@@ -252,11 +252,10 @@ const char *auth_identity;
 
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
-static int mysasl_authproc(void *context __attribute__((unused)),
+static int mysasl_authproc(void *context,
 		       const char *auth_identity,
 		       const char *requested_user,
-		       const char **user,
-		       const char **errstr)
+		       const char **user)
 {
     const char *val;
     char *canon_authuser, *canon_requser;
@@ -265,7 +264,7 @@ static int mysasl_authproc(void *context __attribute__((unused)),
 
     canon_authuser = auth_canonifyid(auth_identity);
     if (!canon_authuser) {
-	if (errstr) *errstr = "bad userid authenticated";
+	sasl_seterror(context, 0, "bad userid authenticated");
 	return SASL_BADAUTH;
     }
     canon_authuser = xstrdup(canon_authuser);
@@ -273,7 +272,7 @@ static int mysasl_authproc(void *context __attribute__((unused)),
     if (!requested_user) requested_user = auth_identity;
     canon_requser = auth_canonifyid(requested_user);
     if (!canon_requser) {
-	if (errstr) *errstr = "bad userid requested";
+	sasl_seterror(context, 0, "bad userid requested");
 	return SASL_BADAUTH;
     }
     canon_requser = xstrdup(canon_requser);
@@ -294,7 +293,7 @@ static int mysasl_authproc(void *context __attribute__((unused)),
 	if (!*val) {
 	    snprintf(replybuf, 100, "cross-realm login %s denied", 
 		     canon_authuser);
-	    if (errstr) *errstr = replybuf;
+	    sasl_seterror(context, 0, replybuf);
 	    return SASL_BADAUTH;
 	}
     }
@@ -319,7 +318,7 @@ static int mysasl_authproc(void *context __attribute__((unused)),
 	    
 	    imapd_authstate = auth_newstate(canon_requser, NULL);
 	} else {
-	    if (errstr) *errstr = "user is not allowed to proxy";
+	    sasl_seterror(context, 0, "user is not allowed to proxy");
 	    
 	    free(canon_authuser);
 	    free(canon_requser);
@@ -331,7 +330,6 @@ static int mysasl_authproc(void *context __attribute__((unused)),
 
     free(canon_authuser);
     *user = canon_requser;
-    if (errstr) *errstr = NULL;
     return SASL_OK;
 }
 
@@ -464,6 +462,30 @@ int service_init(int argc, char **argv, char **envp)
     return 0;
 }
 
+/* FIXME: This only parses IPV4 addresses */
+static int iptostring(const struct sockaddr_in *addr,
+		      char *out, unsigned outlen) {
+    unsigned char a[4];
+    int i;
+    
+    /* FIXME: Weak bounds check, are we less than the largest possible size? */
+    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
+    if(outlen <= 21) return SASL_BUFOVER;
+    if(!addr || !out) return SASL_BADPARAM;
+
+    memset(out, 0, outlen);
+
+    for(i=3; i>=0; i--) {
+	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
+    }
+    
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
+	                                 (int)a[1],(int)a[0],
+	                                 (int)addr->sin_port);
+
+    return SASL_OK;
+}
+
 /*
  * run for each accepted connection
  */
@@ -473,8 +495,8 @@ int service_main(int argc, char **argv, char **envp)
     struct hostent *hp;
     int timeout;
     sasl_security_properties_t *secprops = NULL;
-    sasl_external_properties_t extprops;
     struct sockaddr_in imapd_localaddr, imapd_remoteaddr;
+    char localip[60], remoteip[60];
     int imapd_haveaddr = 0;
 
     signals_poll();
@@ -483,9 +505,6 @@ int service_main(int argc, char **argv, char **envp)
     /* get command line args for use in ID before getopt mangles them */
     id_getcmdline(argc, argv);
 #endif
-
-    memset(&extprops, 0, sizeof(sasl_external_properties_t));
-    extprops.ssf = extprops_ssf;
 
     imapd_in = prot_new(0, 0);
     imapd_out = prot_new(1, 1);
@@ -507,25 +526,31 @@ int service_main(int argc, char **argv, char **envp)
 	strcat(imapd_clienthost, "]");
 	salen = sizeof(imapd_localaddr);
 	if (getsockname(0, (struct sockaddr *)&imapd_localaddr, &salen) == 0) {
-	    imapd_haveaddr = 1;
+	      if(iptostring(&imapd_localaddr, localip, 60) == SASL_OK
+		 && iptostring(&imapd_remoteaddr, remoteip, 60) == SASL_OK) {
+		  imapd_haveaddr = 1;
+	      }
 	}
     }
 
     /* create the SASL connection */
     if (sasl_server_new("imap", config_servername, 
-			NULL, NULL, SASL_SECURITY_LAYER, 
+			NULL, NULL, NULL, NULL, 0, 
 			&imapd_saslconn) != SASL_OK) {
 	fatal("SASL failed initializing: sasl_server_new()", EC_TEMPFAIL);
     }
 
     secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
     sasl_setprop(imapd_saslconn, SASL_SEC_PROPS, secprops);
-    if (extprops.ssf) {
-	sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops);
-    }
+
+    sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
+/*	sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, ); */
+
     if (imapd_haveaddr) {
-	sasl_setprop(imapd_saslconn, SASL_IP_REMOTE, &imapd_remoteaddr);
-	sasl_setprop(imapd_saslconn, SASL_IP_LOCAL, &imapd_localaddr);
+	sasl_setprop(imapd_saslconn, SASL_IPREMOTEPORT,
+		     (const void **)&remoteip);
+	sasl_setprop(imapd_saslconn, SASL_IPLOCALPORT,
+		     (const void **)&localip);
     }
 
     proc_register("imapd", imapd_clienthost, NULL, NULL);
@@ -1432,12 +1457,10 @@ char *passwd;
 				    canon_user,
 				    strlen(canon_user),
 				    passwd,
-				    strlen(passwd),
-				    (const char **) &reply)) != SASL_OK) {
-	if (reply) {
-	    syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
-		   imapd_clienthost, canon_user, reply);
-	}
+				    strlen(passwd))) != SASL_OK) {
+	syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
+	       imapd_clienthost, canon_user, sasl_errdetail(imapd_saslconn));
+
 	/* Apply penalty only if not under layer */
 	if (imapd_starttls_done == 0)
 	    sleep(3);
@@ -1517,30 +1540,25 @@ cmd_authenticate(char *tag,char *authtype)
     static struct buf clientin;
     int clientinlen=0;
     
-    char *serverout;
+    const char *serverout;
     unsigned int serveroutlen;
-    const char *errstr;
+    const char *errorstring;
     
-    const char *errorstring = NULL;
-
-    int *ssfp;
+    const int *ssfp;
     char *ssfmsg=NULL;
 
-    char *canon_user;
+    const char *canon_user;
 
     sasl_result = sasl_server_start(imapd_saslconn, authtype,
 				    NULL, 0,
-				    &serverout, &serveroutlen,
-				    &errstr);    
+				    &serverout, &serveroutlen);    
 
     /* sasl_server_start will return SASL_OK or SASL_CONTINUE on success */
 
     while (sasl_result == SASL_CONTINUE)
     {
-
       /* print the message to the user */
       printauthready(imapd_out, serveroutlen, (unsigned char *)serverout);
-      free(serverout);
 
       /* get string from user */
       clientinlen = getbase64string(imapd_in, &clientin);
@@ -1552,24 +1570,15 @@ cmd_authenticate(char *tag,char *authtype)
       sasl_result = sasl_server_step(imapd_saslconn,
 				     clientin.s,
 				     clientinlen,
-				     &serverout, &serveroutlen,
-				     &errstr);
+				     &serverout, &serveroutlen);
     }
 
 
     /* failed authentication */
     if (sasl_result != SASL_OK)
     {
-	/* convert the sasl error code to a string */
-	errorstring = sasl_errstring(sasl_usererr(sasl_result), NULL, NULL);
-      
-	if (errstr) {
-	    syslog(LOG_NOTICE, "badlogin: %s %s %s [%s]",
-		   imapd_clienthost, authtype, errorstring, errstr);
-	} else {
-	    syslog(LOG_NOTICE, "badlogin: %s %s %s",
-		   imapd_clienthost, authtype, errorstring);
-	}
+	syslog(LOG_NOTICE, "badlogin: %s %s %s [%s]",
+	       imapd_clienthost, authtype, sasl_errdetail(imapd_saslconn));
 
 	snmp_increment_args(AUTHENTICATION_NO, 1,
 			    VARIABLE_AUTH, hash_simple(authtype), 
@@ -1591,7 +1600,7 @@ cmd_authenticate(char *tag,char *authtype)
      * mysasl_authproc()
      */
     sasl_result = sasl_getprop(imapd_saslconn, SASL_USERNAME,
-			       (void **) &canon_user);
+			       (const void **) &canon_user);
     imapd_userid = xstrdup(canon_user);
     if (sasl_result != SASL_OK) {
 	prot_printf(imapd_out, "%s NO weird SASL error %d SASL_USERNAME\r\n", 
@@ -1606,7 +1615,7 @@ cmd_authenticate(char *tag,char *authtype)
     syslog(LOG_NOTICE, "login: %s %s %s%s %s", imapd_clienthost, imapd_userid,
 	   authtype, imapd_starttls_done ? "+TLS" : "", "User logged in");
 
-    sasl_getprop(imapd_saslconn, SASL_SSF, (void **) &ssfp);
+    sasl_getprop(imapd_saslconn, SASL_SSF, (const void **) &ssfp);
 
     /* really, we should be doing a sasl_getprop on SASL_SSF_EXTERNAL,
        but the current libsasl doesn't allow that. */
@@ -1981,7 +1990,7 @@ void idle_update(idle_flags_t flags)
  */
 void cmd_capability(char *tag)
 {
-    char *sasllist; /* the list of SASL mechanisms */
+    const char *sasllist; /* the list of SASL mechanisms */
     unsigned mechcount;
     const char *acapserver;
 
@@ -2012,7 +2021,6 @@ void cmd_capability(char *tag)
 		      &sasllist,
 		      NULL, &mechcount) == SASL_OK && mechcount > 0) {
 	prot_printf(imapd_out, " %s", sasllist);      
-	free(sasllist);
     } else {
 	/* else don't show anything */
     }
@@ -4064,10 +4072,12 @@ void cmd_starttls(char *tag, int imaps)
 {
     int result;
     int *layerp;
-    sasl_external_properties_t external;
+
+    char *auth_id;
+    sasl_ssf_t ssf;
 
     /* SASL and openssl have different ideas about whether ssf is signed */
-    layerp = (int *) &(external.ssf);
+    layerp = (int *) &ssf;
 
     if (imapd_starttls_done == 1)
     {
@@ -4112,7 +4122,7 @@ void cmd_starttls(char *tag, int imaps)
     result=tls_start_servertls(0, /* read */
 			       1, /* write */
 			       layerp,
-			       &(external.auth_id),
+			       &auth_id,
 			       &tls_conn);
 
     /* if error */
@@ -4129,7 +4139,13 @@ void cmd_starttls(char *tag, int imaps)
     }
 
     /* tell SASL about the negotiated layer */
-    result = sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &external);
+    result = sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &ssf);
+
+    if (result != SASL_OK) {
+	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
+    }
+
+    result = sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, &auth_id);
 
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
