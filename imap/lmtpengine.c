@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26.2.8 2001/11/24 19:20:21 ken3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.9 2001/11/24 19:36:53 ken3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -1135,8 +1135,16 @@ void lmtpmode(struct lmtp_func *func,
 	salen = sizeof(localaddr);
 	if (!getsockname(fd, (struct sockaddr *)&localaddr, &salen)) {
 	    /* set the ip addresses here */
-	    sasl_setprop(cd.conn, SASL_IP_REMOTE, &remoteaddr);  
-	    sasl_setprop(cd.conn, SASL_IP_LOCAL,  &localaddr );
+	    if(iptostring((struct sockaddr *)&localaddr,
+                          sizeof(struct sockaddr_in), localip, 60) == 0) {
+                sasl_setprop(cd.conn, SASL_IPLOCALPORT,  &localip );
+                saslprops.iplocalport = xstrdup(localip);
+            }
+            if(iptostring((struct sockaddr *)&remoteaddr,
+                          sizeof(struct sockaddr_in), remoteip, 60) == 0) {
+                saslprops.ipremoteport = xstrdup(remoteip);
+                sasl_setprop(cd.conn, SASL_IPREMOTEPORT, &remoteip);  
+            }
 	} else {
 	    fatal("can't get local addr", EC_SOFTWARE);
 	}
