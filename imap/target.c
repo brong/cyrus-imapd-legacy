@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.8 1999/11/04 00:43:13 leg Exp $
+ * $Id: target.c,v 1.1.2.9 1999/11/04 01:41:50 leg Exp $
  */
 
 #include <stdio.h>
@@ -500,7 +500,7 @@ int main(int argc, char *argv[], char *envp[])
 
     signal(SIGTERM, &handler);
     signal(SIGINT, &handler);
-    signal(SIGALRM, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
 
     while (argc > 1) {
 	/* add argv[argc] to our list */
