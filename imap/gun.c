@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.11 1999/11/03 04:46:15 leg Exp $
+ * $Id: gun.c,v 1.1.2.12 1999/11/03 04:46:38 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -308,7 +308,7 @@ int listen_proxies(void)
 
     r = 0;
     while (ptr != NULL) {
-	fprintf(stderr, "reading from %x...\n");
+	fprintf(stderr, "reading from %x...\n", ptr);
 	ch1 = prot_getc(ptr->in);
 	ch2 = prot_getc(ptr->in);
 	if (ch1 == 'o' && ch2 == 'k') {
