@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.2 1999/10/13 21:13:03 tmartin Exp $ */
+/* $Id: imapd.c,v 1.180.4.3 1999/10/14 19:55:55 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -507,15 +507,15 @@ int fd;
 /*
  * Cleanly shut down and exit
  */
-void
-shut_down(code)
-int code;
+void shut_down(int code) __attribute__((noreturn));
+void shut_down(int code)
 {
     proc_cleanup();
     if (imapd_mailbox) {
 	index_closemailbox(imapd_mailbox);
 	mailbox_close(imapd_mailbox);
     }
+    mboxlist_done();
     prot_flush(imapd_out);
     exit(code);
 }
@@ -1177,14 +1177,20 @@ char *passwd;
 				    strlen(canon_user),
 				    passwd,
 				    strlen(passwd),
-				    (const char **) &reply))!=SASL_OK) { 
-      if (reply) {
+				    (const char **) &reply))!=SASL_OK) {
+	const char *errorstring = sasl_errstring(result, NULL, NULL);
+	if (reply) {
 	    syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
 		   imapd_clienthost, canon_user, reply);
-      }
-      sleep(3);
-      prot_printf(imapd_out, "%s NO Login failed. Error=%d\r\n", tag, result);
-      return;
+	}
+	sleep(3);
+	if (errorstring) {
+	    prot_printf(imapd_out, "%s NO Login failed: %s\r\n", 
+			tag, errorstring);
+	} else {
+	    prot_printf(imapd_out, "%s NO Login failed.", tag);
+	}	    
+	return;
     }
     else {
 	imapd_userid = xstrdup(canon_user);

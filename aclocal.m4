@@ -14,7 +14,7 @@ dnl
 dnl Additional macros for configure.in packaged up for easier theft.
 dnl tjs@andrew.cmu.edu 6-may-1998
 dnl
-dnl $Id: aclocal.m4,v 1.15 1999/10/04 18:23:04 leg Exp $
+dnl $Id: aclocal.m4,v 1.15.4.1 1999/10/14 19:55:55 leg Exp $
 dnl
 
 dnl It would be good if ANDREW_ADD_LIBPATH could detect if something was
