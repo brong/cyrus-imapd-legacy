@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.105.4.1 1999/10/13 19:29:44 leg Exp $
+ * $Id: deliver.c,v 1.105.4.2 1999/10/18 02:47:26 tmartin Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.105.4.1 1999/10/13 19:29:44 leg Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.105.4.2 1999/10/18 02:47:26 tmartin Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1376,10 +1376,10 @@ address_data_t **ad;
 	}
 	strcpy(buf, "user.");
 	strcat(buf, user);
-	r = mboxlist_lookup(buf, (char **)0, (char **)0);
+	r = mboxlist_lookup(buf, (char **)0, (char **)0, NULL);
     }
     else {
-	r = mboxlist_lookup(user+1, (char **)0, (char **)0);
+	r = mboxlist_lookup(user+1, (char **)0, (char **)0, NULL);
     }
     if (r) {
 	return convert_lmtp(r);

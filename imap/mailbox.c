@@ -1,5 +1,5 @@
 /* mailbox.c -- Mailbox manipulation routines
- $Id: mailbox.c,v 1.81.4.2 1999/10/17 22:35:15 tmartin Exp $
+ $Id: mailbox.c,v 1.81.4.3 1999/10/18 02:47:34 tmartin Exp $
  
  # Copyright 1998 Carnegie Mellon University
  # 
@@ -205,7 +205,7 @@ struct mailbox *mailbox;
     char *path, *acl;
     int r;
 
-    r = mboxlist_lookup(name, &path, &acl);
+    r = mboxlist_lookup(name, &path, &acl, NULL);
     if (r) return r;
 
     return mailbox_open_header_path(name, path, acl, auth_state, mailbox, 0);
@@ -506,7 +506,7 @@ struct auth_state *auth_state;
     int r;
     char *acl;
 
-    r = mboxlist_lookup(mailbox->name, (char **)0, &acl);
+    r = mboxlist_lookup(mailbox->name, (char **)0, &acl, NULL);
     if (r) return r;
 
     free(mailbox->acl);

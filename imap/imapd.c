@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.3 1999/10/14 19:55:55 leg Exp $ */
+/* $Id: imapd.c,v 1.180.4.4 1999/10/18 02:47:28 tmartin Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -247,7 +247,7 @@ const char *auth_identity;
     strcat(inboxname, user);
 
     if (!(authstate = auth_newstate(auth_identity, (char *)0)) ||
-	mboxlist_lookup(inboxname, (char **)0, &acl)) {
+	mboxlist_lookup(inboxname, (char **)0, &acl, NULL)) {
 	r = 0;  /* Failed so assume no proxy access */
     }
     else {
@@ -2768,7 +2768,7 @@ int oldform;
     r = mboxname_tointernal(name, imapd_userid, mailboxname);
 
     if (!r) {
-	r = mboxlist_lookup(mailboxname, (char **)0, &acl);
+	r = mboxlist_lookup(mailboxname, (char **)0, &acl, NULL);
     }
 
     if (!r) {
@@ -2850,7 +2850,7 @@ char *identifier;
     r = mboxname_tointernal(name, imapd_userid, mailboxname);
 
     if (!r) {
-	r = mboxlist_lookup(mailboxname, (char **)0, &acl);
+	r = mboxlist_lookup(mailboxname, (char **)0, &acl, NULL);
     }
 
     if (!r) {
@@ -2911,7 +2911,7 @@ int oldform;
     r = mboxname_tointernal(name, imapd_userid, mailboxname);
 
     if (!r) {
-	r = mboxlist_lookup(mailboxname, (char **)0, &acl);
+	r = mboxlist_lookup(mailboxname, (char **)0, &acl, NULL);
     }
 
     if (!r) {
