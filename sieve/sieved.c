@@ -214,7 +214,7 @@ int dump2_test(bytecode_t * d, int i)
 
     for (x=0; x<l; x++)
       {i=dump2_test(d,i);
-      printf("OR");}
+      if((x+1)<l) printf(" OR ");}
 
     printf(")\n");	 
     break;
@@ -225,7 +225,7 @@ int dump2_test(bytecode_t * d, int i)
 
     for (x=0; x<l; x++)
       {i=dump2_test(d,i);
-      printf("AND");}
+       if((x+1)<l) printf(" AND ");}
 
     printf(")\n");
     break;
@@ -327,45 +327,36 @@ void dump2(bytecode_t *d, int len)
 	     
 	case B_IF:/*6*/
 	    printf("%d: IF ",i);
-	    testtemp=i;
-	    i = dump2_test(d,i+3);
-	    printf("   THEN(%d) \n   POST(%d)\n",  d[testtemp+1].jump/4,d[testtemp+2].jump/4);
-	    break;
-	case B_IFELSE:/*7*/
-	    printf("%d: IF ",i);
-	    testtemp=i;
-	    i = dump2_test(d,i+4);
-	    printf("   THEN(%d) \n   ELSE(%d) \n   POST(%d)\n",
-		   d[testtemp+1].jump/4,d[testtemp+2].jump/4,
-		   d[testtemp+3].jump/4);
+	    i = dump2_test(d,i+1);
+	    printf("\n");
 	    break;
 
-	case B_MARK:/*8*/
+	case B_MARK:/*7*/
 	    printf("%d: MARK\n",i);
 	    i++;
 	    break;
 
-	case B_UNMARK:/*9*/
+	case B_UNMARK:/*8*/
 	    printf("%d: UNMARK\n",i);
 	    i++;
 	    break;
 
-	case B_ADDFLAG: /*10*/
+	case B_ADDFLAG: /*9*/
 	    printf("%d: ADDFLAG  {%d}\n",i,d[i+1].len);
 	    i=write_list(d[i+1].len,i+2,d);
 	    break;
 
-	case B_SETFLAG: /*11*/
+	case B_SETFLAG: /*10*/
 	  printf("%d: SETFLAG  {%d}\n",i,d[i+1].len);
 	 	    i=write_list(d[i+1].len,i+2,d);
 	    break;
 
-	case B_REMOVEFLAG: /*12*/
+	case B_REMOVEFLAG: /*11*/
 	    printf("%d: REMOVEFLAG  {%d}\n",i,d[i+1].len);
 	    i=write_list(d[i+1].len,i+2,d);
 	    break;
 	    
-	case B_DENOTIFY:/*14*/
+	case B_DENOTIFY:/*12*/
 	    printf("%d: DENOTIFY\n",i);
 	    i++; 
 	    printf("            PRIORITY(%d) Comparison type %d (relat %d)\n",d[i].value,d[i+1].value, d[i+2].value);
@@ -382,8 +373,7 @@ void dump2(bytecode_t *d, int len)
 
 	    printf("            ID({%d}%s) OPTIONS ",d[i].len,(d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
 	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
-	    printf("len%d\n",d[i].len);
-	    
+	   	    
 	    i=write_list(d[i].len,i+1,d);
 	    
 	    printf("            PRIORITY(%d)\n",d[i].value);
@@ -394,7 +384,7 @@ void dump2(bytecode_t *d, int len)
 
 	    break;
 
-	case B_VACATION:/*15*/
+	case B_VACATION:/*14*/
 	  printf("%d: VACATION\n",i);
 	  /*add address list here!*/
 	  i=write_list(d[i+1].len,i+2,d);
@@ -411,9 +401,13 @@ void dump2(bytecode_t *d, int len)
 	  i+=2;
 
 	  break;
-	case B_NULL:/*16*/
+	case B_NULL:/*15*/
 	  printf("%d:NULL\n",i);
 	  i++;
+	  break;
+	case B_JUMP:/*16*/
+	  printf("%d:JUMP %d\n",i, d[i+1].jump);
+	  i+=2;
 	  break;		  
 	default:
 	    printf("%d: %d (NOT AN OP)\n",i,d[i].op);

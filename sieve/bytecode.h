@@ -28,8 +28,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 /* for debugging*/
-#define DUMPCODE 0
-#define VERBOSE 0
+#define DUMPCODE 1
+#define VERBOSE 1
 
 
 /*for finding correctly aligned bytes on strings*/
@@ -70,8 +70,7 @@ enum bytecode {
     B_REDIRECT,
 
     B_IF,
-    B_IFELSE,
-
+  
     B_MARK,/* require imapflags */
     B_UNMARK,/* require imapflags */
 
@@ -83,7 +82,8 @@ enum bytecode {
     B_DENOTIFY,/* require notify */
 
     B_VACATION,/* require vacation*/
-    B_NULL
+    B_NULL,
+    B_JUMP
 };
 
 enum bytecode_comps {
@@ -95,21 +95,18 @@ enum bytecode_comps {
     BC_ANYOF,
     BC_ALLOF,
     BC_ADDRESS,
-    BC_ENVELOPE,
+    BC_ENVELOPE,  /* require envelope*/
     BC_HEADER    
 };
 
+  /*currently one enum so that we don't have too many things with the same value
+   *should  minimize the chance of errors from misreading bytecode.
+   *this will make adding things more difficult though*/
 enum bytecode_tags {
-    /* Address Part Tags */
-    B_ALL,
-    B_LOCALPART,
-    B_DOMAIN,
-    B_USER,  /* require subaddress*/
-    B_DETAIL, /* require subaddress*/
-
     /* Sizes */
     B_OVER,
     B_UNDER,
+    
     /*sizes, pt 2*/
     B_GT, /* require relational*/
     B_GE,  /* require relational*/
@@ -117,7 +114,20 @@ enum bytecode_tags {
     B_LE,  /* require relational*/
     B_EQ,  /* require relational*/
     B_NE,  /* require relational*/
- 
+    
+    /*priorities*/
+    B_LOW,
+    B_NORMAL,
+    B_HIGH,
+    B_ANY,
+    
+    /* Address Part Tags */
+    B_ALL,
+    B_LOCALPART,
+    B_DOMAIN,
+    B_USER,  /* require subaddress*/
+    B_DETAIL, /* require subaddress*/
+    
     /* Comparators */
     B_ASCIICASEMAP,
     B_OCTET,
@@ -129,13 +139,9 @@ enum bytecode_tags {
     B_MATCHES,
     B_REGEX,/* require regex*/
     B_COUNT,/* require relational*/
-    B_VALUE, /* require relational*/
+    B_VALUE /* require relational*/
 
-    /*priorities*/
-    B_LOW,
-    B_NORMAL,
-    B_HIGH,
-    B_ANY
+  
 };
 
 #endif

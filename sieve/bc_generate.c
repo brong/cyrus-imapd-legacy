@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_generate.c,v 1.1.2.7 2003/01/23 01:15:31 jsmith2 Exp $
+ * $Id: bc_generate.c,v 1.1.2.8 2003/01/30 16:54:46 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -598,28 +598,25 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		break;
 	    case IF:
 	    {
-		int jumpVal; /* do not remove this variable. 
-				the function test_generate might change the value 
-				of retval and this makes things unhappy*/
-	    
-		/* IF (test / codep else / codep done) */
+		int jumpVal; 	    
+		/* IF
+		   (int: begin then block)
+		   (int: end then block/begin else block)
+		   (int:end else block) (-1 if no else block)
+		   (test)
+		   (then block)
+		   (else block)(optional)
+		*/
 		baseloc = codep;
 	    
 		/* Allocate operator + jump table offsets */
-		if(!atleast(retval,codep+3)) return -1;
+		if(!atleast(retval,codep+4)) return -1;
+		
+		jumploc = codep+4;
+		retval->data[codep++].op = B_IF;
 
-		if(c->u.i.do_else) {
-		    jumploc = codep+4;
-		    /* we need an extra */
-		    if(!atleast(retval,jumploc)) return -1;
-		    retval->data[codep++].op = B_IFELSE;
-		} else {
-		    jumploc = codep+3;
-		    retval->data[codep++].op = B_IF;
-		}
-	    
-		/* offset to if code */
-	    
+		    
+		/* begining of then  code */
 		jumpVal= bc_test_generate(jumploc,retval,c->u.i.t);
 		if(jumpVal == -1) 
 		{return -1;}
@@ -637,25 +634,26 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		else 
 		{retval->data[codep].jump = jumpVal;
 		}
-	    
-		/* write else code */
+		codep++;
+		/* write else code if its there*/
 		if(c->u.i.do_else) {
-		    codep++;
-	      
+	
 		    jumpVal= bc_action_generate(jumpVal,retval, c->u.i.do_else);
 		    if(jumpVal == -1) 
-		    {return -1;}
-		    else 
-		    {retval->data[codep].jump = jumpVal;
-		    codep++;
+		    {
+			return -1;
+		    } else 
+		    {
+			retval->data[codep].jump = jumpVal;
 		    }
-	      
-	      
+		    
 		    /* Update code pointer to end of else code */
-		    codep = retval->data[codep-1].jump;
-		} else {
-		    /* Update code pointer to end of then code */
 		    codep = retval->data[codep].jump;
+		} else {
+		    /*there is no else block, so its -1*/
+		    retval->data[codep].jump = -1;
+		    /* Update code pointer to end of then code */
+		    codep = retval->data[codep-1].jump;
 		}
 	    
 		break;

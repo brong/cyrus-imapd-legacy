@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_emit.c,v 1.1.2.6 2003/01/23 01:15:31 jsmith2 Exp $
+ * $Id: bc_emit.c,v 1.1.2.7 2003/01/30 16:54:45 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -308,7 +308,7 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
     int i;
     
     /*debugging variable to check filelen*/
-    int location;
+    /*int location;*/
     
     syslog(LOG_ERR, "entered with filelen: %d", filelen);
     
@@ -325,112 +325,121 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
 	filelen+=sizeof(int);
 	
 	switch(bc->data[codep++].op) {
-	case B_IF: 
+
+	case B_IF:
 	{
-	    int teststart, testend, realend, testdist, enddist;
+	    /* IF
+	     *  test
+	     *  jump (false condition)
+	     *  then
+	     * (if there is an else) jump(finish) 
+	     * (if there is an else) else
+	     */
+
+	    int testEndLoc=-1;
+	    int testdist, thendist, elsedist;
 	    int c;
 	    
-	    /* first skip 2 words so we can write in offsets later */
-	    ret = lseek(fd, 2 * sizeof(int), SEEK_CUR);
+	    int jumpFalseLoc=-1;/*this is the location that is being reserved
+				  for the first jump command
+				  we jump to the false condition of the test*/
+	    
+	    int jumpEndLoc=-1; /* this is the location that is being reserved
+				  for the optional jump command
+				  it jumps over the else statement to the end*/
+	    int jumpto=-1;
+	    int jumpop= B_JUMP;
+
+	    /*leave space to store the location of end of the test*/
+	    ret = lseek(fd, sizeof(int), SEEK_CUR);
 	    if(ret == -1) return ret;
 	    
-	    /* save location of 2 offsets */
-	    testend = teststart = filelen;
-	    testend += 2 * sizeof(int);
+	    testEndLoc=filelen;
+	    filelen+=sizeof(int);
 	    
 	    /* spew the test */
-	    c=codep+2;
-	    testdist = bc_test_emit(fd, &c , bc);
-	    
-	    if(testdist == -1)return -1;
-	    testend += testdist;
-	    
-	    realend = testend;
-	    /* spew the then code */
-	    enddist = bc_action_emit(fd, bc->data[codep].value,
-				     bc->data[codep+1].value, bc,
-				     filelen + testdist + 2*sizeof(int));
-	    
-	    realend += enddist;
-	    
-	    /* now, jump back to the two offset locations and write them */
-	    if(lseek(fd, filelen, SEEK_SET) == -1)
-		return -1;
-	    if(write(fd,&testend,sizeof(testend)) == -1)
-		return -1;
-	    if(write(fd,&realend,sizeof(realend)) == -1)
-		return -1;
-	    if(lseek(fd,realend,SEEK_SET) == -1)
-		return -1;
-	    
-	    codep = bc->data[codep+1].value;
-	    
-	    /* update file length to the length of the test and the
-	     * then code, plus the 2 offsets we need. */
-	    
-	    filelen += testdist + enddist + 2*sizeof(int);
-	    
-	    break;
-	}
-	case B_IFELSE:
-	{
-	    int teststart, testend, thenend, realend,
-		testdist, thendist, enddist;
-	    int c;
-	    
-	    
-	    /* first skip 3 words so we can write in offsets later */
-	    ret = lseek(fd, 3 * sizeof(int), SEEK_CUR);
-	    if(ret == -1) return ret;
-	    
-	    /* save location of 3 offsets */
-	    testend = teststart = filelen;
-	    testend += 3 * sizeof(int);
-	    
-	    /* spew the test */
-	    location=lseek(fd,0,SEEK_CUR);
+
 	    c=codep+3;
-	    
 	    testdist = bc_test_emit(fd, &c, bc);
 	    if(testdist == -1)return -1;
-	    testend += testdist;
-	    location=lseek(fd,0,SEEK_CUR);
+	   
+	   	    
+	    filelen +=testdist;
 	    
-	    thenend = testend;
+            /*store the location for hte end of the test
+	     *this is important for short circuiting of allof/anyof*/
+	    jumpto=filelen/4;
+	    if(lseek(fd, testEndLoc, SEEK_SET) == -1)
+		return -1;
+	    if(write(fd,&jumpto,sizeof(jumpto)) == -1)
+		return -1;
+	    if(lseek(fd,filelen,SEEK_SET) == -1)
+		return -1;
+
+	    /* leave space for jump */
+	    if(write(fd, &jumpop, sizeof(int)) == -1)
+	    return -1;
+	    ret = lseek(fd, sizeof(int), SEEK_CUR);
+	    if(ret == -1) return ret;
+	    jumpFalseLoc=filelen+sizeof(int);
+	    
+	    filelen +=2*sizeof(int);
+	    
 	    /* spew the then code */ 
 	    thendist = bc_action_emit(fd, bc->data[codep].value,
 				      bc->data[codep+1].value, bc,
-				      filelen + testdist + 3*sizeof(int));
-	    /*thendist-=sizeof(int);*/
-	    thenend += thendist;
-	    
-	    realend = thenend;
-	    /* spew the else code */
-	    enddist = bc_action_emit(fd, bc->data[codep+1].value,
-				     bc->data[codep+2].value, bc,
-				     filelen + testdist + thendist
-				     + 3*sizeof(int));
-	    realend += enddist;
-	    
-	    
-	    
-	    /* now, jump back to the two offset locations and write them */
-	    if(lseek(fd, filelen, SEEK_SET) == -1)
+				      filelen);
+	 
+	    filelen+=thendist;
+	  	    
+	    /* there is an else case */
+	    if(bc->data[codep+2].value != -1)
+	    {
+		/* leave space for jump */
+		if(write(fd, &jumpop, sizeof(int)) == -1)
+		    return -1;
+		ret = lseek(fd, sizeof(int), SEEK_CUR);
+		if(ret == -1) return ret;
+		jumpEndLoc=filelen+sizeof(int);
+
+		filelen+=2*sizeof(int);
+	    }
+	  
+	    /*put previous jump to the end of the then code,
+	     *or the end of the jump if there is an else case */
+	    jumpto=filelen/4;
+	    if(lseek(fd, jumpFalseLoc, SEEK_SET) == -1)
 		return -1;
-	    if(write(fd,&testend,sizeof(testend)) == -1)
+	    if(write(fd,&jumpto,sizeof(jumpto)) == -1)
 		return -1;
-	    if(write(fd,&thenend,sizeof(testend)) == -1)
-		return -1;
-	    if(write(fd,&realend,sizeof(realend)) == -1)
-		return -1;
-	    if(lseek(fd,realend,SEEK_SET) == -1)
+	    if(lseek(fd,filelen,SEEK_SET) == -1)
 		return -1;
 	    
-	    codep = bc->data[codep+2].value;
-	    
-	    /* update file length to the length of the test and the
-	     * then code, plus the 3 offsets we need. */
-	    filelen += testdist  +thendist + enddist + 3*sizeof(int);
+	    /* there is an else case */
+	    if(bc->data[codep+2].value != -1)
+	    {
+		/* spew the else code */
+		elsedist = bc_action_emit(fd, bc->data[codep+1].value,
+					 bc->data[codep+2].value, bc,
+					 filelen);
+	
+		filelen+=elsedist;
+		
+		/*put jump to the end of the else code*/
+	        jumpto=filelen/4;
+		if(lseek(fd, jumpEndLoc, SEEK_SET) == -1)
+		    return -1;
+		if(write(fd,&jumpto,sizeof(jumpto)) == -1)
+		    return -1;
+		if(lseek(fd,filelen,SEEK_SET) == -1)
+		    return -1;
+		
+		codep = bc->data[codep+2].value;
+	    }
+	    else
+	    {
+		codep = bc->data[codep+1].value;
+	    }
 	    
 	    break;
 	}

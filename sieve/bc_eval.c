@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.6 2003/01/23 21:27:49 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.7 2003/01/30 16:54:46 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -270,41 +270,49 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	res=1;
 	currh=headersi+2;
 	for(x=0; x<numheaders && res; x++)
-	{ blah=(interp->getheader(m,(char*)&(bc[currh+1].str), &val));
-	if (blah!=SIEVE_OK)
-	{return 0;}
-	currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
+	{
+	    blah=(interp->getheader(m,(char*)&(bc[currh+1].str), &val));
+	    if (blah!=SIEVE_OK) {res=0;}
+	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	}
 	i=(bc[headersi+1].value/4);
 	break;
     }
     case BC_SIZE:/*4*/
-    {int s;
-    res=0;
-    if (interp->getsize(m, &s) != SIEVE_OK)
+    {
+	int s;
+	res=0;
+	if (interp->getsize(m, &s) != SIEVE_OK)	break;
+
+	
+	if (bc[i+1].value==B_OVER)
+	{
+	    res=s>bc[i+2].value;
+	}else /*under*/
+	{
+	    res=s<bc[i+2].value;
+	}
+	i+=3;
 	break;
-    if (bc[i+1].value==B_OVER)
-    {res=s>bc[i+2].value;}
-    else /*under*/
-    {res=s<bc[i+2].value;}
-    i+=2;
-    break;
     }
     case BC_ANYOF:/*5*/
 	res = 0;
 	l=bc[i+1].len;
 	i+=2;
 	/*return 0 unless you find one, then return 1*/
-	for (x=0;x<l && !res; x++) 
-	{res|= eval_bc_test(interp,m,bc,&i);}
-	break;
-    case BC_ALLOF:/*6*/
+	for (x=0;x<l && !res; x++)
+	{ 
+	    res|= eval_bc_test(interp,m,bc,&i);}
+	break; 
+    case BC_ALLOF:/*6*/ 
         res=1;     
 	l=bc[i+1].len;
 	i+=2;
 	/*return 1 unless you find one that isn't true, then return 0*/
+	
 	for (x=0;x<l && res; x++) 
-	{res &= eval_bc_test(interp,m,bc,&i);}
+	{
+  	    res &= eval_bc_test(interp,m,bc,&i);}
 	break;
     case BC_ADDRESS:/*7*/
 	address=1;
@@ -451,7 +459,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	char errbuf[100];/* this is a silly variable.
 			  * we currently have nothing in place for reporting errors in this fcn,
 			  * the compiling of a regex should work, we tested it on parsing*/ 
-
+	
 	/*set up variables needed for compiling regex*/
 	if (isReg)
 	{
@@ -466,16 +474,14 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
      
 	}
 	
-      
-	
-	
+      	
 	/*find the correct comparator fcn*/
 	comp=lookup_comp(comparator, match, relation, &comprock);
 
 	/*search through all the flags for the header*/
 	currh=headersi+2;
 	for(x=0; x<numheaders && !res; x++)
-	{ 
+	{
 	    blah=(interp->getheader(m,(char*)&(bc[currh+1].str), &val));
 	    if (blah!=SIEVE_OK)
 	    {currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
@@ -510,6 +516,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	    }
 	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	}
+
 	
 
 	if  (match == B_COUNT )
@@ -527,15 +534,18 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	    }
 	      
 	}
+	
 	i=(bc[datai+1].value/4);
 	break;
     }
     default:
 #if VERBOSE
-	printf("WERT, can't evaluate if statement.");
+	printf("WERT, can't evaluate if statement.%d is not a valid command", bc[i].value);
 #endif     
 	exit(1);
     }
+  
+    
     *ip=i;
     return res;
 }
@@ -547,9 +557,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 {
     /*i is a struct with useful function calls such as getheader*/
     int ip, res=0;
-    int needtojump=0;
-    int jumpat=-1;
-    int jumpto=-1;
+   
 
     bytecode_t *bc = (bytecode_t *)bc_in;
     
@@ -558,23 +566,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
     printf("version number %d\n",bc[0].op); 
 #endif
     for(ip=1; ip<=bc_len; ) { 
-	if (needtojump)
-	{if (jumpat==ip)
-	{
-#if VERBOSE
-	    printf("jumping from %d to %d\n",ip, jumpto);
-#endif
-	    ip=jumpto;
-	    jumpto=-1;
-	    jumpat=-1;
-	    needtojump=0;
-	}
-	else if (ip>jumpat)
-	{res= -1; /*if this ever happens there is somethign wrong with teh bytecode*/
-	*errmsg ="Bytecode Error in IF statement."; 
-	return res;
-	}
-	}
+	
 	switch(bc[ip].op) {
 	case B_STOP:/*0*/
 	    res=1;
@@ -618,31 +610,19 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	}
 	case B_IF:/*6*/
 	{
-	    int testtemp=ip;
-	    ip+=3;
+	    int testend=bc[ip+1].value;
+	    ip+=2;
+	    
 	    if (eval_bc_test(i,m, bc, &ip))
-	    {ip=bc[testtemp+1].jump/4;}	  
-	    else
-	    {ip=bc[testtemp+2].jump/4;}
+	    {
+		/*skip over jump instruction*/
+		testend+=2;
+	    }
+	    ip=testend;
+	    
 	    break;
 	}
-	case B_IFELSE:/*7*/
-	{
-	    int testtemp=ip;
-	    ip+=4;
-	    needtojump=1;
-	    jumpto=bc[testtemp+3].jump/4;
-	    
-	    if(eval_bc_test(i,m,bc, &ip))
-	    {ip=bc[testtemp+1].jump/4;
-	    jumpat=(bc[testtemp+2].jump/4);
-	    }	  
-	    else
-	    {ip=bc[testtemp+2].jump/4;
-	    jumpat=(bc[testtemp+3].jump/4);
-	    }
-	}
-	break;
+
 	case B_MARK:/*8*/
 	    res = do_mark(actions);
 	    ip++;
@@ -871,6 +851,9 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	case B_NULL:/*16*/
 	    ip++;
 	    break;
+	case B_JUMP:/*16*/
+	    ip= bc[ip+1].jump;
+	  break;
 	default:
 	
 	    if(errmsg) *errmsg = "Invalid sieve bytecode";
