@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.17 1999/10/18 22:01:21 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.18 1999/10/18 22:26:46 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -1962,6 +1962,53 @@ int newquota;
     /*
      * Have to create a new quota root
      */
+
+
+
+    /* should we delete the quota root?  are there any other mailboxes
+       in this quota root? */
+    {
+      DBC *cursor;      
+      struct mbox_entry *mboxent=NULL;
+      DBT key, data;
+
+      r=mbdb->cursor(mbdb, NULL, &cursor, 0);
+      if (r!=0) { 
+	syslog(LOG_ERR, "Unable to create cursor in delete");
+	return r;
+      }
+
+      memset(&data, 0, sizeof(data));
+      memset(&key, 0, sizeof(key));
+      key.data = quota.root; 
+      key.size = strlen(quota.root);
+      
+      r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
+      
+      if (r == DB_NOTFOUND) {
+	return IMAP_MAILBOX_NONEXISTENT;
+      } else {
+	switch (r) {
+	case 0:
+	  mboxent = (struct mbox_entry *) data.data;
+
+	  /* if this entry is not in the quota root then fail */
+	  if ( strlen(mboxent->name) < strlen(quota.root))
+	    return IMAP_MAILBOX_NONEXISTENT;
+
+	  if (strncmp(mboxent->name, quota.root, strlen(quota.root))!=0)
+	    return IMAP_MAILBOX_NONEXISTENT;
+
+	  break;
+
+	default:
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    return IMAP_IOERROR;
+	    break;
+	}
+
+      }
+    }
 
 #if NEEDSTODB
     /* Ensure there is at least one mailbox under the quota root */
