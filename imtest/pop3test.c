@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.7 2001/11/15 20:03:13 ken3 Exp $
+ * $Id: pop3test.c,v 1.1.2.8 2001/11/17 15:06:40 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -941,6 +941,10 @@ int auth_sasl(char *mechlist)
 
     /* check if sasl suceeded */
     if (saslresult != SASL_OK && saslresult != SASL_CONTINUE) {
+	/* cancel the exchange */
+	prot_printf(pout,"*\r\n");
+	prot_flush(pout);
+
 	return saslresult;
     }
 
