@@ -1,7 +1,7 @@
 .\" -*- nroff -*-
-.TH TIMSIEVED 8 "Project Cyrus" CMU
+.TH CTL_DELIVER 8
 .\" 
-.\" Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
+.\" Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -40,24 +40,33 @@
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
 .SH NAME
-timsieved \- CMU hack for getting sieve scripts onto the server
+ctl_deliver \- perform operations on the duplicate delivery database
 .SH SYNOPSIS
-.B timsieved
+.B ctl_deliver \-r
+.br
+.B ctl_deliver \-E
+.I days
+.br
+.B ctl_deliver \-d \-f
+.I filename
 .SH DESCRIPTION
-.I timsieved
-is a server that allows users to remotly manage their sieve scripts kept on the server.
-It accepts commands on its standard input and responds on its standard output.
-It MUST be invoked by
-.IR master (8)
-with those descriptors attached to a remote client connection.
-.PP
-.I timsieved
-reads its configuration options out of the
-.IR imapd.conf (5)
-file.
-.PP
+.I Ctl_deliver
+is used to perform various administrative operations on the duplicate
+delivery database.
 .SH OPTIONS
 .TP
+.B \-r
+Recover the database after an application or system failure.
+.TP
+\fB\-E \fIdays\fR
+Prune the database of entries older than \fIdays\fR.
+.TP
+.B \-d
+Dump the contents of the database to standard output in a portable
+flat-text format.
+.TP
+\fB\-f \fIfilename\fR
+Use the database specified by \fIfilename\fR.
 .SH FILES
 .TP
 .B /etc/imapd.conf
