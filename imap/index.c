@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.91.4.1 2000/07/06 18:46:23 ken3 Exp $
+ * $Id: index.c,v 1.91.4.2 2000/07/20 19:54:48 ken3 Exp $
  */
 #include <stdio.h>
 #include <string.h>
@@ -222,7 +222,8 @@ static int _index_search P((unsigned **msgno_list, struct mailbox *mailbox,
 
 static void parse_cached_envelope P((char *env, char *tokens[]));
 static char *get_localpart_addr P((const char *header));
-static char *index_extract_subject P((const char *subj, int *is_refwd));
+static char *index_extract_subject P((const char *subj, int *is_refwd,
+				      int flags));
 static void index_get_ids P((MsgData *msgdata,
 			     char *envtokens[], const char *headers));
 static MsgData *index_msgdata_load P((unsigned *msgno_list, int n,
@@ -2997,7 +2998,7 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 		cur->size = SIZE(cur->msgno);
 		break;
 	    case SORT_SUBJECT:
-		cur->xsubj = index_extract_subject(subj+4, &cur->is_refwd);
+		cur->xsubj = index_extract_subject(subj+4, &cur->is_refwd, 0);
 		cur->xsubj_hash = hash(cur->xsubj);
 		break;
 	    case SORT_TO:
@@ -3086,16 +3087,27 @@ static char *get_localpart_addr(const char *header)
 /*
  * Extract base subject from subject header
  */
-static char *index_extract_subject(const char *subj, int *is_refwd)
+static char *index_extract_subject(const char *subj, int *is_refwd, int flags)
 {
+#define NS_FWD	1
     char *s, *base, *ret, *x;
 
-    if (!strcmp(subj, "NIL"))				/* "NIL"? */
-	return xstrdup("");				/* yes, return empty */
+    /* make a working copy of subj.
+     *
+     * if this is the initial pass, prepare the nstring
+     */
+    if (!flags) {
+	if (!strcmp(subj, "NIL"))		       	/* NIL? */
+	    return xstrdup("");				/* yes, return empty */
 
-    /* make a working copy of subj -- remove double-quotes, if they exist */
-    if (*subj == '"')
-	s = xstrndup(subj+1, strlen(subj) - 2);
+	else if (*subj == '"')				/* quoted? */
+	    s = xstrndup(subj+1, strlen(subj) - 2);	/* yes, strip quotes */
+
+	else if (*subj == '{')				/* literal? */
+	    s = xstrdup(strchr(subj, '}') + 3);		/* yes, skip to str */
+    }
+
+    /* if we're inside a Netscape [Fwd: ], just use what we're given */
     else
 	s = xstrdup(subj);
 
@@ -3216,7 +3228,7 @@ static char *index_extract_subject(const char *subj, int *is_refwd)
 	base[strlen(base) - 1] = '\0';
 
 	/* extract contents */
-	ret = index_extract_subject(base+1, is_refwd);
+	ret = index_extract_subject(base+1, is_refwd, NS_FWD);
     }
 
     /* make a copy of the extracted base */
