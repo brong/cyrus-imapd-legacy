@@ -43,7 +43,7 @@ exec perl -x -S $0 ${1+"$@"} # -*-perl-*-
 #
 # Script for mass compilation of sieve scripts.
 #
-# $Id: masssievec,v 1.1.2.2 2003/02/21 22:05:21 rjs3 Exp $
+# $Id: masssievec,v 1.1.2.3 2003/02/21 22:13:13 rjs3 Exp $
 
 if ($] !~ /^5\..*/) {
   # uh-oh. this isn't perl 5.
@@ -119,6 +119,8 @@ while (defined($s = readdir TOP)) {
 	    if($u eq "default") {
 		# special case
 		$dest = readlink $u;
+		next unless($dest =~ m/\.script$/);
+		$dest =~ s/\.script$//;
 		symlink "$dest.bc", "default.bc" || warn "can't symlink $dest.bc to default.bc: $!";
 	    } else {
 		next unless($u =~ m/\.script$/);
