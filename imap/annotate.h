@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: annotate.h,v 1.2.2.3 2002/09/10 20:30:39 rjs3 Exp $
+ * $Id: annotate.h,v 1.2.2.4 2002/11/19 18:10:41 rjs3 Exp $
  */
 
 #ifndef ANNOTATE_H
@@ -88,7 +88,6 @@ void freeentryatts(struct entryattlist *l);
 #define FNAME_ANNOTATIONS "/annotations.db"
 
 /* initialize database structures */
-#define ANNOTATE_RECOVER (1 << 0)
 #define ANNOTATE_SYNC (1 << 1)
 void annotatemore_init(int flags, int (*func)(const char *, const char *,
 					      struct strlist *));
@@ -102,7 +101,8 @@ int annotatemore_fetch(struct strlist *entries, struct strlist *attribs,
 		       struct auth_state *auth_state, struct protstream *pout);
 
 /* store annotations */
-int annotatemore_store(struct entryattlist *l, int isadmin, char *userid,
+int annotatemore_store(struct entryattlist *l, struct namespace *namespace,
+		       int isadmin, char *userid,
 		       struct auth_state *auth_state);
 
 /* close the database */
