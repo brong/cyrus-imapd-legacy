@@ -1,5 +1,5 @@
 /* mboxname.h -- Mailbox list manipulation routines
- * $Id: mboxname.h,v 1.5 2001/01/05 06:00:18 leg Exp $
+ * $Id: mboxname.h,v 1.5.6.1 2001/08/07 21:51:21 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -44,7 +44,16 @@
 #ifndef INCLUDED_MBOXNAME_H
 #define INCLUDED_MBOXNAME_H
 
-int mboxname_tointernal(const char *name, const char *userid, char *result);
+#include "namespace.h"
+
+int mboxname_tointernal(const char *name, struct namespace *namespace,
+			const char *userid, char *result);
+int mboxname_tointernal_alt(const char *name, struct namespace *namespace,
+			    const char *userid, char *result);
+int mboxname_toexternal(const char *name, struct namespace *namespace,
+			const char *userid, char *result);
+int mboxname_toexternal_alt(const char *name, struct namespace *namespace,
+			    const char *userid, char *result);
 int mboxname_userownsmailbox(char *userid, char *name);
 int mboxname_netnewscheck(char *name);
 int mboxname_policycheck(char *name);

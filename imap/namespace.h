@@ -1,5 +1,7 @@
-/* version.h: the version number
- * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
+/* namespace.h -- Namespace manipulation routines
+ * $Id: namespace.h,v 1.2.2.1 2001/08/07 21:51:22 rjs3 Exp $
+ *
+ * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,23 +38,33 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- * $Id: version.h,v 1.106.2.1 2001/08/07 21:51:23 rjs3 Exp $
+ *
  */
 
-#define _CYRUS_VERSION "v2.1.0pre"
+#ifndef INCLUDED_NAMESPACE_H
+#define INCLUDED_NAMESPACE_H
 
-/* EXTRA_IDENT is a hack to add some version information for which compile
- * was used to build this version (at CMU, but we don't care what you do with
- * it).
- */
+#define MAX_NAMESPACE_PREFIX 40
 
-#ifdef EXTRA_IDENT
-#define CYRUS_VERSION _CYRUS_VERSION "-" EXTRA_IDENT
-#else
-#define CYRUS_VERSION _CYRUS_VERSION
+#define DOTCHAR '^'
+
+enum { NAMESPACE_INBOX, NAMESPACE_USER, NAMESPACE_SHARED };
+
+struct namespace {
+    int isalt;
+    char prefix[3][MAX_NAMESPACE_PREFIX+1];
+    char hier_sep;
+    int (*mboxname_tointernal)(const char *name, struct namespace *namespace,
+			       const char *userid, char *result);
+    int (*mboxname_toexternal)(const char *name, struct namespace *namespace,
+			       const char *userid, char *result);
+};
+
+/* Initialize namespace (prefixes & hierarchy separator from imapd.conf) */
+int namespace_init(struct namespace *namespace, int force_std);
+
+char *hier_sep_tointernal(char *name, struct namespace *namespace);
+
+char *hier_sep_toexternal(char *name, struct namespace *namespace);
+
 #endif
-
-/* CAPABILITIES are now defined here, not including sasl ones */
-#define CAPABILITY_STRING "IMAP4 IMAP4rev1 ACL QUOTA LITERAL+ NAMESPACE " \
-	"UIDPLUS ID NO_ATOMIC_RENAME UNSELECT CHILDREN MULTIAPPEND SORT " \
-	"THREAD=ORDEREDSUBJECT THREAD=REFERENCES"

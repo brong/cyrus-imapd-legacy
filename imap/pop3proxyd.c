@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.3 2001/08/02 21:41:44 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.4 2001/08/07 21:51:22 rjs3 Exp $
  */
 #include <config.h>
 
@@ -80,6 +80,7 @@
 #include "version.h"
 #include "xmalloc.h"
 #include "mboxlist.h"
+#include "namespace.h"
 
 #ifdef HAVE_KRB
 /* kerberos des is purported to conflict with OpenSSL DES */
@@ -118,9 +119,12 @@ struct protstream *backend_out, *backend_in;
 int backend_sock;
 sasl_conn_t *backend_saslconn;
 
+/* current namespace */
+static struct namespace popd_namespace;
+
 static void cmd_apop(char *response);
 static int apop_enabled(void);
-static char popd_apop_chal[300]; /* timestamp (44) + config_servername (256) */
+static char popd_apop_chal[45 + MAXHOSTNAMELEN + 1]; /* <rand.time@hostname> */
 
 static void cmd_auth();
 static void cmd_capa();
@@ -178,6 +182,12 @@ int service_init(int argc, char **argv, char **envp)
     /* open the mboxlist, we'll need it for real work */
     mboxlist_init(0);
     mboxlist_open(NULL);
+
+    /* Set namespace */
+    if (!namespace_init(&popd_namespace, 0)) {
+	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
+	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    }
 
     return 0;
 }
@@ -270,6 +280,12 @@ int service_main(int argc, char **argv, char **envp)
     /* we were connected on pop3s port so we should do 
        TLS negotiation immediatly */
     if (pop3s == 1) cmd_starttls(1);
+
+    /* Create APOP challenge for banner */
+    if (!sasl_mkchal(popd_saslconn, popd_apop_chal, sizeof(popd_apop_chal), 1)) {
+	syslog(LOG_ERR, "APOP disabled: can't create challenge");
+	*popd_apop_chal = 0;
+    }
 
     prot_printf(popd_out, "+OK %s Cyrus POP3 Murder %s server ready\r\n",
 		apop_enabled() ? popd_apop_chal : config_servername,
@@ -581,16 +597,6 @@ static void cmd_starttls(int pop3s)
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
 
-    /* if authenticated set that */
-    if (auth_id != NULL) {
-	result = sasl_setprop(popd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
-	if (result != SASL_OK) {
-	    fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
-	}
-
-	popd_userid = auth_id;
-    }
-
     /* tell the prot layer about our new layers */
     prot_settls(popd_in, tls_conn);
     prot_settls(popd_out, tls_conn);
@@ -719,8 +725,11 @@ char *user;
     }
 
     shutdown_file(); /* check for shutdown file */
-    if (!(p = auth_canonifyid(user, 0)) ||
-	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
+    if (!(p = auth_canonifyid(user,0)) ||
+	/* '.' isn't allowed if '.' is the hierarchy separator */
+	(popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
+	strlen(p) + 6 > MAX_MAILBOX_PATH) {
+
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
 	syslog(LOG_NOTICE,
 	       "badlogin: %s plaintext %s invalid user",
@@ -1161,6 +1170,11 @@ static void openproxy(void)
     /* have to figure out what server to connect to */
     strcpy(inboxname, "user.");
     strcat(inboxname, popd_userid);
+
+    /* Translate userid part of inboxname
+       (we need the original userid for AUTH to backend) */
+    hier_sep_tointernal(inboxname+5, &popd_namespace);
+
     r = mboxlist_lookup(inboxname, &server, NULL, NULL);
     if (!r) fatal("couldn't find backend server", EC_CONFIG);
 

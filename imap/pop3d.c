@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.11 2001/08/02 21:29:34 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.12 2001/08/07 21:51:22 rjs3 Exp $
  */
 #include <config.h>
 
@@ -82,6 +82,7 @@
 #include "mboxlist.h"
 #include "idle.h"
 #include "telemetry.h"
+#include "namespace.h"
 
 #ifdef HAVE_KRB
 /* kerberos des is purported to conflict with OpenSSL DES */
@@ -129,6 +130,9 @@ int popd_starttls_done = 0;
 static struct mailbox mboxstruct;
 
 static mailbox_decideproc_t expungedeleted;
+
+/* current namespace */
+static struct namespace popd_namespace;
 
 static void cmd_apop(char *response);
 static int apop_enabled(void);
@@ -187,8 +191,13 @@ static void popd_reset(void)
     popd_starttls_done = 0;
 #ifdef HAVE_SSL
     if (tls_conn) {
+#ifdef TLS_REUSE
+	/* make sure we re-use sessions */
+	SSL_set_shutdown(tls_conn,SSL_SENT_SHUTDOWN|SSL_RECEIVED_SHUTDOWN);
+#else
 	tls_free(&tls_conn);
 	tls_conn = NULL;
+#endif
     }
 #endif
 
@@ -232,6 +241,12 @@ int service_init(int argc, char **argv, char **envp)
 
     /* setup for sending IMAP IDLE notifications */
     idle_enabled();
+
+    /* Set namespace */
+    if (!namespace_init(&popd_namespace, 0)) {
+	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
+	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    }
 
     while ((opt = getopt(argc, argv, "C:sk")) != EOF) {
 	switch(opt) {
@@ -787,16 +802,6 @@ static void cmd_starttls(int pop3s)
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
 
-    /* if authenticated set that */
-    if (auth_id != NULL) {
-	result = sasl_setprop(popd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
-	if (result != SASL_OK) {
-	    fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
-	}
-
-	popd_userid = auth_id;
-    }
-
     /* tell the prot layer about our new layers */
     prot_settls(popd_in, tls_conn);
     prot_settls(popd_out, tls_conn);
@@ -925,7 +930,9 @@ char *user;
 	shut_down(0);
     }
     else if (!(p = auth_canonifyid(user,0)) ||
-	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
+	     /* '.' isn't allowed if '.' is the hierarchy separator */
+	     (popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
+	     strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
 	syslog(LOG_NOTICE,
 	       "badlogin: %s plaintext %s invalid user",
@@ -1200,6 +1207,9 @@ int openinbox(void)
     int minpoll;
 
     popd_login_time = time(0);
+
+    /* Translate userid */
+    hier_sep_tointernal(popd_userid, &popd_namespace);
 
     strcpy(inboxname, "user.");
     strcat(inboxname, popd_userid);
