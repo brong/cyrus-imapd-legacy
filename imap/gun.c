@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.16 1999/11/05 17:59:06 leg Exp $
+ * $Id: gun.c,v 1.1.2.17 1999/11/06 20:26:13 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -107,7 +107,6 @@ void handler(int sig)
     if (sig != SIGALRM) {
         fatal("received signal", 0);
     } else {
-        fprintf(stderr, "riiiiiiing...\n");
         signal(sig, &handler);
     }
 }
@@ -547,8 +546,6 @@ int main(int argc, char *argv[], char *envp[])
 		syslog(LOG_NOTICE, "got connection from %s",
 		       inet_ntoa(sin.sin_addr));
 		init_proxy(fd);
-	    } else {
-                printf("no connection waiting\n");
 	    }
 	}
     }
