@@ -2,7 +2,7 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.3 1999/11/02 20:56:42 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.4 1999/11/05 17:57:51 leg Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -37,14 +37,13 @@ typedef enum {
     MB_FATAL
 } foreach_res;
 
-/* commit a previously started transaction */
-int mboxlist_commit(void *tid);
+typedef struct mbox_txn mbox_txn_t;
 
-/* prepare a transaction; step 1 of a two-phase commit */
-int mboxlist_prepare(void *mytid);
+/* commit a previously started transaction */
+int mboxlist_commit(struct mbox_txn *tid);
 
 /* abort a previously started transaction */
-int mboxlist_abort(void *tid);
+int mboxlist_abort(struct mbox_txn *tid);
 
 /* Lookup 'name' in the mailbox list. */
 int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid);

@@ -1,5 +1,5 @@
 /* mailbox.c -- Mailbox manipulation routines
- $Id: mailbox.c,v 1.81.4.3 1999/10/18 02:47:34 tmartin Exp $
+ $Id: mailbox.c,v 1.81.4.4 1999/11/05 17:57:47 leg Exp $
  
  # Copyright 1998 Carnegie Mellon University
  # 
@@ -1737,9 +1737,7 @@ struct mailbox *mailboxp;
  * Delete and close the mailbox 'mailbox'.  Closes 'mailbox' whether
  * or not the deletion was successful.
  */
-int mailbox_delete(mailbox, delete_quota_root)
-struct mailbox *mailbox;
-int delete_quota_root;
+int mailbox_delete(struct mailbox *mailbox, int delete_quota_root)
 {
     int r;
     DIR *dirp;
@@ -1761,8 +1759,7 @@ int delete_quota_root;
 
     if (delete_quota_root) {
 	mailbox_delete_quota(&mailbox->quota);
-    }
-    else {
+    } else {
 	/* Free any quota being used by this mailbox */
 	if (mailbox->quota.used >= mailbox->quota_mailbox_used) {
 	    mailbox->quota.used -= mailbox->quota_mailbox_used;
@@ -1823,16 +1820,9 @@ char *indexbuf;
 }
 
 int
-mailbox_rename(oldname, oldpath, oldacl, newname, newpath, isinbox, olduidvalidityp,
-	       newuidvalidityp)
-const char *oldname;
-const char *oldpath;
-const char *oldacl;
-const char *newname;
-char *newpath;
-int isinbox;
-bit32 *olduidvalidityp;
-bit32 *newuidvalidityp;
+mailbox_rename(const char *oldname, const char *oldpath, const char *oldacl, 
+	       const char *newname, char *newpath, int isinbox, 
+	       bit32 *olduidvalidityp, bit32 *newuidvalidityp)
 {
     int r, r2;
     struct mailbox oldmailbox, newmailbox;
@@ -1869,8 +1859,8 @@ bit32 *newuidvalidityp;
 	newmailbox.uidvalidity = oldmailbox.uidvalidity;
     }
 
-    *olduidvalidityp = oldmailbox.uidvalidity;
-    *newuidvalidityp = newmailbox.uidvalidity;
+    if (olduidvalidityp) *olduidvalidityp = oldmailbox.uidvalidity;
+    if (newuidvalidityp) *newuidvalidityp = newmailbox.uidvalidity;
 
     /* Copy flag names */
     for (flag = 0; flag < MAX_USER_FLAGS; flag++) {
@@ -1956,8 +1946,7 @@ bit32 *newuidvalidityp;
 	/* Expunge old mailbox */
 	r = mailbox_expunge(&oldmailbox, 0, expungeall, (char *)0);
 	mailbox_close(&oldmailbox);
-    }
-    else {
+    } else {
 	r = mailbox_delete(&oldmailbox, 0);
     }
 

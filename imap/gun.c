@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.14 1999/11/04 01:41:03 cyrus Exp $
+ * $Id: gun.c,v 1.1.2.15 1999/11/05 17:57:46 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -304,17 +304,20 @@ int listen_proxies(void)
 {
     struct cb *ptr = head, *p2;
     int ch1, ch2;
-    int r;
+    int r, c;
 
     r = 0;
+    c = 0;
     while (ptr != NULL) {
 	fprintf(stderr, "reading from %x...\n", ptr);
 	ch1 = prot_getc(ptr->in);
 	ch2 = prot_getc(ptr->in);
 	if (ch1 == 'o' && ch2 == 'k') {
+	    c++;
 	    fprintf(stderr, "\tgot ok\n");
 	    ptr = ptr->next;
 	} else if (ch1 == 'n' && ch2 == 'o') {
+	    c++;
 	    r++;
 	    fprintf(stderr, "\tgot no\n");
 	    ptr = ptr->next;
@@ -326,6 +329,14 @@ int listen_proxies(void)
 	}
     }
 
+    if (r > 0) {
+	syslog(LOG_NOTICE, "transaction failed on %d/%d proxies", r, c);
+	if (r != c) {
+	    r = IMAP_AGAIN;
+	} else {
+	    r = IMAP_IOERROR;
+	}
+    }
     return r;
 }
 

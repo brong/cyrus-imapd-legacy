@@ -85,7 +85,7 @@ ec IMAP_QUOTAROOT_NONEXISTENT,
 ec IMAP_SERVER_UNAVAILABLE,
    "Server(s) unavailable to complete operation"
 
-ec IMAP_AGAIN
+ec IMAP_AGAIN,
    "Retry operation"
 
 # Following only used for internationalization of error messages
