@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.4 2002/06/17 17:13:25 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.5 2002/08/22 20:06:33 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -270,28 +270,49 @@ static int ascii_numeric_cmp(const char *text, const char *pat)
     else return 0; /* both not digits */
 }
 
-static comparator_t *lookup_rel(const char *relation)
+static comparator_t *lookup_rel(int relation)
 {
     comparator_t *ret;
 
     ret = NULL;
-    if (!strcmp(relation, "eq")) ret = &rel_eq;
-    else if (!strcmp(relation, "ne")) ret = &rel_ne;
-    else if (!strcmp(relation, "gt")) ret = &rel_gt;
-    else if (!strcmp(relation, "ge")) ret = &rel_ge;
-    else if (!strcmp(relation, "lt")) ret = &rel_lt;
-    else if (!strcmp(relation, "le")) ret = &rel_le;
+    switch (relation)
+      {
+      case EQ:
+      case B_EQ:
+	ret = &rel_eq;
+	break;
+      case B_NE:
+      case NE:
+	ret = &rel_ne; 
+	break;
+      case B_GT: 
+      case GT:
+	ret = &rel_gt; 
+	break;
+      case GE:
+      case B_GE:
+         ret = &rel_ge; 
+	 break;
+      case LT:
+      case B_LT:
+	ret = &rel_lt; 
+	break;
+      case LE:
+      case B_LE:
+	ret = &rel_le; 
+      }
 
     return ret;
 }
 
-comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
+comparator_t *lookup_comp(const char *comp, int mode, int relation,
 			  void **comprock)
 {
     comparator_t *ret;
 
     ret = NULL;
     *comprock = NULL;
+    printf("%s %d %d \n", comp, mode, relation); 
     if (!strcmp(comp, "i;octet")) {
  	switch (mode) {
 	case IS:
@@ -313,13 +334,11 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	    ret = &octet_regex;
 	    break;
 #endif
-#ifdef ENABLE_VALUE
 	case VALUE:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &octet_cmp;
 	    break;
-#endif
 	}
     }else if (!strcmp(comp, "i;ascii-casemap")) {
      	switch (mode) {
@@ -344,13 +363,11 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	    ret = &octet_regex;
 	    break;
 #endif
-#ifdef ENABLE_VALUE
 	case VALUE:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &strcasecmp;
 	    break;
-#endif
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {
@@ -359,7 +376,6 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	    ret = &rel_eq;
 	    *comprock = &ascii_numeric_cmp;
 	    break;
-#ifdef ENABLE_VALUE
 	case COUNT:
 	case VALUE:
 	case B_COUNT:
@@ -367,7 +383,6 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	    ret = lookup_rel(relation);
 	    *comprock = &ascii_numeric_cmp;
 	    break;
-#endif
 	}
     }
     return ret;

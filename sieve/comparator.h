@@ -1,6 +1,6 @@
 /* comparator.h
  * Larry Greenfield
- * $Id: comparator.h,v 1.7.12.1 2002/05/29 22:20:25 jsmith2 Exp $
+ * $Id: comparator.h,v 1.7.12.2 2002/08/22 20:06:33 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -43,6 +43,6 @@ typedef int comparator_t(const char *, const char *, void *);
 
 /* returns a pointer to a comparator function given it's name */
 comparator_t *lookup_comp(const char *comp, int mode,
-			  const char *relation, void **rock);
+			  int relation, void **rock);
 
 #endif

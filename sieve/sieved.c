@@ -133,7 +133,7 @@ int main(int argc, char * argv[])
 
 int write_list(int list_len, int i, bytecode_t * d)
 {int x;
- int endoflist=d[i].value;
+/* int endoflist=d[i].value;*/
  i++;
  for (x=0; x<list_len; x++)
    {
@@ -144,6 +144,44 @@ int write_list(int list_len, int i, bytecode_t * d)
  /*  printf("%d (predicted %d)\n", i, endoflist/4);*/
  return i;
 }
+int printComparison(bytecode_t *d ,int i)
+{
+  printf("Comparison: ");
+   switch(d[i].value)
+    {
+    case B_IS: printf("Is");break;
+    case B_CONTAINS:printf("Contains");break;
+    case B_MATCHES:printf("Matches");break;
+    case B_REGEX:printf("Regex");break;
+    case B_COUNT: printf("Count");
+      i++;
+      switch(d[i].value)
+	{
+	case B_GT: printf(" greater than "); break;   
+	case B_GE: printf(" greater than or equal ");break;
+	case B_LT: printf(" less than ");    break;
+	case B_LE: printf(" less than or equal ");break;
+	case B_NE: printf(" not equal ");    break;
+	case B_EQ: printf(" equal ");break;
+	}
+      break;
+    case B_VALUE:printf("Value");break;
+      i++;
+      switch(d[i].value)
+	{
+	case B_GT: printf(" greater than "); break;   
+	case B_GE: printf(" greater than or equal ");break;
+	case B_LT: printf(" less than ");    break;
+	case B_LE: printf(" less than or equal ");break;
+	case B_NE: printf(" not equal ");    break;
+	case B_EQ: printf(" equal ");break;
+	}
+      break;
+    }
+   printf("\n");
+  return i+1;
+}
+
 
 int dump2_test(bytecode_t * d, int i)
 {int l,x;
@@ -199,9 +237,10 @@ int dump2_test(bytecode_t * d, int i)
     printf(")\n");
     break;
   case BC_ADDRESS:/*7*/
-    printf("Address (Comp:%d type: ",d[i+1].value);
-    
-    switch(d[i+2].value)
+    printf("Address (");
+    i=printComparison(d, i+1);
+    printf("               type: ");
+    switch(d[i++].value)
       {
       case B_ALL: printf("all");break;
       case B_LOCALPART:printf("localpart");break;
@@ -210,13 +249,15 @@ int dump2_test(bytecode_t * d, int i)
       case B_DETAIL:printf("detail");break;
       }
     printf("Headers:");
-    i=write_list(d[i+3].len, i+4, d);
+    i=write_list(d[i].len, i+1, d);
     printf("Data:");
     i=write_list(d[i].len, i+1, d);
     break;
   case BC_ENVELOPE:/*8*/
-    printf("Envelope (Comp:%d type: %d ",d[i+1].value,d[i+2].value);
-    switch(d[i+2].value)
+    printf("Envelope (");
+    i=printComparison(d, i+1);
+    printf("                type: ");
+    switch(d[i++].value)
       {
       case B_ALL: printf("all");break;
       case B_LOCALPART:printf("localpart");break;
@@ -230,17 +271,11 @@ int dump2_test(bytecode_t * d, int i)
     i=write_list(d[i].len, i+1, d);
     break;
   case BC_HEADER:/*9*/
-    printf("Address (Comp:%d ",d[i+1].value);
-     switch(d[i+1].value)
-      {
-      case B_IS: printf("is");break;
-      case B_CONTAINS:printf("contains");break;
-      case B_MATCHES:printf("MATCHES");break;
-      case B_REGEX:printf("REGEX");break;
-      }
-    printf("Headers:");
-    i=write_list(d[i+2].len, i+3, d);
-    printf("Data:");
+    printf("Header (");
+    i= printComparison(d, i+1);
+    printf("              Headers: ");
+    i=write_list(d[i].len, i+1, d);
+    printf("Data: ");
     i=write_list(d[i].len, i+1, d);
     break;
   default:

@@ -1,6 +1,6 @@
 /* sievec.c -- compile a sieve script to bytecode manually
  * Rob Siemborski
- * $Id: sievec.c,v 1.1.2.3 2002/05/23 17:16:53 jsmith2 Exp $
+ * $Id: sievec.c,v 1.1.2.4 2002/08/22 20:06:34 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -139,7 +139,7 @@ static int sieve_notify(void *ac,
 {
     fatal("stub function called", 0);
     return SIEVE_FAIL;
-}
+    }
 int mysieve_error(int lineno, const char *msg,
 		  void *i, void *s)
 {

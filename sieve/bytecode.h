@@ -103,12 +103,26 @@ enum bytecode_tags {
     /* Sizes */
     B_OVER,
     B_UNDER,
+    /*sizes, pt 2*/
+    B_GT,
+    B_GE, 
+    B_LT,
+    B_LE,
+    B_EQ,
+    B_NE,
  
     /* Comparitors */
     B_IS,
     B_CONTAINS,
     B_MATCHES,
-    B_REGEX
+    B_REGEX,
+    B_COUNT,
+    B_VALUE
+
+    /*priorities*/
+    /*B_LOW
+      B_MEDIUM 
+      B_HIGH*/
 };
 
 #endif

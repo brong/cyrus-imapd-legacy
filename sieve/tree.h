@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.4 2002/06/05 16:44:28 jsmith2 Exp $
+ * $Id: tree.h,v 1.3.14.5 2002/08/22 20:06:34 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -66,14 +66,16 @@ struct Test {
 	stringlist_t *sl; /* exists */
 	struct { /* it's a header test */
 	    int comptag;
-	    comparator_t *comp;
+	    /*comparator_t *comp; not needed for bytecode!*/
+	    int relation;
 	    void *comprock;
 	    stringlist_t *sl;
 	    stringlist_t *pl;
 	} h;
 	struct { /* it's an address or envelope test */
 	    int comptag;
-	    comparator_t *comp;
+	    /*comparator_t *comp; not needed for bytecode!*/
+	    int relation;
 	    void *comprock;
 	    stringlist_t *sl;
 	    stringlist_t *pl;
@@ -118,7 +120,8 @@ struct Commandlist {
 	} n;
 	struct { /* it's a denotify action */
 	    int comptag;
-	    comparator_t *comp;
+	  /*comparator_t *comp; not needed for bytecode!*/
+	    int relation;
 	    void *comprock;
 	    void *pattern;
 	    const char *priority;
