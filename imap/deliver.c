@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.123.2.12 2000/10/17 05:28:04 ken3 Exp $
+ * $Id: deliver.c,v 1.123.2.13 2000/11/11 04:53:52 ken3 Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.123.2.12 2000/10/17 05:28:04 ken3 Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.123.2.13 2000/11/11 04:53:52 ken3 Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1272,7 +1272,8 @@ int send_response(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 	    break;
 	}
     fprintf(sm, "Subject: %s\r\n", src->subj);
-    fprintf(sm, "In-Reply-To: %s\r\n", m->id);
+    if (m->id)
+	fprintf(sm, "In-Reply-To: %s\r\n", m->id);
     fprintf(sm, "Auto-Submitted: auto-replied (vacation)\r\n");
     if (src->mime) {
 	fprintf(sm, "MIME-Version: 1.0\r\n");
