@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.198.2.3.2.1 2000/07/06 18:46:20 ken3 Exp $ */
+/* $Id: imapd.c,v 1.198.2.3.2.2 2000/07/06 20:46:33 ken3 Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -4001,6 +4001,7 @@ int type;
 	    /*
 	     * Nothing to do here - fall through.
 	     */
+	    break;
 	}
 	
     case EOF:
