@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.1 2003/01/15 23:31:17 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.2 2003/01/16 17:39:58 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -28,27 +28,6 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
-
-
-/*
- *previously included, don't know what for*
- 
- #include <stdlib.h>
- 
- #include <md5global.h>
- #include <md5.h>
- 
- #include <sys/stat.h>
- #include <fcntl.h>
- 
- 
- #include "comparator.h"
- */
-
-
-
-
-
 
 #include "sieve_interface.h"
 #include "interp.h"
@@ -261,7 +240,6 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
   int address=0;/*to differentiate between address and envelope*/
   comparator_t * comp=NULL;
   void * comprock=NULL;
-  printf("WERT %d\n",bc[i].value);
   switch(bc[i].value)
     {
     case BC_FALSE:res=0; i++;break;
@@ -379,11 +357,11 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		  /*search through all the data*/ 
 		  currd=datai+2;
 		  for (z=0; z<numdata && !res; z++)
-		    {printf("4wert\n");
+		    {/*printf("4wert\n");*/
 		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		    }
-		  printf("5wert\n");
+		/*  printf("5wert\n");*/
 		}
 	    }
 	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
