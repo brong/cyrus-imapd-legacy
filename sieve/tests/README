@@ -1,0 +1,12 @@
+there are four directories 
+
+action (sieve actions)
+test (the test cases for if)
+action extension (extensons to sieve that are actions)
+testExtension (extensions to sieve that are tests)
+
+inside these directories is a script and a folders of messages that can be used to test the script.
+
+the folder servermessages contains messages that could be used to test with a lmpt server
+
+the folder testmessages contains messages that could be used to test with the test program that comes with sieve
