@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.49 1999/11/05 22:42:19 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.50 1999/11/05 22:56:39 leg Exp $
  */
 
 #include <stdio.h>
@@ -523,8 +523,9 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     }
 
     /* Check ability to create mailbox */
-    r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, userid,
-				      auth_state, &acl, &newpartition, 1, tid);
+    r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, 
+				      userid, auth_state, 
+				      &acl, &newpartition, DB_RMW, tid);
     if (r == IMAP_AGAIN) {
 	goto retry;
     }
@@ -1204,8 +1205,8 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    goto done;
 	}
 	r = mboxlist_mycreatemailboxcheck(newname, 0, partition, isadmin, 
-					  userid, auth_state, (char **)0, 
-					  &newpartition, 1, tid);
+					  userid, auth_state, NULL, 
+					  &newpartition, DB_RMW, tid);
 	switch (r) {
 	case 0:
 	    break;
