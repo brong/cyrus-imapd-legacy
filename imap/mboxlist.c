@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.18 1999/10/18 22:26:46 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.19 1999/10/18 23:11:35 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -1984,7 +1984,9 @@ int newquota;
       key.size = strlen(quota.root);
       
       r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
-      
+
+      syslog(LOG_ERR, "DBERROR: error advancing: %s", quota.root);      
+
       if (r == DB_NOTFOUND) {
 	return IMAP_MAILBOX_NONEXISTENT;
       } else {
@@ -1992,12 +1994,18 @@ int newquota;
 	case 0:
 	  mboxent = (struct mbox_entry *) data.data;
 
+	  syslog(LOG_ERR, "DBERROR: found: %s", mboxent->name);      
+
 	  /* if this entry is not in the quota root then fail */
 	  if ( strlen(mboxent->name) < strlen(quota.root))
 	    return IMAP_MAILBOX_NONEXISTENT;
 
 	  if (strncmp(mboxent->name, quota.root, strlen(quota.root))!=0)
 	    return IMAP_MAILBOX_NONEXISTENT;
+
+	  if (strlen(mboxent->name) > strlen(quota.root))
+	    if (mboxent->name[ strlen(quota.root) ] != '.')
+	      return IMAP_MAILBOX_NONEXISTENT;
 
 	  break;
 
@@ -2010,20 +2018,6 @@ int newquota;
       }
     }
 
-#if NEEDSTODB
-    /* Ensure there is at least one mailbox under the quota root */
-    offset = bsearch_mem(quota.root, 1, list_base, list_size, 0, &len);
-    if (!len) {
-	if (strlen(quota.root) >= list_size - offset ||
-	    strncmp(quota.root, list_base + offset,
-		    strlen(quota.root)) != 0 ||
-	    list_base[offset + strlen(quota.root)] != '.') {
-
-	    return IMAP_MAILBOX_NONEXISTENT;
-	}
-    }
-#endif
-    
     /* perhaps create .NEW, lock, check if it got recreated, move in place */
     quota.lock_count = 1;
     quota.used = 0;
