@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.8 1999/11/06 23:13:25 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.9 1999/11/06 23:38:14 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1199,6 +1199,7 @@ cmdloop()
 	do {
 	    now = time(NULL);
 	    mark = IDLE_TIMEOUT + 1;
+	    i = 0;
 	    while (backend_cached[i]) {
 		if ((backend_cached[i]->lastused != 0) &&
 		    (backend_cached[i] != backend_current)) {
