@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.22.2.2 2002/06/06 21:09:18 jsmith2 Exp $
+ * $Id: message.c,v 1.22.2.3 2002/09/05 17:19:58 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -340,8 +340,8 @@ int do_mark(action_list_t *a)
  */
 int do_unmark(action_list_t *a)
 {
+
     action_list_t *b = NULL;
- 
     /* see if this conflicts with any previous actions taken on this message */
     while (a != NULL) {
 	b = a;

@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.14 2002/09/04 20:23:27 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.15 2002/09/05 17:19:57 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -1332,8 +1332,8 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 
   switch(bc[i].value)
     {
-    case BC_FALSE:res=0; break;
-    case BC_TRUE:res=1; break;
+    case BC_FALSE:res=0; i++;break;
+    case BC_TRUE:res=1; i++;break;
     case BC_NOT:/*2*/
       i+=1;
       res= !(eval_bc_test(interp,m, bc, &i));
@@ -1353,18 +1353,19 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      {return 0;}
 	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	  }
-
+	i=(bc[headersi+1].value/4);
 	break;
       }
     case BC_SIZE:/*4*/
       {int s;
       res=0;
-	if (interp->getsize(m, &s) != SIEVE_OK)
-	    break;
+      if (interp->getsize(m, &s) != SIEVE_OK)
+	break;
       if (bc[i+1].value==B_OVER)
-	    {res=s>bc[i+2].value;}
-	  else /*under*/
-	    {res=s<bc[i+2].value;}
+	{res=s>bc[i+2].value;}
+      else /*under*/
+	{res=s<bc[i+2].value;}
+      i+=2;
       break;
       }
     case BC_ANYOF:/*5*/
@@ -1380,9 +1381,8 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	l=bc[i+1].len;
 	i+=2;
 	/*return 1 unless you find one that isn't true, then return 0*/
-	for (x=0;x<l && res; x++) {
-	    res &= eval_bc_test(interp,m,bc,&i);
-	}
+	for (x=0;x<l && res; x++) 
+	  {res &= eval_bc_test(interp,m,bc,&i);}
 	break;
     case BC_ADDRESS:/*7*/
       address=1;
@@ -1537,6 +1537,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
       printf("WERT, can't evaluate if statement.");
     }
   *ip=i;
+  printf("%d", i);
   return res;
 }
 

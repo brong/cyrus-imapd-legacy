@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.7 2002/09/04 20:23:28 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.8 2002/09/05 17:19:58 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -235,7 +235,7 @@ static int ascii_casemap_contains(const char *text, const char *pat,
 
     i = 0, j = 0;
     while ((j < M) && (i < N)) {
-          if (toupper(text[i]) == toupper(pat[j])) {
+              if (toupper(text[i]) == toupper(pat[j])) {
 	  	  i++; j++;
 	} else {
 	    i = i - j + 1;
