@@ -1,5 +1,5 @@
 /* lmtpengine.h: lmtp protocol engine interface
- * $Id: lmtpengine.h,v 1.7.2.1 2002/06/06 21:08:07 jsmith2 Exp $
+ * $Id: lmtpengine.h,v 1.7.2.2 2002/06/14 18:36:51 jsmith2 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *

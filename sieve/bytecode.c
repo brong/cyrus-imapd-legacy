@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.8 2002/06/06 21:09:17 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.9 2002/06/14 18:37:04 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -51,7 +51,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <fcntl.h>
 
 #include "bytecode.h"
-#include "comparator_bc.h"
+#include "comparator.h"
  
 
 

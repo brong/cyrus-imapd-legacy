@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: annotate.c,v 1.8.2.1 2002/06/06 21:07:56 jsmith2 Exp $
+ * $Id: annotate.c,v 1.8.2.2 2002/06/14 18:36:42 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -310,8 +310,8 @@ int annotatemore_fetch(struct strlist *entries, struct strlist *attribs,
 	    mailbox = e->s + 10;
 	    *cp++ = '\0';
 
-	    /* we only support "/mailbox/{mbox}/vendor/cyrus/server" and
-	       "/mailbox/{mbox}/vendor/cyrus/partition" right now */
+	    /* we only support "/vendor/cyrus/server" and
+	       "/vendor/cyrus/partition" right now */
 	    if (!strncmp(cp, "/vendor/cyrus/server",
 			 (wildcard = strchr(cp, '*')) ? wildcard - cp : 20)) {
 		fdata.entries |= ENTRY_SERVER;
@@ -339,126 +339,23 @@ int annotatemore_fetch(struct strlist *entries, struct strlist *attribs,
 	    }
 	}
 
-	if (!strncmp(e->s, "/server/", 8)) {
-	    FILE *f;
-	    char filename[1024], buf[1024], size[100], *p;
-	    struct attvaluelist *attvalues;
-
-	    cp = e->s + 8;
-
-	    if (!strncmp(cp, "motd", strcspn(cp, "*%"))) {
-		sprintf(filename, "%s/msg/motd", config_dir);
-		if ((f = fopen(filename, "r")) != NULL) {
-		    fgets(buf, sizeof(buf), f);
-		    fclose(f);
-
-		    if ((p = strchr(buf, '\r'))!=NULL) *p = 0;
-		    if ((p = strchr(buf, '\n'))!=NULL) *p = 0;
-		    /* can't have [ be first char, sigh */
-		    for(p = buf; *p == '['; p++);
-
-		    attvalues = NULL;
-		    if (fdata.attribs & ATTRIB_VALUE)
-			appendattvalue(&attvalues, "value.shared", buf);
-		    if (fdata.attribs & ATTRIB_SIZE) {
-			sprintf(size, "%u", strlen(buf));
-			appendattvalue(&attvalues, "size.shared", size);
-		    }
-
-		    appendentryatt(l, "/server/motd", attvalues);
-		}
-	    }
-	    if (!strncmp(cp, "comment", strcspn(cp, "*%"))) {
-		sprintf(filename, "%s/msg/comment", config_dir);
-		if ((f = fopen(filename, "r")) != NULL) {
-		    fgets(buf, sizeof(buf), f);
-		    fclose(f);
-
-		    if ((p = strchr(buf, '\r'))!=NULL) *p = 0;
-		    if ((p = strchr(buf, '\n'))!=NULL) *p = 0;
-
-		    attvalues = NULL;
-		    if (fdata.attribs & ATTRIB_VALUE)
-			appendattvalue(&attvalues, "value.shared", buf);
-		    if (fdata.attribs & ATTRIB_SIZE) {
-			sprintf(size, "%u", strlen(buf));
-			appendattvalue(&attvalues, "size.shared", size);
-		    }
-
-		    appendentryatt(l, "/server/comment", attvalues);
-		}
-	    }
-	}
-
 	e = e->next;
     }
 
     return 0;
 }
 
-static int server_store(char *filename, char *value)
-{
-    FILE *f;
-
-    /* XXX check for failures */
-    if (!strcmp(value, "NIL"))
-	unlink(filename);
-    else {
-	f = fopen(filename, "w");
-	fprintf(f, "%s\n", value);
-	fclose(f);
-    }
-
-    return 0;
-}
-
-int annotatemore_store(struct entryattlist *l, struct namespace *namespace,
-		       int isadmin, char *userid,
+int annotatemore_store(struct entryattlist *l, int isadmin, char *userid,
 		       struct auth_state *auth_state)
 {
     struct entryattlist *e = l;
-    struct attvaluelist *av;
-    char *value = NULL, *motd = NULL, *comment = NULL;
-    char filename[1024];
-
-    syslog(LOG_INFO, "annotatemore_store");
 
     while (e) {
 	if (strncmp(e->entry, "/server/", 8) &&
 	    strncmp(e->entry, "/mailbox/", 9)) {
 	    return IMAP_ANNOTATION_BADENTRY;
 	}
-
-	av = e->attvalues;
-	while (av) {
-	    if (!strcmp(av->attrib, "value.shared")) {
-		value = av->value;
-		break;
-	    }
-	    else
-		return IMAP_PERMISSION_DENIED;
-
-	    av = av->next;
-	}
-
-	if (value && !strcmp(e->entry, "/server/motd"))
-	    motd = value;
-	else if (value && !strcmp(e->entry, "/server/comment"))
-	    comment = value;
-	else
-	    return IMAP_PERMISSION_DENIED;
-
 	e = e->next;
-    }
-
-    /* XXX check for failures -- how to do this atomic? */
-    if (motd) {
-	sprintf(filename, "%s/msg/motd", config_dir);
-	server_store(filename, value);
-    }
-    if (comment) {
-	sprintf(filename, "%s/msg/comment", config_dir);
-	server_store(filename, value);
     }
 
     return 0;

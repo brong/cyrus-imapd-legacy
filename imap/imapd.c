@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.331.2.1 2002/06/06 21:08:01 jsmith2 Exp $ */
+/* $Id: imapd.c,v 1.331.2.2 2002/06/14 18:36:46 jsmith2 Exp $ */
 
 #include <config.h>
 
@@ -3580,7 +3580,7 @@ cmd_create(char *tag, char *name, char *partition, int localonly)
 				       imapd_authstate, 0, 0);
 	    
 	    if (!r && autocreatequota > 0) {
-		(void) mboxlist_setquota(mailboxname, autocreatequota, 0);
+		(void) mboxlist_setquota(mailboxname, autocreatequota);
 	    }
 	}
     }
@@ -3642,7 +3642,7 @@ void cmd_delete(char *tag, char *name, int localonly)
     if (!r) {
 	r = mboxlist_deletemailbox(mailboxname, imapd_userisadmin,
 				   imapd_userid, imapd_authstate, 1,
-				   localonly, 0);
+				   localonly);
     }
 
     /* was it a top-level user mailbox? */
@@ -3665,8 +3665,7 @@ void cmd_delete(char *tag, char *name, int localonly)
 	/* foreach mailbox in list, remove it */
 	for (i = 0; i < l->num; i++) {
 	    r2 = mboxlist_deletemailbox(l->mb[i], imapd_userisadmin,
-					imapd_userid, imapd_authstate,
-					0, 0, 0);
+					imapd_userid, imapd_authstate, 0, 0);
 	    if (r2) {
 		prot_printf(imapd_out, "* NO delete %s: %s\r\n",
 			    l->mb[i], error_message(r2));
@@ -4482,7 +4481,6 @@ char *quotaroot;
     int newquota = -1;
     int badresource = 0;
     int c;
-    int force = 0;
     static struct buf arg;
     char *p;
     int r;
@@ -4516,22 +4514,13 @@ char *quotaroot;
     }
 
     if (badresource) r = IMAP_UNSUPPORTED_QUOTA;
-    else if (!imapd_userisadmin && !imapd_userisproxyadmin) {
-	/* need to allow proxies so that mailbox moves can set initial quota
-	 * roots */
-	r = IMAP_PERMISSION_DENIED;
-    } else {
-	/* are we forcing the creation of a quotaroot by having a leading +? */
-	if(quotaroot[0] == '+') {
-	    force = 1;
-	    quotaroot++;
-	}
-	
+    else if (!imapd_userisadmin) r = IMAP_PERMISSION_DENIED;
+    else {
 	r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, quotaroot,
 						   imapd_userid, mailboxname);
 
 	if (!r) {
-	    r = mboxlist_setquota(mailboxname, newquota, force);
+	    r = mboxlist_setquota(mailboxname, newquota);
 	}
     }
 
@@ -4771,20 +4760,23 @@ char *name;
 /*
  * Reply to Netscape's crock with a crock of my own
  */
-void cmd_netscrape(char *tag)
+void
+cmd_netscrape(tag)
+    char *tag;
 {
     const char *url;
-
-    url = config_getstring("netscapeurl", NULL);
+    /* so tempting, and yet ... */
+    /* url = "http://random.yahoo.com/ryl/"; */
+    url = config_getstring("netscapeurl",
+			   "http://andrew2.andrew.cmu.edu/cyrus/imapd/netscape-admin.html");
 
     /* I only know of three things to reply with: */
     prot_printf(imapd_out,
-		"* OK [NETSCAPE] Carnegie Mellon Cyrus IMAP\r\n"
-		"* VERSION %s\r\n",
+"* OK [NETSCAPE] Carnegie Mellon Cyrus IMAP\r\n* VERSION %s\r\n",
 		CYRUS_VERSION);
-    if (url) prot_printf(imapd_out, "* ACCOUNT-URL %s\r\n", url);
-    prot_printf(imapd_out, "%s OK %s\r\n",
-		tag, error_message(IMAP_OK_COMPLETED));
+    prot_printf(imapd_out,
+		"* ACCOUNT-URL %s\r\n%s OK %s\r\n",
+		url, tag, error_message(IMAP_OK_COMPLETED));
 }
 #endif /* ENABLE_X_NETSCAPE_HACK */
 
@@ -5174,7 +5166,7 @@ void cmd_getannotation(char *tag)
  */    
 void cmd_setannotation(char *tag)
 {
-    int c, r = 0;
+    int c;
     struct entryattlist *entryatts = NULL;
 
     c = getannotatestoredata(tag, &entryatts);
@@ -5193,22 +5185,7 @@ void cmd_setannotation(char *tag)
 	goto freeargs;
     }
 
-    /* administrators only please */
-    if (!imapd_userisadmin) {
-	r = IMAP_PERMISSION_DENIED;
-    }
-
-    if (!r) {
-	r = annotatemore_store(entryatts, &imapd_namespace, imapd_userisadmin,
-			       imapd_userid, imapd_authstate);
-    }
-
-    if (r) {
-	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
-    } else {
-	prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		    error_message(IMAP_OK_COMPLETED));
-    }
+    prot_printf(imapd_out, "%s NO setting annotations not supported\r\n", tag);
 
   freeargs:
     if (entryatts) freeentryatts(entryatts);
@@ -5991,8 +5968,7 @@ static int do_xfer_single(char *toserver, char *topart,
 			  int mbflags, 
 			  char *path, char *part, char *acl,
 			  int prereserved,
-			  mupdate_handle *h_in,
-			  struct backend *be_in) 
+			  mupdate_handle *h_in) 
 {
     int r = 0, rerr = 0;
     char buf[MAX_PARTITION_LEN+HOSTNAME_SIZE+2];
@@ -6030,15 +6006,13 @@ static int do_xfer_single(char *toserver, char *topart,
      */
 
     /* Step 1: Connect to remote server */
-    if(!r && !be_in) {
+    if(!r) {
 	/* Just authorize as the IMAP server, so pass "" as our authzid */
 	be = findserver(NULL, toserver, "");
 	if(!be) r = IMAP_SERVER_UNAVAILABLE;
 	if(r) syslog(LOG_ERR,
 		     "Could not move mailbox: %s, Backend connect failed",
 		     mailboxname);
-    } else if(!r) {
-	be = be_in;
     }
 
     /* Step 1a: Connect to mupdate (as needed) */
@@ -6161,7 +6135,7 @@ static int do_xfer_single(char *toserver, char *topart,
 	/* note also that we need to remember to let proxyadmins do this */
 	r = mboxlist_deletemailbox(mailboxname,
 				   imapd_userisadmin || imapd_userisproxyadmin,
-				   imapd_userid, imapd_authstate, 0, 1, 0);
+				   imapd_userid, imapd_authstate, 0, 1);
 	if(r) syslog(LOG_ERR,
 		     "Could not delete local mailbox during move of %s",
 		     mailboxname);
@@ -6199,11 +6173,11 @@ done:
 			mailboxname);
     }
 
-    /* release the handles we got locally if necessary */
-    if(!h_in)
+    /* release the handle we got locally if necessary */
+    if(!h_in) {
 	mupdate_disconnect(&mupdate_h);
-    if(be && !be_in)
-	downserver(be);
+    }
+    if(be) downserver(be);
 
     return r;
 }
@@ -6213,7 +6187,6 @@ struct xfer_user_rock
     char *toserver;
     char *topart;
     mupdate_handle *h;
-    struct backend *be;
 };
 
 static int xfer_user_cb(char *name,
@@ -6224,7 +6197,6 @@ static int xfer_user_cb(char *name,
     mupdate_handle *mupdate_h = ((struct xfer_user_rock *)rock)->h;
     char *toserver = ((struct xfer_user_rock *)rock)->toserver;
     char *topart = ((struct xfer_user_rock *)rock)->topart;
-    struct backend *be = ((struct xfer_user_rock *)rock)->be;
     char externalname[MAX_MAILBOX_NAME];
     int mbflags;
     int r = 0;
@@ -6254,7 +6226,7 @@ static int xfer_user_cb(char *name,
 
     if(!r) {
 	r = do_xfer_single(toserver, topart, externalname, name, mbflags,
-			   path, part, acl, 0, mupdate_h, be);
+			   path, part, acl, 0, mupdate_h);
     }
 
     if(path) free(path);
@@ -6319,10 +6291,8 @@ void cmd_xfer(char *tag, char *name, char *toserver, char *topart)
     /* if we are not moving a user, just move the one mailbox */
     if(!r && !moving_user) {
 	r = do_xfer_single(toserver, topart, name, mailboxname, mbflags,
-			   path, part, acl, 0, NULL, NULL);
+			   path, part, acl, 0, NULL);
     } else {
-	struct backend *be = NULL;
-	
 	/* we need to reserve the users inbox - connect to mupdate */
 	if(!r) {
 	    r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
@@ -6332,16 +6302,6 @@ void cmd_xfer(char *tag, char *name, char *toserver, char *topart)
 		       mailboxname);
 		goto done;
 	    }
-	}
-
-	/* Get a single connection to the remote backend */
-	be = findserver(NULL, toserver, "");
-	if(!be) {
-	    r = IMAP_SERVER_UNAVAILABLE;
-	    syslog(LOG_ERR,
-		   "Could not move mailbox: %s, " \
-		   "Initial backend connect failed",
-		   mailboxname);
 	}
 
 	/* deactivate their inbox */
@@ -6356,35 +6316,6 @@ void cmd_xfer(char *tag, char *name, char *toserver, char *topart)
 	    else backout_mupdate = 1;
 	}
 
-	/* If needed, set an uppermost quota root */
-	{
-	    char buf[MAX_MAILBOX_PATH];
-	    struct quota quota;
-	    
-	    quota.fd = -1;
-	    quota.root = mailboxname;
-	    mailbox_hash_quota(buf,quota.root);
-	    quota.fd = open(buf, O_RDWR, 0);
-	    if(quota.fd != -1) {	    
-		r = mailbox_read_quota(&quota);
-		close(quota.fd);
-	    
-		if(!r) {
-		    /* note use of + to force the setting of a nonexistant
-		     * quotaroot */
-		    prot_printf(be->out, "Q01 SETQUOTA {%d+}\r\n" \
-				         "+%s (STORAGE %d)\r\n",
-				strlen(name)+1, name, quota.limit);
-		    r = getresult(be->in, "Q01");
-		    if(r) syslog(LOG_ERR,
-				 "Could not move mailbox: %s, " \
-				 "failed setting initial quota root\r\n",
-				 mailboxname);
-		}
-	    }
-	}
-
-
 	/* recursively move all sub-mailboxes, using internal names */
 	if(!r) {
 	    struct xfer_user_rock rock;
@@ -6392,8 +6323,7 @@ void cmd_xfer(char *tag, char *name, char *toserver, char *topart)
 	    rock.toserver = toserver;
 	    rock.topart = topart;
 	    rock.h = mupdate_h;
-	    rock.be = be;
-
+	    
 	    snprintf(buf, sizeof(buf), "%s.*", mailboxname);
 	    r = mboxlist_findall(NULL, buf, 1, imapd_userid,
 				 imapd_authstate, xfer_user_cb,
@@ -6406,11 +6336,7 @@ void cmd_xfer(char *tag, char *name, char *toserver, char *topart)
 	/* ...and seen file, and subs file, and sieve scripts... */
 	if(!r) {
 	    r = do_xfer_single(toserver, topart, name, mailboxname, mbflags,
-			       path, part, acl, 1, mupdate_h, be);
-	}
-
-	if(be) {
-	    downserver(be);
+			       path, part, acl, 1, mupdate_h);
 	}
 
 	if(r && backout_mupdate) {

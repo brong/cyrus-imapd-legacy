@@ -40,8 +40,6 @@
  *
  */
 
-/* $Id: acappush.h,v 1.3.12.1 2002/06/06 21:07:56 jsmith2 Exp $ */
-
 #ifndef ACAPPUSH_H_
 #define ACAPPUSH_H_
 

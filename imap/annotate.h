@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: annotate.h,v 1.2.2.1 2002/06/06 21:07:56 jsmith2 Exp $
+ * $Id: annotate.h,v 1.2.2.2 2002/06/14 18:36:43 jsmith2 Exp $
  */
 
 #ifndef ANNOTATE_H
@@ -76,8 +76,7 @@ int annotatemore_fetch(struct strlist *entries, struct strlist *attribs,
 		       struct auth_state *auth_state, struct entryattlist **l);
 
 /* store annotations */
-int annotatemore_store(struct entryattlist *l, struct namespace *namespace,
-		       int isadmin, char *userid,
+int annotatemore_store(struct entryattlist *l, int isadmin, char *userid,
 		       struct auth_state *auth_state);
 
 /* close the database */

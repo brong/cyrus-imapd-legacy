@@ -40,7 +40,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * 
- * $Id: mboxlist.h,v 1.17.2.1 2002/06/06 21:08:12 jsmith2 Exp $
+ * $Id: mboxlist.h,v 1.17.2.2 2002/06/14 18:36:54 jsmith2 Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -114,11 +114,9 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
 /* setting local_only disables any communication with the mupdate server
  * and deletes the mailbox from the filesystem regardless of if it is
  * MBTYPE_REMOTE or not */
-/* force ignores errors and just tries to wipe the mailbox off the face of
- * the planet */
 int mboxlist_deletemailbox(const char *name, int isadmin, char *userid, 
 			   struct auth_state *auth_state, int checkacl,
-			   int local_only, int force);
+			   int local_only);
 
 /* Rename/move a mailbox (hierarchical) */
 int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
@@ -168,7 +166,7 @@ int mboxlist_changesub(const char *name, const char *userid,
 char *mboxlist_hash_usersubs(const char *userid);
 
 /* set or create quota root */
-int mboxlist_setquota(const char *root, int newquota, int force);
+int mboxlist_setquota(const char *root, int newquota);
 int mboxlist_unsetquota(const char *root);
 
 /* returns a malloc() string that is the representation in the mailboxes 

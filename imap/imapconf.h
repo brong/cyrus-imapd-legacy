@@ -1,5 +1,5 @@
 /* config.h -- Configuration routines
- * $Id: imapconf.h,v 1.11.2.1 2002/06/06 21:08:01 jsmith2 Exp $
+ * $Id: imapconf.h,v 1.11.2.2 2002/06/14 18:36:46 jsmith2 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

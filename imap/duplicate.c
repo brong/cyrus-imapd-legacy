@@ -39,8 +39,6 @@
  *
  */
 
-/* $Id: duplicate.c,v 1.25.2.1 2002/06/06 21:08:00 jsmith2 Exp $ */
-
 #include <config.h>
 
 #include <stdio.h>

@@ -1,6 +1,6 @@
 /* mupdate.c -- cyrus murder database master 
  *
- * $Id: mupdate.c,v 1.13.2.1 2002/06/06 21:08:13 jsmith2 Exp $
+ * $Id: mupdate.c,v 1.13.2.2 2002/06/14 18:36:55 jsmith2 Exp $
  * Copyright (c) 2001 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -821,7 +821,7 @@ void database_log(const struct mbent *mb)
 	break;
 
     case SET_DELETE:
-	mboxlist_deletemailbox(mb->mailbox, 1, "", NULL, 0, 0, 0);
+	mboxlist_deletemailbox(mb->mailbox, 1, "", NULL, 0, 0);
 	break;
 
     case SET_DEACTIVATE:
@@ -925,7 +925,7 @@ void cmd_authenticate(struct conn *C,
 	}
 
 	len = strlen(buf);
-	in = xmalloc(len+1);
+	in = xmalloc(len);
 	r = sasl_decode64(buf, len, in, len, &inlen);
 	if(r != SASL_OK) {
 	    prot_printf(C->pout, "%s NO \"cannot base64 decode\"\r\n",tag);
@@ -1548,7 +1548,7 @@ int mupdate_synchronize(mupdate_handle *handle)
 	    remote_boxes.head = r->next;
 	} else if (ret < 0) {
 	    /* Local without corresponding remote, delete it */
-	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0, 0);
+	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0);
 	    local_boxes.head = l->next;
 	} else /* (ret > 0) */ {
 	    /* Remote without corresponding local, insert it */
@@ -1563,7 +1563,7 @@ int mupdate_synchronize(mupdate_handle *handle)
     if(l && !r) {
 	/* we have more deletes to do */
 	while(l) {
-	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0, 0);
+	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0);
 	    local_boxes.head = l->next;
 	    l = local_boxes.head;
 	}

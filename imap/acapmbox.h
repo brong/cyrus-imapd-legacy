@@ -39,8 +39,6 @@
  *
  */
 
-/* $Id: acapmbox.h,v 1.16.12.1 2002/06/06 21:07:56 jsmith2 Exp $ */
-
 #ifndef ACAPMBOX_H_
 #define ACAPMBOX_H_
 

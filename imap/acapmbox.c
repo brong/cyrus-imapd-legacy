@@ -38,7 +38,6 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: acapmbox.c,v 1.28.2.1 2002/06/06 21:07:56 jsmith2 Exp $ */
 
 #include <config.h>
 

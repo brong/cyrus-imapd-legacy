@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: user.h,v 1.2.8.1 2002/06/06 21:08:20 jsmith2 Exp $
+ * $Id: user.h,v 1.2.8.2 2002/06/14 18:37:01 jsmith2 Exp $
  */
 
 #ifndef INCLUDED_USER_H

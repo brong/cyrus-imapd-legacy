@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.44.2.1 2002/06/06 21:08:06 jsmith2 Exp $
+ * $Id: lmtpengine.c,v 1.44.2.2 2002/06/14 18:36:50 jsmith2 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *

@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.156.2.1 2002/06/06 21:08:09 jsmith2 Exp $
+ * $Id: mboxlist.c,v 1.156.2.2 2002/06/14 18:36:52 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -541,6 +541,7 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
     char *acl = NULL;
     const char *root = NULL;
     char *newpartition = NULL;
+    struct mailbox newmailbox;
     struct txn *tid = NULL;
     mupdate_handle *mupdate_h = NULL;
     char *mboxent = NULL;
@@ -588,7 +589,6 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
     }
 
     /* 4. Create mupdate reservation */
-    /* xxx this is network I/O being done while holding a mboxlist lock */
     if (config_mupdate_server && !localonly) {
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
@@ -639,7 +639,10 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
 			   ((mbtype & MBTYPE_NETNEWS) ?
 			    MAILBOX_FORMAT_NETNEWS :
 			    MAILBOX_FORMAT_NORMAL), 
-			   NULL);
+			   &newmailbox);
+	if (!r) {
+	    mailbox_close(&newmailbox);
+	}
     }
 
     if (r) { /* CREATE failed */ 
@@ -766,7 +769,7 @@ int mboxlist_insertremote(const char *name, int mbtype,
  */
 int mboxlist_deletemailbox(const char *name, int isadmin, char *userid, 
 			   struct auth_state *auth_state, int checkacl,
-			   int local_only, int force)
+			   int local_only)
 {
     int r;
     char *acl;
@@ -779,8 +782,6 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
     int mbtype;
     int deleteright = get_deleteright();
     mupdate_handle *mupdate_h = NULL;
-
-    if(!isadmin && force) return IMAP_PERMISSION_DENIED;
 
  retry:
     /* Check for request to delete a user:
@@ -796,7 +797,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	if (!isadmin) { r = IMAP_PERMISSION_DENIED; goto done; }
     }
 
-    r = mboxlist_mylookup(name, &mbtype, &path, NULL, &acl, NULL, 1);
+    r = mboxlist_mylookup(name, &mbtype, &path, NULL, &acl, &tid, 1);
     switch (r) {
     case 0:
 	break;
@@ -813,7 +814,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 
     /* are we reserved? (but for remote mailboxes this is okay, since
      * we don't touch their data files at all) */
-    if(!isremote && (mbtype & MBTYPE_RESERVE) && !force) {
+    if(!isremote && (mbtype & MBTYPE_RESERVE)) {
 	r = IMAP_MAILBOX_RESERVED;
 	goto done;
     }
@@ -835,30 +836,9 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	}
     }
 
-    /* Lock the mailbox if it isn't a remote mailbox */
-    if(!r && !isremote) {
-	r = mailbox_open_locked(name, path, acl, 0, &mailbox, 0);
-	if(r && !force) goto done;
-    }
-    
-    /* delete entry */
-    r = DB->delete(mbdb, name, strlen(name), &tid, 0);
-    switch (r) {
-    case CYRUSDB_OK: /* success */
-	break;
-    case CYRUSDB_AGAIN:
-	goto retry;
-    default:
-	syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
-	       name, cyrusdb_strerror(r));
-	r = IMAP_IOERROR;
-	if(!force) goto done;
-    }
-
-    /* remove from mupdate - this can be weird if the commit below fails */
-    /* xxx this is network I/O being done while holding a mboxlist lock */
-    if ((!r || force)
-	&& !isremote && !local_only && config_mupdate_server) {
+    /* remove from mupdate */
+    /* xxx this can lead to inconsistancies if the later stuff fails */
+    if (!r && !isremote && !local_only && config_mupdate_server) {
 	/* delete the mailbox in MUPDATE */
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
@@ -875,8 +855,22 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	mupdate_disconnect(&mupdate_h);
     }
 
+    /* delete entry */
+    r = DB->delete(mbdb, name, strlen(name), &tid, 0);
+    switch (r) {
+    case CYRUSDB_OK: /* success */
+	break;
+    case CYRUSDB_AGAIN:
+	goto retry;
+    default:
+	syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
+	       name, cyrusdb_strerror(r));
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
     /* commit db operations */
-    if (!r || force) {
+    if (!r) {
 	r = DB->commit(mbdb, tid);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
@@ -886,9 +880,10 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	tid = NULL;
     }
 
-    if ((r && !force) || isremote) goto done;
+    if (r || isremote) goto done;
 
-    if (!r || force) r = mailbox_delete(&mailbox, deletequotaroot);
+    if (!r) r = mailbox_open_header_path(name, path, acl, 0, &mailbox, 0);
+    if (!r) r = mailbox_delete(&mailbox, deletequotaroot);
 
     /*
      * See if we have to remove mailbox's quota root
@@ -898,11 +893,9 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
     }
 
  done:
-    if(r && tid && !force) {
+    if(r && tid) {
 	/* Abort the transaction if it is still in progress */
 	DB->abort(mbdb, tid);
-    } else if(tid && force) {
-	DB->commit(mbdb, tid);
     }
 
     return r;
@@ -1277,10 +1270,6 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
  * 6. Commit transaction
  * 7. Change mupdate entry 
  *
- * xxx i'm not happy with this function.  the "goto done" bit has made it
- * more confusing, not less.  we should probably just nuke the gotos
- * and it'll be more clear or make "goto done" really jump to the
- * very end. -leg
  */
 int mboxlist_setacl(char *name, char *identifier, char *rights, 
 		    int isadmin, char *userid, 
@@ -1292,7 +1281,6 @@ int mboxlist_setacl(char *name, char *identifier, char *rights,
     int mode = ACL_MODE_SET;
     int isusermbox = 0;
     struct mailbox mailbox;
-    int mailbox_open = 0;
     char *acl, *newacl = NULL;
     char *partition, *path;
     char *mboxent = NULL;
@@ -1333,10 +1321,7 @@ int mboxlist_setacl(char *name, char *identifier, char *rights,
 
 	/* open & lock mailbox header */
         r = mailbox_open_header_path(name, path, acl, NULL, &mailbox, 0);
-	if (!r) {
-	    mailbox_open = 1;
-	    r = mailbox_lock_header(&mailbox);
-	}
+	if(!r) r = mailbox_lock_header(&mailbox);
 
 	if(!r) {
 	relock_retry:
@@ -1409,19 +1394,19 @@ int mboxlist_setacl(char *name, char *identifier, char *rights,
 	goto done;
     }
 
-    /* Do change to mailbox header file; we already have 
-       it locked from above */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
-	if(mailbox.acl) free(mailbox.acl);
-	mailbox.acl = xstrdup(newacl);
-	r = mailbox_write_header(&mailbox);
+    /* Do change to mailbox file */
+    if (!(mbtype & MBTYPE_REMOTE)) {
+	if (!r) {
+	    r = mailbox_lock_header(&mailbox);
+	    if (!r) {
+		/* set it in the /var/spool part */
+		(void) mailbox_write_header(&mailbox);
+	    }
+	    mailbox_close(&mailbox);
+	}
     }
 
   done:
-    if (mailbox_open) {
-	mailbox_close(&mailbox);
-    }
-
     if (mboxent) free(mboxent);
 
     if (r) {
@@ -1964,12 +1949,11 @@ int mboxlist_findall_alt(struct namespace *namespace,
 /*
  * Set the quota on or create a quota root
  */
-int mboxlist_setquota(const char *root, int newquota, int force)
+int mboxlist_setquota(const char *root, int newquota)
 {
     char quota_path[MAX_MAILBOX_PATH];
     char pattern[MAX_MAILBOX_PATH];
     struct quota quota;
-    int have_mailbox = 1;
     int r, t;
 
     if (!root[0] || root[0] == '.' || strchr(root, '/')
@@ -2001,16 +1985,10 @@ int mboxlist_setquota(const char *root, int newquota, int force)
     /* look for a top-level mailbox in the proposed quotaroot */
     r = mboxlist_detail(quota.root, &t, NULL, NULL, NULL, NULL);
     if (r) {
-	/* are we going to force the create anyway? */
-	if(!force) return r;
-	else {
-	    have_mailbox = 0;
-	    t = 0;
-	}
+	return r;
     }
-
-    if(t & (MBTYPE_REMOTE | MBTYPE_MOVING)) {
-	/* Can't set quota on a remote mailbox */
+    /* Can't set quota on a remote mailbox */
+    if (t & (MBTYPE_REMOTE | MBTYPE_MOVING)) {
 	return IMAP_MAILBOX_NOTSUPPORTED;
     }
 
@@ -2028,8 +2006,7 @@ int mboxlist_setquota(const char *root, int newquota, int force)
     strcat(pattern, ".*");
     
     /* top level mailbox */
-    if(have_mailbox)
-	mboxlist_changequota(quota.root, 0, 0, &quota);
+    mboxlist_changequota(quota.root, 0, 0, &quota);
     /* submailboxes - we're using internal names here */
     mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_changequota, &quota);
     

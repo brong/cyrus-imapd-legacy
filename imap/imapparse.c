@@ -1,5 +1,3 @@
-/* $Id: imapparse.c,v 1.3.6.1 2002/06/06 21:08:04 jsmith2 Exp $ */
-
 #include <config.h>
 
 #include <ctype.h>

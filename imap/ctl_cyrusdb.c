@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: ctl_cyrusdb.c,v 1.4.2.1 2002/06/06 21:07:58 jsmith2 Exp $
+ * $Id: ctl_cyrusdb.c,v 1.4.2.2 2002/06/14 18:36:44 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -136,11 +136,12 @@ static int fixmbox(char *name,
     /* if it is MBTYPE_RESERVED, unset it & call mboxlist_delete */
     if(!r && (mbtype & MBTYPE_RESERVE)) {
 	if(!r) {
-	    r = mboxlist_deletemailbox(name, 1, NULL, NULL, 0, 0, 1);
+	    r = mboxlist_deletemailbox(name, 1, NULL, NULL, 0, 0);
 	    if(r) {
-		/* log the error */
+		/* put it back, log the error */
+		mboxlist_update(name, mbtype, part, acl);
 		syslog(LOG_ERR,
-		       "could not remove reserved mailbox '%s': %s",
+		       "could not remove mailbox '%s' after unreserving: %s",
 		       name, error_message(r));
 	    } else {
 		syslog(LOG_ERR,

@@ -1,5 +1,5 @@
 /* notify.c -- Module to notify of new mail
- * $Id: notify.c,v 1.6.2.1 2002/06/06 21:08:14 jsmith2 Exp $ 
+ * $Id: notify.c,v 1.6.2.2 2002/06/14 18:36:56 jsmith2 Exp $ 
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
