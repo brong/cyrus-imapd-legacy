@@ -85,7 +85,7 @@ pop3test: pop3test.o $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o pop3test pop3test.o $(DEPLIBS) $(IMAP_LIBS)
 
 clean:
-	rm -f *.o Makefile.bak makedepend.log imtest
+	rm -f *.o Makefile.bak makedepend.log imtest pop3test
 
 distclean: clean
 	rm -f Makefile
