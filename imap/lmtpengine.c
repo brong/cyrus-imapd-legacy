@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.26.2.5 2001/10/01 19:54:46 rjs3 Exp $
+ * $Id: lmtpengine.c,v 1.26.2.6 2001/10/31 21:47:24 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -115,6 +115,17 @@ struct clientdata {
 
     sasl_conn_t *conn;
 };
+
+/* Enable the resetting of a sasl_conn_t */
+static int reset_saslconn(sasl_conn_t **conn);
+
+static struct 
+{
+    char *ipremoteport;
+    char *iplocalport;
+    sasl_ssf_t ssf;
+    char *authid;
+} saslprops = {NULL,NULL,0,NULL};
 
 /* a simple hash function for sasl mechanisms */
 static int hash_simple (const char *str)
@@ -1080,11 +1091,15 @@ void lmtpmode(struct lmtp_func *func,
 	if (!getsockname(fd, (struct sockaddr *)&localaddr, &salen)) {
 	    /* set the ip addresses here */
 	    if(iptostring((struct sockaddr *)&localaddr,
-			  sizeof(struct sockaddr_in), localip, 60) == 0)
+			  sizeof(struct sockaddr_in), localip, 60) == 0) {
 		sasl_setprop(cd.conn, SASL_IPLOCALPORT,  &localip );
+		saslprops.iplocalport = xstrdup(localip);
+	    }
 	    if(iptostring((struct sockaddr *)&remoteaddr,
-			  sizeof(struct sockaddr_in), remoteip, 60) == 0)
+			  sizeof(struct sockaddr_in), remoteip, 60) == 0) {
+		saslprops.ipremoteport = xstrdup(remoteip);
 		sasl_setprop(cd.conn, SASL_IPREMOTEPORT, &remoteip);  
+	    }
 	} else {
 	    fatal("can't get local addr", EC_SOFTWARE);
 	}
@@ -1190,13 +1205,15 @@ void lmtpmode(struct lmtp_func *func,
 	      while (r == SASL_CONTINUE) {
 		  char inbase64[4096];
 		  unsigned len;
-		  
-		  r = sasl_encode64(out, outlen, 
+
+		  if(out) {
+		    r = sasl_encode64(out, outlen, 
 				    inbase64, sizeof(inbase64), NULL);
-		  if (r != SASL_OK) break;
+		    if (r != SASL_OK) break;
 	  
-		  /* send out */
-		  prot_printf(pout,"334 %s\r\n", inbase64);
+		    /* send out */
+		    prot_printf(pout,"334 %s\r\n", inbase64);
+		  }
 		  
 		  /* read a line */
 		  if (!prot_fgets(buf, sizeof(buf)-1, pin)) {
@@ -1205,6 +1222,13 @@ void lmtpmode(struct lmtp_func *func,
 		  p = buf + strlen(buf) - 1;
 		  if (p >= buf && *p == '\n') *p-- = '\0';
 		  if (p >= buf && *p == '\r') *p-- = '\0';
+
+		  if(buf[0] == '*') {
+		      prot_printf(pout,
+				  "501 5.5.4 client canceled authentication\r\n");
+		      reset_saslconn(&cd.conn);
+		      goto nextcmd;
+		  }
 		  
 		  len = strlen(buf);
 		  in = xmalloc(len);
@@ -1212,7 +1236,8 @@ void lmtpmode(struct lmtp_func *func,
 		  if (r != SASL_OK) {
 		      prot_printf(pout,
 				  "501 5.5.4 cannot base64 decode\r\n");
-		      goto nextcmd; /* what's the state of our sasl_conn_t? */
+		      reset_saslconn(&cd.conn);
+		      goto nextcmd;
 		  }
 
 		  r = sasl_server_step(cd.conn,
@@ -1223,6 +1248,8 @@ void lmtpmode(struct lmtp_func *func,
 	      
 	      if (in) { free(in); in = NULL; }
 	      if ((r != SASL_OK) && (r != SASL_CONTINUE)) {
+		  sleep(3);
+		  
 		  syslog(LOG_ERR, "badlogin: %s %s %s",
 			 remoteaddr.sin_family == AF_INET ?
 			 inet_ntoa(remoteaddr.sin_addr) :
@@ -1237,10 +1264,16 @@ void lmtpmode(struct lmtp_func *func,
 		  prot_printf(pout, "501 5.5.4 %s\r\n",
 		       sasl_errstring((r == SASL_NOUSER ? SASL_BADAUTH : r),
 				      NULL, NULL));
+		  
+		  reset_saslconn(&cd.conn);
 		  continue;
 	      }
 	      r = sasl_getprop(cd.conn, SASL_USERNAME, (const void **) &user);
-	      if (r != SASL_OK) user = "[sasl error]";
+	      if (r != SASL_OK) {
+		  prot_printf(pout, "501 5.5.4 SASL Error\r\n");
+		  reset_saslconn(&cd.conn);
+		  goto nextcmd;
+	      }
 
 	      /* authenticated successfully! */
 	      snmp_increment_args(AUTHENTICATION_YES,1,
@@ -1584,12 +1617,15 @@ void lmtpmode(struct lmtp_func *func,
 		if (r != SASL_OK)
 		    fatal("sasl_setprop(SASL_SSF_EXTERNAL) failed: STARTTLS",
 			  EC_TEMPFAIL);
+		saslprops.ssf = ssf;
 
 		r=sasl_setprop(cd.conn, SASL_AUTH_EXTERNAL, auth_id);
 		if (r != SASL_OK)
 		    fatal("sasl_setprop(SASL_AUTH_EXTERNAL) failed: STARTTLS",
 			  EC_TEMPFAIL);
-
+		if(saslprops.authid)
+		    free(saslprops.authid);
+		saslprops.authid = xstrdup(auth_id);		
 
 		/* tell the prot layer about our new layers */
 		prot_settls(pin, tls_conn);
@@ -1787,14 +1823,12 @@ static int do_auth(struct lmtp_conn *conn)
     struct sockaddr_in saddr_r;
     socklen_t addrsize;
     char buf[2048];
-    char optstr[128];
     char *in, *p;
     const char *out;
     unsigned int inlen, outlen;
     const char *mechusing;
     unsigned b64len;
     char localip[60], remoteip[60];
-    const char *pass;
 
     secprops = mysasl_secprops(0);
     r = sasl_setprop(conn->saslconn, SASL_SEC_PROPS, secprops);
@@ -2285,4 +2319,47 @@ int lmtp_disconnect(struct lmtp_conn *conn)
     if (conn->mechs) free(conn->mechs);
 
     return 0;
+}
+
+/* Reset the given sasl_conn_t to a sane state */
+static int reset_saslconn(sasl_conn_t **conn) 
+{
+    int ret;
+    sasl_security_properties_t *secprops = NULL;
+
+    sasl_dispose(conn);
+    /* do initialization typical of service_main */
+    ret = sasl_server_new("imap", config_servername,
+                         NULL, NULL, NULL,
+                         NULL, 0, conn);
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.ipremoteport)
+       ret = sasl_setprop(*conn, SASL_IPREMOTEPORT,
+                          saslprops.ipremoteport);
+    if(ret != SASL_OK) return ret;
+    
+    if(saslprops.iplocalport)
+       ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+                          saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    
+    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+    if(saslprops.ssf) {
+       ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &saslprops.ssf);
+    }
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.authid) {
+       ret = sasl_setprop(*conn, SASL_AUTH_EXTERNAL, saslprops.authid);
+       if(ret != SASL_OK) return ret;
+    }
+    /* End TLS/SSL Info */
+
+    return SASL_OK;
 }
