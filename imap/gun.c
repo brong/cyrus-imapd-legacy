@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.6 1999/11/03 03:08:25 leg Exp $
+ * $Id: gun.c,v 1.1.2.7 1999/11/03 03:37:19 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -271,6 +271,7 @@ int tell_proxies_txn(struct inmsg *buf)
     int r;
 
     while (ptr != NULL) {
+	fprintf(stderr, "writing to %x\n", ptr);
 	r = prot_write(ptr->out, (char *) buf, sizeof(struct inmsg));
 	if (!r) {
 	    r = prot_flush(ptr->out);
@@ -304,12 +305,15 @@ int listen_proxies(void)
 
     r = 0;
     while (ptr != NULL) {
+	fprintf(stderr, "reading from %x...\n");
 	ch1 = prot_getc(ptr->in);
 	ch2 = prot_getc(ptr->in);
 	if (ch1 == 'o' && ch2 == 'k') {
+	    fprintf(stderr, "\tgot ok\n");
 	    ptr = ptr->next;
 	} else if (ch1 == 'n' && ch2 == 'o') {
 	    r++;
+	    fprintf(stderr, "\tgot no\n");
 	    ptr = ptr->next;
 	} else {
 	    /* got an unrecognized response; kill this server */
@@ -329,6 +333,7 @@ void tell_proxies_commit(void)
     int r;
 
     while (ptr != NULL) {
+	fprintf(stderr, "writing 'go' to %x\n", ptr);
 	r = prot_putc('g', ptr->in);
 	if (!r) r = prot_putc('o', ptr->out);
 	if (!r) r = prot_flush(ptr->out);
@@ -351,6 +356,7 @@ void tell_proxies_abort(void)
     int r;
 
     while (ptr != NULL) {
+	fprintf(stderr, "writing 'ab' to %x\n", ptr);
 	r = prot_putc('a', ptr->in);
 	if (!r) r = prot_putc('b', ptr->out);
 	if (!r) r = prot_flush(ptr->out);
