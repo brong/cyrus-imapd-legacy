@@ -26,6 +26,12 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #ifndef SIEVE_BYTECODE_H
 #define SIEVE_BYTECODE_H
 
+
+/* for debugging*/
+#define DUMPCODE 1
+#define VERBOSE 1
+
+
 /*for finding correctly aligned bytes on strings*/
 /* bump to the next multiple of 4 bytes */
 #define ROUNDUP(num) (((num) + 3) & 0xFFFFFFFC)
@@ -59,24 +65,24 @@ enum bytecode {
 
     B_KEEP,
     B_DISCARD,
-    B_REJECT,
-    B_FILEINTO,
+    B_REJECT,/* require reject*/
+    B_FILEINTO,/*require fileinto*/
     B_REDIRECT,
 
     B_IF,
     B_IFELSE,
 
-    B_MARK,
-    B_UNMARK,
+    B_MARK,/* require imapflags */
+    B_UNMARK,/* require imapflags */
 
-    B_ADDFLAG,
-    B_SETFLAG,
-    B_REMOVEFLAG,
+    B_ADDFLAG,/* require imapflags */
+    B_SETFLAG,/* require imapflags */
+    B_REMOVEFLAG,/* require imapflags */
 
-    B_NOTIFY,
-    B_DENOTIFY,
+    B_NOTIFY,/* require notify */
+    B_DENOTIFY,/* require notify */
 
-    B_VACATION,
+    B_VACATION,/* require vacation*/
     B_NULL
 };
 
@@ -98,32 +104,32 @@ enum bytecode_tags {
     B_ALL,
     B_LOCALPART,
     B_DOMAIN,
-    B_USER,  /* not required?*/
-    B_DETAIL, /* not required?*/
+    B_USER,  /* require ?*/
+    B_DETAIL, /* require ?*/
 
     /* Sizes */
     B_OVER,
     B_UNDER,
     /*sizes, pt 2*/
-    B_GT, /* not required*/
-    B_GE, /* not required*/
-    B_LT, /* not required*/
-    B_LE, /* not required*/
-    B_EQ, /* not required*/
-    B_NE, /* not required*/
+    B_GT, /* require relational*/
+    B_GE,  /* require relational*/
+    B_LT,  /* require relational*/
+    B_LE,  /* require relational*/
+    B_EQ,  /* require relational*/
+    B_NE,  /* require relational*/
  
     /* Comparators */
     B_ASCIICASEMAP,
     B_OCTET,
-    B_ASCIINUMERIC, /* not required*/
+    B_ASCIINUMERIC, /*require ascii-numeric*/
     
     /*match types*/
     B_IS,
     B_CONTAINS,
     B_MATCHES,
-    B_REGEX,/* not required*/
-    B_COUNT,/* not required*/
-    B_VALUE /* not required*/
+    B_REGEX,/* require */
+    B_COUNT,/* require*/
+    B_VALUE /* require */
 
     /*priorities*/
     /*B_LOW

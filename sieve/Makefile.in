@@ -1,6 +1,6 @@
 # Makefile.in - sieve makefile
 # @configure_input@
-# $Id: Makefile.in,v 1.25.10.5 2002/06/14 18:37:04 jsmith2 Exp $
+# $Id: Makefile.in,v 1.25.10.6 2003/01/15 23:31:16 jsmith2 Exp $
 ################################################################
 #        Copyright 1998 by Carnegie Mellon University
 #
@@ -64,13 +64,14 @@ test: $(DEPLIBS) libsieve.a test.o
 
 OBJS = sieve_err.o \
        sieve.o sieve-lex.o comparator.o interp.o message.o \
-       bytecode.o script.o tree.o addr.o addr-lex.o @MD5OBJ@ 
+       bc_generate.o bc_dump.o bc_emit.o bc_eval.o \
+       script.o tree.o addr.o addr-lex.o @MD5OBJ@ 
 
 sieve-lex.c: sieve-lex.l sieve.h
 
 sieve.c sieve.h: sieve.y
 	$(YACC) $(YFLAGS) $(srcdir)/sieve.y
-	mv -f y.tab.c sieve.c
+	mv -f y.tab.c sieve.c 
 	mv -f y.tab.h sieve.h
 
 
