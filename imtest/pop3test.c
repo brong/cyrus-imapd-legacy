@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.5 2001/11/09 20:05:07 ken3 Exp $
+ * $Id: pop3test.c,v 1.1.2.6 2001/11/15 18:08:44 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -102,7 +102,7 @@ sasl_conn_t *conn;
 int sock; /* socket descriptor */
 
 int verbose=0;
-int dochallenge=0;
+int dochallenge=1;
 
 struct protstream *pout, *pin;
 
@@ -604,7 +604,7 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
   struct sockaddr_in saddr_r;
 
   /* attempt to start sasl */
-  saslresult=sasl_client_init(callbacks+(dochallenge ? 0 : 2));
+  saslresult=sasl_client_init(callbacks+(!dochallenge ? 2 : 0));
 
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
@@ -1192,8 +1192,8 @@ void usage(void)
   printf("  -t file  : Enable TLS. file has the TLS public and private keys\n"
 	 "             (specify \"\" to not use TLS for authentication)\n");
 #endif /* HAVE_SSL */
-  printf("  -c       : enable challenge prompt callbacks\n"
-	 "             (enter one-time password instead of secret pass-phrase)\n");
+  printf("  -c       : disable challenge prompt callbacks\n"
+	 "             (enter secret pass-phrase instead of one-time password)\n");
 
   exit(1);
 }
@@ -1232,7 +1232,7 @@ int main(int argc, char **argv)
   while ((c = getopt(argc, argv, "cvk:l:p:u:a:m:f:r:t:")) != EOF)
     switch (c) {
     case 'c':
-	dochallenge=1;
+	dochallenge=0;
 	break;
     case 'v':
 	verbose=1;
