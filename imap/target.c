@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.5 1999/11/03 03:37:20 leg Exp $
+ * $Id: target.c,v 1.1.2.6 1999/11/03 03:52:55 leg Exp $
  */
 
 #include <stdio.h>
@@ -400,12 +400,15 @@ void be_process(struct be *ptr)
 	ch1 = prot_getc(ptr->in);
 	ch2 = prot_getc(ptr->in);
 	if (ch1 == 'g' && ch2 == 'o') {	/* commit */
+	    fprintf(stderr, "\tgot go\n");
 	    mboxlist_commit(ptr->curtxn);
 	    ptr->curtxn = NULL;
 	} else if (ch1 == 'a' && ch2 == 'b') { /* abort */
+	    fprintf(stderr, "\tgot ab\n");
 	    mboxlist_abort(ptr->curtxn);
 	    ptr->curtxn = NULL;
 	} else {		/* communication failure */
+	    fprintf(stderr, "\tcommunication failure\n");
 	    cr = 1;
 	}
     } else {			/* grab a new transaction */
@@ -417,7 +420,7 @@ void be_process(struct be *ptr)
 	got = 0;
 	while (!cr && (got < toread)) {
 	    r = prot_read(ptr->in, ((char *) &inbuf) + got, toread - got);
-	    got -= r;
+	    got += r;
 	    if (r == 0) {
 		cr = 1; /* damn, problems */
 	    }
