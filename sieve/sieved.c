@@ -283,15 +283,15 @@ void dump2(bytecode_t *d, int len)
 	    break;
 
 	case B_FILEINTO: /*4*/
-	    printf("%d: FILEINTO \n{",i);
-	    i=write_list(d[i+1].len,i+2,d);
-	    printf("}\n");
+	    printf("%d: FILEINTO {%s}\n",i,(char *)&(d[i+2].str));
+	    i+=(1+(ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
+	    i++;
 	    break;
 
-	case B_FORWARD: /*5*/
-	    printf("%d: FORWARD \n{",i);
-	    i=write_list(d[i+1].len,i+2,d);
-	    printf("}\n");
+	case B_REDIRECT: /*5*/
+	    printf("%d: REDIRECT {%s}\n",i,(char *)&(d[i+2].str));
+	    i+=(1+(ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
+	    i++;
 	    break;
 	     
 	case B_IF:/*6*/

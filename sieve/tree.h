@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.2 2002/05/29 22:20:26 jsmith2 Exp $
+ * $Id: tree.h,v 1.3.14.3 2002/06/03 16:05:53 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -42,6 +42,11 @@ typedef struct Taglist taglist_t;
 struct Stringlist {
     char *s;
     stringlist_t *next;
+};
+
+struct Patternlist {
+    void *p;
+    patternlist_t *next;   
 };
 
 struct Tag {

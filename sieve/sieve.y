@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.2 2002/05/29 22:20:26 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.3 2002/06/03 16:05:53 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -85,7 +85,7 @@ static commandlist_t *ret;
 static sieve_script_t *parse_script;
 static int check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, stringlist_t *pl);
+			     stringlist_t *sl, patternlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
 			    stringlist_t *sl, patternlist_t *pl);
 static commandlist_t *build_vacation(int t, struct vtags *h, char *s);
@@ -371,7 +371,6 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 	| SFALSE		 { $$ = new_test(SFALSE); }
 	| STRUE			 { $$ = new_test(STRUE); }
 	| HEADER htags stringlist stringlist
-
 				 { patternlist_t *pl;
                                    if (!verify_stringlist($3, verify_header)) {
                                      YYERROR; /* vh should call yyerror() */
@@ -379,12 +378,11 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 
 				   $2 = canon_htags($2);
 #ifdef ENABLE_REGEX
-				   /* Just verify them, we can't compile
-				      them until we reinterpret the bytecode */
 				   if ($2->comptag == REGEX) {
-				     if(!verify_regexs($4, $2->comparator))
-				     { YYERROR; }
+				     pl = verify_regexs($4, $2->comparator);
+				     if (!pl) { YYERROR; }
 				   }
+				   else
 #endif
 				     pl = (patternlist_t *) $4;
 				       
@@ -392,9 +390,7 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 				   if ($$ == NULL) { 
 			yyerror("unable to find a compatible comparator");
 			YYERROR; } }
-
-           | addrorenv aetags stringlist stringlist
-
+	| addrorenv aetags stringlist stringlist
 				 { patternlist_t *pl;
                                    if (!verify_stringlist($3, verify_header)) {
                                      YYERROR; /* vh should call yyerror() */
@@ -402,12 +398,11 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 
 				   $2 = canon_aetags($2);
 #ifdef ENABLE_REGEX
-				   /* Just verify them, we can't compile
-				      them until we reinterpret the bytecode */
 				   if ($2->comptag == REGEX) {
-				     if(!verify_regexs($4, $2->comparator))
-				     { YYERROR; }
+				     pl = verify_regexs($4, $2->comparator);
+				     if (!pl) { YYERROR; }
 				   }
+				   else
 #endif
 				     pl = (patternlist_t *) $4;
 				       
@@ -571,7 +566,7 @@ static int check_reqs(stringlist_t *sl)
 }
 
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, stringlist_t *pl)
+			     stringlist_t *sl, patternlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be either ADDRESS or ENVELOPE */
 

@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.3 2002/05/29 22:20:25 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.4 2002/06/03 16:05:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -823,9 +823,9 @@ static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
     return SIEVE_OK;
 }
 
-static int send_notify_callback(sieve_script_t *s, void *message_context, 
-				notify_list_t *notify, char *actions_string,
-				const char **errmsg)
+static int send_notify_callback(sieve_interp_t *interp, void *message_context, 
+				void * script_context, notify_list_t *notify, 
+				char *actions_string, const char **errmsg)
 {
     sieve_notify_context_t nc;
     char *out_msg;
@@ -839,7 +839,7 @@ static int send_notify_callback(sieve_script_t *s, void *message_context,
 	stringlist_to_chararray(notify->options) : NULL;
     nc.priority = notify->priority;
 
-    fillin_headers(&(s->interp), notify->message, message_context, 
+    fillin_headers(interp, notify->message, message_context, 
 		   &out_msg, &out_msglen);
 
     nc.message = xmalloc(out_msglen + strlen(actions_string) + 30);
@@ -850,9 +850,9 @@ static int send_notify_callback(sieve_script_t *s, void *message_context,
 
     strcat(nc.message,actions_string);
 
-    ret = s->interp.notify(&nc,
-			   s->interp.interp_context,
-			   s->script_context,
+    ret = interp->notify(&nc,
+			   interp->interp_context,
+			   script_context,
 			   message_context,
 			   errmsg);    
 
@@ -1183,7 +1183,8 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	while (n != NULL) {
 	    if (n->isactive) {
 		lastaction = ACTION_NOTIFY;
-		notify_ret = send_notify_callback(s, message_context, n,
+		notify_ret = send_notify_callback(&(s->interp),message_context,
+						  s->script_context, n,
 						  actions_string, &errmsg);
 		ret |= notify_ret;
 	    }
@@ -1204,8 +1205,9 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
     return ret;
 }
 
+/******************************bytecode functions*****************************
+ *****************************************************************************/
 
-/*confusion about this fcn*/
 /* Load a compiled script */
 int sieve_script_load(sieve_interp_t *interp, int fd, const char *name,
 		      void *script_context, sieve_bytecode_t **ret) 
@@ -1257,8 +1259,10 @@ static int do_sieve_error(int ret,
 			  sieve_interp_t *interp,
 			  void *script_context,
 			  void *message_context,
+			  sieve_imapflags_t imapflags,
 			  action_list_t *actions,
-			  notify_action_t *notify_action,
+			  notify_list_t *notify_list,
+			  /* notify_action_t *notify_action,*/
 			  int lastaction,
 			  int implicit_keep,
 			  char *actions_string,
@@ -1280,12 +1284,15 @@ static int do_sieve_error(int ret,
     }
  
     /* Process notify action if there is one */
-    if (interp->notify && notify_action->exists) {
+    if (interp->notify && notify_list) {
 	ret |= send_notify_callback(interp, message_context, script_context,
-				    notify_action,
+				    notify_list,
 				    actions_string, &errmsg);
+
     }
- 
+    /*static int send_notify_callback(sieve_script_t *s, void *message_context,
+       notify_list_t *notify, char *actions_string, const char **errmsg)
+    */
     if ((ret != SIEVE_OK) && interp->err) {
 	char buf[1024];
 	if (lastaction == -1) /* we never executed an action */
@@ -1302,7 +1309,7 @@ static int do_sieve_error(int ret,
 	sieve_keep_context_t keep_context;
 	int keep_ret;
 
-	keep_context.imapflags = &(interp->curflags);
+	keep_context.imapflags = &imapflags;
  
 	lastaction = ACTION_KEEP;
 	keep_ret = interp->keep(&keep_context, interp->interp_context,
@@ -1315,7 +1322,7 @@ static int do_sieve_error(int ret,
 	else {
 	    implicit_keep = 0;	/* don't try an implicit keep again */
 	    return do_sieve_error(ret, interp, script_context, message_context,
-				  actions, notify_action, lastaction,
+				  imapflags, actions, notify_list, lastaction,
 				  implicit_keep, actions_string, errmsg);
 	}
     }
@@ -1330,8 +1337,10 @@ static int do_sieve_error(int ret,
 static int do_action_list(sieve_interp_t *interp,
 			  void *script_context,
 			  void *message_context,
+			  sieve_imapflags_t imapflags,
 			  action_list_t *actions,
-			  notify_action_t *notify_action,
+			  notify_list_t *notify_list,
+			  /* notify_action_t *notify_action,*/
 			  char *actions_string,
 			  const char *errmsg) 
 {
@@ -1467,14 +1476,14 @@ static int do_action_list(sieve_interp_t *interp,
 
  
 	case ACTION_SETFLAG:
-	    free_imapflags(&interp->curflags);
-	    ret = sieve_addflag(&interp->curflags, a->u.fla.flag);
+	    free_imapflags(&imapflags);
+	    ret = sieve_addflag(&imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_ADDFLAG:
-	    ret = sieve_addflag(&interp->curflags, a->u.fla.flag);
+	    ret = sieve_addflag(&imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_REMOVEFLAG:
-	    ret = sieve_removeflag(&interp->curflags, a->u.fla.flag);
+	    ret = sieve_removeflag(&imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_MARK:
 	    {
@@ -1482,7 +1491,7 @@ static int do_action_list(sieve_interp_t *interp,
 
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_addflag(&interp->curflags,
+		    ret = sieve_addflag(&imapflags,
 					interp->markflags->flag[--n]);
 		}
 		break;
@@ -1493,7 +1502,7 @@ static int do_action_list(sieve_interp_t *interp,
 
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_removeflag(&interp->curflags,
+		    ret = sieve_removeflag(&imapflags,
 					   interp->markflags->flag[--n]);
 		}
 		break;
@@ -1515,39 +1524,50 @@ static int do_action_list(sieve_interp_t *interp,
 	}
     }
 
-    return do_sieve_error(ret, interp, script_context, message_context,
-			  actions, notify_action, lastaction, implicit_keep,
-			  actions_string, errmsg);
+    return do_sieve_error(ret, interp, script_context, message_context, 
+			  imapflags, actions, notify_list, lastaction, 
+			  implicit_keep, actions_string, errmsg);
 }
+
 
 
 /* execute some bytecode */
 int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context) 
 {
     action_list_t *actions = NULL;
-    notify_action_t *notify_action;
+    notify_list_t *notify_list = NULL;
+    /*   notify_action_t *notify_action;*/
     action_t lastaction = -1;
     int ret;
     char actions_string[ACTIONS_STRING_LEN] = "";
     const char *errmsg = NULL;
+    sieve_imapflags_t imapflags;
+    
+    imapflags.flag = NULL; 
+    imapflags.nflags = 0;
 
-    notify_action = default_notify_action();
-    if (notify_action == NULL)
-	return SIEVE_NOMEM;
+
+    /* should we check that notify is required??   */
+    notify_list = new_notify_list();
+    if (notify_list == NULL)
+      return SIEVE_NOMEM;
+    
 
     actions = new_action_list();
     if (actions == NULL) {
 	ret = SIEVE_NOMEM;
 	return do_sieve_error(ret, bc->interp, bc->script_context,
-			      message_context,
-			      actions, notify_action, lastaction, 0,
+			      message_context, imapflags,
+			      actions, notify_list, lastaction, 0,
 			      actions_string, errmsg);
     }
 
-      if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, actions,          notify_action, &errmsg) < 0)
+      if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, 
+			imapflags, actions, notify_list, &errmsg) < 0)
 	return SIEVE_RUN_ERROR;  
 
-    return do_action_list(bc->interp, bc->script_context, message_context,
-			  actions, notify_action, actions_string, errmsg);
+      return do_action_list(bc->interp, bc->script_context, message_context, 
+			    imapflags, actions, notify_list, actions_string,
+			    errmsg);
 }
 

@@ -61,7 +61,7 @@ enum bytecode {
     B_DISCARD,
     B_REJECT,
     B_FILEINTO,
-    B_FORWARD,
+    B_REDIRECT,
 
     B_IF,
     B_IFELSE,

@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.5 2002/05/29 22:20:24 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.6 2002/06/03 16:05:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -99,13 +99,14 @@ static int bc_stringlist_generate(int codep, bytecode_info_t *retval,
 
     for(cur=sl; cur; cur=cur->next) {
 	strcount++;
-
+	if (cur->s!=NULL)
+	  printf("%s\n", cur->s);
 	/* Bounds check for each string before we allocate it */
 	if(!atleast(retval,codep+2)) return -1;
 	retval->data[codep++].len = strlen(cur->s);
 	retval->data[codep++].str = cur->s;
     }
-
+ 
     retval->data[len_codep].listlen = strcount;
     retval->curlen+=(2*strcount) + 1;
     return codep;
@@ -350,22 +351,20 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->curlen+=3;
 	    break;
 	case FILEINTO:
-	    /* FILEINTO stringlist */
-	    if(!atleast(retval,codep+2)) return -1;
+	    /* FILEINTO (STRING: len + dataptr) */
+	    if(!atleast(retval,codep+3)) return -1;
 	    retval->data[codep++].op = B_FILEINTO;
-	    retval->curlen++;
-	    codep = bc_stringlist_generate(codep,retval,c->u.sl);
-
-	    if(codep == -1) return -1;
+	    retval->data[codep++].len = strlen(c->u.str);
+	    retval->data[codep++].str = c->u.str;
+	    retval->curlen+=3;
 	    break;
-	case FORWARD:
-	    /* FORWARD stringlist */
-	    if(!atleast(retval,codep+2)) return -1;
-	    retval->data[codep++].op = B_FORWARD;
-	    retval->curlen++;
-	    codep = bc_stringlist_generate(codep,retval,c->u.sl);
-
-	    if(codep == -1) return -1;
+	case REDIRECT:
+	    /* REDIRECT (STRING: len + dataptr) */
+	    if(!atleast(retval,codep+3)) return -1;
+	    retval->data[codep++].op = B_REDIRECT;
+	    retval->data[codep++].len = strlen(c->u.str);
+	    retval->data[codep++].str = c->u.str;
+	    retval->curlen+=3;
 	    break;
 	case ADDFLAG:
 	    /* ADDFLAG stringlist */
@@ -400,14 +399,19 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	     * priority / message / headers_list */
 	    if(!atleast(retval,codep+5)) return -1;
 	    retval->data[codep++].op = B_NOTIFY;
+
+	    retval->data[codep++].len = strlen(c->u.n.method);
+	    retval->data[codep++].str = c->u.n.method;
+	    retval->data[codep++].len = strlen(c->u.n.id);
+	    retval->data[codep++].str = c->u.n.id;
+	    retval->curlen++;
+	    codep = bc_stringlist_generate(codep,retval,c->u.n.options);
+	    /*	    if(codep == -1) return -1;*/
 	    retval->data[codep++].len = strlen(c->u.n.priority);
 	    retval->data[codep++].str = c->u.n.priority;
 	    retval->data[codep++].len = strlen(c->u.n.message);
 	    retval->data[codep++].str = c->u.n.message;
-	    retval->curlen+=5;
-	    codep = bc_stringlist_generate(codep,retval,c->u.n.headers_list);
-
-	    if(codep == -1) return -1;
+	    retval->curlen+=10;
 	    break;
       case VACATION:
 	   /* VACATION
@@ -420,7 +424,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    if(!atleast(retval,codep+7)) return -1;
 	    retval->data[codep++].op = B_VACATION;
 
-	    codep = bc_stringlist_generate(codep,retval,c->u.n.headers_list);
+	    codep = bc_stringlist_generate(codep,retval,c->u.v.addresses);
 
 	    if(c->u.v.subject) {
 	      retval->data[codep++].len = strlen(c->u.v.subject);
@@ -872,6 +876,9 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    }
 
 	    case B_REJECT:
+	    case B_FILEINTO:
+	    case B_REDIRECT:
+	      /*just a string*/
 	      len = bc->data[codep++].len;
 		if(write(fd,&len,sizeof(len)) == -1)
 		    return -1;
@@ -885,9 +892,6 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		filelen += len + ret;
 
 	        break; 
-
-	    case B_FILEINTO:
-	    case B_FORWARD:
 	    case B_SETFLAG:
 	    case B_ADDFLAG:
 	    case B_REMOVEFLAG:
@@ -898,9 +902,9 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		break;
 
 	    case B_NOTIFY:
-		/* Priority String, Message String */
-		/* In other words, the same thing twice */
-		for(i=0; i<2; i++) {
+		/* method string, id string, options string,Priority String, Message String */
+		/* In other words, the same thing x5 */
+		for(i=0; i<5; i++) {
 		    len = bc->data[codep++].len;
 		    if(write(fd,&len,sizeof(len)) == -1)
 			return -1;
@@ -1097,8 +1101,8 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
   void *data = NULL, *marker = NULL;
   char *tmp;
   int curra, x;
-  char * found;
-  char * reply_to;
+  char * found=NULL;
+  char * reply_to=NULL;
   
   /* is there an Auto-Submitted keyword other than "no"? */
   strcpy(buf, "auto-submitted");
@@ -1376,7 +1380,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 } 
 
 int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
-		  void *m, action_list_t *actions,
+		  void *m, sieve_imapflags_t imapflags, action_list_t *actions,
 		  notify_action_t *notify_action,
 		  const char **errmsg) 
 {
@@ -1410,7 +1414,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  res=1;
 	  break;
       case B_KEEP:/*1*/
-	  res = do_keep(actions, &i->curflags);
+	  res = do_keep(actions, &imapflags);
 	  if (res == SIEVE_RUN_ERROR)
 	    *errmsg = "Keep can not be used with Reject";
 	  /* return res;*/
@@ -1439,7 +1443,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    ip+=3;
 	    for (x=0; x<l; x++)\
 	      {
-		res = do_fileinto(actions,(char*)&( bc[ip+1].str), &i->curflags);
+		res = do_fileinto(actions,(char*)&( bc[ip+1].str), &imapflags);
 		if (res == SIEVE_RUN_ERROR)
 		  {*errmsg = "Fileinto can not be used with Reject";
 		  printf("WERT!!!!!");}
@@ -1447,14 +1451,14 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	      } 
 	    break;
 	  }
-      case B_FORWARD:/*5*/
+      case B_REDIRECT:/*5*/
 	  {
 	    int x;
 	    int l=bc[ip+1].len;
 	    ip+=3;
 	    for (x=0; x<l; x++)\
 	      {
-		res = do_forward(actions,(char*)&( bc[ip+1].str));
+		res = do_redirect(actions,(char*)&( bc[ip+1].str));
 		if (res == SIEVE_RUN_ERROR)
 		  *errmsg = "Redirect can not be used with Reject";
 		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
@@ -1755,7 +1759,7 @@ void dump(bytecode_info_t *d)
 	    printf("%d: IF THEN(%d) POST(%d) TEST(\n",i,
 		   d->data[i+1].jump,d->data[i+2].jump);
 	    i = dump_test(d,i+3);
-	    printf(")\n");
+	    printf(")\n %d", i);
 	    break;
 
 	case B_IFELSE:
@@ -1787,13 +1791,15 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_FILEINTO:
-	    printf("%d: FILEINTO\n",i);
-	    i=dump_sl(d,++i);
+	    printf("%d: FILEINTO {%d}%s\n",i,
+		   d->data[i+1].len,d->data[i+2].str);
+	    i+=2;
 	    break;
 
-	case B_FORWARD:
-	    printf("%d: FORWARD\n",i);
-	    i=dump_sl(d,++i);
+	case B_REDIRECT:
+	    printf("%d: REDIRECT {%d}%s\n",i,
+		   d->data[i+1].len,d->data[i+2].str);
+	    i+=2;
 	    break;
 
 	case B_SETFLAG:
@@ -1816,11 +1822,15 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_NOTIFY:
-	    printf("%d: NOTIFY PRIORITY({%d}%s) MESSAGE({%d}%s)\n",i,
+	    printf("%d: NOTIFY METHOD({%d}%s), ID({%d}%s)",i,
 		   d->data[i+1].len,d->data[i+2].str,
 		   d->data[i+3].len,d->data[i+4].str);
 	    i+=5;
 	    i=dump_sl(d,i);
+	    printf("PRIORITY({%d}%s) MESSAGE({%d}%s)\n", 
+		   d->data[i+1].len,d->data[i+2].str,
+		   d->data[i+3].len,d->data[i+4].str);
+	    i+=5;
 	    break;
 
 	case B_VACATION:
