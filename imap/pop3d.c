@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.3 2001/08/01 16:21:27 ken3 Exp $
+ * $Id: pop3d.c,v 1.98.2.4 2001/08/01 17:25:05 rjs3 Exp $
  */
 #include <config.h>
 
@@ -892,9 +892,9 @@ static void cmd_apop(char *response)
 	prot_printf(popd_out, "-ERR authenticating: %s\r\n",
 		    sasl_errstring(sasl_result, NULL, NULL));
 
-	syslog(LOG_NOTICE, "badlogin: %s %s %s",
-	       popd_clienthost, authtype,
-	       sasl_errstring(sasl_result, NULL, NULL));
+	syslog(LOG_NOTICE, "badlogin: %s APOP (%s) %s",
+	       popd_clienthost, popd_apop_chal,
+	       sasl_errdetail(popd_saslconn));
 	
 	return;
     }

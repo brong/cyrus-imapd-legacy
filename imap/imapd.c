@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.3 2001/08/01 15:32:48 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.4 2001/08/01 17:25:04 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -66,6 +66,7 @@
 #include <db.h>			/* for cmd_id() 'environment' info */
 
 #include "acl.h"
+#include "gai.h"
 #include "util.h"
 #include "auth.h"
 #include "imapconf.h"
@@ -80,6 +81,7 @@
 #include "xmalloc.h"
 #include "mboxname.h"
 #include "append.h"
+#include "iptostring.h"
 #include "mboxlist.h"
 #include "acapmbox.h"
 #include "idle.h"
@@ -486,30 +488,6 @@ int service_init(int argc, char **argv, char **envp)
     return 0;
 }
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[0],(int)a[1],
-	                                 (int)a[2],(int)a[3],
-	                                 (int)ntohs(addr->sin_port));
-
-    return SASL_OK;
-}
-
 /*
  * run for each accepted connection
  */
@@ -550,8 +528,12 @@ int service_main(int argc, char **argv, char **envp)
 	strcat(imapd_clienthost, "]");
 	salen = sizeof(imapd_localaddr);
 	if (getsockname(0, (struct sockaddr *)&imapd_localaddr, &salen) == 0) {
-	      if(iptostring(&imapd_remoteaddr, remoteip, 60) == SASL_OK
-		 && iptostring(&imapd_localaddr, localip, 60) == SASL_OK) {
+	      if(iptostring((struct sockaddr *)&imapd_remoteaddr,
+			    sizeof(struct sockaddr_in),
+			    remoteip, 60) == SASL_OK
+		 && iptostring((struct sockaddr *)&imapd_localaddr,
+			       sizeof(struct sockaddr_in),
+			       localip, 60) == SASL_OK) {
 		  imapd_haveaddr = 1;
 	      }
 	}
