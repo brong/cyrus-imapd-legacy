@@ -128,7 +128,8 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   ret->min_ssf=min;
   ret->max_ssf=max;
 
-  ret->security_flags=0;
+  /* should make this configurable */
+  ret->security_flags=SASL_SEC_NOANONYMOUS;
   ret->property_names=NULL;
   ret->property_values=NULL;
 
@@ -173,7 +174,7 @@ int init_sasl(isieve_t *obj,
       return -1;
 
   /* client new connection */
-  saslresult=sasl_client_new("imap",
+  saslresult=sasl_client_new("sieve",
 			     obj->serverFQDN,
 			     localip, remoteip,
 			     NULL,
@@ -225,6 +226,8 @@ char * read_capability(isieve_t *obj)
 
       } else if (strcasecmp(attr,"IMPLEMENTATION")==0) {
 
+      } else if (strcasecmp(attr,"STARTTLS")==0) {
+	  /* TODO */
       } else if (strncmp(val,"SASL=",5)==0) {
 	  obj->version = OLD_VERSION;
 	  cap = (char *) malloc(strlen(val));

@@ -1,4 +1,4 @@
-<!-- $Id: install-upgrade.html,v 1.15.6.1 2001/10/01 19:54:35 rjs3 Exp $ -->
+<!-- $Id: install-upgrade.html,v 1.15.6.2 2001/10/23 00:21:31 rjs3 Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Upgrading From Previous Versions
@@ -17,14 +17,19 @@ enabled the alternate namespace and/or the Unix hierarchy separator,
 run the script "<tt>tools/translatesieve</tt>".  This script will
 translate the folder names in <tt>fileinto</tt> actions.
 
+<li> Cyrus now uses the service name "sieve" instead of "imap" for the
+SASL profile of <tt>timsieved</tt>. If you use <tt>timsieved</tt> to
+manage Sieve scripts, be sure to update your password checking
+mechanism appropriately,
+
 <li> If you have enabled the improved directory hashing scheme, run
 the script "<tt>tools/rehash full</tt>".  This script will rehash your
 existing directories.
 
 <li> The hashed deliver databases (used for duplicate delivery suppression
 and Sieve) have been merged into a single <tt>deliver.db</tt> database.
-You can remove the entire <tt>/var/imap/deliverdb</tt> directory structure 
-after shutting down the server.
+You can safely remove the entire <tt>/var/imap/deliverdb</tt>
+directory structure after shutting down the server.
 
 <li>All of the Cyrus databases have been unified under a single DB3 
 environment.  A new <tt>ctl_cyrusdb</tt> tool is now used for database 
@@ -92,7 +97,7 @@ database:
 <kbd>   mkdir /var/imap/db
    mkdir /var/imap/socket
    chown cyrus /var/imap/db /var/imap/socket
-   rm /var/imap/deliverdb/*
+   rm -rf /var/imap/deliverdb
 </kbd></pre>
 
 <li>Convert mailboxes file to Berkeley DB:
@@ -100,7 +105,7 @@ database:
 <kbd>   su cyrus
    cd /var/imap
    ctl_mboxlist -u &lt; mailboxes
-   ctl_mboxlist -c
+   ctl_cyrusdb -c
 </kbd></pre>
 
 Please keep a backup of your mailboxes file.  You can dump an
@@ -201,7 +206,7 @@ worry about it.)
 </ul>
 
 <P><HR><P>
-last modified: $Date: 2001/10/01 19:54:35 $
+last modified: $Date: 2001/10/23 00:21:31 $
 </BODY></HTML>
 
 

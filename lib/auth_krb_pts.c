@@ -1,5 +1,5 @@
 /* auth_krb_pts.c -- Kerberos authorization with AFS PTServer groups
- $Id: auth_krb_pts.c,v 1.38.8.1 2001/08/01 15:32:52 rjs3 Exp $
+ $Id: auth_krb_pts.c,v 1.38.8.2 2001/10/23 00:21:37 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -63,6 +63,8 @@
 #include "retry.h"
 #include "xmalloc.h"
 #include "hash.h"
+
+const char *auth_method_desc = "krb_pts";
 
 #ifndef KRB_MAPNAME
 #define KRB_MAPNAME "/etc/krb.equiv"

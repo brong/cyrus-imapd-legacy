@@ -1,6 +1,6 @@
 /* auth.h -- Site authorization module
-	$Id: auth.h,v 1.10.8.1 2001/08/01 15:32:52 rjs3 Exp $
-
+ * $Id: auth.h,v 1.10.8.2 2001/10/23 00:21:37 rjs3 Exp $
+ *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,6 +43,8 @@
 
 #ifndef INCLUDED_AUTH_H
 #define INCLUDED_AUTH_H
+
+extern const char *auth_method_desc;
 
 struct auth_state;
 

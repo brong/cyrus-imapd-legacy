@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.25.8.2 2001/10/01 19:55:06 rjs3 Exp $
+ * $Id: actions.c,v 1.25.8.3 2001/10/23 00:21:50 rjs3 Exp $
  * 
  */
 /*
@@ -62,6 +62,7 @@
 #include <string.h>
 
 #include "prot.h"
+#include "tls.h"
 #include "util.h"
 #include "imapconf.h"
 #include "xmalloc.h"
@@ -164,7 +165,9 @@ int capabilities(struct protstream *conn, sasl_conn_t *saslconn)
     /* Sieve capabilities */
     prot_printf(conn,"\"SIEVE\" \"%s\"\r\n",sieve_listextensions());
 
-    /* TODO: STARTTLS */
+    if (tls_enabled("sieve")) {
+	prot_printf(conn, "\"STARTTLS\"\r\n");
+    }
 
     prot_printf(conn,"OK\r\n");
 
@@ -266,7 +269,8 @@ static int countscripts(char *name)
 
 
 /* save name as a sieve script */
-int putscript(struct protstream *conn, mystring_t *name, mystring_t *data)
+int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
+	      int verify_only)
 {
   FILE *stream;
   char *dataptr;
@@ -283,18 +287,22 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data)
       return result;
   }
 
-  /* see if this would put the user over quota */
-  maxscripts = config_getint("sieve_maxscripts",5);
+  if (!verify_only) {
+      /* see if this would put the user over quota */
+      maxscripts = config_getint("sieve_maxscripts",5);
 
-  if (countscripts(string_DATAPTR(name))+1 > maxscripts)
-  {
-    prot_printf(conn,
-		"NO (\"QUOTA\") \"You are only allowed %d scripts on this server\"\r\n",
-		maxscripts);
-    return TIMSIEVE_FAIL;
+      if (countscripts(string_DATAPTR(name))+1 > maxscripts)
+      {
+	  prot_printf(conn,
+		      "NO (\"QUOTA\") \"You are only allowed %d scripts on this server\"\r\n",
+		      maxscripts);
+	  return TIMSIEVE_FAIL;
+      }
+
+      snprintf(path, 1023, "%s.script.NEW", string_DATAPTR(name));
   }
-
-  snprintf(path, 1023, "%s.script.NEW", string_DATAPTR(name));
+  else
+      tmpnam(path);
 
   stream = fopen(path, "w+");
   if (stream == NULL) {
@@ -337,8 +345,10 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data)
   fflush(stream);
   fclose(stream);
   
-  snprintf(p2, 1023, "%s.script", string_DATAPTR(name));
-  rename(path, p2);
+  if (!verify_only) {
+      snprintf(p2, 1023, "%s.script", string_DATAPTR(name));
+      rename(path, p2);
+  }
 
   prot_printf(conn, "OK\r\n");
 

@@ -306,8 +306,7 @@ int service_main(int argc, char **argv, char **envp)
 
     /* other params should be filled in */
     if (sasl_server_new("imap", config_servername, NULL,
-			NULL, NULL, NULL, 0, &sieved_saslconn)
-	   != SASL_OK)
+			NULL, NULL, NULL, 0, &sieved_saslconn) != SASL_OK)
 	fatal("SASL failed initializing: sasl_server_new()", -1); 
 
     if(iptostring((struct sockaddr *)&sieved_remoteaddr,
@@ -319,7 +318,6 @@ int service_main(int argc, char **argv, char **envp)
 
     /* will always return something valid */
     /* should be configurable! */
-    secflags = SASL_SEC_NOANONYMOUS;
     if (!config_getswitch("allowplaintext", 1)) {
 	secflags |= SASL_SEC_NOPLAINTEXT;
     }

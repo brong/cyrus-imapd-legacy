@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.12 2001/10/15 15:45:20 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.13 2001/10/23 00:21:32 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -60,7 +60,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/utsname.h>
 
 #include <sasl/sasl.h>
 #include <db.h>			/* for cmd_id() 'environment' info */
@@ -177,7 +176,8 @@ struct idparamlist {
     char *value;
     struct idparamlist *next;
 };
-void id_getcmdline(int argc, char **argv);
+extern void id_getcmdline(int argc, char **argv);
+extern void id_response(struct protstream *pout);
 void id_appendparamlist(struct idparamlist **l, char *field, char *value);
 void id_freeparamlist(struct idparamlist *l);
 
@@ -548,6 +548,7 @@ int service_main(int argc, char **argv, char **envp)
 	fatal("SASL failed initializing: sasl_server_new()", EC_TEMPFAIL);
     }
 
+    /* never allow plaintext, since IMAP has the LOGIN command */
     secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
     sasl_setprop(imapd_saslconn, SASL_SEC_PROPS, secprops);
     sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
@@ -1709,20 +1710,6 @@ char *cmd;
  * we only allow MAXIDFAILED consecutive failed IDs from a given client.
  * we only record MAXIDLOG ID responses from a given client.
  */
-enum {
-    MAXIDFAILED	= 3,
-    MAXIDLOG = 5,
-    MAXIDFIELDLEN = 30,
-    MAXIDVALUELEN = 1024,
-    MAXIDPAIRS = 30,
-    MAXIDLOGLEN = (MAXIDPAIRS * (MAXIDFIELDLEN + MAXIDVALUELEN + 6))
-};
-
-#ifdef ID_SAVE_CMDLINE
-static char id_resp_command[MAXIDVALUELEN];
-static char id_resp_arguments[MAXIDVALUELEN] = "";
-#endif
-
 void cmd_id(char *tag)
 {
     static int did_id = 0;
@@ -1731,7 +1718,6 @@ void cmd_id(char *tag)
     int error = 0;
     int c = EOF, npair = 0;
     static struct buf arg, field;
-    struct utsname os;
     struct idparamlist *params = 0;
 
     /* check if we've already had an ID in non-authenticated state */
@@ -1865,48 +1851,8 @@ void cmd_id(char *tag)
     /* spit out our ID string.
        eventually this might be configurable. */
     if (config_getswitch("imapidresponse", 1)) {
-	char env_buf[MAXIDVALUELEN+1];
-
-	prot_printf(imapd_out, "* ID ("
-		    "\"name\" \"Cyrus\""
-		    " \"version\" \"%s\""
-		    " \"vendor\" \"Project Cyrus\""
-		    " \"support-url\" \"http://asg.web.cmu.edu/cyrus\"",
-		    CYRUS_VERSION);
-
-	/* add the os info */
-	if (uname(&os) != -1)
-	    prot_printf(imapd_out,
-			" \"os\" \"%s\""
-			" \"os-version\" \"%s\"",
-			os.sysname, os.release);
-
-#ifdef ID_SAVE_CMDLINE
-	/* add the command line info */
-	prot_printf(imapd_out, " \"command\" \"%s\"", id_resp_command);
-	if (strlen(id_resp_arguments)) {
-	    prot_printf(imapd_out, " \"arguments\" \"%s\"", id_resp_arguments);
-	} else {
-	    prot_printf(imapd_out, " \"arguments\" NIL");
-	}
-#endif
-
-	/* add the environment info */
-	snprintf(env_buf, MAXIDVALUELEN,"Cyrus SASL %d.%d.%d",
-		 SASL_VERSION_MAJOR, SASL_VERSION_MINOR, SASL_VERSION_STEP);
-#ifdef DB_VERSION_STRING
-	snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
-		 "; %s", DB_VERSION_STRING);
-#endif
-#ifdef HAVE_SSL
-	snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
-		 "; %s", OPENSSL_VERSION_TEXT);
-#endif
-#ifdef HAVE_LIBWRAP
-	snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
-		 "; TCP Wrappers");
-#endif
-	prot_printf(imapd_out, " \"environment\" \"%s\")\r\n", env_buf);
+	id_response(imapd_out);
+	prot_printf(imapd_out, ")\r\n");
     }
     else
 	prot_printf(imapd_out, "* ID NIL\r\n");
@@ -1917,21 +1863,6 @@ void cmd_id(char *tag)
     failed_id = 0;
     did_id = 1;
 }
-
-#ifdef ID_SAVE_CMDLINE
-/*
- * Grab the command line args for the ID response.
- */
-void id_getcmdline(int argc, char **argv)
-{
-    snprintf(id_resp_command, MAXIDVALUELEN, *argv);
-    while (--argc > 0) {
-	snprintf(id_resp_arguments + strlen(id_resp_arguments),
-		 MAXIDVALUELEN - strlen(id_resp_arguments),
-		 "%s%s", *++argv, (argc > 1) ? " " : "");
-    }
-}
-#endif
 
 /*
  * Append the 'field'/'value' pair to the paramlist 'l'.
@@ -4439,7 +4370,15 @@ void cmd_namespace(tag)
     char* pattern;
 
     if (SLEEZY_NAMESPACE) {
-	sawone[NAMESPACE_INBOX] = 1;
+	char inboxname[MAX_MAILBOX_NAME+1];
+
+	if (strlen(imapd_userid) + 5 > MAX_MAILBOX_NAME)
+	    sawone[NAMESPACE_INBOX] = 0;
+	else {
+	    sprintf(inboxname, "user.%s", imapd_userid);
+	    sawone[NAMESPACE_INBOX] = 
+		!mboxlist_lookup(inboxname, NULL, NULL, NULL);
+	}
 	sawone[NAMESPACE_USER] = 1;
 	sawone[NAMESPACE_SHARED] = 1;
     } else {

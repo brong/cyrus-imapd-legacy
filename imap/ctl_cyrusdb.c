@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: ctl_cyrusdb.c,v 1.3.2.1 2001/10/01 19:54:42 rjs3 Exp $
+ * $Id: ctl_cyrusdb.c,v 1.3.2.2 2001/10/23 00:21:32 rjs3 Exp $
  */
 
 #include <config.h>
@@ -141,6 +141,7 @@ main(argc, argv)
 
     switch (op) {
     case RECOVER:
+	r2 = 0;
 	break;
 
     case CHECKPOINT:

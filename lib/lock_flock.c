@@ -1,5 +1,5 @@
 /* lock_flock.c -- Lock files using flock()
- $Id: lock_flock.c,v 1.11 2000/05/23 20:56:17 robeson Exp $
+ $Id: lock_flock.c,v 1.11.8.1 2001/10/23 00:21:38 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -51,6 +51,8 @@
 #endif
 
 #include "lock.h"
+
+const char *lock_method_desc = "flock";
 
 extern int errno;
 
