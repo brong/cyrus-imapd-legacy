@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.2 2002/03/06 01:55:38 rjs3 Exp $
+ * $Id: bytecode.c,v 1.1.2.3 2002/05/23 17:16:52 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -50,20 +50,17 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <sys/stat.h>
 #include <fcntl.h>
 
-/* yes, lots of these are superfluous, it's for clarity */
-typedef union bytecode 
-{
-    int op; /* OPTYPE */
-    int value;
+#include "bytecode.h"
+#include "comparator_bc.h"
+ 
 
-    int jump;
 
-    int listlen;
+#define DUMPCODE 1  
 
-    /* store strings (need 2 consecutive bytecodes) */
-    int len;
-    char *str;
-} bytecode_t;
+#if DUMPCODE
+void dump(bytecode_info_t *d);
+#endif
+
 
 struct bytecode_info 
 {
@@ -72,75 +69,12 @@ struct bytecode_info
     size_t reallen;
 };
 
-#define BYTECODE_VERSION 0x01
-
-/* IMPORTANT: To maintain forward compatibility of bytecode, please only add
- * new instructions to the end of these enums.  (The reason these values
- * are all duplicated here is to avoid silliness if this caveat is forgotten
- * about in the other tables. */
-enum bytecode {
-    B_STOP,
-
-    B_KEEP,
-    B_DISCARD,
-    B_REJECT,
-    B_FILEINTO,
-    B_FORWARD,
-
-    B_IF,
-    B_IFELSE,
-
-    B_MARK,
-    B_UNMARK,
-
-    B_ADDFLAG,
-    B_SETFLAG,
-    B_REMOVEFLAG,
-
-    B_NOTIFY,
-    B_DENOTIFY,
-
-    B_VACATION
-};
-
-enum bytecode_comps {
-    BC_FALSE,
-    BC_TRUE,
-    BC_NOT,
-    BC_EXISTS,
-    BC_SIZE,
-    BC_ANYOF,
-    BC_ALLOF,
-    BC_ADDRESS,
-    BC_ENVELOPE,
-    BC_HEADER    
-};
-
-enum bytecode_tags {
-    /* Address Part Tags */
-    B_ALL,
-    B_LOCALPART,
-    B_DOMAIN,
-    B_USER,
-    B_DETAIL,
-
-    /* Sizes */
-    B_OVER,
-    B_UNDER,
- 
-    /* Comparitors */
-    B_IS,
-    B_CONTAINS,
-    B_MATCHES,
-    B_REGEX
-};
-
-
 static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t);
 
 static int atleast(bytecode_info_t *arr, size_t len) 
 {
     if(arr->reallen < len) {
+
 	arr->reallen = (len > arr->reallen * 2 ? len : arr->reallen * 2);
 	arr->data = realloc(arr->data, arr->reallen*sizeof(bytecode_info_t));
 	if(!arr->data) return 0;
@@ -571,7 +505,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 /* returns -1 on failure or number of bytes written on success */
 static int align_string(int fd, int string_len) 
 {
-    /* Keep in mind that we always have to pad a string with *atleast*
+    /* Keep in mind that we always want to pad a string with *atleast*
      * one zero, that's why sometimes we have to pad with 4 */
     int needed = sizeof(int) - (string_len % sizeof(int));
     int i;
@@ -590,11 +524,14 @@ static int emit_stringlist(int fd, int *codep, bytecode_info_t *bc)
     int len = bc->data[(*codep)++].len;
     int i;
     int ret;
-    int wrote = sizeof(int);
-
+    int wrote = 2*sizeof(int);
+   int begin,end;
     /* Write out number of items in the list */
     ret = write(fd, &len, sizeof(int));
     if(ret == -1) return 0;
+
+    begin=lseek(fd,0,SEEK_CUR);
+    lseek(fd,sizeof(int),SEEK_CUR);
 
     /* Loop through all the items of the list, writing out lenght and string
      * in sequence */
@@ -612,7 +549,13 @@ static int emit_stringlist(int fd, int *codep, bytecode_info_t *bc)
 	
 	wrote+=ret;
     }
+    end=lseek(fd,0,SEEK_CUR);
+ 
 
+    lseek(fd,begin,SEEK_SET);
+    if(write(fd, &end, sizeof(int)) == -1) return 0;
+    lseek(fd,end,SEEK_SET);
+    /*  printf("wrote %d @ %d\n",end, begin);*/
     return wrote;
 }
 
@@ -626,11 +569,13 @@ static int emit_testlist(int fd, int *codep, bytecode_info_t *bc)
     int i;
     int ret;
     int wrote = sizeof(int);
+ 
 
     /* Write out number of items in the list */
     ret = write(fd, &len, sizeof(int));
     if(ret == -1) return -1;
 
+  
     /* Loop through all the items of the list, writing out each
      * test as we reach it in sequence. */
     for(i=0; i < len; i++) {
@@ -649,16 +594,24 @@ static int emit_testlist(int fd, int *codep, bytecode_info_t *bc)
 /* emit the bytecode for a test.  returns -1 on failure or size of
  * emitted bytecode on success */
 static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc) 
-{
-    int filelen = 0; /* Relative offset to account for interleaved strings */
-    int ret; /* Temporary Return Value Variable */
-    
-    /* Output this opcode */
-    if(write(fd, &bc->data[codep].op, sizeof(bc->data[codep].op)) == -1)
-	return -1;
-    
-    filelen += sizeof(int);
+{/*general opinion is that the 4 makes no sense*/
+  int filelen=0;/* = 4; *//* Relative offset to account for interleaved strings */
+ 
 
+  int ret; /* Temporary Return Value Variable */
+  /*
+    int location;
+    location=lseek(fd,0,SEEK_CUR);
+    printf("***filelen %d \n", filelen);
+    printf("***location %d \n", location); 
+    
+  */
+  /* Output this opcode */
+  if(write(fd, &bc->data[codep].op, sizeof(bc->data[codep].op)) == -1)
+	return -1;
+    filelen += sizeof(int);
+    
+    /*    printf("%d\n",bc->data[codep].op);*/
     switch(bc->data[codep++].op) {
         case BC_TRUE:
         case BC_FALSE:
@@ -666,7 +619,11 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
 	    break;
 
         case BC_NOT:
-	{
+	  { /*write return value*/  
+	    /*  if(write(fd, &bc->data[codep].value,
+		sizeof(bc->data[codep].value)) == -1)
+		return -1;*/
+	    codep++;
 	    /* Single parameter: another test */
 	    ret = emit_bytecode_test(fd, codep, bc);
 	    if(ret != -1)
@@ -678,6 +635,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
 	
         case BC_ALLOF:
         case BC_ANYOF:
+	  /*where we jump to?*/
 	    /* Just drop a testlist */
 	    ret = emit_testlist(fd, &codep, bc);
 	    if(ret != -1)
@@ -772,6 +730,9 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
     int start_filelen = filelen;
     int i;
 
+    /*debugging variable to check filelen*/
+    int location;
+
     syslog(LOG_ERR, "entered with filelen: %d", filelen);
     
     /* All non-string data MUST be sizeof(int)
@@ -790,7 +751,11 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    case B_IF: 
 	    {
 		int teststart, testend, realend, testdist, enddist;
-
+		/*
+		  location=lseek(fd,0,SEEK_CUR);
+		  printf("***filelen %d \n", filelen);
+		  printf("***location %d \n", location);
+		*/
 		/* first skip 2 words so we can write in offsets later */
 		ret = lseek(fd, 2 * sizeof(int), SEEK_CUR);
 		if(ret == -1) return ret;
@@ -801,6 +766,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 
 		/* spew the test */
 		testdist = emit_bytecode_test(fd, codep+2, bc);
+	
 		if(testdist == -1)
 		    return -1;
 		testend += testdist;
@@ -810,10 +776,11 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		enddist = emit_bytecode_act(fd, bc->data[codep].value,
 					    bc->data[codep+1].value, bc,
 					    filelen + testdist + 2*sizeof(int));
+	       
 		realend += enddist;
 		
 		/* now, jump back to the two offset locations and write them */
-		if(lseek(fd, teststart, SEEK_SET) == -1)
+		if(lseek(fd, filelen, SEEK_SET) == -1)
 		    return -1;
 		if(write(fd,&testend,sizeof(testend)) == -1)
 		    return -1;
@@ -826,15 +793,20 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 
 		/* update file length to the length of the test and the
 		 * then code, plus the 2 offsets we need. */
-		filelen += testdist + enddist + 2*sizeof(int);
 
+		filelen += testdist + enddist + 2*sizeof(int);
+	
 		break;
 	    }
 	    case B_IFELSE:
 	    {
 		int teststart, testend, thenend, realend,
 		               testdist, thendist, enddist;
-
+		/*
+		  location=lseek(fd,0,SEEK_CUR);
+		  printf("***filelen %d \n", filelen);
+		  printf("***location %d \n", location);
+		*/
 		/* first skip 3 words so we can write in offsets later */
 		ret = lseek(fd, 3 * sizeof(int), SEEK_CUR);
 		if(ret == -1) return ret;
@@ -844,18 +816,22 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		testend += 3 * sizeof(int);
 
 		/* spew the test */
+		location=lseek(fd,0,SEEK_CUR);
+
 		testdist = emit_bytecode_test(fd, codep+3, bc);
 		if(testdist == -1)
 		    return -1;
 		testend += testdist;
-		
+		location=lseek(fd,0,SEEK_CUR);
+
 		thenend = testend;
-		/* spew the then code */
+		/* spew the then code */ 
 		thendist = emit_bytecode_act(fd, bc->data[codep].value,
 					     bc->data[codep+1].value, bc,
 					     filelen + testdist + 3*sizeof(int));
+		/*thendist-=sizeof(int);*/
 		thenend += thendist;
-
+	
 		realend = thenend;
 		/* spew the else code */
 		enddist = emit_bytecode_act(fd, bc->data[codep+1].value,
@@ -864,8 +840,10 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 					      + 3*sizeof(int));
 		realend += enddist;
 		
+
+
 		/* now, jump back to the two offset locations and write them */
-		if(lseek(fd, teststart+sizeof(int), SEEK_SET) == -1)
+		if(lseek(fd, filelen, SEEK_SET) == -1)
 		    return -1;
 		if(write(fd,&testend,sizeof(testend)) == -1)
 		    return -1;
@@ -879,26 +857,30 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		codep = bc->data[codep+2].value;
 
 		/* update file length to the length of the test and the
-		 * then code, plus the 2 offsets we need. */
-		filelen += testdist + thendist + enddist + 3*sizeof(int);
-
+		 * then code, plus the 3 offsets we need. */
+		filelen += testdist  +thendist + enddist + 3*sizeof(int);
+	
+		/*
+		  location=lseek(fd,0,SEEK_CUR);
+		  printf("***filelen %d \n", filelen);
+		  printf("***location %d \n", location);
+		*/
 		break;
 	    }
 
 	    case B_REJECT:
-		len = bc->data[codep++].len;
+	      len = bc->data[codep++].len;
 		if(write(fd,&len,sizeof(len)) == -1)
 		    return -1;
 		filelen+=sizeof(int);
 
-       		if(write(fd,bc->data[codep++].str,len) == -1)
+		if(write(fd,bc->data[codep++].str,len) == -1)
 		    return -1;
-		filelen+=sizeof(int);
-
+		
 		ret = align_string(fd, len);
 		if(ret == -1) return -1;
-		
 		filelen += len + ret;
+
 	        break; 
 
 	    case B_FILEINTO:
@@ -992,12 +974,12 @@ int sieve_emit_bytecode(int fd, bytecode_info_t *bc)
     if(write(fd, &data, sizeof(data)) == -1)
 	return -1;
 
-    return emit_bytecode_act(fd, 0, bc->curlen, bc, 0);
-}
-
-#if 0
-#include <errno.h>
+#if DUMPCODE
+    dump(bc);
 #endif
+    /*teh 4 is to account for the version at hte begining*/
+    return emit_bytecode_act(fd, 0, bc->curlen, bc, 4);
+}
 
 /* Entry point to the bytecode emitter module */	
 int sieve_generate_bytecode(bytecode_info_t **retval, sieve_script_t *s) 
@@ -1015,22 +997,6 @@ int sieve_generate_bytecode(bytecode_info_t **retval, sieve_script_t *s)
     memset(*retval, 0, sizeof(bytecode_info_t));
 
     return bc_generate(0, *retval, c);
-/*    if(ret == -1) return -1; */
-#if 0    
-    fd = open("foo.bc",O_CREAT | O_TRUNC | O_WRONLY);
-    if(fd == -1) {
-	printf("no opening foo.bc");
-	return -1;
-    }
-    
-    ret = emit_bytecode(fd, *retval);
-    if(ret == -1) {
-	printf("eb error: %s\n",strerror(errno));
-    } else {
-	printf("emitted %d bytes\n", ret);
-    }
-    return ret;
-#endif  
 }
 
 void sieve_free_bytecode(bytecode_info_t **p) 
@@ -1040,9 +1006,387 @@ void sieve_free_bytecode(bytecode_info_t **p)
     free(*p);
     *p = NULL;
 }
-    
 
-#if 0
+
+int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
+{/*interp is a sieve interpretor?  meaning that it knows what to do next, or it is the thing that parses and evaluates and all that every time?????????.*/
+  int res=0; 
+  int i=*ip;
+  int x,y,z;/*loop variable*/
+  int l;/*for allof/anyof*/
+  int address=0;/*to differentiate between address and envelope*/
+  comparator_bc_t * comp;
+
+  printf("\n%d ",bc[i].value); 
+  switch(bc[i].value)
+    {
+    case BC_FALSE:res=0; break;
+    case BC_TRUE:res=1; break;
+    case BC_NOT:/*2*/
+      i+=1;
+      res= !(eval_bc_test(interp,m, bc, &i));
+      break;
+    case BC_EXISTS:/*3*/
+      {
+	int headersi=i+1;
+	int numheaders=bc[headersi].len;
+	const char** val;
+	int currh;
+	int blah;
+	res=1;
+	currh=headersi+2;
+	for(x=0; x<numheaders && res; x++)
+	  { blah=(interp->getheader(m,(char*)&(bc[currh+1].str), &val));
+	    if (blah!=SIEVE_OK)
+	      {return 0;}
+	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
+	  }
+
+	break;
+      }
+    case BC_SIZE:/*4*/
+      {int s;
+      res=0;
+	if (interp->getsize(m, &s) != SIEVE_OK)
+	    break;
+	printf("size=%d compared to %d\n", s, bc[i+2].value);
+      if (bc[i+1].value==B_OVER)
+	    {res=s>bc[i+2].value;}
+	  else /*under*/
+	    {res=s<bc[i+2].value;}
+      break;
+      }
+    case BC_ANYOF:/*5*/
+	res = 0;
+	l=bc[i+1].len;
+	i+=2;
+	/*return 0 unless you find one, then return 1*/
+	for (x=0;x<l && !res; x++) {
+	  res |= eval_bc_test(interp,m,bc,&i);
+	}
+	break;
+    case BC_ALLOF:/*6*/
+        res=1;     
+	l=bc[i+1].len;
+	i+=2;
+	/*return 1 unless you find one that isn't true, then return 0*/
+	for (x=0;x<l && res; x++) {
+	    res &= eval_bc_test(interp,m,bc,&i);
+	}
+	break;
+    case BC_ADDRESS:/*7*/
+      address=1;
+    case BC_ENVELOPE:/*8*/
+      {
+	const char ** val;
+	void * data=NULL;
+	void * marker=NULL;
+	char * addr;
+	int addrpart=ADDRESS_ALL;/*is this the correct default behavior?*/
+
+ 	int headersi=i+3;/*the i value for the begining of hte headers*/
+	int datai=(bc[headersi+1].value/4);
+
+	int numheaders=bc[headersi].len;
+	int numdata=bc[datai].len;
+
+	int currh, currd; /*current header, current data*/
+	res=0;
+
+      /*find the correct comparator*/
+      comp=lookup_comp_bc("i;ascii-casemap",bc[i+1].value);
+     
+      /*find the part of the address that we want*/
+      switch(bc[i+2].value)
+	{
+	case B_ALL: addrpart = ADDRESS_ALL; break;
+	case B_LOCALPART: addrpart = ADDRESS_LOCALPART; break;
+	case B_DOMAIN: addrpart = ADDRESS_DOMAIN; break;
+	case B_USER: addrpart = ADDRESS_USER; break;
+	case B_DETAIL: addrpart = ADDRESS_DETAIL; break;
+	}
+
+      /*loop through all the headers*/
+      currh=headersi+2;
+      for (x=0; x<numheaders && !res; x++)
+	{
+	  if ((address) ? 
+	      interp->getheader(m, (char*)&(bc[currh+1].str), &val) :
+	      interp->getenvelope(m, (char*)&(bc[currh+1].str), &val) != SIEVE_OK) 
+	    {continue; /* try next header */}
+	  
+	  /*header exists, now to test it*/
+	  /*search through all teh headers that match*/
+	  for (y=0; val[y]!=NULL && !res; y++)
+	    {
+	      if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
+		{return 0;}
+	      addr=get_address(addrpart, &data, &marker, 0);
+	      /*search through all the data*/ 
+	      currd=datai+2;
+	      for (z=0; z<numdata && !res; z++)
+		{
+		  printf("%s,  %s \n",addr, &(bc[currd+1].str));
+		  res|= comp((char*)&(bc[currd+1].str), addr);
+		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		}
+	    }
+	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
+	}
+      i=(bc[datai+1].value/4);
+      break;
+      }
+    case BC_HEADER:/*9*/
+      {
+	const char** val;
+
+	int headersi=i+2;/*the i value for the begining of hte headers*/
+	int datai=(bc[headersi+1].value/4);
+
+	int numheaders=bc[headersi].len;
+	int numdata=bc[datai].len;
+
+	int currh, currd; /*current header, current data*/
+	int blah;
+
+
+	/*find the correct comparator*/
+	comp=lookup_comp_bc("i;ascii-casemap" ,bc[i+1].value);
+
+	/*i+=4;*/
+	/*search through all the flags for the header*/
+	currh=headersi+2;
+	for(x=0; x<numheaders && !res; x++)
+	  { 
+	    blah=(interp->getheader(m,(char*)&(bc[currh+1].str), &val));
+	    if (blah!=SIEVE_OK)
+	      {currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
+	      continue; /*this header does not exist, search the next*/ 
+	      }
+	    /*search through all teh headers that match*/
+	    for (y=0; val[y]!=NULL&&!res; y++)
+	      {
+		/*search through all the data*/ 
+		currd=datai+2;
+		for (z=0; z<numdata && !res; z++)
+		  {/*printf("numdata %d %d\n,",numdata,z );*/
+		    printf("%s,  %s \n",val[y], &(bc[currd+1].str));
+		    res|= comp((char *)&(bc[currd+1].str), val[y]);
+
+
+		    currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		  }
+	      }
+	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
+	  }
+	i=(bc[datai+1].value/4);
+	break;
+      }
+    default:
+      printf("WERT, can't evaluate if statement.");
+    }
+  *ip=i;
+  return res;
+} 
+
+int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
+		  void *m, action_list_t *actions,
+		  notify_action_t *notify_action,
+		  const char **errmsg) 
+{
+  /*i is a struct with useful function calls such as getheader*/
+    int ip, res=0;
+    int needtojump=0;
+    int jumpat=-1;
+    int jumpto=-1;
+
+    bytecode_t *bc = (bytecode_t *)bc_in;
+    
+    if(!bc) return SIEVE_FAIL;
+
+    printf("version number %d\n",bc[0].op); 
+
+    for(ip=1; ip<=bc_len; ) { 
+      printf("\n%d ",bc[ip].op);
+      if (needtojump)
+	{if (jumpat==ip)
+	  {printf("jumping from %d to %d\n",ip, jumpto);
+	    ip=jumpto;
+	  jumpto=-1;
+	  jumpat=-1;
+	  needtojump=0;
+	  }
+	else if (ip>jumpat)
+	  {printf("ip=%d jumpat=%d WERT, this should never have happened\n", ip, jumpat);}
+	}
+      switch(bc[ip].op) {
+      case B_STOP:/*0*/
+	  res=1;
+	  break;
+      case B_KEEP:/*1*/
+	  res = do_keep(actions, &i->curflags);
+	  if (res == SIEVE_RUN_ERROR)
+	    *errmsg = "Keep can not be used with Reject";
+	  /* return res;*/
+	  ip++;
+	  break;
+      case B_DISCARD:/*2*/
+	  res=do_discard(actions);
+	  /*	  return res;*/
+	  ip++;
+	  break;
+      case B_REJECT:/*3*/
+	res = do_reject(actions, (char*)&bc[ip+2].str);
+	
+	if (res == SIEVE_RUN_ERROR)
+	    *errmsg = "Reject can not be used with any other action";  
+	  printf("\n  %s\n", *errmsg);
+	  /*  return res;*/ 
+	  /* Skip length + string, then move on??? */
+	  ip+=(1+(ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t));
+	  ip++;
+	  break;
+      case B_FILEINTO:/*4*/
+	  {
+	    int x;
+	    int l=bc[ip+1].len;
+	    ip+=3;
+	    for (x=0; x<l; x++)\
+	      {
+		res = do_fileinto(actions,(char*)&( bc[ip+1].str), &i->curflags);
+		if (res == SIEVE_RUN_ERROR)
+		  {*errmsg = "Fileinto can not be used with Reject";
+		  printf("WERT!!!!!");}
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      } 
+	    break;
+	  }
+      case B_FORWARD:/*5*/
+	  {
+	    int x;
+	    int l=bc[ip+1].len;
+	    ip+=3;
+	    for (x=0; x<l; x++)\
+	      {
+		res = do_forward(actions,(char*)&( bc[ip+1].str));
+		if (res == SIEVE_RUN_ERROR)
+		  *errmsg = "Redirect can not be used with Reject";
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      } 
+	    break;
+	  }
+      case B_IF:
+	  {int testtemp=ip;
+	  printf("if");
+       
+	  ip+=3;
+	  if (eval_bc_test(i,m, bc, &ip))
+	    {printf("(if returned true)");    
+	    ip=bc[testtemp+1].jump/4;
+	    }	  
+	  else
+	    {printf("(if returned false-continue)");
+	    ip=bc[testtemp+2].jump/4;
+	    }
+	  break;
+	    }
+      case B_IFELSE:
+	  {int testtemp=ip;
+	  printf("ifelse");
+	  ip+=4;
+	  needtojump=1;
+	  jumpto=bc[testtemp+3].jump/4;
+	  
+	  if(eval_bc_test(i,m,bc, &ip))
+	    {printf("(if returned true)");    
+	    ip=bc[testtemp+1].jump/4;
+	    jumpat=(bc[testtemp+2].jump/4);
+	    }	  
+	  else
+	    {printf("(if returned false-doelse)");
+	    ip=bc[testtemp+2].jump/4;
+	    jumpat=(bc[testtemp+3].jump/4);
+	    printf("(%d %d)", ip, jumpat);
+	    }
+	  }
+	  break;
+      case B_MARK:
+	  res = do_mark(actions);
+	  ip++;
+	  break;
+      case B_UNMARK:
+	  res = do_unmark(actions);
+	  ip++;
+	  break;
+      case B_ADDFLAG: 
+	  {
+	    int x;
+	    int l=bc[ip+1].len;
+	    ip+=3;
+	    for (x=0; x<l; x++)\
+	      {
+		res = do_addflag(actions,(char*)&( bc[ip+1].str));
+		if (res == SIEVE_RUN_ERROR)
+		  *errmsg = "addflag can not be used with Reject";
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      } 
+	    break;
+	  }
+
+      case B_SETFLAG:
+	  {
+	    int x;
+	    int l=bc[ip+1].len;
+	    ip+=3;
+	    res = do_setflag(actions, (char*)&( bc[ip+1].str));
+	    ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	    for (x=1; x<l; x++)\
+	      {
+		res = do_addflag(actions, (char*)&( bc[ip+1].str));
+		if (res == SIEVE_RUN_ERROR)
+		  *errmsg = "setflag can not be used with Reject";
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      } 
+	    break;
+	  }
+      case B_REMOVEFLAG:
+	  {
+	    int x;
+	    int l=bc[ip+1].len;
+	    ip+=3;
+	    for (x=0; x<l; x++)\
+	      {
+		res = do_removeflag(actions, (char*)&( bc[ip+1].str));
+		if (res == SIEVE_RUN_ERROR)
+		  *errmsg = "removeflag can not be used with Reject";
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      } 
+	    break;
+	  }
+      case B_NOTIFY:
+      case B_DENOTIFY:
+	printf("(de)notify not done");
+	break;
+      case B_VACATION:
+	  /*	  dump2(bc, bc_len);*/
+	  res=0;
+	  exit(1);
+	  break;
+      default:
+	  printf("bytecode bad, or not yet implemented\n");
+	  if(errmsg) *errmsg = "Invalid sieve bytecode";
+	  return SIEVE_FAIL;
+      }
+
+      if (res) /* we've either encountered an error or a stop */
+	break;
+    }
+    printf("res=%d, ERRORS:%s\n",res,*errmsg);
+    return res;
+
+}
+
+#if DUMPCODE
 
 /* Dump a stringlist.  Return the last address used by the list */
 static int dump_sl(bytecode_info_t *d, int ip) 
@@ -1117,7 +1461,7 @@ static int dump_test(bytecode_info_t *d, int ip) {
 
         case BC_HEADER:
 	    printf("%d: HEADER (\n",ip++);
-	    printf("      COMP:%d HEADERS:\n",d->data[ip++]);
+	    printf("      COMP:%d HEADERS:\n",d->data[ip++].value);
 	    ip = dump_sl(d,ip); ip++;
 	    printf("      DATA:\n");
 	    ip = dump_sl(d,ip);
@@ -1129,7 +1473,7 @@ static int dump_test(bytecode_info_t *d, int ip) {
 		   d->data[ip].op == BC_ADDRESS ? "ADDRESS" : "ENVELOPE");
 	    ip++;
 	    printf("      COMP:%d TYPE:%d HEADERS:\n",
-		   d->data[ip+1],d->data[ip+2]);
+		   d->data[ip+1].value,d->data[ip+2].value);
 	    ip+=2;
 	    ip = dump_sl(d,ip); ip++;
 	    printf("      DATA:\n");
@@ -1146,7 +1490,7 @@ static int dump_test(bytecode_info_t *d, int ip) {
 
 void dump(bytecode_info_t *d) 
 {
-    int i, j;
+    int i;
     
     if(!d) return;
     
@@ -1247,3 +1591,4 @@ void dump(bytecode_info_t *d)
     printf("full len is: %d\n", d->curlen);
 }
 #endif
+

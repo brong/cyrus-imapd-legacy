@@ -1,5 +1,5 @@
 /* sieve_interface.h -- interface for deliver
- * $Id: sieve_interface.h,v 1.15.2.1 2001/12/18 23:09:57 rjs3 Exp $
+ * $Id: sieve_interface.h,v 1.15.2.2 2002/05/23 17:16:53 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -34,11 +34,12 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 /* error codes */
 #define SIEVE_OK (0)
 
-#include <sieve_err.h>
+#include "sieve_err.h"
 
 /* external sieve types */
 typedef struct sieve_interp sieve_interp_t;
 typedef struct sieve_script sieve_script_t;
+typedef struct sieve_bytecode sieve_bytecode_t;
 typedef struct bytecode_info bytecode_info_t;
 
 typedef int sieve_callback(void *action_context, void *interp_context, 
@@ -141,7 +142,19 @@ int sieve_register_execute_error(sieve_interp_t *interp,
 int sieve_script_parse(sieve_interp_t *interp, FILE *script,
 		       void *script_context, sieve_script_t **ret);
 
+/* given a bytecode file descriptor, setup the sieve_bytecode_t */
+int sieve_script_load(sieve_interp_t *interp, int fd, const char *name,
+		      void *script_context, sieve_bytecode_t **ret);
+
+/* Unload a sieve_bytecode_t */
+int sieve_script_unload(sieve_bytecode_t **s);
+
+/* Free a sieve_script_t */
 int sieve_script_free(sieve_script_t **s);
+
+/* execute bytecode on a message */
+int sieve_execute_bytecode(sieve_bytecode_t *script, 
+			   void *message_context);
 
 /* execute a script on a message, producing side effects via callbacks */
 int sieve_execute_script(sieve_script_t *script, 

@@ -1,6 +1,6 @@
 /* sievec.c -- compile a sieve script to bytecode manually
  * Rob Siemborski
- * $Id: sievec.c,v 1.1.2.2 2001/12/18 23:24:35 rjs3 Exp $
+ * $Id: sievec.c,v 1.1.2.3 2002/05/23 17:16:53 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -53,11 +53,14 @@
 
 #include "xmalloc.h"
 #include "script.h"
-#include <string.h>
+#include <string.h> 
 #include <stdlib.h>
 #include <sys/file.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret);
 

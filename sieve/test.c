@@ -1,6 +1,8 @@
-/* test.c -- tester for libsieve
+/*NEW
+  
+ * test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.15 2000/12/18 15:17:57 ken3 Exp $
+ * $Id: test.c,v 1.15.12.1 2002/05/23 17:16:53 jsmith2 Exp $
  *
  * usage: "test message script"
  */
@@ -95,7 +97,7 @@ int parseheader(FILE *f, char **headname, char **contents) {
     /* there are two ways out of this loop, both via gotos:
        either we successfully read a character (got_header)
        or we hit an error (ph_error) */
-    while (c = getc(f)) {	/* examine each character */
+    while ((c = getc(f))) {	/* examine each character */
 	switch (s) {
 	case NAME_START:
 	    if (c == '\r' || c == '\n') {
@@ -187,7 +189,6 @@ void fill_cache(message_data_t *m)
 	if (parseheader(m->data, &name, &body) < 0) {
 	    break;
 	}
-
 	/* put it in the hash table */
 	clinit = cl = hashheader(name);
 	while (m->cache[cl] != NULL && strcmp(name, m->cache[cl]->name)) {
@@ -274,7 +275,7 @@ int getheader(void *v, const char *phead, const char ***body)
     free(head);
 
     if (*body) {
-	return SIEVE_OK;
+  	return SIEVE_OK;
     } else {
 	return SIEVE_FAIL;
     }
@@ -311,7 +312,7 @@ int getsize(void *mc, int *size)
 
 int getenvelope(void *v, const char *head, const char ***body)
 {
-    static const char *buf[2];
+    static char *buf[2];
 
     if (buf[0] == NULL) { buf[0] = malloc(sizeof(char) * 256); buf[1] = NULL; }
     printf("Envelope body of '%s'? ", head);
@@ -445,9 +446,9 @@ sieve_imapflags_t mark = { markflags, 1 };
 int main(int argc, char *argv[])
 {
     sieve_interp_t *i;
-    sieve_script_t *s;
+    sieve_bytecode_t *bc;
     message_data_t *m;
-    FILE *f;
+    int script_fd;
     int fd, res;
     struct stat sbuf;
 
@@ -537,21 +538,22 @@ int main(int argc, char *argv[])
     if (res != SIEVE_OK) {
 	printf("sieve_register_execute_error() returns %d\n", res);
         exit(1);
-    }
+    }   
 
 
-    f = fopen(argv[2], "r");
-    if (!f) {
+    script_fd = open(argv[2], O_RDONLY);
+    if (script_fd == -1) {
 	printf("can not open script '%s'\n", argv[2]);
 	exit(1);
     }
 
-    res = sieve_script_parse(i, f, NULL, &s);
+    res = sieve_script_load(i, script_fd, "test script",
+			    NULL, &bc);
     if (res != SIEVE_OK) {
 	exit(1);
     }
 
-    fclose(f);
+    close(script_fd);
 
     if (strcmp(argv[1], "-v") != 0) {
 	fd = open(argv[1], O_RDONLY);
@@ -566,18 +568,18 @@ int main(int argc, char *argv[])
 	    exit(1);
 	}
 
-	res = sieve_execute_script(s, m);
+	res = sieve_execute_bytecode(bc, m);
 	if (res != SIEVE_OK) {
-	    printf("sieve_execute_script() returns %d\n", res);
+	    printf("sieve_execute_bytecode() returns %d\n", res);
 	    exit(1);
 	}
 	
 	close(fd);
     }
-
-    res = sieve_script_free(&s);
+    /*used to be sieve_script_free*/
+    res = sieve_script_unload(&bc);
     if (res != SIEVE_OK) {
-	printf("sieve_script_free() returns %d\n", res);
+	printf("sieve_script_unload() returns %d\n", res);
 	exit(1);
     }
     res = sieve_interp_free(&i);

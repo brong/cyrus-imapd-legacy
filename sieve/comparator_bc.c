@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.1 2002/05/23 17:16:52 jsmith2 Exp $
+ * $Id: comparator_bc.c,v 1.1.2.1 2002/05/23 17:16:53 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -34,10 +34,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <string.h>
 #include <fnmatch.h>
 
-#include "comparator.h"
-#include "tree.h"
-#include "sieve.h"
-
+#include "comparator_bc.h"
+#include "bytecode.h"
 /* --- i;octet comparators --- */
 
 /* just compare the two; these should be NULL terminated */
@@ -120,10 +118,9 @@ static int ascii_casemap_contains(const char *pat, const char *text)
     int N = strlen(text);
     int M = strlen(pat);
     int i, j;
-
     i = 0, j = 0;
     while ((j < M) && (i < N)) {
-	if (toupper(text[i]) == toupper(pat[j])) {
+    	if (toupper(text[i]) == toupper(pat[j])) {
 	    i++; j++;
 	} else {
 	    i = i - j + 1;
@@ -166,41 +163,41 @@ static int ascii_numeric_is(const char *pat, const char *text)
     else return 1; /* both not digits */
 }
 
-comparator_t *lookup_comp(const char *comp, int mode)
+comparator_bc_t *lookup_comp_bc(const char *comp, int mode)
 {
-    comparator_t *ret;
+    comparator_bc_t *ret;
 
     ret = NULL;
     if (!strcmp(comp, "i;octet")) {
  	switch (mode) {
-	case IS:
+	case B_IS:
 	    ret = &octet_is;
 	    break;
-	case CONTAINS:
+	case B_CONTAINS:
 	    ret = &octet_contains;
 	    break;
-	case MATCHES:
+	case B_MATCHES:
 	    ret = &octet_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
+	case B_REGEX:
 	    ret = &octet_regex;
 	    break;
 #endif
 	}
     }else if (!strcmp(comp, "i;ascii-casemap")) {
 	switch (mode) {
-	case IS:
+	case B_IS:
 	    ret = &ascii_casemap_is;
 	    break;
-	case CONTAINS:
+	case B_CONTAINS:
 	    ret = &ascii_casemap_contains;
 	    break;
-	case MATCHES:
+	case B_MATCHES:
 	    ret = &ascii_casemap_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
+	case B_REGEX:
 	    /* the ascii-casemap destinction is made during
 	       the compilation of the regex in verify_regex() */
 	    ret = &octet_regex;
@@ -209,7 +206,7 @@ comparator_t *lookup_comp(const char *comp, int mode)
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {
-	case IS:
+	case B_IS:
 	    ret = &ascii_numeric_is;
 	    break;
 	}
