@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.18 2003/01/09 18:43:34 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.19 2003/01/10 17:03:24 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -1429,13 +1429,15 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	comp=lookup_comp(comparator, match, relation, &comprock);
 	
 	/*find the part of the address that we want*/
-	switch(bc[i+3].value)
+
+	switch(bc[i+4].value)
 	  {
 	  case B_ALL: addrpart = ADDRESS_ALL; break;
 	  case B_LOCALPART: addrpart = ADDRESS_LOCALPART; break;
 	  case B_DOMAIN: addrpart = ADDRESS_DOMAIN; break;
 	  case B_USER: addrpart = ADDRESS_USER; break;
 	  case B_DETAIL: addrpart = ADDRESS_DETAIL; break;
+	  default:/*this shouldn't happen with correcct bytecode*/;
 	  }
 
       /*loop through all the headers*/
