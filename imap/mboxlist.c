@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.147.2.4.2.5 2001/07/10 01:46:36 ken3 Exp $
+ * $Id: mboxlist.c,v 1.147.2.4.2.6 2001/07/12 00:43:00 ken3 Exp $
  */
 
 #include <config.h>
@@ -410,7 +410,11 @@ mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition,
 	     */
 	    identifier = xstrdup(name+5);
 	    if (config_getswitch("unixhierarchysep", 0)) {
-		/* Change DOTCHARs to '.' for ACL */
+		/*
+		 * The mailboxname is now in the internal format,
+		 * so we we need to change DOTCHARs back to '.'
+		 * in the identifier in order to have the correct ACL.
+		 */
 		for (p = identifier; *p; p++) {
 		    if (*p == DOTCHAR) *p = '.';
 		}

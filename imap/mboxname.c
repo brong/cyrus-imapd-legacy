@@ -1,5 +1,5 @@
 /* mboxname.c -- Mailbox list manipulation routines
- $Id: mboxname.c,v 1.20.4.2.2.3 2001/07/04 13:59:29 ken3 Exp $
+ $Id: mboxname.c,v 1.20.4.2.2.4 2001/07/12 00:43:01 ken3 Exp $
 
  * Copyright (c)1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -422,7 +422,9 @@ int mboxname_policycheck(char *name)
 	    name++;		/* Skip over terminating '-' */
 	}
 	else {
-	    if (!strchr(GOODCHARS, *name) && !(unixsep && *name == DOTCHAR))
+	    if (!strchr(GOODCHARS, *name) &&
+		/* If we're using unixhierarchysep, DOTCHAR is allowed */
+		!(unixsep && *name == DOTCHAR))
 		return IMAP_MAILBOX_BADNAME;
 	    name++;
 	    sawutf7 = 0;

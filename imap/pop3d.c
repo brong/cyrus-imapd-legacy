@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.90.2.3.2.3 2001/07/08 16:00:02 ken3 Exp $
+ * $Id: pop3d.c,v 1.90.2.3.2.4 2001/07/12 00:43:01 ken3 Exp $
  */
 #include <config.h>
 
@@ -944,6 +944,7 @@ char *user;
 	shut_down(0);
     }
     else if (!(p = auth_canonifyid(user)) ||
+	     /* '.' isn't allowed if '.' is the hierarchy separator */
 	     (popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
 	     strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
