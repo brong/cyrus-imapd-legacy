@@ -1,6 +1,6 @@
-/* imtest.c -- imap test client
+/* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.1 2001/08/08 19:20:17 rjs3 Exp $
+ * $Id: pop3test.c,v 1.1.2.2 2001/08/10 15:40:57 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -76,10 +76,20 @@
 static SSL_CTX *tls_ctx = NULL;
 static SSL *tls_conn = NULL;
 
+#else
+#include <sasl/md5global.h>
+#include <sasl/md5.h>
+
+#define MD5Init _sasl_MD5Init
+#define MD5Update _sasl_MD5Update
+#define MD5Final _sasl_MD5Final
+
 #endif /* HAVE_SSL */
 
 #define IMTEST_OK    0
 #define IMTEST_FAIL -1
+
+char *apop_chal=NULL;
 
 typedef enum {
     STAT_CONT = 0,
@@ -798,6 +808,54 @@ static int auth_login(void)
   }
 }
 
+static int auth_apop(void)
+{
+  char str[1024];
+  /* we need username and password to do "APOP" */
+  char *username;
+  unsigned int userlen;
+  char *pass;
+  unsigned int passlen;
+  int i;
+  MD5_CTX ctx;
+  unsigned char digest[16];
+  char digeststr[32];
+
+  if(!apop_chal) {
+      prot_printf(pout, "QUIT\r\n");
+      printf("C: QUIT\r\n");
+      imtest_fatal("[Server does not support APOP]\n");
+  }
+
+  interaction(SASL_CB_AUTHNAME,"Authname",&username,&userlen);
+  interaction(SASL_CB_PASS,"Password",&pass,&passlen);
+
+  MD5Init(&ctx);
+  MD5Update(&ctx,apop_chal,strlen(apop_chal));
+  MD5Update(&ctx,pass,passlen);
+  MD5Final(digest, &ctx);
+
+  /* convert digest from binary to ASCII hex */
+  for (i = 0; i < 16; i++)
+      sprintf(digeststr + (i*2), "%02x", digest[i]);
+
+  printf("C: APOP %s %s\r\n", username,digeststr);
+  prot_printf(pout,"APOP %s %s\r\n", username,digeststr);
+  prot_flush(pout);
+
+  if(prot_fgets(str, 1024, pin) == NULL) {
+      imtest_fatal("prot layer failure");
+  }
+
+  printf("S: %s", str);
+
+  if (!strncasecmp(str, "+OK ", 4)) {
+      return IMTEST_OK;
+  } else {
+      return IMTEST_FAIL;
+  }
+}
+
 int auth_sasl(char *mechlist)
 {
   sasl_interact_t *client_interact=NULL;
@@ -935,8 +993,6 @@ static char *parsemechlist(char *str)
     strcpy(ret, tmp);
   }
 
-  printf("got mechlist: %s\n", ret);
-
   return ret;
 }
 
@@ -944,7 +1000,32 @@ static char *parsemechlist(char *str)
 static char *ask_capability(int *supports_starttls)
 {
   char str[1024];
+  char *start, *end;
   char *ret;
+
+  /* Get header line */
+  if(prot_fgets(str,sizeof(str),pin) == NULL) {
+      imtest_fatal("prot layer failure");
+  }
+
+  printf("S: %s",str);
+  
+  if(strncmp(str, "+OK", 3)) {
+      imtest_fatal("bad POP3 header");
+  }
+  
+  start = str + 4;
+  if(*start == '<') {
+      end = strchr(start, '>');
+      if(!end) {
+	  imtest_fatal("bad APOP challenge in header");
+      }
+      end += 1;
+      *end = '\0';
+      apop_chal = malloc(strlen(start) + 1);
+      if(!apop_chal) imtest_fatal("memory error");
+      strcpy(apop_chal, start);
+  }  
 
   /* request capabilities of server */
   prot_printf(pout, "CAPA\r\n");
@@ -1091,7 +1172,7 @@ void usage(void)
   printf("  -u user  : authorization name to use\n");
   printf("  -a user  : authentication name to use\n");
   printf("  -v       : verbose\n");
-  printf("  -m mech  : SASL mechanism to use (\"login\" for LOGIN)\n");
+  printf("  -m mech  : SASL mechanism to use (\"login\" for LOGIN, \"apop\" for APOP)\n");
   printf("  -f file  : pipe file into connection after authentication\n");
   printf("  -r realm : realm\n");
 #ifdef HAVE_SSL
@@ -1255,7 +1336,9 @@ int main(int argc, char **argv)
 #endif /* HAVE_SSL */
 
   if (mechanism) {
-      if (!strcasecmp(mechanism, "login")) {
+      if (!strcasecmp(mechanism, "apop")) {
+	  result = auth_apop();
+      } else if (!strcasecmp(mechanism, "login")) {
 	  result = auth_login();
       } else {
 	  result = auth_sasl(mechanism);
@@ -1266,6 +1349,11 @@ int main(int argc, char **argv)
       } else {
 	  result = auth_login();
       }
+  }
+
+  if(apop_chal) {
+      free(apop_chal);
+      apop_chal = NULL;
   }
 
   if (result == IMTEST_OK) {
@@ -1296,6 +1384,6 @@ int main(int argc, char **argv)
       free(cur->str);
       free(cur);
   }
-  
+
   exit(0);
 }
