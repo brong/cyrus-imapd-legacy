@@ -1,4 +1,4 @@
-* mboxlist.c -- Mailbox list manipulation routines
+/* mboxlist.c -- Mailbox list manipulation routines
  * 
  * Copyright 1998 Carnegie Mellon University
  * 
@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.56 2000/01/15 00:14:19 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.57 2000/01/15 00:22:20 leg Exp $
  */
 
 #include <stdio.h>
