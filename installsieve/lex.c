@@ -1,6 +1,6 @@
 /* lex.c -- lexers for command line script installer
  * Tim Martin
- * $Id: lex.c,v 1.6.2.1 1999/10/13 19:29:50 leg Exp $
+ * $Id: lex.c,v 1.6.2.2 1999/12/15 19:51:48 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -67,9 +67,9 @@ int yylex(lexstate_t * lvalp, void * client)
   char *buff_ptr = buffer; /* ptr into the buffer */
   char *buff_end = buffer + ACAP_MAX_QSTR_LEN -1;
 
-  unsigned long count;
+  unsigned long count=0;
 
-  int result;
+  int result = SIEVE_OK;
 
   int synchronizing;  /* wheather we are in the process of reading a
 			 synchronizing string or not */

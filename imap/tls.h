@@ -1,6 +1,8 @@
-/* lex.h 
+/* tls.h - STARTTLS helper functions for imapd
  * Tim Martin
  * 9/21/99
+ *
+ *  Based upon Lutz Jaenicke's TLS patches for postfix
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -25,38 +27,25 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ******************************************************************/
 
+#ifdef HAVE_SSL
 
-#ifndef _LEX_H_
-#define _LEX_H_
+#ifndef TLS_H
+#define TLS_H
 
-#include "mystring.h"
+/* init tls */
+int     tls_init_serverengine(int verifydepth, /* depth to verify */
+			      int askcert,     /* 1 = verify client */
+			      int requirecert, /* 1 = another client verify? */
+			      char *var_imapd_tls_CAfile,
+			      char *var_imapd_tls_CApath,
+			      char *var_imapd_tls_cert_file,
+			      char *var_imapd_tls_key_file);
 
-typedef struct lexstate_s {
-  mystring_t *str;
-  int number;
+/* start tls negotiation */
+int tls_start_servertls(int readfd, int writefd, int *layerbits, char **authid);
 
-} lexstate_t;
-
-int yylex(lexstate_t * lvalp, void * client);
-
-#define	TAG	258
-#define	EOL	259
-#define	STRING	260
-#define NUMBER  261
-
-#define TOKEN_OK      280
-#define TOKEN_NO      281
-
-#define LEXER_STATE_TAG         60
-#define LEXER_STATE_RECOVER     61
-#define LEXER_STATE_RECOVER_CR  62
-#define LEXER_STATE_CR          63
-#define LEXER_STATE_QSTR        64
-#define LEXER_STATE_LITERAL     65
-#define LEXER_STATE_NUMBER      66
-#define LEXER_STATE_NORMAL      67
-#define LEXER_STATE_ATOM        68
+#endif /* CYRUSTLS_H */
 
 
 
-#endif /* _LEX_H_ */
+#endif /* HAVE_SSL */

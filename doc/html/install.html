@@ -1,4 +1,4 @@
-<!-- $Id: install.html,v 1.68.4.1 1999/10/13 19:29:43 leg Exp $ -->
+<!-- $Id: install.html,v 1.68.4.2 1999/12/15 19:51:07 leg Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Installing and Configuring the Cyrus IMAP Server</TITLE>
@@ -14,7 +14,7 @@ The IMAP server stores and provides access to messages.
 <P>A list of answers to common installation problems is maintained in
 <A
 HREF="http://asg.web.cmu.edu/cyrus/imapd/install-FAQ.html">http://asg.web.cmu.edu/cyrus/imapd/install-FAQ.html</A>.
-It is somewhat out of date and will eventually be updated.
+It is very out of date and will eventually be updated.
 
 <P>Feedback on the software or on the document may be sent to
 "<tt>cyrus-bugs@andrew.cmu.edu</tt>".  The
@@ -50,20 +50,19 @@ input to collectnews has changed.
 
 Duplicate delivery suppression is now required for Sieve.
 
-<li> Upgrading from the Cyrus IMAP server version 1.6.1 or earlier:
-the quota and user directories are now hashed by the first character
-of the username.  This is to reduce the number of entries in any given
-directory. It doesn't do a great job (and in some cases it will do a
-really poor job) but as a quick hack it shouldn't make things worse.
-Optionally, the data partitions can also be hashed by enabling the
-"hashimapspool" option.
+<li> Upgrading from the Cyrus IMAP server version 1.6.1 or earlier
+(including 1.5.x!): the quota and user directories are now hashed by
+the first character of the username.  This is to reduce the number of
+entries in any given directory. It doesn't do a great job (and in some
+cases it will do a really poor job) but as a quick hack it shouldn't
+make things worse.  Optionally, the data partitions can also be hashed
+by enabling the "hashimapspool" option.
 
-<p>You can automatically hash your directories using the
-"<tt>dohash</tt>" script in the tools subdirectory.  If you want to
-hash your mail spool, be sure to set "hashimapspool" before running
-"<tt>dohash</tt>".  This must be run as the Cyrus user. Be sure to
-stop mail service while converting. Doing this in single user mode is
-probably the safest.
+<p>Hash your directories using the "<tt>dohash</tt>" script in the
+tools subdirectory.  (If you want to hash your mail spool, be sure to
+set "hashimapspool" before running "<tt>dohash</tt>".)  This must be
+run as the Cyrus user. Be sure to stop mail service while
+converting. Doing this in single user mode is probably the safest.
 
 </ul>
 
@@ -77,6 +76,8 @@ you must allow the cyrus user read access to /etc/shadow.
 <li> An ANSI C compiler is now required.  gcc should work fine and can
 be acquired from <a href="http://www.gnu.org/software/gcc/gcc.html">
 http://www.gnu.org/software/gcc/gcc.html</a>.
+
+<li> Make sure to read the upgrading instructions under 1.6 above.
 
 <li> Upgrading from 1.5.14 or earlier requires deleting the delivered
 database.  Remove the file delivered.db in the configdirectory and make a
@@ -248,6 +249,11 @@ configure uses "<TT>mail</TT>". <P>
 <dt><tt>--with-statedir=PATH</tt> 
 <dd>Specifies the directory used for the <TT>ptclient</TT> state
 directories.  By default, configure uses "<TT>/var</TT>". <P>
+
+<dt><tt>--with-sasldir=PATH</tt> 
+<dd>Specifies the path to the directories containing the library
+(<tt>.../lib</tt>) and include (<tt>.../include</tt>)
+files for libsasl. <P>
 
 <dt><tt>--with-auth=METHOD</tt>
 <dd>Specifies the authorization module to use.  Currently implemented

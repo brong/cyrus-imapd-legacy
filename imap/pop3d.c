@@ -26,7 +26,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.50.4.1 1999/10/17 23:54:37 leg Exp $
+ * $Id: pop3d.c,v 1.50.4.2 1999/12/15 19:51:44 leg Exp $
  */
 
 #ifndef __GNUC__
@@ -53,6 +53,12 @@
 #include "util.h"
 #include "auth.h"
 #include "config.h"
+
+/* openSSL has it's own DES function which conflict in names with those used by krb.h */
+#ifdef HAVE_SSL
+#undef HAVE_SSL
+#endif /* HAVE_SSL */
+
 #include "prot.h"
 #include "exitcodes.h"
 #include "imap_err.h"
@@ -379,7 +385,12 @@ cmdloop()
 	for (p = inputbuf; *p && !isspace(*p); p++);
 	if (*p) {
 	    *p++ = '\0';
-	    for (arg=p; *arg && isspace(*arg); arg++);
+	    arg = p;
+	    if (strcasecmp(inputbuf, "pass") != 0) {
+		while (*arg && isspace(*arg)) {
+		    arg++;
+		}
+	    }
 	    if (!*arg) {
 		prot_printf(popd_out, "-ERR Syntax error\r\n");
 		continue;

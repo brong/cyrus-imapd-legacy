@@ -1,5 +1,5 @@
 # cyrinit.c -- Cyrus administrative client initialization for interactive mode
-# $Id: cyrinit.tcl,v 1.14 1999/09/30 07:27:35 leg Exp $
+# $Id: cyrinit.tcl,v 1.14.4.1 1999/12/15 19:51:05 leg Exp $
 # Copyright 1998 Carnegie Mellon University
 # 
 # No warranties, either expressed or implied, are made regarding the
@@ -41,6 +41,8 @@ while {$i < $argc} {
 	-layers {incr i; lappend auth_args -layers [lindex $argv $i] }
 	-m {incr i; lappend auth_args -mech [lindex $argv $i] }
 	-mech {incr i; lappend auth_args -mech [lindex $argv $i] }
+	-notls { lappend auth_args -notls  }
+	-tlskey {incr i; lappend auth_args -tlskey [lindex $argv $i] }
 	-h {incr i; set help 1 }
 	-help {incr i; set help 1 }
 	default {lappend conn_args [lindex $argv $i]}

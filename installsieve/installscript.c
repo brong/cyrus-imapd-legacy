@@ -62,7 +62,9 @@ typedef enum {
 } imt_stat;
 
 char *authname=NULL;
+char *username=NULL;
 char *realm=NULL;
+char *password=NULL;
 
 /* global vars */
 sasl_conn_t *conn;
@@ -83,12 +85,26 @@ void interaction (int id, const char *prompt,
     char result[1024];
     
     if (id==SASL_CB_PASS) {
+      if (password!=NULL) /* if specified on command line */
+      {
+	*tresult = strdup(password);
+	*tlen=strlen(*tresult);
+	
+	/* wipe it out from memory now. we don't want to hold 
+	   onto the user's plaintext password */
+	memset(password, '\0', strlen(password));
+	
+      } else {
 	printf("%s: ", prompt);
 	*tresult=strdup(getpass(""));
 	*tlen=strlen(*tresult);
+      }
 	return;
     } else if ((id==SASL_CB_USER) || (id==SASL_CB_AUTHNAME)) {
-	if (authname) {
+        if ((id==SASL_CB_USER) && (username!=NULL))
+	{
+	  strcpy(result, username);
+	} else if (authname) {
 	    strcpy(result, authname);
 	} else {
 	    strcpy(result, getpwuid(getuid())->pw_name);
@@ -124,10 +140,10 @@ void fillin_interactions(sasl_interact_t *tlist)
 
 }
 
+#if 0
 static int show(char *tag)
 {
   char *str=malloc(301);
-  char *ptr;
 
   do {
       str=prot_fgets(str,300,pin);
@@ -141,6 +157,7 @@ static int show(char *tag)
 
   return 0;
 }
+#endif /* 0 */
 
 /* callbacks we support */
 static sasl_callback_t callbacks[] = {
@@ -180,16 +197,6 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   ret->property_values=NULL;
 
   return ret;
-}
-
-static char *getrealname(char *name)
-{
-    static char ret[1024];
-    struct hostent *he;
-
-    he = gethostbyname(name);
-    strncpy(ret, he->h_name, 1023);
-    return ret;
 }
 
 
@@ -260,7 +267,7 @@ int getauthline(char **line, int *linelen)
   res=yylex(&state, pin);
   if (res!=STRING)
   {
-    string_t *savestr;
+    mystring_t *savestr;
 
     /* read string then eol */
     if (yylex(&state, pin)!=' ')
@@ -382,28 +389,6 @@ int auth_sasl(char *mechlist)
   return (status == STAT_OK) ? IMTEST_OK : IMTEST_FAIL;
 }
 
-#define BUFSIZE 16384
-
-
-
-static int waitfor(char *tag)
-{
-  char *str=malloc(301);
-  char *ptr;
-
-  do {
-      str=prot_fgets(str,300,pin);
-      if (str == NULL) {
-	  imtest_fatal("prot layer failure");
-      }
-      printf("%s", str);
-  } while (strncmp(str, tag, strlen(tag)));
-
-  free(str);
-
-  return 0;
-}
-
 
 /* initialize the network */
 int init_net(char *serverFQDN, int port)
@@ -433,46 +418,6 @@ int init_net(char *serverFQDN, int port)
   return IMTEST_OK;
 }
 
-/***********************
- * Parse a mech list of the form: ... AUTH=foo AUTH=bar ...
- *
- * Return: string with mechs seperated by spaces
- *
- ***********************/
-
-static char *parsemechlist(char *str)
-{
-  char *tmp;
-  int num=0;
-  char *ret=malloc(strlen(str)+1);
-  if (ret==NULL) return NULL;
-
-  strcpy(ret,"");
-
-  while ((tmp=strstr(str,"AUTH="))!=NULL)
-  {
-    char *end=tmp+5;
-    tmp+=5;
-
-    while(((*end)!=' ') && ((*end)!='\0'))
-      end++;
-
-    (*end)='\0';
-
-    /* add entry to list */
-    if (num>0)
-      strcat(ret," ");
-    strcat(ret, tmp);
-    num++;
-
-    /* reset the string */
-    str=end+1;
-
-  }
-  
-  return ret;
-}
-
 char *read_capability(void)
 {
   lexstate_t state;
@@ -491,7 +436,7 @@ char *read_capability(void)
 
     if (res==EOL)
     {
-      return cap;
+      return NULL;
 
     } else if (res!=' ') {
       parseerror("SPACE");
@@ -533,6 +478,8 @@ void usage(void)
   printf("  -m <mech>    Mechanism to use for authentication\n");
   printf("  -g <name>    Get script <name> and save to disk\n");
   printf("  -u <user>    Userid/Authname to use\n");
+  printf("  -t <user>    Userid to use (for proxying)\n");
+  printf("  -w <passwd>  Specify password (Should only be used for automated scripts)\n");
   exit(1);
 }
 
@@ -561,7 +508,7 @@ int main(int argc, char **argv)
   int result;
 
   /* look at all the extra args */
-  while ((c = getopt(argc, argv, "a:d:g:lv:p:i:m:u:")) != EOF)
+  while ((c = getopt(argc, argv, "a:d:g:lv:p:i:m:u:w:t:")) != EOF)
     switch (c) 
     {
     case 'a':
@@ -595,6 +542,12 @@ int main(int argc, char **argv)
       break;
     case 'u':
       authname = optarg;
+      break;
+    case 't':
+      username = optarg;
+      break;
+    case 'w':
+      password = optarg;
       break;
     default:
       usage();
@@ -630,10 +583,14 @@ int main(int argc, char **argv)
 
   mechlist=read_capability();
 
-  if (mechanism!=NULL)
+  if (mechanism!=NULL) {
     result=auth_sasl(mechanism);
-  else
+  } else if (mechlist==NULL) {
+    printf("Error reading mechanism list from server\n");
+    exit(1);
+  } else {
     result=auth_sasl(mechlist);
+  }
 
   if (result!=IMTEST_OK) {
     printf("Authentication failed.\n");

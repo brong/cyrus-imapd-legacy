@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.35 1999/10/12 03:19:35 leg Exp $
+ * $Id: imtest.c,v 1.35.4.1 1999/12/15 19:51:46 leg Exp $
  *
  * Copyright 1999 Carnegie Mellon University
  * 
@@ -30,6 +30,9 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -51,6 +54,13 @@
 
 #include "prot.h"
 
+#ifdef HAVE_SSL
+
+static SSL_CTX *tls_ctx = NULL;
+static SSL *tls_conn = NULL;
+
+#endif /* HAVE_SSL */
+
 #define IMTEST_OK    0
 #define IMTEST_FAIL -1
 
@@ -63,6 +73,8 @@ typedef enum {
 /* global vars */
 sasl_conn_t *conn;
 int sock; /* socket descriptor */
+
+int verbose=0;
 
 struct protstream *pout, *pin;
 
@@ -105,6 +117,424 @@ void fatal(void)
   exit(1);
 }
 
+#ifdef HAVE_SSL
+
+static int verify_depth;
+static int verify_error = X509_V_OK;
+static int do_dump = 0;
+
+#define CCERT_BUFSIZ 256
+static char peer_subject[CCERT_BUFSIZ];
+static char peer_issuer[CCERT_BUFSIZ];
+static char peer_CN[CCERT_BUFSIZ];
+static char issuer_CN[CCERT_BUFSIZ];
+static unsigned char md[EVP_MAX_MD_SIZE];
+static char fingerprint[EVP_MAX_MD_SIZE * 3];
+
+char   *tls_peer_CN = NULL;
+char   *tls_issuer_CN = NULL;
+
+char   *tls_protocol = NULL;
+const char   *tls_cipher_name = NULL;
+int	tls_cipher_usebits = 0;
+int	tls_cipher_algbits = 0;
+
+/*
+  * Set up the cert things on the server side. We do need both the
+  * private key (in key_file) and the cert (in cert_file).
+  * Both files may be identical.
+  *
+  * This function is taken from OpenSSL apps/s_cb.c
+  */
+
+static int set_cert_stuff(SSL_CTX * ctx, char *cert_file, char *key_file)
+{
+    if (cert_file != NULL) {
+	if (SSL_CTX_use_certificate_file(ctx, cert_file,
+					 SSL_FILETYPE_PEM) <= 0) {
+	  printf("unable to get certificate from '%s'\n", cert_file);
+	  return (0);
+	}
+	if (key_file == NULL)
+	    key_file = cert_file;
+	if (SSL_CTX_use_PrivateKey_file(ctx, key_file,
+					SSL_FILETYPE_PEM) <= 0) {
+	  printf("unable to get private key from '%s'\n", key_file);
+	  return (0);
+	}
+	/* Now we know that a key and cert have been set against
+         * the SSL context */
+	if (!SSL_CTX_check_private_key(ctx)) {
+	  printf("Private key does not match the certificate public key\n");
+	  return (0);
+	}
+    }
+    return (1);
+}
+
+/* taken from OpenSSL apps/s_cb.c */
+
+static int verify_callback(int ok, X509_STORE_CTX * ctx)
+{
+    char    buf[256];
+    X509   *err_cert;
+    int     err;
+    int     depth;
+
+    err_cert = X509_STORE_CTX_get_current_cert(ctx);
+    err = X509_STORE_CTX_get_error(ctx);
+    depth = X509_STORE_CTX_get_error_depth(ctx);
+
+    X509_NAME_oneline(X509_get_subject_name(err_cert), buf, 256);
+
+    if (verbose==1)
+      printf("Peer cert verify depth=%d %s\n", depth, buf);
+
+    if (!ok) {
+      printf("verify error:num=%d:%s\n", err,
+	     X509_verify_cert_error_string(err));
+	if (verify_depth >= depth) {
+	    ok = 1;
+	    verify_error = X509_V_OK;
+	} else {
+	    ok = 0;
+	    verify_error = X509_V_ERR_CERT_CHAIN_TOO_LONG;
+	}
+    }
+    switch (ctx->error) {
+    case X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT:
+	X509_NAME_oneline(X509_get_issuer_name(ctx->current_cert), buf, 256);
+	printf("issuer= %s\n", buf);
+	break;
+    case X509_V_ERR_CERT_NOT_YET_VALID:
+    case X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD:
+      printf("cert not yet valid\n");
+      break;
+    case X509_V_ERR_CERT_HAS_EXPIRED:
+    case X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD:
+      printf("cert has expired\n");
+      break;
+    }
+
+    if (verbose==1)
+      printf("verify return:%d\n", ok);
+
+    return (ok);
+}
+
+
+/* taken from OpenSSL apps/s_cb.c */
+
+static RSA *tmp_rsa_cb(SSL * s, int export, int keylength)
+{
+    static RSA *rsa_tmp = NULL;
+
+    if (rsa_tmp == NULL) {
+	rsa_tmp = RSA_generate_key(keylength, RSA_F4, NULL, NULL);
+    }
+    return (rsa_tmp);
+}
+
+/* taken from OpenSSL apps/s_cb.c 
+ * tim - this seems to just be giving logging messages
+ */
+
+static void apps_ssl_info_callback(SSL * s, int where, int ret)
+{
+    char   *str;
+    int     w;
+
+    if (verbose==0) return;
+
+    w = where & ~SSL_ST_MASK;
+
+    if (w & SSL_ST_CONNECT)
+	str = "SSL_connect";
+    else if (w & SSL_ST_ACCEPT)
+	str = "SSL_accept";
+    else
+	str = "undefined";
+
+    if (where & SSL_CB_LOOP) {
+      printf("%s:%s\n", str, SSL_state_string_long(s));
+    } else if (where & SSL_CB_ALERT) {
+	str = (where & SSL_CB_READ) ? "read" : "write";
+	if ((ret & 0xff) != SSL3_AD_CLOSE_NOTIFY)
+	  printf("SSL3 alert %s:%s:%s\n", str,
+		   SSL_alert_type_string_long(ret),
+		   SSL_alert_desc_string_long(ret));
+    } else if (where & SSL_CB_EXIT) {
+	if (ret == 0)
+	    printf("%s:failed in %s\n",
+		     str, SSL_state_string_long(s));
+	else if (ret < 0) {
+	    printf("%s:error in %s %i\n",
+		     str, SSL_state_string_long(s),ret);
+	}
+    }
+}
+
+
+char *var_tls_CAfile="";
+char *var_tls_CApath="";
+ /*
+  * This is the setup routine for the SSL client. 
+  *
+  * The skeleton of this function is taken from OpenSSL apps/s_client.c.
+  */
+
+static int tls_init_clientengine(int verifydepth, char *var_tls_cert_file, char *var_tls_key_file)
+{
+    int     off = 0;
+    int     verify_flags = SSL_VERIFY_NONE;
+    char   *CApath;
+    char   *CAfile;
+    char   *c_cert_file;
+    char   *c_key_file;
+
+
+    if (verbose==1)
+      printf("starting TLS engine\n");
+
+    SSL_load_error_strings();
+    SSLeay_add_ssl_algorithms();
+
+    tls_ctx = SSL_CTX_new(SSLv23_client_method());
+    if (tls_ctx == NULL) {
+	return IMTEST_FAIL;
+    };
+
+    off |= SSL_OP_ALL;		/* Work around all known bugs */
+    SSL_CTX_set_options(tls_ctx, off);
+    SSL_CTX_set_info_callback(tls_ctx, apps_ssl_info_callback);
+
+    if (strlen(var_tls_CAfile) == 0)
+	CAfile = NULL;
+    else
+	CAfile = var_tls_CAfile;
+    if (strlen(var_tls_CApath) == 0)
+	CApath = NULL;
+    else
+	CApath = var_tls_CApath;
+
+    if (CAfile || CApath)
+	if ((!SSL_CTX_load_verify_locations(tls_ctx, CAfile, CApath)) ||
+	    (!SSL_CTX_set_default_verify_paths(tls_ctx))) {
+	    printf("TLS engine: cannot load CA data\n");
+	    return IMTEST_FAIL;
+	}
+    if (strlen(var_tls_cert_file) == 0)
+	c_cert_file = NULL;
+    else
+	c_cert_file = var_tls_cert_file;
+    if (strlen(var_tls_key_file) == 0)
+	c_key_file = NULL;
+    else
+	c_key_file = var_tls_key_file;
+
+    if (c_cert_file || c_key_file)
+	if (!set_cert_stuff(tls_ctx, c_cert_file, c_key_file)) {
+	    printf("TLS engine: cannot load cert/key data\n");
+	    return IMTEST_FAIL;
+	}
+    SSL_CTX_set_tmp_rsa_callback(tls_ctx, tmp_rsa_cb);
+
+    verify_depth = verifydepth;
+    SSL_CTX_set_verify(tls_ctx, verify_flags, verify_callback);
+
+    return IMTEST_OK;
+}
+
+/*
+ * taken from OpenSSL crypto/bio/b_dump.c, modified to save a lot of strcpy
+ * and strcat by Matti Aarnio.
+ */
+
+#define TRUNCATE
+#define DUMP_WIDTH	16
+
+static int tls_dump(const char *s, int len)
+{
+    int     ret = 0;
+    char    buf[160 + 1];
+    char    *ss;
+    int     i;
+    int     j;
+    int     rows;
+    int     trunc;
+    unsigned char ch;
+
+    trunc = 0;
+
+#ifdef TRUNCATE
+    for (; (len > 0) && ((s[len - 1] == ' ') || (s[len - 1] == '\0')); len--)
+	trunc++;
+#endif
+
+    rows = (len / DUMP_WIDTH);
+    if ((rows * DUMP_WIDTH) < len)
+	rows++;
+
+    for (i = 0; i < rows; i++) {
+	buf[0] = '\0';				/* start with empty string */
+	ss = buf;
+
+	sprintf(ss, "%04x ", i * DUMP_WIDTH);
+	ss += strlen(ss);
+	for (j = 0; j < DUMP_WIDTH; j++) {
+	    if (((i * DUMP_WIDTH) + j) >= len) {
+		strcpy(ss, "   ");
+	    } else {
+		ch = ((unsigned char) *((char *) (s) + i * DUMP_WIDTH + j))
+		    & 0xff;
+		sprintf(ss, "%02x%c", ch, j == 7 ? '|' : ' ');
+		ss += 3;
+	    }
+	}
+	ss += strlen(ss);
+	*ss+= ' ';
+	for (j = 0; j < DUMP_WIDTH; j++) {
+	    if (((i * DUMP_WIDTH) + j) >= len)
+		break;
+	    ch = ((unsigned char) *((char *) (s) + i * DUMP_WIDTH + j)) & 0xff;
+	    *ss+= (((ch >= ' ') && (ch <= '~')) ? ch : '.');
+	    if (j == 7) *ss+= ' ';
+	}
+	*ss = 0;
+	/* 
+	 * if this is the last call then update the ddt_dump thing so that
+         * we will move the selection point in the debug window
+         */
+	printf("%s\n", buf);
+	ret += strlen(buf);
+    }
+#ifdef TRUNCATE
+    if (trunc > 0) {
+	sprintf(buf, "%04x - <SPACES/NULS>\n", len+ trunc);
+	printf("%s\n", buf);
+	ret += strlen(buf);
+    }
+#endif
+    return (ret);
+}
+
+
+/* taken from OpenSSL apps/s_cb.c */
+
+static long bio_dump_cb(BIO * bio, int cmd, const char *argp, int argi,
+			long argl, long ret)
+{
+    if (!do_dump)
+	return (ret);
+
+    if (cmd == (BIO_CB_READ | BIO_CB_RETURN)) {
+	printf("read from %08X [%08lX] (%d bytes => %ld (0x%X))\n", bio, argp,
+		 argi, ret, ret);
+	tls_dump(argp, (int) ret);
+	return (ret);
+    } else if (cmd == (BIO_CB_WRITE | BIO_CB_RETURN)) {
+	printf("write to %08X [%08lX] (%d bytes => %ld (0x%X))\n", bio, argp,
+		 argi, ret, ret);
+	tls_dump(argp, (int) ret);
+    }
+    return (ret);
+}
+
+int tls_start_clienttls(int *layer, char **authid)
+{
+    int     sts;
+    int     j;
+    unsigned int n;
+    SSL_SESSION *session;
+    SSL_CIPHER *cipher;
+    X509   *peer;
+
+    if (verbose==1)
+      printf("setting up TLS connection\n");
+
+    if (tls_conn == NULL) {
+	tls_conn = (SSL *) SSL_new(tls_ctx);
+    }
+    if (tls_conn == NULL) {
+	printf("Could not allocate 'con' with SSL_new()\n");
+	return IMTEST_FAIL;
+    }
+    SSL_clear(tls_conn);
+
+    if (!SSL_set_fd(tls_conn, sock)) {
+      printf("SSL_set_fd failed\n");
+      return IMTEST_FAIL;
+    }
+    /*
+     * This is the actual handshake routine. It will do all the negotiations
+     * and will check the client cert etc.
+     */
+    SSL_set_connect_state(tls_conn);
+
+
+    /*
+     * We do have an SSL_set_fd() and now suddenly a BIO_ routine is called?
+     * Well there is a BIO below the SSL routines that is automatically
+     * created for us, so we can use it for debugging purposes.
+     */
+    if (verbose==1)
+      BIO_set_callback(SSL_get_rbio(tls_conn), bio_dump_cb);
+
+    /* Dump the negotiation for loglevels 3 and 4 */
+    if (verbose==1)
+	do_dump = 1;
+
+    if ((sts = SSL_connect(tls_conn)) <= 0) {
+	printf("SSL_connect error %d\n", sts);
+	session = SSL_get_session(tls_conn);
+	if (session) {
+	    SSL_CTX_remove_session(tls_ctx, session);
+	    printf("SSL session removed\n");
+	}
+	if (tls_conn!=NULL)
+	    SSL_free(tls_conn);
+	tls_conn = NULL;
+	return IMTEST_FAIL;
+    }
+
+    /*
+     * Lets see, whether a peer certificate is availabe and what is
+     * the actual information. We want to save it for later use.
+     */
+    peer = SSL_get_peer_certificate(tls_conn);
+    if (peer != NULL) {
+	X509_NAME_get_text_by_NID(X509_get_subject_name(peer),
+			  NID_commonName, peer_CN, CCERT_BUFSIZ);
+	tls_peer_CN = peer_CN;
+	X509_NAME_get_text_by_NID(X509_get_issuer_name(peer),
+			  NID_commonName, issuer_CN, CCERT_BUFSIZ);
+	if (verbose==1)
+	  printf("subject_CN=%s, issuer_CN=%s\n", peer_CN, issuer_CN);
+	tls_issuer_CN = issuer_CN;
+
+    }
+    tls_protocol = SSL_get_version(tls_conn);
+    cipher = SSL_get_current_cipher(tls_conn);
+    tls_cipher_name = SSL_CIPHER_get_name(cipher);
+    tls_cipher_usebits = SSL_CIPHER_get_bits(cipher,
+						 &tls_cipher_algbits);
+
+    if (layer!=NULL)
+      *layer = tls_cipher_usebits;
+
+    if (authid!=NULL)
+      *authid = tls_peer_CN;
+
+    printf("TLS connection established: %s with cipher %s (%d/%d bits)\n",
+	   tls_protocol, tls_cipher_name,
+	   tls_cipher_usebits, tls_cipher_algbits);
+    return IMTEST_OK;
+}
+
+
+#endif /* HAVE_SSL */
+
+
 static sasl_security_properties_t *make_secprops(int min,int max)
 {
   sasl_security_properties_t *ret=(sasl_security_properties_t *)
@@ -125,7 +555,7 @@ static sasl_security_properties_t *make_secprops(int min,int max)
  * Initialize SASL and set necessary options
  */
 
-static int init_sasl(char *serverFQDN, int port, int ssf)
+static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
 {
   int saslresult;
   sasl_security_properties_t *secprops=NULL;
@@ -148,7 +578,7 @@ static int init_sasl(char *serverFQDN, int port, int ssf)
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
   /* create a security structure and give it to sasl */
-  secprops = make_secprops(0, ssf);
+  secprops = make_secprops(minssf, maxssf);
   if (secprops != NULL)
   {
     sasl_setprop(conn, SASL_SEC_PROPS, secprops);
@@ -184,8 +614,8 @@ imt_stat getauthline(char **line, int *linelen)
   int saslresult;
   char *str=(char *) buf;
   
-  str=prot_fgets(str, BUFSIZE, pin);
-  if (str==NULL) imtest_fatal("prot layer failure");
+  str = prot_fgets(str, BUFSIZE, pin);
+  if (str == NULL) imtest_fatal("prot layer failure");
   printf("S: %s",str);
 
   if (!strncasecmp(str, "A01 OK ", 7)) { return STAT_OK; }
@@ -375,7 +805,7 @@ int auth_sasl(char *mechlist)
     if (saslresult != SASL_OK) return saslresult;
 
     free(in);
-    if (outlen > 0) free(out);
+    if (out != NULL) free(out);
 
     /* send to server */
     printf("C: %s\n",inbase64);
@@ -459,34 +889,41 @@ static char *parsemechlist(char *str)
   return ret;
 }
 
+#define CAPATAG "C01"
 #define CAPABILITY "C01 CAPABILITY\r\n"
 
-static char *ask_capability(void)
+static char *ask_capability(int *supports_starttls)
 {
   char *str=malloc(301);
   char *ret;
 
-  str=prot_fgets(str,300,pin);
-  if (str == NULL) {
-      imtest_fatal("prot layer failure");
-  }
-  printf("S: %s",str);
-
   /* request capabilities of server */
-  prot_printf(pout, CAPABILITY);
+  prot_printf(pout, CAPATAG " CAPABILITY\r\n");
   prot_flush(pout);
 
-  printf("C: %s", CAPABILITY);
+  printf("C: " CAPATAG " CAPABILITY\r\n", CAPABILITY);
 
-  str=prot_fgets(str,300,pin);
-  if (str==NULL) imtest_fatal("prot layer failure");
+  do { /* look for the * CAPABILITY response */
+      str = prot_fgets(str,300,pin);
+      if (str == NULL) imtest_fatal("prot layer failure");
 
-  printf("S: %s", str);
+      printf("S: %s", str);
+  } while (strncasecmp(str, "* CAPABILITY", 12));
+
+  /* check for starttls */
+  if (strstr(str,"STARTTLS")!=NULL)
+    *supports_starttls=1;
+  else
+    *supports_starttls=0;
 
   ret=parsemechlist(str);
 
-  str=prot_fgets(str,300,pin);
-  printf("S: %s",str);
+  do { /* look for TAG */
+      str = prot_fgets(str,300,pin);
+      if (str == NULL) imtest_fatal("prot layer failure");
+
+      printf("S: %s",str);
+  } while (strncmp(str, CAPATAG, strlen(CAPATAG)));
 
   free(str);
 
@@ -566,17 +1003,19 @@ static void send_recv_test(void)
 
 void interactive(char *filename)
 {
-  char buf[4096];
+  char buf[1024];
   fd_set read_set, rset;
+  fd_set write_set, wset;
   int nfds;
   int nfound;
   int count;
-  FILE *fp;
+  int fd;
   int atend=0;
+  int donewritingfile = 1;
 
   /* open the file if available */
   if (filename != NULL) {
-    if ((fp = fopen(filename, "r")) == NULL) {
+    if ((fd = open(filename, O_RDONLY)) == -1) {
       fprintf(stderr,"Unable to open file: %s:", filename);
       perror("");
       exit(1);
@@ -588,11 +1027,19 @@ void interactive(char *filename)
     FD_SET(0, &read_set);  
   
   FD_SET(sock, &read_set);
+
+  FD_ZERO(&write_set);
+  if (filename != NULL) 
+      FD_SET(fd, &write_set);  
+
   nfds = getdtablesize();
 
+  if (filename != NULL)
+      donewritingfile = 0;
+  
   /* let's send the whole file. IMAP is smart. it'll handle everything
      in order*/
-  if (filename!=NULL)
+  /*  if (filename!=NULL)
   {
 
     while (atend==0)
@@ -611,12 +1058,13 @@ void interactive(char *filename)
       }
       prot_flush(pout);
     }
-  }
+    }*/
 
   /* loop reading from network and from stdin if applicable */
   while(1) {
       rset = read_set;
-      nfound = select(nfds, &rset, NULL, NULL, NULL);
+      wset = write_set;
+      nfound = select(nfds, &rset, &wset, NULL, NULL);
       if (nfound < 0) {
 	  perror("select");
 	  imtest_fatal("select");
@@ -636,9 +1084,7 @@ void interactive(char *filename)
 	      prot_write(pout, buf, count + 1);
 	  }
 	  prot_flush(pout);
-      }
-      
-      if (FD_ISSET(sock, &rset)) {
+      } else if (FD_ISSET(sock, &rset)) {
 	  do {
 	      count = prot_read(pin, buf, sizeof (buf) - 1);
 	      if (count == 0) {
@@ -654,9 +1100,31 @@ void interactive(char *filename)
 		  imtest_fatal("prot_read");
 	      }
 	      buf[count] = '\0';
-	      printf("%s", buf);
+	      printf("%s", buf); 
 	  } while (pin->cnt > 0);
+      } else if ((FD_ISSET(fd, &wset)) && (donewritingfile == 0)) {
+	  /* read from disk */	
+	  int numr = read(fd, buf, sizeof(buf));
+
+	  if (numr < 0)
+	  {
+	      perror("read");
+	      imtest_fatal("read");
+	  } else if (numr==0) {
+	      donewritingfile = 1;
+
+	      /* send LOGOUT */
+	      printf(LOGOUT);
+	      prot_write(pout, LOGOUT, sizeof (LOGOUT));	      
+	      prot_flush(pout);
+	  } else {
+	      prot_write(pout, buf, numr);
+	      prot_flush(pout);
+	  }
+
       }
+
+
   }
 }
 
@@ -666,6 +1134,7 @@ void usage(void)
   printf("Usage: imtest [options] hostname\n");
   printf("  -p port  : port to use\n");
   printf("  -z       : timing test\n");
+  printf("  -k #     : minimum protection layer required\n");
   printf("  -l #     : max protection layer (0=none; 1=integrity; etc)\n");
   printf("  -u user  : authorization name to use\n");
   printf("  -a user  : authentication name to use\n");
@@ -673,6 +1142,9 @@ void usage(void)
   printf("  -m mech  : SASL mechanism to use (\"login\" for LOGIN)\n");
   printf("  -f file  : pipe file into connection after authentication\n");
   printf("  -r realm : realm\n");
+#ifdef HAVE_SSL
+  printf("  -t file  : Enable TLS. file has the TLS public and private keys (specify \"\" not to use TLS for authentication)\n");
+#endif /* HAVE_SSL */
 
   exit(1);
 }
@@ -682,23 +1154,27 @@ int main(int argc, char **argv)
 {
   char *mechanism=NULL;
   char servername[1024];
+  char buf[1024];
   char *filename=NULL;
 
   char *mechlist;
   int *ssfp;
-  int ssf = 10000;
+  int maxssf = 128;
+  int minssf = 0;
   char c;
   int result;
   int errflg = 0;
 
+  char *tls_keyfile="";
   char *port = "imap";
   struct servent *serv;
   int servport;
   int run_stress_test=0;
-  int verbose=0;
+  int dotls=0;
+  int server_supports_tls;
 
   /* look at all the extra args */
-  while ((c = getopt(argc, argv, "zvl:p:u:a:m:f:")) != EOF)
+  while ((c = getopt(argc, argv, "zvk:l:p:u:a:m:f:t:")) != EOF)
     switch (c) {
     case 'z':
 	run_stress_test=1;
@@ -706,8 +1182,11 @@ int main(int argc, char **argv)
     case 'v':
 	verbose=1;
 	break;
+    case 'k':
+	minssf=atoi(optarg);      
+	break;
     case 'l':
-	ssf=atoi(optarg);      
+	maxssf=atoi(optarg);      
 	break;
     case 'p':
 	port = optarg;
@@ -727,6 +1206,10 @@ int main(int argc, char **argv)
     case 'r':
         realm=optarg;
         break;
+    case 't':
+      dotls=1;
+      tls_keyfile=optarg;
+      break;
     case '?':
     default:
 	errflg = 1;
@@ -756,7 +1239,7 @@ int main(int argc, char **argv)
       imtest_fatal("Network initialization");
   }
   
-  if (init_sasl(servername, servport, ssf) != IMTEST_OK) {
+  if (init_sasl(servername, servport, minssf, maxssf) != IMTEST_OK) {
       imtest_fatal("SASL initialization");
   }
 
@@ -764,7 +1247,58 @@ int main(int argc, char **argv)
   pin = prot_new(sock, 0);
   pout = prot_new(sock, 1); 
 
-  mechlist=ask_capability();   /* get the * line also */
+  /* get the greeting line */
+  if (prot_fgets(buf, sizeof(buf) - 1, pin) == NULL) {
+      imtest_fatal("prot layer failure");
+  }
+  printf("S: %s", buf);
+
+  mechlist = ask_capability(&server_supports_tls);
+
+#ifdef HAVE_SSL
+  if ((dotls==1) && (server_supports_tls==1))
+  {
+    sasl_external_properties_t externalprop;
+
+    prot_printf(pout,"S01 STARTTLS\r\n");
+    prot_flush(pout);
+    
+    waitfor("S01");
+
+    result=tls_init_clientengine(10, tls_keyfile, tls_keyfile);
+    if (result!=IMTEST_OK)
+    {
+      printf("Start TLS engine failed\n");
+    } else {
+      result=tls_start_clienttls(&externalprop.ssf, &externalprop.auth_id);
+      
+      if (result!=IMTEST_OK)
+	printf("TLS negotiation failed!\n");
+    }
+
+    /* TLS negotiation suceeded */
+
+    /* tell SASL about the negotiated layer */
+    result=sasl_setprop(conn,
+			SASL_SSF_EXTERNAL,
+			&externalprop);
+
+    if (result!=SASL_OK) imtest_fatal("Error setting SASL property");
+
+    prot_settls (pin,  tls_conn);
+    prot_settls (pout, tls_conn);
+
+    /* ask for the capabilities again */
+    if (verbose==1) {
+	printf("Asking for capabilities again (they might have changed)\n");
+    }
+    mechlist=ask_capability(&server_supports_tls);
+
+  } else if ((dotls==1) && (server_supports_tls!=1)) {
+    imtest_fatal("STARTTLS not supported by the server!\n");
+  }
+#endif /* HAVE_SSL */
+
 
   if (mechanism) {
       if (!strcasecmp(mechanism, "login")) {

@@ -1,5 +1,5 @@
 # Top-level Makefile for cyrus software
-# $Id: Makefile.in,v 1.25 1999/03/02 00:56:19 tjs Exp $
+# $Id: Makefile.in,v 1.25.4.1 1999/12/15 19:51:02 leg Exp $
 #
 # @configure_input@
 # Copyright 1998 Carnegie Mellon University

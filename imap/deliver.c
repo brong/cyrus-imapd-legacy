@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.105.4.2 1999/10/18 02:47:26 tmartin Exp $
+ * $Id: deliver.c,v 1.105.4.3 1999/12/15 19:51:25 leg Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.105.4.2 1999/10/18 02:47:26 tmartin Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.105.4.3 1999/12/15 19:51:25 leg Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -333,12 +333,12 @@ char **argv;
 	(deliver_opts_t *) xmalloc(sizeof(deliver_opts_t));
     message_data_t *msgdata;
 
-    config_init("deliver");
-
     deliver_in = prot_new(0, 0);
     deliver_out = prot_new(1, 1);
     prot_setflushonread(deliver_in, deliver_out);
     prot_settimeout(deliver_in, 300);
+
+    config_init("deliver");
 
 #ifdef USE_SIEVE
     sieve_usehomedir = config_getswitch("sieveusehomedir", 0);
@@ -355,7 +355,9 @@ char **argv;
     /* Can't be EC_USAGE; sendmail thinks that EX_USAGE implies
      * a permenant failure.
      */
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_TEMPFAIL);
+    if (geteuid() == 0) {
+	fatal("must run as the Cyrus user", EC_TEMPFAIL);
+    }
 
     while ((opt = getopt(argc, argv, "df:r:m:a:F:eE:lqD")) != EOF) {
 	switch(opt) {
@@ -513,8 +515,8 @@ typedef enum {
 
 /* we don't have to worry about dotstuffing here, since it's illegal
    for a header to begin with a dot! */
-static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
-		       char **headname, char **contents) {
+static int parseheader(struct protstream *fin, FILE *fout, 
+		       int lmtpmode, char **headname, char **contents) {
     int c;
     static char *name = NULL, *body = NULL;
     static int namelen = 0, bodylen = 0;
@@ -533,7 +535,7 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
     /* there are two ways out of this loop, both via gotos:
        either we successfully read a character (got_header)
        or we hit an error (ph_error) */
-    while ((c = getc(fin)) != EOF) { /* examine each character */
+    while ((c = prot_getc(fin)) != EOF) { /* examine each character */
 	switch (s) {
 	case NAME_START:
 	    if (c == '\r' || c == '\n') {
@@ -571,8 +573,8 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
 	    } else if (c != ' ' && c != '\t') {
 		/* i want to avoid confusing dot-stuffing later */
 		while (c == '.') {
-		    putc(c, fout);
-		    c = getc(fin);
+		    fputc(c, fout);
+		    c = prot_getc(fin);
 		}
 		goto ph_error;
 	    }
@@ -589,20 +591,20 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
 	    if (c == '\r' || c == '\n') {
 		int peek;
 
-		peek = getc(fin);
-
-		putc('\r', fout);
-		putc('\n', fout);
+		peek = prot_getc(fin);
+		
+		fputc('\r', fout);
+		fputc('\n', fout);
 		/* we should peek ahead to see if it's folded whitespace */
 		if (c == '\r' && peek == '\n') {
-		    c = getc(fin);
+		    c = prot_getc(fin);
 		} else {
 		    c = peek; /* single newline seperator */
 		}
 		if (c != ' ' && c != '\t') {
 		    /* this is the end of the header */
 		    body[off] = '\0';
-		    ungetc(c, fin);
+		    prot_ungetc(c, fin);
 		    goto got_header;
 		}
 		/* ignore this whitespace, but we'll copy all the rest in */
@@ -618,7 +620,7 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
 	}
 
 	/* copy this to the output */
-	putc(c, fout);
+	fputc(c, fout);
     }
 
     /* if we fall off the end of the loop, we hit some sort of error
@@ -626,7 +628,7 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
 
  ph_error:
     /* put the last character back; we'll copy it later */
-    ungetc(c, fin);
+    prot_ungetc(c, fin);
 
     /* and we didn't get a header */
     if (headname != NULL) *headname = NULL;
@@ -643,11 +645,12 @@ static int parseheader(FILE *fin, FILE *fout, int lmtpmode,
 /* copies the message from fin to fout, massaging accordingly: mostly
  * newlines are fiddled. in lmtpmode, "." terminates; otherwise, EOF
  * does it.  */
-static void copy_msg(FILE *fin, FILE *fout, int lmtpmode)
+static void copy_msg(struct protstream *fin, FILE *fout, 
+		     int lmtpmode)
 {
     char buf[8192], *p;
 
-    while (fgets(buf, sizeof(buf)-1, fin)) {
+    while (prot_fgets(buf, sizeof(buf)-1, fin)) {
 	p = buf + strlen(buf) - 1;
 	if (p == buf || p[-1] != '\r') {
 	    p[0] = '\r';
@@ -663,7 +666,7 @@ static void copy_msg(FILE *fin, FILE *fout, int lmtpmode)
 		 * We were unlucky enough to get a CR just before we ran
 		 * out of buffer--put it back.
 		 */
-		ungetc('\r', fin);
+		prot_ungetc('\r', fin);
 		*p = '\0';
 	    }
 	}
@@ -693,7 +696,8 @@ lmtpdot:
     return;
 }
 
-static void fill_cache(FILE *fin, FILE *fout, int lmtpmode, message_data_t *m)
+static void fill_cache(struct protstream *fin, FILE *fout, 
+		       int lmtpmode, message_data_t *m)
 {
     /* let's fill that header cache */
     for (;;) {
@@ -843,7 +847,8 @@ int open_sendmail(char *argv[], FILE **sm)
     return p;
 }
 
-int send_rejection(char *rejto,
+int send_rejection(char *origid,
+		   char *rejto,
 		   char *mailreceip, 
 		   char *reason, 
 		   struct protstream *file)
@@ -891,10 +896,11 @@ int send_rejection(char *rejto,
     fprintf(sm, "From: Mail Sieve Subsystem <%s>\r\n", POSTMASTER);
     fprintf(sm, "To: <%s>\r\n", rejto);
     fprintf(sm, "MIME-Version: 1.0\r\n");
-    fprintf(sm, "Content-Type: multipart/report; report-type=delivery-status;"
+    fprintf(sm, "Content-Type: "
+	    "multipart/report; report-type=disposition-notification;"
 	    "\r\n\tboundary=\"%d/%s\"\r\n", p, hostname);
     fprintf(sm, "Subject: Automatically rejected mail\r\n");
-    fprintf(sm, "Auto-Submitted: auto-generated (rejected)\r\n");
+    fprintf(sm, "Auto-Submitted: auto-replied (rejected)\r\n");
     fprintf(sm, "\r\nThis is a MIME-encapsulated message\r\n\r\n");
 
     /* this is the human readable status report */
@@ -903,13 +909,19 @@ int send_rejection(char *rejto,
 	    "filtering language.\r\n\r\n");
     fprintf(sm, "The following reason was given:\r\n%s\r\n\r\n", reason);
 
-    /* this is the DSN status report */
-    fprintf(sm, "--%d/%s\r\nContent-Type: message/deliver-status\r\n\r\n",
+    /* this is the MDN status report */
+    fprintf(sm, "--%d/%s\r\n"
+	    "Content-Type: message/disposition-notification\r\n\r\n",
 	    p, hostname);
-    fprintf(sm, "Reporting-MTA: dns; %s\r\n", hostname);
-    fprintf(sm, "Action: failed\r\n");
+    fprintf(sm, "Reporting-UA: %s; Cyrus %s/%s\r\n",
+	    hostname, CYRUS_VERSION, sieve_version);
+#if 0
+    fprintf(sm, "Original-Recipient: rfc822; %s\r\n", mailreceip);
+#endif
     fprintf(sm, "Final-Recipient: rfc822; %s\r\n", mailreceip);
-    fprintf(sm, "Status: 5.7.1\r\n");
+    fprintf(sm, "Original-Message-ID: %s\r\n", origid);
+    fprintf(sm, "Disposition: "
+	    "automatic-action/MDN-sent-automatically; deleted\r\n");
     fprintf(sm, "\r\n");
 
     /* this is the original message */
@@ -931,7 +943,7 @@ int send_rejection(char *rejto,
 int send_forward(char *forwardto, char *return_path, struct protstream *file)
 {
     FILE *sm;
-    char *smbuf[5];
+    char *smbuf[6];
     int i;
     char buf[1024];
     pid_t p;
@@ -942,10 +954,11 @@ int send_forward(char *forwardto, char *return_path, struct protstream *file)
 	smbuf[2] = return_path;
     } else {
 	smbuf[1] = "-f";
-	smbuf[2] = "postmaster";
+	smbuf[2] = "postmaster"; /* how do i represent <>? */
     }
-    smbuf[3] = forwardto;
-    smbuf[4] = NULL;
+    smbuf[3] = "--";
+    smbuf[4] = forwardto;
+    smbuf[5] = NULL;
     p = open_sendmail(smbuf, &sm);
 	
     if (sm == NULL) {
@@ -954,7 +967,7 @@ int send_forward(char *forwardto, char *return_path, struct protstream *file)
 
     prot_rewind(file);
 
-    while ((i = prot_read(file, buf, 1024)) > 0) {
+    while ((i = prot_read(file, buf, sizeof(buf))) > 0) {
 	fwrite(buf, i, 1, sm);
     }
 
@@ -998,7 +1011,8 @@ int sieve_reject(char *msg, void *ic, void *sc, void *mc)
 	return SIEVE_FAIL;
     }
     
-    if (send_rejection(m->return_path, sd->username, msg, m->data) == 0) {
+    if (send_rejection(m->id, m->return_path, sd->username,
+		       msg, m->data) == 0) {
 	return SIEVE_OK;
     } else {
 	return SIEVE_FAIL;
@@ -1078,13 +1092,14 @@ int autorespond(unsigned char *hash, int len, int days,
 
     if (ret == SIEVE_OK) {
 	markdelivered((char *) hash, len, 
-		      sd->username, strlen(sd->username), now);
+		      sd->username, strlen(sd->username), 
+		      now + days * (24 * 60 * 60));
     }
 
     return ret;
 }
 
-int send_response(char *addr, char *subj, char *msg, int mime, int days,
+int send_response(char *addr, char *subj, char *msg, int mime, 
 		  void *ic, void *sc, void *mc)
 {
     FILE *sm;
@@ -1159,8 +1174,7 @@ int send_response(char *addr, char *subj, char *msg, int mime, int days,
     if (i == 0) { /* i is sendmail exit value */
 	sievedb = make_sieve_db(sdata->username);
 
-	markdelivered(outmsgid, strlen(outmsgid), sievedb, strlen(sievedb), 
-		      t + days * (24 * 60 * 60));
+	markdelivered(outmsgid, strlen(outmsgid), sievedb, strlen(sievedb), t);
 	return SIEVE_OK;
     } else {
 	return SIEVE_FAIL;
@@ -1461,6 +1475,8 @@ void msg_free(message_data_t *m)
 	    free(m->cache[i]);
 	}
 #endif
+
+    free(m);
 }
 
 #define RCPT_GROW 5 /* XXX 30 */
@@ -1670,7 +1686,7 @@ deliver_opts_t *delopts;
 		    prot_printf(deliver_out,"503 5.5.1 No recipients\r\n");
 		    continue;
 		}
-		savemsg(msg, 1);
+		savemsg(msg, msg->rcpt_num);
 		if (!msg->data) continue;
 
 		i = msg->rcpt_num;
@@ -1837,7 +1853,8 @@ savemsg(message_data_t *m, int lmtpmode)
     f = tmpfile();
     if (!f) {
 	if (lmtpmode) {
-	    prot_printf(deliver_out,"451 4.3.%c cannot create temporary file: %s\r\n",
+	    prot_printf(deliver_out,
+			"451 4.3.%c cannot create temporary file: %s\r\n",
 		   (
 #ifdef EDQUOT
 		    errno == EDQUOT ||
@@ -1866,9 +1883,7 @@ savemsg(message_data_t *m, int lmtpmode)
 	}
 
 	fprintf(f, "Return-Path: <%s%s%s>\r\n",
-		rpath,
-		hostname ? "@" : "",
-		hostname ? hostname : "");
+		rpath, hostname ? "@" : "", hostname ? hostname : "");
     }
 
 #ifdef USE_SIEVE
@@ -1876,7 +1891,7 @@ savemsg(message_data_t *m, int lmtpmode)
     fprintf(f, "X-Sieve: %s\r\n", sieve_version);
 
     /* fill the cache */
-    fill_cache(stdin, f, lmtpmode, m);
+    fill_cache(deliver_in, f, lmtpmode, m);
 
     /* now, using our header cache, fill in the data that we want */
 
@@ -1934,7 +1949,7 @@ savemsg(message_data_t *m, int lmtpmode)
     }
 
 #else
-    while (fgets(buf, sizeof(buf)-1, stdin)) {
+    while (prot_fgets(buf, sizeof(buf)-1, deliver_in)) {
 	p = buf + strlen(buf) - 1;
 	if (*p == '\n') {
 	    if (p == buf || p[-1] != '\r') {
@@ -1953,7 +1968,7 @@ savemsg(message_data_t *m, int lmtpmode)
 		 * We were unlucky enough to get a CR just before we ran
 		 * out of buffer--put it back.
 		 */
-		ungetc('\r', stdin);
+		prot_ungetc('\r', deliver_in);
 		*p = '\0';
 	    }
 	}
@@ -2237,6 +2252,7 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 		
 		if (checkdelivered(msgdata->id, strlen(msgdata->id),
 				   sdb, strlen(sdb))) {
+		    logdupelem(msgdata->id, sdb);
 		    /* done it before ! */
 		    return 0;
 		}
@@ -2420,6 +2436,7 @@ char
 void fatal(const char* s, int code)
 {
     prot_printf(deliver_out,"421 4.3.0 deliver: %s\r\n", s);
+    prot_flush(deliver_out);
     exit(code);
 }
 
@@ -2573,6 +2590,7 @@ int idlen, tolen;
     time_t mark;
 
     (void)memset(&info, 0, sizeof(info));
+    (void)memset(&date, 0, sizeof(date));
     (void)memset(&delivery, 0, sizeof(delivery));
 
     (void)strcpy(fname, _get_db_name(to));
@@ -2580,10 +2598,10 @@ int idlen, tolen;
 
     memcpy(buf, id, idlen);
     buf[idlen] = '\0';
-    memcpy(buf+idlen+1, to, tolen);
-    buf[idlen+tolen+2] = '\0';
+    memcpy(buf + idlen + 1, to, tolen);
+    buf[idlen + tolen + 1] = '\0';
     delivery.data = buf;
-    delivery.size = idlen + tolen + 2; 
+    delivery.size = idlen + tolen + 2;
           /* +2 b/c 1 for the center null; +1 for the terminating null */
 
     if ((lockfd = _lock_delivered_db(to, 0)) < 0) {
@@ -2593,7 +2611,8 @@ int idlen, tolen;
     DeliveredDBptr = dbopen(fname, O_RDONLY, 0666, DB_HASH, &info);
     if (!DeliveredDBptr) {
       close(lockfd);
-      syslog(LOG_ERR,"checkdelivered: Unable to open delivered db: %s: %m", buf);
+      syslog(LOG_ERR,"checkdelivered: Unable to open delivered db: %s: %m", 
+	     fname);
       return 0;
     }
 
@@ -2674,6 +2693,8 @@ int idlen, tolen;
 	mark = (time_t)0;
     }
     dbm_close(DeliveredDBptr);
+
+    return mark;
 #endif /* HAVE_LIBDB */
 }
 
@@ -2692,8 +2713,8 @@ markdelivered(char *id, int idlen, char *to, int tolen, time_t mark)
 
   memcpy(buf, id, idlen);
   buf[idlen] = '\0';
-  memcpy(buf+idlen+1, to, tolen);
-  buf[idlen+tolen+2] = '\0';
+  memcpy(buf + idlen + 1, to, tolen);
+  buf[idlen + tolen + 1] = '\0';
   if (mark == 0) { mark = time(0); }
     
 #ifdef HAVE_LIBDB
@@ -2787,7 +2808,7 @@ _prune_actual_db(fname, mark)
   while ((rc = DeliveredDBptr->seq(DeliveredDBptr, &delivery, &date, mode)) == 0) {
     mode = R_NEXT;
     count++;
-    if ((date.size > 0) && ((time_t)date.data < mark)) {
+    if ((date.size > 0) && ((*(time_t *)date.data) < mark)) {
       if (num_deletions >= alloc_deletions) {
 	alloc_deletions += 1000;
 	deletions = (DBT *) xrealloc((char *)deletions,
@@ -2806,7 +2827,7 @@ _prune_actual_db(fname, mark)
 	      
 	ptr = ((char *)delivery.data + (strlen(delivery.data) + 1)); 
 	syslog(LOG_NOTICE, "prunedelivered: marking %s/%s at %d for deletion\n",
-	       delivery.data, ptr, (time_t)date.data);
+	       delivery.data, ptr, *(time_t *)date.data);
       }
     }
   }
@@ -2837,7 +2858,7 @@ _prune_actual_db(fname, mark)
 						delivery = dbm_nextkey(DeliveredDBptr)) {
     date = dbm_fetch(DeliveredDBptr, delivery);
     if (!date.dptr) continue;
-    if ((date.dsize > 0) && ((time_t)date.dptr < mark)) {
+    if ((date.dsize > 0) && ((*(time_t *)date.dptr) < mark)) {
       if (dbm_delete(DeliveredDBptr, delivery)) {
 	rcode = 1;
       }
@@ -2855,7 +2876,7 @@ int
 prunedelivered(age)
 int age;
 {
-  char c;
+  char c[2];
   int lockfd;
   int rc;
   char fname[MAX_MAILBOX_PATH];
@@ -2867,21 +2888,24 @@ int age;
 
   mark = time(0) - (age*60*60*24);
   syslog(LOG_NOTICE, "prunedelivered: pruning back %d days", age);
-  for (c = 'a' ; c <= 'z'; c++) {
-    (void)strcpy(fname, _get_db_name(&c));
-    (void)strcat(fname, ".db");
-
-    if (logdebug)
-      syslog(LOG_DEBUG, "prunedelivered: pruning %s", fname);
-
-    if ((lockfd = _lock_delivered_db(&c, 1)) < 0)
-      return -1;
-    rc = _prune_actual_db(fname, mark);
-    close(lockfd);
-    if (rc < 0) {
-      syslog(LOG_ERR, "prunedelivered: error exit", age);
-      return(rc);
-    }
+  c[1] = '\0';
+  for (c[0] = 'a' ; c[0] <= 'z'; c[0]++) {
+      (void)strcpy(fname, _get_db_name(c));
+      (void)strcat(fname, ".db");
+      
+      if (logdebug) {
+	  syslog(LOG_DEBUG, "prunedelivered: pruning %s", fname);
+      }
+      
+      if ((lockfd = _lock_delivered_db(c, 1)) < 0) {
+	  return -1;
+      }
+      rc = _prune_actual_db(fname, mark);
+      close(lockfd);
+      if (rc < 0) {
+	  syslog(LOG_ERR, "prunedelivered: error exit", age);
+	  return(rc);
+      }
   }
   syslog(LOG_NOTICE, "prunedelivered: done");
   return 0;

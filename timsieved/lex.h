@@ -1,7 +1,7 @@
 /* lex.h -- lexer for timsieved
  * Tim Martin
  * 9/21/99
- * $Id: lex.h,v 1.3.2.1 1999/10/13 19:29:54 leg Exp $
+ * $Id: lex.h,v 1.3.2.2 1999/12/15 19:51:53 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -30,6 +30,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #ifndef _LEX_H_
 #define _LEX_H_
 
+#include "prot.h"
+#include "mystring.h"
 
 #define LEXER_STATE_TAG         60
 #define LEXER_STATE_RECOVER     61
@@ -42,7 +44,26 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #define LEXER_STATE_ATOM        68
 
 
+/* possible tokens */
+
+#define SPACE 32
+
+/* these must be above 255 */
+#define EOL          300
+#define STRING       301
+#define AUTHENTICATE 302
+#define LOGOUT       304
+#define GETSCRIPT    305
+#define PUTSCRIPT    306
+#define SETACTIVE    307
+#define LISTSCRIPTS  308
+#define DELETESCRIPT 309
+
+
 int lex_init(void);
 
+int timlex(mystring_t **outstr,   struct protstream *stream);
+
+void lex_setrecovering(void);
 
 #endif

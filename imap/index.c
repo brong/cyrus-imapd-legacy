@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.89 1999/08/17 05:59:27 leg Exp $
+ * $Id: index.c,v 1.89.4.1 1999/12/15 19:51:28 leg Exp $
  */
 #include <stdio.h>
 #include <string.h>
@@ -2060,7 +2060,7 @@ void *rock;
 	    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 	char datebuf[30];
 
-	if (tm->tm_year < 80) {
+	if (tm->tm_year < 70) {
 	    abort();
 	}
 	if (gmtoff < 0) {

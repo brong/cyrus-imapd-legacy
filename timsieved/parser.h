@@ -1,6 +1,7 @@
-/* lex.h 
+/* parser.h
  * Tim Martin
  * 9/21/99
+ * $Id: parser.h,v 1.1.2.1 1999/12/15 19:51:54 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -25,38 +26,13 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ******************************************************************/
 
+#ifndef PARSER_H
+#define PARSER_H
 
-#ifndef _LEX_H_
-#define _LEX_H_
+#include "prot.h"
 
-#include "mystring.h"
-
-typedef struct lexstate_s {
-  mystring_t *str;
-  int number;
-
-} lexstate_t;
-
-int yylex(lexstate_t * lvalp, void * client);
-
-#define	TAG	258
-#define	EOL	259
-#define	STRING	260
-#define NUMBER  261
-
-#define TOKEN_OK      280
-#define TOKEN_NO      281
-
-#define LEXER_STATE_TAG         60
-#define LEXER_STATE_RECOVER     61
-#define LEXER_STATE_RECOVER_CR  62
-#define LEXER_STATE_CR          63
-#define LEXER_STATE_QSTR        64
-#define LEXER_STATE_LITERAL     65
-#define LEXER_STATE_NUMBER      66
-#define LEXER_STATE_NORMAL      67
-#define LEXER_STATE_ATOM        68
+int parser(struct protstream *sieved_out, 
+	   struct protstream *sieved_in);
 
 
-
-#endif /* _LEX_H_ */
+#endif /* PARSER_H */

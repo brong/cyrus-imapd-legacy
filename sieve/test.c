@@ -1,6 +1,6 @@
 /* test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.2 1999/09/06 02:52:12 leg Exp $
+ * $Id: test.c,v 1.2.4.1 1999/12/15 19:51:52 leg Exp $
  *
  * usage: "test message < script"
  */
@@ -203,7 +203,7 @@ void fill_cache(message_data_t *m)
 		/* increase the size */
 		m->cache[cl] = (header_t *)
 		    realloc(m->cache[cl],sizeof(header_t) +
-			    (8 + m->cache[cl]->ncontents * sizeof(char *)));
+			    ((8 + m->cache[cl]->ncontents) * sizeof(char *)));
 		if (m->cache[cl] == NULL) {
 		    fprintf(stderr, "realloc() returned NULL\n");
 		    exit(1);
@@ -344,6 +344,14 @@ int keep(char *arg, void *ic, void *sc, void *mc)
     return SIEVE_OK;
 }
 
+int mysieve_error(int lineno, char *msg,
+		  void *i, void *s)
+{
+    fprintf(stderr, "line %d: %s\r\n", lineno, msg);
+
+    return SIEVE_OK;
+}
+
 int autorespond(unsigned char *hash, int len, int days,
 		void *ic, void *sc, void *mc)
 {
@@ -450,16 +458,14 @@ int main(int argc, char *argv[])
 	exit(1);
     }
 
+    res = sieve_register_parse_error(i, &mysieve_error);
+    if (res != SIEVE_OK) {
+	printf("sieve_register_parse_error() returns %d\n", res);
+	exit(1);
+    }
+
     res = sieve_script_parse(i, stdin, NULL, &s);
     if (res != SIEVE_OK) {
-	struct sieve_errorlist *el = sieve_script_errors(s);
-
-	printf("sieve_script_parse() returns %d\n", res);
-	while (el != NULL) {
-	    printf("%d: %s\n", el->lineno, el->msg);
-	    el = el->next;
-	}
-
 	exit(1);
     }
 

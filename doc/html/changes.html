@@ -1,14 +1,73 @@
-<!-- $Id: changes.html,v 1.86.4.1 1999/10/13 19:29:43 leg Exp $ -->
+<!-- $Id: changes.html,v 1.86.4.2 1999/12/15 19:51:07 leg Exp $ -->
 
 <HTML><HEAD>
 <TITLE>Changes to the Cyrus IMAP Server</TITLE>
 </HEAD><BODY>
 <H1>                   Changes to the Cyrus IMAP Server</H1>
 
+    <h2> Changes to the Cyrus IMAP Server in 1.7 </h2>
+    <ul>
+    <li> deleting a user's inbox no longer deletes all of their
+    submailboxes.
+    </ul>
+
+    <h2> Changes to the Cyrus IMAP Server Since Version 1.6.19 </h2>
+    <ul>
+    <li> Added STARTTLS support; requires OpenSSL.
+
+    <li> Sieve now uses MDNs to reject messages instead of DSNs,
+    conforming to the latest Sieve specification.
+
+    <li> The duplicate delivery database expiration (deliver -E) was
+    deleting all entries; fixed.
+
+    <li> imtest is now a little smarter about parsing the protocol to
+    avoid synchronization errors prior to authentication.
+
+    <li> timsieved's parser is now written in C; should be no
+    noticeable changes, but should make compiling it much easier.
+    </ul>
+
+    <h2> Changes to the Cyrus IMAP Server Since Version 1.6.16 </h2>
+    <ul>
+      <li> Fix to enclosed message parsing (thanks to John Myers).
+
+      <li> When trying to skip over non-synchronizing literals during
+      error recovery, the IMAP server never stopped eating.  Fixed.
+
+      <li> Added <tt>with-sasldir</tt> as a configure option.
+
+      <li> Fixed a bug in cyradm when it got the CAPABILITY list.
+
+      <li> Fixed bugs relating to the incomplete SASLfication of
+      deliver.
+
+      <li> Fixed bugs in deliver relating to duplicate delivery
+      suppression and Sieve vacation functionality.
+
+      <li> Fixed a memory leak in deliver.
+
+      <li> When looking for SASL options, imapd wasn't defaulting to
+      the option without the plugin name requesting it.  This caused
+      PLAIN authentications to incorrectly fail.
+
+      <li> Changed the expiration time of pts entries to 3 hours; only
+      affects sites using krb_pts as the authentication method.
+
+      <li> Fixed some bugs in imclient; mostly affects cyradm.
+
+      <li> Fixed a bug in the Sieve lexer and improved the usefulness
+      of the Sieve test program.
+    </ul>
+
     <h2> Changes to the Cyrus IMAP Server Since Version 1.6.13 </h2>
     <ul>
+      <li> An annoying memory management bug in imclient was fixed and
+      it's efficiency was improved somewhat.
+
       <li> Added the sieve client (<tt>installsieve</tt>) and server
-      (<tt>timsieved</tt>) for getting sieve scripts onto the server.
+      (<tt>timsieved</tt>) for getting sieve scripts onto the server
+      and managing them once they are there.
 
       <li> The default Sieve script layout has changed to
       sievedir/u/user/default; this supports multiple Sieve scripts

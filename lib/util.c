@@ -23,11 +23,12 @@
  * Author: Chris Newman
  * Start Date: 4/6/93
  */
-/* $Id: util.c,v 1.11 1999/09/30 07:32:32 leg Exp $
+/* $Id: util.c,v 1.11.4.1 1999/12/15 19:51:51 leg Exp $
  */
 
 #include <stdio.h>
 #include <ctype.h>
+#include <string.h>
 #include "util.h"
 
 /* from OS: */

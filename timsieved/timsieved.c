@@ -28,30 +28,41 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #include <sasl.h> /* yay! sasl */
 
+#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
-#include <time.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/param.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <sys/param.h>
 #include <syslog.h>
+#include <dirent.h>
+#include <ctype.h>
 #include <com_err.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
 
 #include "prot.h"
+#include "config.h"
 #include "xmalloc.h"
 
+#include "codes.h"
+#include "actions.h"
+#include "parser.h"
 #include "lex.h"
 #include "mystring.h"
 
-#include "codes.h"
+#include "auth.h"
+
 
 sasl_conn_t *sieved_saslconn; /* the sasl connection context */
+
+struct auth_state *sieved_authstate = 0;
 
 struct sockaddr_in sieved_localaddr;
 struct sockaddr_in sieved_remoteaddr;
@@ -88,15 +99,12 @@ void cmdloop()
 
   while (1)
   {
-    timparse(sieved_in);
+    parser(sieved_out, sieved_in);
   }
 }
 
 
-void
-fatal(s, code)
-const char *s;
-int code;
+void fatal(const char *s, int code)
 {
     static int recurse_code = 0;
 
@@ -107,6 +115,9 @@ int code;
     recurse_code = code;
     prot_printf(sieved_out, "NO Fatal error: %s\r\n", s);
     prot_flush(sieved_out);
+
+    exit(1);
+
 }
 
 /* This creates a structure that defines the allowable
@@ -125,9 +136,10 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   if (!config_getswitch("allowplaintext", 1)) {
       ret->security_flags |= SASL_SEC_NOPLAINTEXT;
   }
-  if (!config_getswitch("allowanonymouslogin", 0)) {
-      ret->security_flags |= SASL_SEC_NOANONYMOUS;
-  }
+
+  /* never allow anonymous */
+  ret->security_flags |= SASL_SEC_NOANONYMOUS;
+
   ret->property_names = NULL;
   ret->property_values = NULL;
 
@@ -167,25 +179,41 @@ static int mysasl_config(void *context,
 }
 
 /* returns true if imapd_authstate is in "item";
-   expected: item = admins or proxyservers */
+   expected: item = admins or proxyservers 
+*/
 static int authisa(const char *item)
 {
-  /* xxx i don't understand larry's code that goes here yet */
+    const char *val = config_getstring(item, "");
+    char buf[1024];
+
+    while (*val) {
+	char *p;
+	
+	for (p = (char *) val; *p && !isspace(*p); p++);
+	strncpy(buf, val, p-val);
+	buf[p-val] = 0;
+
+	if (auth_memberof(sieved_authstate, buf)) {
+	    return 1;
+	}
+	val = p;
+	while (*val && isspace(*val)) val++;
+    }
     return 0;
 }
 
+
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
-static mysasl_authproc(void *context,
+static int mysasl_authproc(void *context,
 		       const char *auth_identity,
 		       const char *requested_user,
 		       const char **user,
 		       const char **errstr)
 {
-    char *p;
     const char *val;
     char *canon_authuser, *canon_requser;
-    char *username=NULL, *realm;
+    char *realm;
     static char replybuf[100];
 
     canon_authuser = (char *) auth_canonifyid(auth_identity);
@@ -203,17 +231,17 @@ static mysasl_authproc(void *context,
     canon_requser = xstrdup(canon_requser);
 
     /* check if remote realm */
-    if (realm = strchr(canon_authuser, '@')) {
+    if ((realm = strchr(canon_authuser, '@'))!=NULL) {
 	realm++;
 	val = (const char *) config_getstring("loginrealms", "");
 	while (*val) {
 	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace(val[strlen(realm)]))) {
+		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
 		break;
 	    }
 	    /* not this realm, try next one */
-	    while (*val && !isspace(*val)) val++;
-	    while (*val && isspace(*val)) val++;
+	    while (*val && !isspace((int) *val)) val++;
+	    while (*val && isspace((int) *val)) val++;
 	}
 	if (!*val) {
 	    snprintf(replybuf, 100, "cross-realm login %s denied", 
@@ -223,27 +251,15 @@ static mysasl_authproc(void *context,
 	}
     }
 
+    sieved_authstate = auth_newstate(canon_authuser, NULL);
+
     /* ok, is auth_identity an admin? */
     sieved_userisadmin = authisa("admins");
 
-    if (strcmp(canon_authuser, canon_requser)) {
-	/* we want to authenticate as a different user; we'll allow this
-	   if we're an admin or if we've allowed ACL proxy logins */
-	int use_acl = config_getswitch("loginuseacl", 0);
-
-	if (sieved_userisadmin)
-	{	    
-	    /* proxy ok! */
-
-	    sieved_userisadmin = 0;	/* no longer admin */
-	} else {
-	    *errstr = "user is not allowed to proxy";
-	    
-	    free(canon_authuser);
-	    free(canon_requser);
-	    
-	    return SASL_BADAUTH;
-	}
+    if (strcmp(canon_authuser, canon_requser)!=0) {
+      /* we want to authenticate as a different user; we'll NEVER allow this */
+      if (sieved_userisadmin!=1)
+	return SASL_BADAUTH;
     }
 
     free(canon_authuser);
@@ -254,16 +270,11 @@ static mysasl_authproc(void *context,
 
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
-#if 0
     { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
-#endif
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
-main(argc, argv, envp)
-int argc;
-char **argv;
-char **envp;
+int main(int argc, char **argv, char **envp)
 {
     int salen;
     struct hostent *hp;
@@ -292,8 +303,8 @@ char **envp;
     salen = sizeof(sieved_remoteaddr);
     if (getpeername(0, (struct sockaddr *)&sieved_remoteaddr, &salen) == 0 &&
 	sieved_remoteaddr.sin_family == AF_INET) {
-	if (hp = gethostbyaddr((char *)&sieved_remoteaddr.sin_addr,
-			       sizeof(sieved_remoteaddr.sin_addr), AF_INET)) {
+	if ((hp = gethostbyaddr((char *)&sieved_remoteaddr.sin_addr,
+			       sizeof(sieved_remoteaddr.sin_addr), AF_INET))!=NULL) {
 	    strncpy(sieved_clienthost, hp->h_name, sizeof(sieved_clienthost)-30);
 	    sieved_clienthost[sizeof(sieved_clienthost)-30] = '\0';
 	}
@@ -337,6 +348,9 @@ char **envp;
       fatal("Error initializing actions",-1);
 
     cmdloop();
+
+    /* never reaches */
+    return -99;
 }
 
 

@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.7.2.1 1999/10/13 19:29:52 leg Exp $
+ * $Id: actions.c,v 1.7.2.2 1999/12/15 19:51:53 leg Exp $
  * 
  */
 /***********************************************************
@@ -37,6 +37,9 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <sys/param.h>
 #include <syslog.h>
 #include <dirent.h>
+#include <ctype.h>
+#include <unistd.h>
+#include <string.h>
 
 #include "prot.h"
 #include "config.h"
@@ -45,6 +48,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "codes.h"
 #include "actions.h"
 #include "scripttest.h"
+
+
 
 /* after a user has authentication, our current directory is their Sieve 
    directory! */
@@ -72,18 +77,18 @@ int actions_init(void)
 
 int actions_setuser(char *userid)
 {
-  char *buf;
   char hash;
   char *foo=sieve_dir;
-  struct stat filestats;  /* returned by stat */
   int result;  
 
   sieve_dir=(char *) xmalloc(1024);
   
   hash = (char) tolower((int) *userid);
-  if (!islower(hash)) { hash = 'q'; }
+  if (!islower((int) hash)) { hash = 'q'; }
     
   snprintf(sieve_dir, 1023, "%s/%c/%s", foo, hash,userid);
+
+  printf("sievedir=%s\n",sieve_dir);
 
   result = chdir(sieve_dir);
   if (result != 0) {
@@ -99,14 +104,14 @@ int actions_setuser(char *userid)
 
 static int validchar(char ch)
 {
-    if (isalnum(ch) || (ch == '_') || (ch == '-') || (ch == ' ')) {
+    if (isalnum((int) ch) || (ch == '_') || (ch == '-') || (ch == ' ')) {
 	return TIMSIEVE_OK;
     }
 
     return TIMSIEVE_FAIL;
 }
 
-int verifyscriptname(string_t *name)
+int verifyscriptname(mystring_t *name)
 {
   int lup;
   char *ptr;
@@ -123,7 +128,7 @@ int verifyscriptname(string_t *name)
   return TIMSIEVE_OK;
 }
 
-int getscript(struct protstream *conn, string_t *name)
+int getscript(struct protstream *conn, mystring_t *name)
 {
   FILE *stream;
   struct stat filestats;	/* returned by stat */
@@ -209,7 +214,7 @@ static int countscripts(char *name)
 }
 
 /* save name as a sieve script */
-int putscript(struct protstream *conn, string_t *name, string_t *data)
+int putscript(struct protstream *conn, mystring_t *name, mystring_t *data)
 {
   FILE *stream;
   char *dataptr;
@@ -270,7 +275,7 @@ int putscript(struct protstream *conn, string_t *name, string_t *data)
       return result;
   }
 
-  fsync(stream);
+  fflush(stream);
   fclose(stream);
   
   snprintf(p2, 1023, "%s.script", string_DATAPTR(name));
@@ -285,9 +290,6 @@ int putscript(struct protstream *conn, string_t *name, string_t *data)
 
 static int deleteactive(struct protstream *conn)
 {
-  struct stat filestats;  /* returned by stat */
-  int result;  
-  char *active;
 
   if (unlink("default") != 0) {
       prot_printf(conn,"NO \"Unable to unlink active script\"\r\n");
@@ -320,7 +322,7 @@ static int isactive(char *name)
 }
 
 /* delete a sieve script */
-int deletescript(struct protstream *conn, string_t *name)
+int deletescript(struct protstream *conn, mystring_t *name)
 {
   int result;
   char path[1024];
@@ -406,7 +408,7 @@ static int exists(char *str)
 
 /* set the sieve script 'name' to be the active script */
 
-int setactive(struct protstream *conn, string_t *name)
+int setactive(struct protstream *conn, mystring_t *name)
 {
   int result;
   char filename[1024];

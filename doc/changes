@@ -1,9 +1,44 @@
                    Changes to the Cyrus IMAP Server
 
+Changes to the Cyrus IMAP Server Since Version 1.6.19 
+
+      * Added STARTTLS support; requires OpenSSL. 
+      * Sieve now uses MDNs to reject messages instead of DSNs, conforming
+        to the latest Sieve specification. 
+      * The duplicate delivery database expiration (deliver -E) was
+        deleting all entries; fixed. 
+      * imtest is now a little smarter about parsing the protocol to avoid
+        synchronization errors prior to authentication. 
+      * timsieved's parser is now written in C; should be no noticeable
+        changes, but should make compiling it much easier. 
+
+Changes to the Cyrus IMAP Server Since Version 1.6.16 
+
+      * Fix to enclosed message parsing (thanks to John Myers). 
+      * When trying to skip over non-synchronizing literals during error
+        recovery, the IMAP server never stopped eating. Fixed. 
+      * Added with-sasldir as a configure option. 
+      * Fixed a bug in cyradm when it got the CAPABILITY list. 
+      * Fixed bugs relating to the incomplete SASLfication of deliver. 
+      * Fixed bugs in deliver relating to duplicate delivery suppression
+        and Sieve vacation functionality. 
+      * Fixed a memory leak in deliver. 
+      * When looking for SASL options, imapd wasn't defaulting to the
+        option without the plugin name requesting it. This caused PLAIN
+        authentications to incorrectly fail. 
+      * Changed the expiration time of pts entries to 3 hours; only affects
+        sites using krb_pts as the authentication method. 
+      * Fixed some bugs in imclient; mostly affects cyradm. 
+      * Fixed a bug in the Sieve lexer and improved the usefulness of the
+        Sieve test program. 
+
 Changes to the Cyrus IMAP Server Since Version 1.6.13 
 
+      * An annoying memory management bug in imclient was fixed and it's
+        efficiency was improved somewhat. 
       * Added the sieve client (installsieve) and server (timsieved) for
-        getting sieve scripts onto the server. 
+        getting sieve scripts onto the server and managing them once they
+        are there. 
       * The default Sieve script layout has changed to
         sievedir/u/user/default; this supports multiple Sieve scripts per
         user with the ability to switch between them. 

@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.52 1999/11/05 23:42:40 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.53 1999/12/15 19:51:30 leg Exp $
  */
 
 #include <stdio.h>
@@ -2138,6 +2138,10 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		 strncmp(name, usermboxname, usermboxnamelen) == 0 &&
 		 (namelen == usermboxnamelen ||
 		  name[usermboxnamelen] == '.'))) {
+		/* we didn't match
+		        OR
+		   this is one of my personal mailboxes & 
+		   we already listed it */
 		break;
 	    }
 
