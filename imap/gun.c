@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.13 1999/11/03 17:52:36 leg Exp $
+ * $Id: gun.c,v 1.1.2.14 1999/11/04 01:41:03 cyrus Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -393,7 +393,7 @@ int main(int argc, char *argv[], char *envp[])
     signal(SIGTERM, &handler);
     signal(SIGINT, &handler);
     signal(SIGALRM, &handler);
-    /* signal(SIGALRM, SIG_IGN); */
+    signal(SIGPIPE, SIG_IGN);
 
     if ((msqin = msgget(COMMANDS, IPC_CREAT | 0600)) < 0) {
         perror("msgget");
