@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.90.2.3.2.4 2001/07/12 00:43:01 ken3 Exp $
+ * $Id: pop3d.c,v 1.90.2.3.2.5 2001/08/02 20:00:48 ken3 Exp $
  */
 #include <config.h>
 
@@ -873,7 +873,9 @@ static void cmd_apop(char *user, char *digest)
 	shut_down(0);
     }
     else if (!(p = auth_canonifyid(user)) ||
-	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
+	     /* '.' isn't allowed if '.' is the hierarchy separator */
+	     (popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
+	     strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
 	syslog(LOG_NOTICE,
 	       "badlogin: %s APOP %s invalid user",
