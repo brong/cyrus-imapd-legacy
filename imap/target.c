@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.10 1999/11/05 18:00:24 leg Exp $
+ * $Id: target.c,v 1.1.2.11 1999/11/06 23:32:00 leg Exp $
  */
 
 #include <stdio.h>
@@ -542,7 +542,9 @@ int main(int argc, char *argv[], char *envp[])
 	    for (ptr = head; ptr != NULL; ptr = ptr->next) {
 		if (FD_ISSET(ptr->sock, &rfds)) {
 		    fprintf(stderr, "input from '%s'\n", ptr->hostname);
-		    be_process(ptr);
+		    while (ptr->in->cnt > 0) {
+			be_process(ptr);
+		    }
 		}
 
 		if (FD_ISSET(ptr->sock, &efds)) {
