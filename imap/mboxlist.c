@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.29 1999/10/21 22:42:17 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.30 1999/10/22 20:37:08 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -1105,8 +1105,9 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
     int mode = ACL_MODE_SET;
     int isusermbox = 0;
     struct mailbox mailbox;
+    int mailbox_isopen;
     unsigned long offset, len;
-    char *oldacl, *acl, *newacl;
+    char *oldacl, *acl, *newacl=NULL;
     char *path;
     unsigned long oldacllen;
     int newlistfd;
@@ -1134,6 +1135,8 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
 	    return IMAP_IOERROR;
 	}
     }
+
+    mailbox_isopen=0;
 
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
@@ -1182,6 +1185,9 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
     if (r) {
       goto done;
     }
+
+    mailbox_isopen=1;
+
     r = mailbox_lock_header(&mailbox);
     if (r) {
       goto done;
@@ -1201,22 +1207,18 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
 	
 	if (acl_set(&newacl, identifier, mode, acl_strtomask(rights),
 		    isusermbox ? mboxlist_ensureOwnerRights : 0,
-		    (void *)userid)) {
-	    mailbox_close(&mailbox);
-	    free(newacl);
-	    txn_abort(tid);
-	    return IMAP_INVALID_IDENTIFIER;
+		    (void *)userid))
+	{
+	    r = IMAP_INVALID_IDENTIFIER;
+	    goto done;
 	}
     }
     else {
 	if (acl_remove(&newacl, identifier,
 		       isusermbox ? mboxlist_ensureOwnerRights : 0,
 		       (void *)userid)) {
-	    mailbox_close(&mailbox);
-
-	    free(newacl);
-	    txn_abort(tid);
-	    return IMAP_INVALID_IDENTIFIER;
+	  r = IMAP_INVALID_IDENTIFIER;
+	  goto done;
 	}
     }
 
@@ -1256,10 +1258,12 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
     uidvalidity = mailbox.uidvalidity;
     toimsp(name, uidvalidity, "ACLsn", newacl, timestamp, 0);
 
-    mailbox_close(&mailbox);
-    free(newacl);
-
   done:
+
+    if (mailbox_isopen==1)
+      mailbox_close(&mailbox);
+
+    free(newacl);
     free(newent);
 
     switch (txn_commit(tid)) {
@@ -1283,6 +1287,38 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
  * and returns that value.  'rock' is passed along as an argument to proc in
  * case it wants some persistant storage or extra data.
  */
+
+/*
+ * NOTE!!!
+ *
+ * Ok this is how we're doing it now. The whole thing is in a
+ * transaction. we remember where we are so if the transaction abort
+ * we can just restart where we left off. This unfortunatly has the
+ * double deletion problem++ but luckily IMAP doesn't require
+ * that. phew!
+ *
+ *
+ * ++ Double deletion problem: 1 connection does a list * *. Another
+ * connection deletes 2 mailboxes (mailbox.deleted.1 and
+ * mailbox.deleted.2 in that order). The list could (depending on the
+ * alphabetical order of the deleted mailboxes) say mailbox.deleted.1
+ * exists but mailbox.deleted.2 doesn't. This is wierd but we think ok
+ *
+ *
+ * Blame larry if you don't like this solution
+ */
+
+/* xxx probably should be an enumerated type */
+typedef enum {
+  FINDALL_START= 0,
+  FINDALL_INBOX= 1,
+  FINDALL_PREFIX= 2,
+  FINDALL_DOING_INBOXSTAR= 3,
+  FINDALL_INBOXSTAR= 4,
+  FINDALL_DOING_REST= 5,
+  FINDALL_REST= 6
+} findall_t;
+
 int mboxlist_findall(char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, 
 		     int (*proc)(), void *rock)
@@ -1304,6 +1340,11 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
     DB_TXNMGR *txnp;
     DBT key, data;
     struct mbox_entry *mboxent;
+
+    findall_t state=FINDALL_START;
+
+    DBT DID_inboxstar_data;
+    DBT DID_rest_data;
 
     txnp = dbenv.tx_info;
 
@@ -1340,14 +1381,19 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
     }
 
     /* Check for INBOX first of all */
-    if (userid) {
-	if (GLOB_TEST(g, "INBOX") != -1) {
+    if (userid!=NULL)
+    {
+      if (state < FINDALL_INBOX)
+      {
+	if (GLOB_TEST(g, "INBOX") != -1)
+	{
 	    DBT key, data;
 
 	    memset(&data, 0, sizeof(data));
 	    memset(&key, 0, sizeof(key));
 	    key.data = usermboxname;
 	    key.size = usermboxnamelen;
+
 	    r = mbdb->get(mbdb, tid, &key, &data, 0);
 	    switch (r) {
 	    case 0:
@@ -1398,16 +1444,24 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    }
 	}
 
+	state=FINDALL_INBOX;
 	strcpy(usermboxname+usermboxnamelen, ".");
 	usermboxnamelen++;
+      }
+
     }
 
     /* Find fixed-string pattern prefix */
-    for (p = pattern; *p; p++) {
+    if (state < FINDALL_PREFIX)
+    {
+      for (p = pattern; *p; p++) {
 	if (*p == '*' || *p == '%' || *p == '?') break;
+      }
+      prefixlen = p - pattern;
+      *p = '\0';
+
+      state=FINDALL_PREFIX;
     }
-    prefixlen = p - pattern;
-    *p = '\0';
 
     /*
      * If user.X.* or INBOX.* can match pattern,
@@ -1420,7 +1474,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	goto done;
     }
 
-    if (userid &&
+    if ((userid!=NULL) && (state < FINDALL_INBOXSTAR) &&
 	(!strncmp(usermboxname, pattern, usermboxnamelen-1) ||
 	 !strncasecmp("inbox.", pattern, prefixlen < 6 ? prefixlen : 6))) {
 	int result;
@@ -1432,10 +1486,20 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    inboxoffset = strlen(userid);
 	}
 
+	
 	memset(&data, 0, sizeof(data));
 	memset(&key, 0, sizeof(key));
-	key.data = usermboxname;
-	key.size = usermboxnamelen;
+
+	if (state == FINDALL_DOING_INBOXSTAR)
+	{  
+	  /* we've been here before. let's start where we left off */
+	  key.data = DID_inboxstar_data.data;
+	  key.size = DID_inboxstar_data.size;
+	} else {
+	  /* first time we got here */
+	  key.data = usermboxname;
+	  key.size = usermboxnamelen;
+	}
 
 	r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
 
@@ -1477,26 +1541,49 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		list_doingfind--;
 		goto done;
 	      }
+
 	    }
+
+	    /* this is the last one we outputed unless we have to restart */
+	    memset(&DID_inboxstar_data, 0, sizeof(DID_inboxstar_data));
+	    DID_inboxstar_data.data = xmalloc(key.size);
+	    memcpy(DID_inboxstar_data.data, key.data, key.size);
+	    DID_inboxstar_data.size = key.size;	    
+	    state = FINDALL_DOING_INBOXSTAR; /* we're in the middle now :) */
+
 
 	    memset(&data, 0, sizeof(data));
 	    r = cursor->c_get(cursor, &key, &data, DB_NEXT);
 	}
+
+	state = FINDALL_INBOXSTAR;
+	if (userid) usermboxname[--usermboxnamelen] = '\0';
     }
 
     /* Search for all remaining mailboxes.  Start at the pattern prefix */
-    if (prefixlen) {
-	memset(&data, 0, sizeof(data));
-	memset(&key, 0, sizeof(key));
+    memset(&data, 0, sizeof(data));
+    memset(&key, 0, sizeof(key));    
+
+    if (state == FINDALL_DOING_REST)
+    {
+      /* we've been here before. let's start where we left off */
+      key.data = DID_rest_data.data;
+      key.size = DID_rest_data.size;      
+
+      r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
+    } else {
+      if (prefixlen) {
 	key.data = pattern;
 	key.size = prefixlen;
 	
 	r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
-    } else {
+      } else {
 	r = cursor->c_get(cursor, &key, &data, DB_FIRST);
-    }
+      }
 
-    if (userid) usermboxname[--usermboxnamelen] = '\0';
+    }
+      
+
     while (r != DB_NOTFOUND) {
 	switch (r) {
 	case 0:
@@ -1556,6 +1643,13 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    }
 	}
 
+	/* this is the last one we outputed to be used when we have to restart */
+	memset(&DID_rest_data, 0, sizeof(DID_rest_data));
+	DID_rest_data.data = xmalloc(key.size);
+	memcpy(DID_rest_data.data, key.data, key.size);
+	DID_rest_data.size = key.size;	    
+	state = FINDALL_DOING_REST; /* we're in the middle now :) */
+
 	memset(&data, 0, sizeof(data));
 
 	r = cursor->c_get(cursor, &key, &data, DB_NEXT);
@@ -1563,7 +1657,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
     r = 0;
 
   done:
-    if (cursor) {
+    if (cursor!=NULL) {
 	switch (r2 = cursor->c_close(cursor)) {
 	case 0:
 	    break;
@@ -2127,6 +2221,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
     int low, high, mid;
     struct mailbox mailbox;
 
+    /* restart transaction place */
     if (0) {
       retry:
 	if ((r = txn_abort(tid)) != 0) {
@@ -2185,6 +2280,12 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	    }
 	    if (deletethis) {
 		/* Remove the mailbox.  Don't care about errors */
+
+	      /* if the transactions abort we can leave it in a
+		 inconsistant state the worst that can happen is that
+		 people get I/O Error's instead of Mailbox doesn't
+		 exist on selects */
+
 		r = mailbox_open_header(key.data, 0, &mailbox);
 		if (!r) {
 		    toimsp(key.data, mailbox.uidvalidity, "RENsn", "", 0, 0);
@@ -2223,6 +2324,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
     }
 
   done:
+
     if (r == 0) {
 	r = txn_commit(tid);
 
