@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.c,v 1.1.2.1 2004/02/14 16:15:14 ken3 Exp $
+ * $Id: lmtp_proxy.c,v 1.1.2.2 2004/02/16 21:20:40 ken3 Exp $
  */
 
 #include <config.h>
@@ -73,8 +73,8 @@ struct backend *proxyd_findserver(const char *server)
 	if (!strcmp(server, backend_cached[i]->hostname)) {
 	    ret = backend_cached[i];
 	    /* ping/noop the server */
-	    if (backend_ping(ret, &protocol[PROTOCOL_LMTP])) {
-		backend_disconnect(ret, &protocol[PROTOCOL_LMTP]);
+	    if ((ret->sock != -1) && backend_ping(ret)) {
+		backend_disconnect(ret);
 	    }
 	    break;
 	}
