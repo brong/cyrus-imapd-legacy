@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.57 2000/01/15 00:22:20 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.58 2000/01/20 23:17:19 leg Exp $
  */
 
 #include <stdio.h>
@@ -206,7 +206,7 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-	       name, strerror(r));
+	       name, db_strerror(r));
 	return IMAP_IOERROR;
 	break;
     }
@@ -288,7 +288,7 @@ int mboxlist_findstage(const char *name, char *stagedir)
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-	       name, strerror(r));
+	       name, db_strerror(r));
 	return IMAP_IOERROR;
 	break;
     }
@@ -371,7 +371,7 @@ mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition,
       break;
     default:
 	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-	       name, strerror(r));
+	       name, db_strerror(r));
 	return IMAP_IOERROR;
 	break;
     }
@@ -406,7 +406,7 @@ mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: error updating database: %s",
-		   name, strerror(r));
+		   name, db_strerror(r));
 	    r = IMAP_IOERROR;	  
 	}
 
@@ -553,7 +553,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -561,7 +561,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 
     /* begin transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
     }
@@ -624,7 +624,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error updating database: %s",
-	       name, strerror(r));
+	       name, db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
     }
@@ -645,7 +645,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	    *rettid = (struct mbox_txn *) mtxn;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", db_strerror(r));
 	    *rettid = NULL;
 	    r = IMAP_IOERROR;
 	    break;
@@ -685,7 +685,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	case 0:
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on abort: %s", strerror(r2));
+	    syslog(LOG_ERR, "DBERROR: failed on abort: %s", db_strerror(r2));
 	}
     } else {
 	switch (r = txn_commit(tid, 0)) {
@@ -693,7 +693,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	    /* ACAP: set mailbox here */
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on commit: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on commit: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -730,7 +730,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -739,7 +739,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
     /* begin transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0)
     {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	r = IMAP_IOERROR;
     }
 
@@ -754,7 +754,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: error updating database: %s",
-		   name, strerror(r));
+		   name, db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -773,7 +773,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -784,7 +784,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -842,7 +842,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
       retry:
 	if ((r2 = txn_abort(tid)) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s", strerror(r2));
+	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s", db_strerror(r2));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -850,7 +850,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     /* begin transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
@@ -938,7 +938,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
-	       name, strerror(r));
+	       name, db_strerror(r));
 	goto done;
 	break;
     }
@@ -1002,7 +1002,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: error advancing: %s", 
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -1015,7 +1015,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
-		   strerror(r2));
+		   db_strerror(r2));
 	    break;
 	}
     }
@@ -1034,7 +1034,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	    *rettid = (struct mbox_txn *) mtxn;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", db_strerror(r));
 	    *rettid = NULL;
 	    r = IMAP_IOERROR;
 	    break;
@@ -1083,7 +1083,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on abort: %s",
-		   strerror(r));
+		   db_strerror(r));
 	}
 	if (rettid) *rettid = NULL;
     } else {
@@ -1093,7 +1093,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -1154,7 +1154,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -1162,7 +1162,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 
     /* begin transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
@@ -1293,7 +1293,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
-	       oldname, strerror(r));
+	       oldname, db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
 	break;
@@ -1325,7 +1325,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error renaming %s: %s",
-	       newent->name, strerror(r));
+	       newent->name, db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
     }
@@ -1348,7 +1348,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    *rettid = (struct mbox_txn *) mtxn;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", db_strerror(r));
 	    *rettid = NULL;
 	    r = IMAP_IOERROR;
 	    break;
@@ -1391,7 +1391,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -1449,7 +1449,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -1459,7 +1459,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 
     /* begin transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	if (rettid) *rettid = NULL;
 	return IMAP_IOERROR;
     }
@@ -1482,7 +1482,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	    goto retry;
 	default:
 	    syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-		   name, strerror(r));
+		   name, db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -1550,7 +1550,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: error updating acl %s: %s",
-	       newent->name, strerror(r));
+	       newent->name, db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
     }
@@ -1568,7 +1568,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	    *rettid = (struct mbox_txn *) mtxn;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on prepare: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    *rettid = NULL;
 	    break;
@@ -1602,7 +1602,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     if (r) {
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
 	if (rettid) *rettid = NULL;
@@ -1614,7 +1614,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -1632,7 +1632,7 @@ int mboxlist_abort(struct mbox_txn *mtid)
     case 0: 
 	break;
     default:
-	syslog(LOG_ERR, "DBERROR: failed on abort: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: failed on abort: %s", db_strerror(r));
 	r = IMAP_IOERROR;
     }
 
@@ -1785,14 +1785,14 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    return IMAP_IOERROR;
 	}
     }
 
     /* begin the transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	return IMAP_IOERROR;
     }
 
@@ -1825,7 +1825,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		goto retry;
 	    default: /* DB error */
 		syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-		       usermboxname, strerror(r));
+		       usermboxname, db_strerror(r));
 		r = IMAP_IOERROR;
 		goto done;
 	    }
@@ -1852,7 +1852,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		break;
 	    default: /* DB error */
 		syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-		       usermboxname, strerror(r));
+		       usermboxname, db_strerror(r));
 		r = IMAP_IOERROR;
 		goto done;
 	    }
@@ -1927,7 +1927,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		break;
 		
 	    default:
-		syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+		syslog(LOG_ERR, "DBERROR: error advancing: %s", db_strerror(r));
 		r = IMAP_IOERROR;
 		goto done;
 	    }
@@ -2008,7 +2008,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    break;
 	    
 	default:
-	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    goto done;
 	}
@@ -2082,7 +2082,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
-		   strerror(r2));
+		   db_strerror(r2));
 	    break;
 	}
     }
@@ -2148,14 +2148,14 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    return IMAP_IOERROR;
 	}
     }
 
     /* begin the transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	return IMAP_IOERROR;
     }
 
@@ -2281,7 +2281,7 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 		  break;
 		default:
 		  syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-			 name, strerror(r));
+			 name, db_strerror(r));
 		  r = IMAP_IOERROR;
 		  goto done;
 		  break;
@@ -2376,7 +2376,7 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2384,7 +2384,7 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 	int r2;
 
 	if ((r2 = txn_abort(tid)) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", strerror(r2));
+	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", db_strerror(r2));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -2424,14 +2424,14 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    return IMAP_IOERROR;
 	}
     }
 
     /* begin the transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	return IMAP_IOERROR;
     }
 
@@ -2451,7 +2451,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	    goto retry;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2498,7 +2498,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	    goto retry;
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2523,14 +2523,14 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	break;
     default:
 	syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
-	       strerror(r2));
+	       db_strerror(r2));
 	break;
     }
 
     if (r) {
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	}
     } else {
@@ -2546,7 +2546,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2694,7 +2694,7 @@ int mboxlist_setquota(const char *root, int newquota)
 	r = mbdb->cursor(mbdb, NULL, &cursor, 0);
 	if (r != 0) { 
 	    syslog(LOG_ERR, "DBERROR: couldn't create cursor in createqr: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    return r;
 	}
 	
@@ -2729,7 +2729,7 @@ int mboxlist_setquota(const char *root, int newquota)
 	    break;
 	    
 	default:
-	    syslog(LOG_ERR, "DBERROR: error search for mbox: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: error search for mbox: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2743,7 +2743,7 @@ int mboxlist_setquota(const char *root, int newquota)
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
-		   strerror(r2));
+		   db_strerror(r2));
 	    return IMAP_IOERROR;
 	    break;
 	}
@@ -2799,14 +2799,14 @@ int mboxlist_syncnews(int num, char **group, int *seen)
       retry:
 	if ((r = txn_abort(tid)) != 0) {
 	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    return IMAP_IOERROR;
 	}
     }
 
     /* begin the transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
-	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
+	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	return IMAP_IOERROR;
     }
 
@@ -2823,7 +2823,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	    break;
 
 	default:
-	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: error advancing: %s", db_strerror(r));
 	    r = IMAP_IOERROR;
 	    goto done;
 	}
@@ -2908,7 +2908,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+		   db_strerror(r));
 	    r = IMAP_IOERROR;
 	    break;
 	}
@@ -2916,7 +2916,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	int r2;
 
 	if ((r2 = txn_abort(tid)) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", strerror(r2));
+	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", db_strerror(r2));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -3211,27 +3211,40 @@ void mboxlist_init(void)
 	if ((r = db_env_create(&dbenv, 0)) != 0) {
 	    char err[1024];
 	    
-	    sprintf(err, "DBERROR: db_appinit failed: %s", strerror(r));
+	    sprintf(err, "DBERROR: db_appinit failed: %s", db_strerror(r));
 	    
 	    syslog(LOG_ERR, err);
 	    fatal(err, EC_TEMPFAIL);
 	}
 
-	dbenv->set_paniccall(dbenv, (void (*)(DB_ENV *, int)) &db_panic);
+	/* dbenv->set_paniccall(dbenv, (void (*)(DB_ENV *, int)) &db_panic);*/
 	/* dbenv.db_errcall = &db_err; */
 	dbenv->set_verbose(dbenv, DB_VERB_DEADLOCK, 1);
 	dbenv->set_verbose(dbenv, DB_VERB_WAITSFOR, 1);
-	
+	dbenv->set_errfile(dbenv, stderr);
+	dbenv->set_errpfx(dbenv, "mbdb");
+
+	/*
+	 * We want to specify the shared memory buffer pool cachesize,
+	 * but everything else is the default.
+	 */
+	if ((r = dbenv->set_cachesize(dbenv, 0, 64 * 1024, 0)) != 0) {
+		dbenv->err(dbenv, r, "set_cachesize");
+		dbenv->close(dbenv, 0);
+		fatal("DBERROR: set_cachesize()", EC_TEMPFAIL);
+	}
+
 	/* create the name of the db file */
 	strcpy(dbdir, config_dir);
 	strcat(dbdir, FNAME_DBDIR);
-	r = dbenv->open(dbenv, dbdir, NULL, 
-			DB_INIT_LOCK | DB_INIT_LOG | DB_INIT_MPOOL
-			| DB_INIT_TXN | DB_CREATE | DB_TXN_NOSYNC, 0644);
+ 	r = dbenv->open(dbenv, "/var/imap/db", NULL, 
+			DB_CREATE | DB_INIT_LOCK | DB_INIT_MPOOL
+			| DB_INIT_LOG | DB_INIT_TXN, 0644);
 	if (r) {
 	    char err[1024];
 	    
-	    sprintf(err, "DBERROR: dbenv->open failed: %s", strerror(r));
+	    sprintf(err, "DBERROR: dbenv->open '%s' failed: %s", dbdir,
+		    db_strerror(r));
 	    syslog(LOG_ERR, err);
 	    fatal(err, EC_TEMPFAIL);
 	}
@@ -3256,7 +3269,8 @@ void mboxlist_open(char *fname)
 
     ret = db_create(&mbdb, dbenv, 0);
     if (ret != 0) {
-	syslog(LOG_ERR, "IOERROR: opening %s: %m", fname);
+	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
+	       db_strerror(ret));
 	    /* Exiting TEMPFAIL because Sendmail thinks this
 	       EC_OSFILE == permanent failure. */
 	fatal("db_create() failed", EC_TEMPFAIL);
@@ -3266,7 +3280,8 @@ void mboxlist_open(char *fname)
 
     ret = mbdb->open(mbdb, fname, NULL, DB_BTREE, DB_CREATE, 0664);
     if (ret != 0) {
-	syslog(LOG_ERR, "IOERROR: opening %s: %m", fname);
+	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
+	       db_strerror(ret));
 	    /* Exiting TEMPFAIL because Sendmail thinks this
 	       EC_OSFILE == permanent failure. */
 	fatal("can't read mailboxes file", EC_TEMPFAIL);
@@ -3284,7 +3299,7 @@ mboxlist_close(void)
 	r = mbdb->close(mbdb, 0);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing mailboxes: %s",
-		   strerror(r));
+		   db_strerror(r));
 	}
     }
 }
@@ -3298,7 +3313,7 @@ void mboxlist_done(void)
 	r = dbenv->close(dbenv, 0);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error exiting application: %s",
-		   strerror(r));
+		   db_strerror(r));
 	}
     }
 }

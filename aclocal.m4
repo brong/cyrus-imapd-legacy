@@ -14,7 +14,7 @@ dnl
 dnl Additional macros for configure.in packaged up for easier theft.
 dnl tjs@andrew.cmu.edu 6-may-1998
 dnl
-dnl $Id: aclocal.m4,v 1.15.4.2 1999/12/15 19:51:03 leg Exp $
+dnl $Id: aclocal.m4,v 1.15.4.3 2000/01/20 23:17:19 leg Exp $
 dnl
 
 dnl It would be good if ANDREW_ADD_LIBPATH could detect if something was
@@ -59,7 +59,7 @@ AC_DEFUN(CMU_GUESS_RUNPATH_SWITCH, [
 
 dnl sasl.m4--sasl detection macro
 dnl Rob Earhart
-dnl $Id: aclocal.m4,v 1.15.4.2 1999/12/15 19:51:03 leg Exp $
+dnl $Id: aclocal.m4,v 1.15.4.3 2000/01/20 23:17:19 leg Exp $
 
 AC_DEFUN(CMU_SASL, [
   AC_ARG_WITH(sasldir,[  --with-sasldir=PATH     PATH where the sasl library is installed], sasldir="$withval")
