@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.5 2001/08/01 17:59:25 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.6 2001/08/01 18:04:08 rjs3 Exp $
  */
 #include <config.h>
 
@@ -70,6 +70,7 @@
 #include "acl.h"
 #include "util.h"
 #include "auth.h"
+#include "iptostring.h"
 #include "imapconf.h"
 #include "tls.h"
 
@@ -258,30 +259,6 @@ int service_init(int argc, char **argv, char **envp)
     return 0;
 }
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
-}
-
 /*
  * run for each accepted connection
  */
@@ -328,9 +305,11 @@ int service_main(int argc, char **argv, char **envp)
     secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
     sasl_setprop(popd_saslconn, SASL_SEC_PROPS, secprops);
     
-    if(iptostring(&popd_localaddr, localip, 60) == SASL_OK)
+    if(iptostring((struct sockaddr *)&popd_localaddr,
+		  sizeof(struct sockaddr_in), localip, 60) == SASL_OK)
 	sasl_setprop(popd_saslconn, SASL_IPLOCALPORT, localip);
-    if(iptostring(&popd_remoteaddr, remoteip, 60) == SASL_OK)
+    if(iptostring((struct sockaddr *)&popd_remoteaddr,
+		  sizeof(struct sockaddr_in), remoteip, 60) == SASL_OK)
 	sasl_setprop(popd_saslconn, SASL_IPREMOTEPORT, remoteip);  
 
     proc_register("pop3d", popd_clienthost, NULL, NULL);
