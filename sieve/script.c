@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.9 2002/08/29 16:32:29 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.10 2002/09/04 20:23:28 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -310,7 +310,6 @@ static int fillin_headers(sieve_interp_t *i, char *msg,
 static int sieve_addflag(sieve_imapflags_t *imapflags, char *flag)
 {
     int n;
-    printf("WERT %d flags\n", imapflags->nflags);
     /* search for flag already in list */
     for (n = 0; n < imapflags->nflags; n++) {
 	if (!strcmp(imapflags->flag[n], flag))
@@ -332,34 +331,31 @@ static int sieve_addflag(sieve_imapflags_t *imapflags, char *flag)
 static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
 {
     int n;
- 
     /* search for flag already in list */
-    printf("NUMFLAGS %d\n", imapflags->nflags);
-     for (n = 0; n < imapflags->nflags; n++) {
-	if (!strcmp(imapflags->flag[n], flag))
-	    break;
+    for (n = 0; n < imapflags->nflags; n++) {
+      if (!strcmp(imapflags->flag[n], flag))
+	break;
     }
- 
-    /* remove flag from list, iff in list */
-    if (n < imapflags->nflags) {
+    
+     /* remove flag from list, iff in list */
+    if (n < imapflags->nflags) 
+      {
 	free(imapflags->flag[n]);
 	/*imapflags->nflags--;*/
- 
+	
 	for (; n < imapflags->nflags; n++)
-	    imapflags->flag[n] = imapflags->flag[n+1];
- 
+	  imapflags->flag[n] = imapflags->flag[n+1];
+	
 	imapflags->nflags--;
 	if (imapflags->nflags)
 	  {imapflags->flag =
-              (char **) xrealloc((char *)imapflags->flag,
-                                 imapflags->nflags*sizeof(char *));
-          }
+	     (char **) xrealloc((char *)imapflags->flag,
+				imapflags->nflags*sizeof(char *));}
 	else
 	  {free(imapflags->flag);
-	  imapflags->flag=NULL;
-	  }
-	}
- 
+	  imapflags->flag=NULL;}
+      }
+    
     return SIEVE_OK;
 }
 
@@ -646,7 +642,6 @@ static int do_action_list(sieve_interp_t *interp,
     while (a != NULL) {
 	lastaction = a->a;
 	errmsg = NULL;
-	printf("Action:%d\n",a->a);
 	switch (a->a) {
 	case ACTION_REJECT:
 	    implicit_keep = 0;
@@ -788,7 +783,6 @@ static int do_action_list(sieve_interp_t *interp,
 	case ACTION_UNMARK:
 	    {
 		int n = interp->markflags->nflags;
-		printf("UNMARK");
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
 		    ret = sieve_removeflag(imapflags,

@@ -2,7 +2,7 @@
   
  * test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.15.12.5 2002/08/29 16:32:30 jsmith2 Exp $
+ * $Id: test.c,v 1.15.12.6 2002/09/04 20:23:28 jsmith2 Exp $
  *
  * usage: "test message script"
  */
@@ -368,7 +368,6 @@ int fileinto(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
     if (fc->imapflags->flag) {
 	int n;
 	printf("\twith flags");
-	printf("there are %d flags\n", fc->imapflags->nflags);
 	for (n = 0; n < fc->imapflags->nflags; n++)
 	    printf(" '%s'", fc->imapflags->flag[n]);
 	printf("\n");

@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.6 2002/08/29 16:32:29 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.7 2002/09/04 20:23:28 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -235,13 +235,14 @@ static int ascii_casemap_contains(const char *text, const char *pat,
 
     i = 0, j = 0;
     while ((j < M) && (i < N)) {
-	if (toupper(text[i]) == toupper(pat[j])) {
-	    i++; j++;
+          if (toupper(text[i]) == toupper(pat[j])) {
+	  	  i++; j++;
 	} else {
 	    i = i - j + 1;
 	    j = 0;
 	}
-    }
+    }    
+
     return (j == M); /* we found a match! */
 }
 
@@ -304,7 +305,7 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
 
     ret = NULL;
     *comprock = NULL;
-    printf("\n%d %d %d \n", comp, mode, relation); 
+    /* printf("%d %d %d     ", comp, mode, relation); */
     switch (comp)
       {
       case B_OCTET:    
@@ -328,8 +329,8 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
 	    ret = lookup_rel(relation);
 	    *comprock = &octet_cmp;
 	    break;
-	  }
-	break;
+	}
+	break; /*end of octet */
       case B_ASCIICASEMAP:
      	switch (mode) {
 	case B_IS:
@@ -354,6 +355,7 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
 	    *comprock = &strcasecmp;
 	    break;
 	}
+	break;/*end of ascii casemap */
       case B_ASCIINUMERIC:
 	switch (mode) {
 	case B_IS:
@@ -366,6 +368,7 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
 	    *comprock = &ascii_numeric_cmp;
 	    break;
 	}
+	break;
       }
     return ret;
 }

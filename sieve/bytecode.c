@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.13 2002/09/03 16:11:39 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.14 2002/09/04 20:23:27 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -1446,7 +1446,6 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		  currd=datai+2;
 		  for (z=0; z<numdata && !res; z++)
 		    {
-		      printf("%s,  %s \n",addr, &(bc[currd+1].str));
 		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		    }
@@ -1509,8 +1508,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		    /*search through all the data*/ 
 		    currd=datai+2;
 		    for (z=0; z<numdata && !res; z++)
-		      {
-			printf("%s,  %s \n",val[y], &(bc[currd+1].str));
+		      { 
 			res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
 			currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		      }
@@ -1593,7 +1591,6 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	
 	if (res == SIEVE_RUN_ERROR)
 	    *errmsg = "Reject can not be used with any other action";  
-	  printf("\n  %s\n", *errmsg);
 	  /* Skip length + string */
 	  ip+=1+(ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t);
 	  ip++;
@@ -1640,7 +1637,6 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    else
 	      {ip=bc[testtemp+2].jump/4;
 	       jumpat=(bc[testtemp+3].jump/4);
-	       printf("(%d %d)", ip, jumpat);
 	      }
 	  }
 	  break;
@@ -1749,7 +1745,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  
 	  res = do_denotify(notify_list, comp, pattern, comprock, priority);
 	  
-	  printf("(de)notify not yet implemented");
+	  printf("(de)notify not yet implemented??");
 	  break;
 	}
       case B_VACATION:
@@ -1812,7 +1808,6 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
       if (res) /* we've either encountered an error or a stop */
 	break;
     }
-    printf("res=%d, ERRORS:%s\n",res,*errmsg);
     return res;
 
 }
