@@ -2,7 +2,7 @@
   
  * test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.15.12.2 2002/05/29 22:20:26 jsmith2 Exp $
+ * $Id: test.c,v 1.15.12.3 2002/06/05 16:44:27 jsmith2 Exp $
  *
  * usage: "test message script"
  */
@@ -676,10 +676,9 @@ int main(int argc, char *argv[])
     sieve_bytecode_t *bc;
     message_data_t *m;
     int script_fd;
-    /*from cvs=======
     char *script = NULL, *message = NULL;
     int c, force_fail = 0, usage_error = 0;
-    FILE *f;
+    /* (crom cvs update) FILE *f;
     */
     int fd, res;
     struct stat sbuf;

@@ -340,12 +340,21 @@ void dump2(bytecode_t *d, int len)
 	    break;
 	    
 	case B_NOTIFY: /*13*/
-	    printf("%d: NOTIFY PRIORITY({%d}%s) MESSAGE({%d}%s)\n",i,
-		   d[i+1].len,(char*)&(d[i+2].str),
-		   d[i+3].len,(char*)&(d[i+4].str));
-	    i+=4;
-	    i+=1+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t)+(ROUNDUP(d[i+3].len+1))/sizeof(bytecode_t));
-	    i++;/*?*/
+	    printf("%d: NOTIFY METHOD({%d}%s)",i,
+		   d[i+1].len,(char*)&(d[i+2].str));  
+	    i+=2+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
+
+	    printf(",ID({%d}%s) OPTIONS",d[i].len,(char*)&(d[i+1].str));
+	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+		  
+	    i=write_list(d[i].len,i+1,d);
+	    
+	    printf("PRIORITY({%d}%s)",d[i].len,(char*)&(d[i+1].str));
+      	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+		  
+	    printf("MESSAGE({%d}%s)\n", d[i].len,(char*)&(d[i+1].str));
+	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+
 	    break;
 
 	case B_VACATION:/*15*/

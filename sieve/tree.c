@@ -1,6 +1,6 @@
 /* tree.c -- abstract syntax tree handling
  * Larry Greenfield
- * $Id: tree.c,v 1.8.12.3 2002/06/03 16:05:53 jsmith2 Exp $
+ * $Id: tree.c,v 1.8.12.4 2002/06/05 16:44:27 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -173,7 +173,7 @@ void free_test(test_t *t)
 
     case HEADER:
 	free_sl(t->u.h.sl);
-	free_sl(t->u.h.pl);
+	free_sl(t->u.h.pl)/*, t->u.h.comptag)*/;
 	break;
 
     case ADDRESS:

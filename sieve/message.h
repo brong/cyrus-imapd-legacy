@@ -1,6 +1,6 @@
 /* message.h
  * Larry Greenfield
- * $Id: message.h,v 1.11.12.1 2002/05/29 22:20:25 jsmith2 Exp $
+ * $Id: message.h,v 1.11.12.2 2002/06/05 16:44:26 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -81,19 +81,6 @@ struct Action {
     char *vac_msg;
     int vac_days;
 };
-/*this should be fixed so that it is whatever is the cool thing to be using now-the list, i guess*/
-typedef struct notify_action_s {
-
-    int exists; /* 0 = no +/-1 = yes (-1 flags default action) */
-
-    const char *priority;
-    char *message;
-    stringlist_t *headers;
-
-} notify_action_t;
-
-
-/*end of funny extra struct*/
 
 
 typedef struct notify_list_s {

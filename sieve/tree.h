@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.3 2002/06/03 16:05:53 jsmith2 Exp $
+ * $Id: tree.h,v 1.3.14.4 2002/06/05 16:44:28 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -69,7 +69,7 @@ struct Test {
 	    comparator_t *comp;
 	    void *comprock;
 	    stringlist_t *sl;
-	    patternlist_t *pl;
+	    stringlist_t *pl;
 	} h;
 	struct { /* it's an address or envelope test */
 	    int comptag;

@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.4 2002/06/03 16:05:52 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.5 2002/06/05 16:44:27 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -834,6 +834,11 @@ static int send_notify_callback(sieve_interp_t *interp, void *message_context,
 
     assert(notify->isactive);
 
+    if (notify->method && notify->options && notify->priority && notify->message)
+      {printf("GOOD NOTIFY\n");}
+    else
+      {printf("BAD NOTIFY, NO COOKIE\n");}
+
     nc.method = notify->method;
     nc.options = notify->options ? 
 	stringlist_to_chararray(notify->options) : NULL;
@@ -856,14 +861,15 @@ static int send_notify_callback(sieve_interp_t *interp, void *message_context,
 			   message_context,
 			   errmsg);    
 
-    if (nc.options) {
+    if (nc.options) 
+      {
 	char **opts = nc.options;
 	while (opts && *opts) {
-	    free(*opts);
+	  free(*opts);
 	    opts++;
 	}
 	free(nc.options);
-    }
+      }
     free(nc.message);
 
     return ret;
@@ -1269,7 +1275,7 @@ static int do_sieve_error(int ret,
 			  const char *errmsg
 			  ) 
 {
-    if (ret != SIEVE_OK) {
+  if (ret != SIEVE_OK) {
 	if (lastaction == -1) /* we never executed an action */
 	    snprintf(actions_string+strlen(actions_string),
 		     ACTIONS_STRING_LEN-strlen(actions_string),
@@ -1283,16 +1289,38 @@ static int do_sieve_error(int ret,
 		     errmsg ? errmsg : sieve_errstr(ret));
     }
  
-    /* Process notify action if there is one */
-    if (interp->notify && notify_list) {
-	ret |= send_notify_callback(interp, message_context, script_context,
-				    notify_list,
-				    actions_string, &errmsg);
-
-    }
-    /*static int send_notify_callback(sieve_script_t *s, void *message_context,
-       notify_list_t *notify, char *actions_string, const char **errmsg)
-    */
+   
+    /* Process notify actions */
+    if (interp->notify && notify_list) 
+      {
+	notify_list_t *n = notify_list;
+	int notify_ret = SIEVE_OK;
+	
+	while (n != NULL) 
+	  {
+	    if (n->isactive) 
+	      {
+	      lastaction = ACTION_NOTIFY;
+	       notify_ret = send_notify_callback(interp, message_context, 
+						script_context,n,
+						actions_string, &errmsg);
+	      ret |= notify_ret;
+	      }
+	    n = n->next;
+	  }
+	
+	
+	if (notify_list) free_notify_list(notify_list);
+	notify_list = NULL;	/* don't try any notifications again */
+	
+	
+	if (notify_ret != SIEVE_OK) 
+	  return do_sieve_error(ret, interp, script_context, message_context,
+				imapflags, actions, notify_list, lastaction,
+				implicit_keep, actions_string, errmsg);
+      
+      }
+    
     if ((ret != SIEVE_OK) && interp->err) {
 	char buf[1024];
 	if (lastaction == -1) /* we never executed an action */
@@ -1357,7 +1385,7 @@ static int do_action_list(sieve_interp_t *interp,
     while (a != NULL) {
 	lastaction = a->a;
 	errmsg = NULL;
- 
+	printf("%d\n",a->a);
 	switch (a->a) {
 	case ACTION_REJECT:
 	    implicit_keep = 0;
@@ -1547,27 +1575,27 @@ int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context)
     imapflags.nflags = 0;
 
 
-    /* should we check that notify is required??   */
-    notify_list = new_notify_list();
-    if (notify_list == NULL)
-      return SIEVE_NOMEM;
-    
-
+    if (bc->interp->notify)
+      {
+	notify_list = new_notify_list();
+	if (notify_list == NULL)
+	  return SIEVE_NOMEM;
+      }
     actions = new_action_list();
     if (actions == NULL) {
-	ret = SIEVE_NOMEM;
-	return do_sieve_error(ret, bc->interp, bc->script_context,
-			      message_context, imapflags,
-			      actions, notify_list, lastaction, 0,
-			      actions_string, errmsg);
+      ret = SIEVE_NOMEM;
+      return do_sieve_error(ret, bc->interp, bc->script_context,
+			    message_context, imapflags,
+			    actions, notify_list, lastaction, 0,
+			    actions_string, errmsg);
     }
-
-      if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, 
-			imapflags, actions, notify_list, &errmsg) < 0)
-	return SIEVE_RUN_ERROR;  
-
-      return do_action_list(bc->interp, bc->script_context, message_context, 
-			    imapflags, actions, notify_list, actions_string,
-			    errmsg);
+    
+    if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, 
+		      imapflags, actions, notify_list, &errmsg) < 0)
+      return SIEVE_RUN_ERROR;  
+    
+    return do_action_list(bc->interp, bc->script_context, message_context, 
+			  imapflags, actions, notify_list, actions_string,
+			  errmsg);
 }
 
