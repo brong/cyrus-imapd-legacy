@@ -1,4 +1,4 @@
-<!-- $Id: install-upgrade.html,v 1.22.2.2 2002/09/10 20:30:35 rjs3 Exp $ -->
+<!-- $Id: install-upgrade.html,v 1.22.2.3 2003/02/21 22:29:36 rjs3 Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Upgrading From Previous Versions
@@ -15,6 +15,18 @@
 <li>Clients that use old-style ACL commands that include the &quot;MAILBOX&quot;
 directive will no longer function.  We do not know of any clients
 that have this problem currently.</li>
+
+<li>Sieve scripts are now compiled into bytecode.  The program &quot;sievec&quot;
+is provide to do this process manually (timsieved will compile submitted
+sieve scripts as they are uploaded).  To upgrade existing scripts (outside
+of home directories), you can run the masssievec perl script in the tools/
+directory of the distribution.  It requires a path to your sievec
+binary.  For example:
+
+<pre>
+masssievec /usr/src/cyrus/sieve/sievec
+</pre>
+</li>
 
 </ul>
 
@@ -239,7 +251,7 @@ worry about it.)
 </ul>
 
 <HR><P>
-last modified: $Date: 2002/09/10 20:30:35 $
+last modified: $Date: 2003/02/21 22:29:36 $
 </BODY></HTML>
 
 

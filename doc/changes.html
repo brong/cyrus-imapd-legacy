@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<!-- $Id: changes.html,v 1.24.2.2 2002/09/10 20:30:34 rjs3 Exp $ -->
+<!-- $Id: changes.html,v 1.24.2.3 2003/02/21 22:29:36 rjs3 Exp $ -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
@@ -37,6 +37,9 @@ the rename.  See ??? for details.</li>
 <li> The <tt>db3</tt> and <tt>db3-nosync</tt> database backends have
 been renamed to <tt>berkeley</tt> and <tt>berkeley-nosync</tt>
 respectively (to avoid confusion over whether or not db4 is supported).</li>
+
+<li> Sieve scripts are now compiled to bytecode to allow for faster
+execution (and lmtpd no longer needs lex or yacc).</li>
 
 </ul>
 
@@ -1670,7 +1673,7 @@ message for this common configuration error.</li>
 </ul>
 
 <hr />
-last modified: $Date: 2002/09/10 20:30:34 $ <br />
+last modified: $Date: 2003/02/21 22:29:36 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>
