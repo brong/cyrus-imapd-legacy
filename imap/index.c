@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.91.4.3 2000/07/21 18:33:38 ken3 Exp $
+ * $Id: index.c,v 1.91.4.4 2000/08/25 14:42:17 ken3 Exp $
  */
 #include <stdio.h>
 #include <string.h>
@@ -243,16 +243,15 @@ static void index_thread_orderedsubj P((unsigned *msgno_list, int nmsg,
 					int usinguid));
 static void index_thread_sort P((Thread *root, struct sortcrit *sortcrit));
 static void index_thread_print P((Thread *threads, int usinguid));
-#ifdef ENABLE_THREAD_JWZ
+#ifdef ENABLE_THREAD_REF
 static void index_thread_ref P((unsigned *msgno_list, int nmsg,
 				int usinguid));
 #endif
 
 static struct thread_algorithm thread_algs[] = {
     { "ORDEREDSUBJECT", index_thread_orderedsubj },
-#ifdef ENABLE_THREAD_JWZ
+#ifdef ENABLE_THREAD_REF
     { "REFERENCES", index_thread_ref },
-    { "X-JWZ", index_thread_ref },
 #endif
     { NULL, NULL }
 };
@@ -3646,10 +3645,12 @@ int find_thread_algorithm(char *arg)
     return -1;
 }
 
-#ifdef ENABLE_THREAD_JWZ
+#ifdef ENABLE_THREAD_REF
 /*
  * The following code is an interpretation of JWZ's description
  * and pseudo-code in http://www.jwz.org/doc/threading.html.
+ *
+ * It has been modified to match the THREAD=REFERENCES algorithm.
  */
 
 /*
@@ -4115,4 +4116,4 @@ void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
     /* free the msgdata array */
     free(freeme);
 }
-#endif /* ENABLE_THREAD_JWZ */
+#endif /* ENABLE_THREAD_REF */
