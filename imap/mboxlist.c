@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.50 1999/11/05 22:56:39 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.51 1999/11/05 23:28:26 leg Exp $
  */
 
 #include <stdio.h>
@@ -631,19 +631,20 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     if (rettid) *rettid = NULL;
     
     if (r != 0) {
-	switch (txn_abort(tid)) {
+	int r2 = txn_abort(tid);
+
+	switch (r2) {
 	case 0:
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on abort: %s", strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on abort: %s", strerror(r2));
 	}
     } else {
-	switch (txn_commit(tid)) {
+	switch (r = txn_commit(tid)) {
 	case 0: 
 	    break;
 	default:
-	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-		   strerror(r));
+	    syslog(LOG_ERR, "DBERROR: failed on commit: %s", strerror(r));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -790,10 +791,11 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     /* restart transaction here */
     if (0) {
+	int r2;
+
       retry:
-	if ((r = txn_abort(tid)) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s",
-		   strerror(r));
+	if ((r2 = txn_abort(tid)) != 0) {
+	    syslog(LOG_ERR, "DBERROR: error aborting txn: %s", strerror(r2));
 	    if (rettid) *rettid = NULL;
 	    return IMAP_IOERROR;
 	}
@@ -2487,9 +2489,10 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 	    break;
 	}
     } else {
-	if (txn_abort(tid) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn %s",
-		   strerror(r));
+	int r2;
+
+	if ((r2 = txn_abort(tid)) != 0) {
+	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", strerror(r2));
 	    r = IMAP_IOERROR;
 	}
     }
@@ -3020,9 +3023,10 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	    break;
 	}
     } else {
-	if (txn_abort(tid) != 0) {
-	    syslog(LOG_ERR, "DBERROR: error aborting txn %s",
-		   strerror(r));
+	int r2;
+
+	if ((r2 = txn_abort(tid)) != 0) {
+	    syslog(LOG_ERR, "DBERROR: error aborting txn %s", strerror(r2));
 	    r = IMAP_IOERROR;
 	}
     }
