@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.c,v 1.1.2.4 2004/02/18 19:28:25 ken3 Exp $
+ * $Id: lmtp_proxy.c,v 1.1.2.5 2004/02/19 17:53:41 ken3 Exp $
  */
 
 #include <config.h>
@@ -113,6 +113,7 @@ void runme(remote_msgdata_t *mydata, message_data_t *msgdata,
 	lt->from = msgdata->return_path;
 	lt->auth = d->authas[0] ? d->authas : NULL;
 	lt->isdotstuffed = 0;
+	lt->tempfail_unknown_mailbox = 1;
 	
 	prot_rewind(msgdata->data);
 	lt->data = msgdata->data;
