@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.22 1999/10/19 04:09:37 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.23 1999/10/19 15:52:10 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -636,7 +636,7 @@ int checkacl;
     DB_TXN *tid;
     DB_TXNMGR *txnp = dbenv.tx_info;
     DBT key, data;
-    DBC *cursor;
+    DBC *cursor=NULL;
     int havewritelock;
 
     /* restart transaction place */
@@ -882,6 +882,22 @@ int checkacl;
 
   done:
 
+    /* free the cursor if it was allocated */
+    if (cursor!=NULL) {
+      int r2;
+	switch (r2 = cursor->c_close(cursor)) {
+	case 0:
+	    break;
+	case EAGAIN:
+	    goto retry;
+	    break;
+	default:
+	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
+		   strerror(r2));
+	    break;
+	}
+    }
+
     if (r!=0)
     {
 	txn_abort(tid);
@@ -929,6 +945,7 @@ struct auth_state *auth_state;
     DB_TXNMGR *txnp = dbenv.tx_info;
     DBT key, data;
     struct mbox_entry *mboxent, *newent=NULL;
+    char *newpartition=NULL;
 
     /* we just can't rename if there isn't enough info */
     if (partition && !strcmp(partition, "news")) {
@@ -1021,7 +1038,7 @@ struct auth_state *auth_state;
 	    goto done;
 	}
 	r = mboxlist_createmailboxcheck(newname, 0, partition, isadmin, userid,
-					auth_state, (char **)0, &partition, tid);
+					auth_state, (char **)0, &newpartition, tid);
 
 	if (r==EAGAIN)
 	{
@@ -1033,6 +1050,8 @@ struct auth_state *auth_state;
 	    free(acl);
 	    goto done;
 	}
+    } else {
+      newpartition = xstrdup(partition);
     }
 
     /* delete old entry */
@@ -1067,7 +1086,7 @@ struct auth_state *auth_state;
     memset(newent, 0, sizeof(struct mbox_entry)+strlen(acl));
 
     strcpy(newent->name, newname);
-    strcpy(newent->partition, partition);
+    strcpy(newent->partition, newpartition);
     strcpy(newent->acls, acl);
 
     /* make the keys */
@@ -1096,12 +1115,11 @@ struct auth_state *auth_state;
     }
 
     /* Get partition's path */
-    sprintf(buf2, "partition-%s", partition);
+    sprintf(buf2, "partition-%s", newpartition);
 
     root = config_getstring(buf2, (char *)0);
     if (!root) {
-	free(acl);
-	free(partition);
+
 	r = IMAP_PARTITION_UNKNOWN;
 	goto done;
     }
@@ -1120,6 +1138,7 @@ struct auth_state *auth_state;
 
 
  done:
+    free(newpartition);
     free(newent);
     free(acl);
 
@@ -1360,7 +1379,7 @@ void* rock;
     int rights;
     int r, r2;
     char *inboxcase;
-    DBC *cursor;
+    DBC *cursor=NULL;
     DB_TXN *tid;
     DB_TXNMGR *txnp;
     DBT key, data;
@@ -1899,16 +1918,16 @@ int (*proc)();
 	      }
 	      break;
 		  
-	    case DB_NOTFOUND:
+	    case IMAP_MAILBOX_NONEXISTENT:
 	      /* didn't find the entry; take away the subscription */
-	      mboxlist_changesub(namebuf, userid, auth_state, 0);	      
+	      mboxlist_changesub(namebuf, userid, auth_state, 0);
 	      break;
 	    case EAGAIN:
 	      goto retry;
 	      break;
 	    default:
-	      syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-		     name, strerror(r));
+	      syslog(LOG_ERR, "DBERROR: error fetching %s: %i",
+		     namebuf, r );
 	      r = IMAP_IOERROR;
 	      goto done;
 	      break;
@@ -2093,7 +2112,7 @@ int newquota;
     /* should we delete the quota root?  are there any other mailboxes
        in this quota root? */
     {
-      DBC *cursor;      
+      DBC *cursor=NULL;      
       struct mbox_entry *mboxent=NULL;
       DBT key, data;
 
@@ -2110,37 +2129,61 @@ int newquota;
       
       r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
 
-      syslog(LOG_ERR, "DBERROR: error advancing: %s", quota.root);      
-
-      if (r == DB_NOTFOUND) {
-	return IMAP_MAILBOX_NONEXISTENT;
-      } else {
-	switch (r) {
-	case 0:
-	  mboxent = (struct mbox_entry *) data.data;
-
-	  syslog(LOG_ERR, "DBERROR: found: %s", mboxent->name);      
-
-	  /* if this entry is not in the quota root then fail */
-	  if ( strlen(mboxent->name) < strlen(quota.root))
-	    return IMAP_MAILBOX_NONEXISTENT;
-
-	  if (strncmp(mboxent->name, quota.root, strlen(quota.root))!=0)
-	    return IMAP_MAILBOX_NONEXISTENT;
-
-	  if (strlen(mboxent->name) > strlen(quota.root))
-	    if (mboxent->name[ strlen(quota.root) ] != '.')
-	      return IMAP_MAILBOX_NONEXISTENT;
-
-	  break;
-
-	default:
-	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
-	    return IMAP_IOERROR;
-	    break;
+      switch (r) {
+      case 0:
+	mboxent = (struct mbox_entry *) data.data;
+	
+	/* if this entry is not in the quota root then fail */
+	if ( strlen(mboxent->name) < strlen(quota.root))
+	{
+	  r = IMAP_MAILBOX_NONEXISTENT;
+	  goto done;
 	}
+	
+	if (strncmp(mboxent->name, quota.root, strlen(quota.root))!=0)
+	{
+	  r = IMAP_MAILBOX_NONEXISTENT;
+	  goto done;
+	}
+	
+	if (strlen(mboxent->name) > strlen(quota.root))
+	  if (mboxent->name[ strlen(quota.root) ] != '.')
+	  {
+	    r = IMAP_MAILBOX_NONEXISTENT;
+	    goto done;
+	  }
 
+	break;
+	
+      case DB_NOTFOUND:
+	r = IMAP_MAILBOX_NONEXISTENT;
+	goto done;
+	break;
+	
+      default:
+	syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
+	r = IMAP_IOERROR;
+	goto done;
+	break;
       }
+      
+    
+      done:
+      {
+	int r2;
+	switch (r2 = cursor->c_close(cursor)) {
+	case 0:
+	  if (r!=0) return r;
+	  break;
+	default:
+	  syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
+		 strerror(r2));
+	  return IMAP_IOERROR;
+	  break;
+	}
+      }
+	
+
     }
 
     /* perhaps create .NEW, lock, check if it got recreated, move in place */
