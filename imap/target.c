@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.9 1999/11/04 01:41:50 leg Exp $
+ * $Id: target.c,v 1.1.2.10 1999/11/05 18:00:24 leg Exp $
  */
 
 #include <stdio.h>
@@ -75,7 +75,7 @@ struct be {
     } be_status;
     time_t lastcontact;
 
-    void *curtxn;
+    struct mbox_txn *curtxn;
 
     struct be *next;
 };
@@ -314,10 +314,10 @@ void be_connect(struct be *ptr)
     ptr->be_status = UP;
 }
 
-int do_txn(char *host, struct inmsg *msg, void **txn)
+int do_txn(char *host, struct inmsg *msg, struct mbox_txn **txn)
 {
     struct auth_state *authstate;
-    void *mytxn;
+    struct mbox_txn *mytxn = NULL;
     int r;
 
     authstate = auth_newstate(msg->userid, NULL);
@@ -414,7 +414,7 @@ void be_process(struct be *ptr)
     } else {			/* grab a new transaction */
 	struct inmsg inbuf;
 	int toread, got, r;
-	void *txn;
+	struct mbox_txn *txn;
 
 	toread = sizeof(struct inmsg);
 	got = 0;
