@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62.6.2 2001/07/31 17:39:45 rjs3 Exp $
+ * $Id: imtest.c,v 1.62.6.3 2001/08/01 17:25:42 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -68,6 +68,7 @@
 #include <pwd.h>
 
 #include "prot.h"
+#include "iptostring.h"
 
 #ifdef HAVE_SSL
 #include <openssl/ssl.h>
@@ -575,30 +576,6 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   return ret;
 }
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
-}
-
 /*
  * Initialize SASL and set necessary options
  */
@@ -624,10 +601,12 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
   if (getsockname(sock,(struct sockaddr *)&saddr_l,&addrsize)!=0)
       return IMTEST_FAIL;
 
-  if(iptostring(&saddr_l, localip, 60) != SASL_OK)
+  if(iptostring((struct sockaddr *)&saddr_l, sizeof(struct sockaddr_in),
+		localip, 60) != SASL_OK)
       return IMTEST_FAIL;
 
-  if(iptostring(&saddr_r, remoteip, 60) != SASL_OK)
+  if(iptostring((struct sockaddr *)&saddr_r, sizeof(struct sockaddr_in),
+		remoteip, 60) != SASL_OK)
       return IMTEST_FAIL;
   
 

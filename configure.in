@@ -42,7 +42,7 @@ dnl
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.198.2.1 2001/07/31 16:19:22 rjs3 Exp $
+dnl $Id: configure.in,v 1.198.2.2 2001/08/01 17:25:40 rjs3 Exp $
 dnl
 
 
@@ -93,7 +93,7 @@ CPPFLAGS="-I/usr/local/include ${CPPFLAGS}"
 CMU_ADD_LIBPATH("/usr/local/lib")
 
 AC_CHECK_HEADERS(unistd.h sys/select.h sys/param.h)
-AC_REPLACE_FUNCS(memmove strcasecmp ftruncate strerror)
+AC_REPLACE_FUNCS(memmove strcasecmp ftruncate strerror getaddrinfo getnameinfo)
 AC_HEADER_DIRENT
 
 dnl this is to check for time things for sieve

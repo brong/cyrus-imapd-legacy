@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.17 2001/03/28 16:11:49 ken3 Exp $ */
+/* $Id: acconfig.h,v 1.17.6.1 2001/08/01 17:25:40 rjs3 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -133,6 +133,19 @@ typedef int rlim_t;
 
 /* save the cmdlines for the ID command */
 #undef ID_SAVE_CMDLINE
+
+/* getaddrinfo things */
+#ifndef HAVE_GETADDRINFO
+#define	getaddrinfo	sasl_getaddrinfo
+#define	freeaddrinfo	sasl_freeaddrinfo
+#define	getnameinfo	sasl_getnameinfo
+#define	gai_strerror	sasl_gai_strerror
+#include "gai.h"
+#endif
+
+#ifndef	NI_WITHSCOPEID
+#define	NI_WITHSCOPEID	0
+#endif
 
 /* compile time options; think carefully before modifying */
 enum {
