@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.12 1999/10/18 16:37:26 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.13 1999/10/18 16:47:38 leg Exp $
  */
 
 #include <stdio.h>
@@ -87,7 +87,7 @@ static char *mboxlist_hash_usersubs(const char *userid);
 void mboxlist_open(void);
 void mboxlist_init(void);
 
-#define FNAME_MBOXLIST "/mailboxesdb"
+#define FNAME_MBOXLIST "/mailboxes.db"
 #define FNAME_DBDIR "/db"
 #define FNAME_USERDIR "/user/"
 #define FNAME_SUBSSUFFIX ".sub"
@@ -2359,7 +2359,6 @@ mboxlist_open(void)
     if (!listfname) {
 	listfname = xmalloc(strlen(config_dir)+sizeof(FNAME_MBOXLIST));
 	strcpy(listfname, config_dir);
-	strcat(listfname, FNAME_DBDIR);
 	strcat(listfname, FNAME_MBOXLIST);
     }
 
