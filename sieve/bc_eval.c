@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.2 2003/01/16 17:39:58 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.3 2003/01/22 01:11:02 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -51,13 +51,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 /* this is used by notify to pass the options list */
-/* xxx what the HELL is going on in this function?
 
-   array = (char **) xmalloc(len); sure looks wrong to me, so i changed it.
-   the next xmalloc appears to be at least one byte too short, but i'm
-   not clear on whether it's really copying NUL-terminated strings or not.
-   if it is, it should just use xstrdup() and get it over with
-*/
 
 char ** bc_makeArray(int len, int i, bytecode_t *bc) 
 { 
@@ -66,13 +60,28 @@ char ** bc_makeArray(int len, int i, bytecode_t *bc)
   array=(char**)xmalloc(len* sizeof(char *));
   for (x=0; x<len; x++)
     {
-      array[x]=(char*)xmalloc(bc[i].len);
-      strncpy(array[x], (char*)&(bc[i+1].str), bc[i].len); 
+	/* array[x]=(char*)xmalloc(bc[i].len);
+	   strncpy(array[x], (char*)&(bc[i+1].str), bc[i].len);*/
+	array[x]= xstrdup(bc[i+1].str);
+	
     }
   
   return array;
 }
 
+regex_t * bc_compile_regex(char * s, int ctag, char * errmsg)
+{
+    int ret;
+    regex_t *reg = (regex_t *) xmalloc(sizeof(regex_t));
+    
+    if ( (ret=regcomp(reg, s, ctag)) != 0)
+    {
+	(void) regerror(ret, reg, errmsg, sizeof(errmsg));
+	free(reg);
+	return NULL;
+    }
+    return reg;
+}
 
 static int sysaddr(char *addr)
 {
@@ -318,12 +327,30 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	int count=0;
 	char scount[3];
 	res=0;
+	int isReg = (match==B_REGEX);
+	int ctag;
+	regex_t *reg;
+	char *errbuf;/* this is a silly variable.
+		      * we currently have nothing in place for reporting errors in this fcn,
+		      * the compiling of a regex should work, we tested it on parsing*/ 
 	
+	/*set up variables needed for compiling regex*/
+	if (isReg)
+	{
+	    if (comparator== B_ASCIICASEMAP)
+	    {
+		ctag= REG_EXTENDED | REG_NOSUB | REG_ICASE;
+	    }
+	    else
+	    {
+		ctag= REG_EXTENDED | REG_NOSUB;
+	    }
+     
+	}
 	/*find the correct comparator fcn*/
 	comp=lookup_comp(comparator, match, relation, &comprock);
 	
 	/*find the part of the address that we want*/
-
 	switch(bc[i+4].value)
 	  {
 	  case B_ALL: addrpart = ADDRESS_ALL; break;
@@ -334,10 +361,12 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	  default:/*this shouldn't happen with correcct bytecode*/;
 	  }
 
+	
       /*loop through all the headers*/
       currh=headersi+2;
       for (x=0; x<numheaders && !res; x++)
 	{
+	  
 	  if ((address) ? 
 	      interp->getheader(m, (char*)&(bc[currh+1].str), &val) :
 	      interp->getenvelope(m, (char*)&(bc[currh+1].str), &val) != SIEVE_OK) 
@@ -350,18 +379,32 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	  else
 	    {
 	      for (y=0; val[y]!=NULL && !res; y++)
-		{ 
-		  if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
+		{
+		    if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
 		    {return 0;}
 		  addr=get_address(addrpart, &data, &marker, 0);
-		  /*search through all the data*/ 
-		  currd=datai+2;
-		  for (z=0; z<numdata && !res; z++)
-		    {/*printf("4wert\n");*/
-		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
-		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
-		    }
-		/*  printf("5wert\n");*/
+		  if (addr)
+		  {
+		      
+		      /*search through all the data*/ 
+		      currd=datai+2;
+		      for (z=0; z<numdata && !res; z++)
+		      {
+			  if (isReg)
+			   {
+			       reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			       if (!reg) exit (1);
+			       res|= comp(val[y],reg, comprock);
+			       free(reg);
+			   }
+			  else
+			  {
+			      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
+			  }
+			  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		      }
+		  }
+		  
 		}
 	    }
 	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
@@ -373,8 +416,18 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      /*search through all the data*/ 
 	      currd=datai+2;
 	      for (z=0; z<numdata && !res; z++)
-		{ 
-		  res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
+		{ 	if (isReg)
+			{
+			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    if (!reg) exit (1);
+			    res|= comp(val[y],reg, comprock);
+			    free( reg);
+			}
+			else
+			{
+			    res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
+			}
+		
 		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		}
 	    }
@@ -399,6 +452,30 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	int comparator=bc[i+3].value;
 	int count=0;	
 	char scount[3];
+	int isReg = (match==B_REGEX);
+	int ctag;
+	regex_t *reg;
+	char errbuf[100];/* this is a silly variable.
+		      * we currently have nothing in place for reporting errors in this fcn,
+		      * the compiling of a regex should work, we tested it on parsing*/ 
+
+	/*set up variables needed for compiling regex*/
+	if (isReg)
+	{
+	    if (comparator== B_ASCIICASEMAP)
+	    {
+		ctag= REG_EXTENDED | REG_NOSUB | REG_ICASE;
+	    }
+	    else
+	    {
+		ctag= REG_EXTENDED | REG_NOSUB;
+	    }
+     
+	}
+	
+      
+	
+	
 	/*find the correct comparator fcn*/
 	comp=lookup_comp(comparator, match, relation, &comprock);
 
@@ -421,15 +498,26 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		    /*search through all the data*/ 
 		    currd=datai+2;
 		    for (z=0; z<numdata && !res; z++)
-		      { 
-			res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
+		    {
+			if (isReg)
+			{
+			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    if (!reg) exit (1);
+			    res|= comp(val[y],reg, comprock);
+			    free( reg);
+			}
+			else
+			{
+			    res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
+			}
+			
 			currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
-		      }
+		    }
 		  }
 	      }
 	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	  }
-
+	
 
 	  if  (match == B_COUNT )
 	    {
@@ -439,18 +527,33 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      for (z=0; z<numdata && !res; z++)
 		{ 	
 		  if (comp !=NULL)
-		    res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
-		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		  {
+		      	if (isReg)
+			{
+			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    if (!reg) exit (1);
+			    res|= comp(val[y],reg, comprock);
+			    free( reg);
+			    
+			}
+			else
+			{
+			    res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
+			}
+			
+			currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		  }
 		}
+	      
 	    }
-	i=(bc[datai+1].value/4);
-	break;
+	  i=(bc[datai+1].value/4);
+	  break;
       }
     default:
 #if VERBOSE
-      printf("WERT, can't evaluate if statement.");
+	printf("WERT, can't evaluate if statement.");
 #endif     
-      exit(1);
+	exit(1);
     }
   *ip=i;
   return res;
@@ -647,22 +750,42 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
       case B_DENOTIFY:
 	{
 	  comparator_t * comp=NULL;
+
 	  char * pattern;
+	  regex_t *reg;
+	  
 	  char * priority;
 	  void * comprock=NULL;
-	  
+
+	  int isReg = (bc[ip+1].value == B_REGEX);
 	  comp=lookup_comp("i;ascii-casemap",bc[ip+1].value, -1, comprock);
 	  
 	  ip+=2;
-	  pattern= (char*)&(bc[ip+1].str); 
-	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*printf("priority %s\n", priority);*/
-	  
+
+	  if (isReg)
+	  {
+	      reg=bc_compile_regex(bc[ip+1].str, REG_EXTENDED | REG_NOSUB | REG_ICASE, *errmsg);
+	      if (!reg) {res = SIEVE_RUN_ERROR;}
+	  }
+	  else
+	  {
+	      pattern= (char*)&(bc[ip+1].str); 
+	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	  }
+	
 	  priority= (char*)&(bc[ip+1].str); 
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
 	  /*printf("priority %s\n", priority);*/
 	  
-	  res = do_denotify(notify_list, comp, pattern, comprock, priority);
+	  if (isReg)
+	  {
+	      res = do_denotify(notify_list, comp, reg, comprock, priority);
+	      free(reg);
+	  }
+	  else
+	  {
+	      res = do_denotify(notify_list, comp, pattern, comprock, priority);
+	  }
 	  
 	  break;
 	}

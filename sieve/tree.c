@@ -1,6 +1,6 @@
 /* tree.c -- abstract syntax tree handling
  * Larry Greenfield
- * $Id: tree.c,v 1.8.12.4 2002/06/05 16:44:27 jsmith2 Exp $
+ * $Id: tree.c,v 1.8.12.5 2003/01/22 01:11:03 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -39,14 +39,6 @@ stringlist_t *new_sl(char *s, stringlist_t *n)
 {
     stringlist_t *p = (stringlist_t *) xmalloc(sizeof(stringlist_t));
     p->s = s;
-    p->next = n;
-    return p;
-}
-
-patternlist_t *new_pl(void *pat, patternlist_t *n)
-{
-    patternlist_t *p = (patternlist_t *) xmalloc(sizeof(patternlist_t));
-    p->p = pat;
     p->next = n;
     return p;
 }
@@ -115,26 +107,7 @@ void free_sl(stringlist_t *sl)
 	sl = sl2;
     }
 }
-void free_pl(patternlist_t *pl, int comptag) 
-{
-    patternlist_t *pl2;
 
-    while (pl != NULL) {
-	pl2 = pl->next;
-
-	if (pl->p) {
-#ifdef ENABLE_REGEX
-	    if (comptag == REGEX) {
-		regfree((regex_t *) pl->p);
-	    }
-#endif
-	    free(pl->p);
-	}
-
-	free(pl);
-	pl = pl2;
-    }
-}
 
 void free_test(test_t *t);
 
@@ -173,7 +146,8 @@ void free_test(test_t *t)
 
     case HEADER:
 	free_sl(t->u.h.sl);
-	free_sl(t->u.h.pl)/*, t->u.h.comptag)*/;
+	free_sl(t->u.h.pl);
+	
 	break;
 
     case ADDRESS:

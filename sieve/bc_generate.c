@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_generate.c,v 1.1.2.4 2003/01/16 22:05:53 jsmith2 Exp $
+ * $Id: bc_generate.c,v 1.1.2.5 2003/01/22 01:11:02 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -101,10 +101,12 @@ static int bc_stringlist_generate(int codep, bytecode_info_t *retval,
     for(cur=sl; cur; cur=cur->next) 
     {
 	strcount++;
-	assert(cur->s!=NULL);
+	assert((cur->s)!=NULL);
+	
 	/* Bounds check for each string before we allocate it */
 	if(!atleast(retval,codep+2)) 
 	{return -1;}
+
 	retval->data[codep++].len = strlen(cur->s);
 	retval->data[codep++].str = cur->s;
     }

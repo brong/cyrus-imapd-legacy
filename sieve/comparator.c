@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.9 2002/09/10 20:31:34 rjs3 Exp $
+ * $Id: comparator.c,v 1.7.12.10 2003/01/22 01:11:02 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -308,7 +308,9 @@ comparator_t *lookup_comp(int comp, int mode, int relation,
 
     ret = NULL;
     *comprock = NULL;
-    /* printf("%d %d %d     ", comp, mode, relation); */
+#if VERBOSE
+    printf("%d %d %d     \n", comp, mode, relation); 
+#endif
     switch (comp)
       {
       case B_OCTET:    

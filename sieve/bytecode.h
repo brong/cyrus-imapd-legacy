@@ -104,8 +104,8 @@ enum bytecode_tags {
     B_ALL,
     B_LOCALPART,
     B_DOMAIN,
-    B_USER,  /* require ?*/
-    B_DETAIL, /* require ?*/
+    B_USER,  /* require subaddress*/
+    B_DETAIL, /* require subaddress*/
 
     /* Sizes */
     B_OVER,
@@ -121,15 +121,15 @@ enum bytecode_tags {
     /* Comparators */
     B_ASCIICASEMAP,
     B_OCTET,
-    B_ASCIINUMERIC, /*require ascii-numeric*/
+    B_ASCIINUMERIC, /*require comparator-i;ascii-numeric*/
     
     /*match types*/
     B_IS,
     B_CONTAINS,
     B_MATCHES,
-    B_REGEX,/* require */
-    B_COUNT,/* require*/
-    B_VALUE /* require */
+    B_REGEX,/* require regex*/
+    B_COUNT,/* require relational*/
+    B_VALUE /* require relational*/
 
     /*priorities*/
     /*B_LOW

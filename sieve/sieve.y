@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.6 2003/01/08 23:41:52 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.7 2003/01/22 01:11:03 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -87,9 +87,9 @@ static commandlist_t *ret;
 static sieve_script_t *parse_script;
 static int check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, patternlist_t *pl);
+			     stringlist_t *sl, stringlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, patternlist_t *pl);
+			    stringlist_t *sl, stringlist_t *pl);
 static commandlist_t *build_vacation(int t, struct vtags *h, char *s);
 static commandlist_t *build_notify(int t, struct ntags *n);
 static commandlist_t *build_denotify(int t, struct dtags *n);
@@ -115,8 +115,8 @@ static int verify_header(char *s);
 static int verify_flag(char *s);
 static int verify_relat(char *s);
 #ifdef ENABLE_REGEX
-static regex_t *verify_regex(char *s, int cflags);
-static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
+static int verify_regex(char *s, int cflags);
+static int verify_regexs(stringlist_t *sl, char *comp);
 #endif
 static int ok_header(char *s);
 
@@ -304,22 +304,21 @@ dtags: /* empty */		 { $$ = new_dtags(); }
 	| dtags priority	 { if ($$->priority != /*-1*/NULL) { 
 				yyerror("duplicate priority level"); YYERROR; }
 				   else { $$->priority = $2; } }
-	| dtags comptag STRING 	 { if ($$->comptag != -1) { 
-			yyerror("duplicate comparator type tag"); YYERROR;
-				   } else {
-				       $$->comptag = $2;
+	| dtags comptag STRING 	 { if ($$->comptag != -1)
+	                             { 
+					 yyerror("duplicate comparator type tag"); YYERROR;
+				     }
+	                           $$->comptag = $2;
 #ifdef ENABLE_REGEX
-				       if ($$->comptag == REGEX) {
-					   int cflags = REG_EXTENDED |
-					       REG_NOSUB | REG_ICASE;
-					   $$->pattern =
-					       (void*) verify_regex($3, cflags);
-					   if (!$$->pattern) { YYERROR; }
-				       }
-				       else
+				   if ($$->comptag == REGEX)
+				   {
+				       int cflags = REG_EXTENDED |
+					   REG_NOSUB | REG_ICASE;
+				       if (!verify_regex($3, cflags)) { YYERROR; }
+				   }
 #endif
-					   $$->pattern = $3;
-				   } }
+				   $$->pattern = $3;
+	                          }
 	| dtags relcomp STRING  { $$ = $1;
 				   if ($$->comptag != -1) { 
 			yyerror("duplicate comparator type tag"); YYERROR; }
@@ -371,51 +370,53 @@ block: '{' commands '}'		 { $$ = $2; }
 	| '{' '}'		 { $$ = NULL; }
 	;
 
-test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
-	| ALLOF testlist	 { $$ = new_test(ALLOF); $$->u.tl = $2; }
-	| EXISTS stringlist      { $$ = new_test(EXISTS); $$->u.sl = $2; }
-	| SFALSE		 { $$ = new_test(SFALSE); }
+test:     ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
+        | ALLOF testlist	 { $$ = new_test(ALLOF); $$->u.tl = $2; }
+        | EXISTS stringlist      { $$ = new_test(EXISTS); $$->u.sl = $2; }
+        | SFALSE		 { $$ = new_test(SFALSE); }
 	| STRUE			 { $$ = new_test(STRUE); }
 	| HEADER htags stringlist stringlist
-				 { patternlist_t *pl;
-                                   if (!verify_stringlist($3, verify_header)) {
-                                     YYERROR; /* vh should call yyerror() */
-                                   }
-
-				   $2 = canon_htags($2);
+				 {
+				     if (!verify_stringlist($3, verify_header)) {
+					 YYERROR; /* vh should call yyerror() */
+				     }
+				     
+				     $2 = canon_htags($2);
 #ifdef ENABLE_REGEX
-				   if ($2->comptag == REGEX) {
-				     pl = verify_regexs($4, $2->comparator);
-				     if (!pl) { YYERROR; }
-				   }
-				   else
+				     if ($2->comptag == REGEX)
+				     {
+					 if (!(verify_regexs($4, $2->comparator)))
+					 { YYERROR; }
+				     }
 #endif
-				     pl = (patternlist_t *) $4;
-				       
-				   $$ = build_header(HEADER, $2, $3, pl);
-				   if ($$ == NULL) { 
-			yyerror("unable to find a compatible comparator");
-			YYERROR; } }
-	| addrorenv aetags stringlist stringlist
-				 { patternlist_t *pl;
-                                   if (!verify_stringlist($3, verify_header)) {
-                                     YYERROR; /* vh should call yyerror() */
-                                   }
+				     $$ = build_header(HEADER, $2, $3, $4);
+				     if ($$ == NULL) { 
+					 yyerror("unable to find a compatible comparator");
+					 YYERROR; } 
+				 }
 
-				   $2 = canon_aetags($2);
+
+        | addrorenv aetags stringlist stringlist
+				 { 
+				     if (!verify_stringlist($3, verify_header))
+				     {
+					 YYERROR; /* vh should call yyerror() */
+				     }
+				     
+				     $2 = canon_aetags($2);
 #ifdef ENABLE_REGEX
-				   if ($2->comptag == REGEX) {
-				     pl = verify_regexs($4, $2->comparator);
-				     if (!pl) { YYERROR; }
-				   }
-				   else
+				     if ($2->comptag == REGEX)
+				     {
+					 if (!( verify_regexs($4, $2->comparator)))
+					 { YYERROR; }
+				     }
 #endif
-				     pl = (patternlist_t *) $4;
-				       
-				   $$ = build_address($1, $2, $3, pl);
-				   if ($$ == NULL) { 
-			yyerror("unable to find a compatible comparator");
-			YYERROR; } }
+				     $$ = build_address($1, $2, $3, $4);
+				     if ($$ == NULL) { 
+					 yyerror("unable to find a compatible comparator");
+					 YYERROR; } 
+				 }
+
 	| NOT test		 { $$ = new_test(NOT); $$->u.t = $2; }
 	| SIZE sizetag NUMBER    { $$ = new_test(SIZE); $$->u.sz.t = $2;
 		                   $$->u.sz.n = $3; }
@@ -576,7 +577,7 @@ static int check_reqs(stringlist_t *sl)
 }
 
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, patternlist_t *pl)
+			     stringlist_t *sl, stringlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be either ADDRESS or ENVELOPE */
 
@@ -596,7 +597,7 @@ static test_t *build_address(int t, struct aetags *ae,
 }
 
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, patternlist_t *pl)
+			    stringlist_t *sl, stringlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be HEADER */
 
@@ -890,44 +891,41 @@ static int verify_flag(char *f)
 }
  
 #ifdef ENABLE_REGEX
-static regex_t *verify_regex(char *s, int cflags)
+static int verify_regex(char *s, int cflags)
 {
     int ret;
     char errbuf[100];
     regex_t *reg = (regex_t *) xmalloc(sizeof(regex_t));
 
-    if ((ret = regcomp(reg, s, cflags)) != 0) {
+     if ((ret = regcomp(reg, s, cflags)) != 0) {
 	(void) regerror(ret, reg, errbuf, sizeof(errbuf));
 	yyerror(errbuf);
 	free(reg);
-	return NULL;
-    }
-    return reg;
+	return 0;
+	}
+    free(reg);
+    return 1;
 }
 
-static patternlist_t *verify_regexs(stringlist_t *sl, char *comp)
+static int verify_regexs(stringlist_t *sl, char *comp)
 {
     stringlist_t *sl2;
-    patternlist_t *pl = NULL;
     int cflags = REG_EXTENDED | REG_NOSUB;
-    regex_t *reg;
+ 
 
     if (!strcmp(comp, "i;ascii-casemap")) {
 	cflags |= REG_ICASE;
     }
 
     for (sl2 = sl; sl2 != NULL; sl2 = sl2->next) {
-	if ((reg = verify_regex(sl2->s, cflags)) == NULL) {
-	    free_pl(pl, REGEX);
+	if ((verify_regex(sl2->s, cflags)) == 0) {
 	    break;
 	}
-	pl = (patternlist_t *) new_pl(reg, pl);
     }
     if (sl2 == NULL) {
-	free_sl(sl);
-	return pl;
+	return 1;
     }
-    return NULL;
+    return 0;
 }
 #endif
 

@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.22.2.3 2002/09/05 17:19:58 jsmith2 Exp $
+ * $Id: message.c,v 1.22.2.4 2003/01/22 01:11:03 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -493,10 +493,13 @@ char *get_address(address_part_t addrpart,
 	    break;
 
 	case ADDRESS_DETAIL:
-	    if (a->mailbox) {
+	    if (a->mailbox)
+	    {	    
 		char *p = strchr(a->mailbox, '+');
 		ret = (p ? p + 1 : NULL);
-	    } else {
+	    }
+	    else
+	    {
 		ret = NULL;
 	    }
 	    break;

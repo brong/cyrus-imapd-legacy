@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.6 2002/08/29 16:32:30 jsmith2 Exp $
+ * $Id: tree.h,v 1.3.14.7 2003/01/22 01:11:04 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -32,7 +32,6 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 /* abstract syntax tree for sieve */
 typedef struct Stringlist stringlist_t;
-typedef struct Patternlist patternlist_t;
 typedef struct Commandlist commandlist_t;
 typedef struct Test test_t;
 typedef struct Testlist testlist_t;
@@ -44,11 +43,7 @@ struct Stringlist {
     stringlist_t *next;
 };
 
-struct Patternlist {
-    void *p;
-    patternlist_t *next;   
-};
-
+ 
 struct Tag {
     int type;
     char *arg;
@@ -66,7 +61,6 @@ struct Test {
 	stringlist_t *sl; /* exists */
 	struct { /* it's a header test */
 	    int comptag;
-	    /*comparator_t *comp; not needed for bytecode!*/
 	    char * comparator;
 	    int relation;
 	    void *comprock;
@@ -75,7 +69,6 @@ struct Test {
 	} h;
 	struct { /* it's an address or envelope test */
 	    int comptag;
-	    /*comparator_t *comp; not needed for bytecode!*/
 	    int relation; 
 	    char * comparator;
 	    void *comprock;
@@ -134,7 +127,6 @@ struct Commandlist {
 };
 
 stringlist_t *new_sl(char *s, stringlist_t *n);
-patternlist_t *new_pl(void *pat, patternlist_t *n);
 tag_t *new_tag(int type, char *s);
 taglist_t *new_taglist(tag_t *t, taglist_t *n);
 test_t *new_test(int type);
@@ -143,7 +135,6 @@ commandlist_t *new_command(int type);
 commandlist_t *new_if(test_t *t, commandlist_t *y, commandlist_t *n);
 
 void free_sl(stringlist_t *sl);
-void free_pl(patternlist_t *pl, int comptag);
 void free_test(test_t *t);
 void free_tree(commandlist_t *cl);
 
