@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.35 1999/11/03 03:44:06 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.36 1999/11/03 03:53:12 leg Exp $
  */
 
 #include <stdio.h>
@@ -2448,11 +2448,9 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	case 0:
 	    mboxent = (struct mbox_entry *) data.data;
 	    break;
-
 	case EAGAIN:
 	    goto retry;
 	    break;
-
 	default:
 	    syslog(LOG_ERR, "DBERROR: error advancing: %s", strerror(r));
 	    r = IMAP_IOERROR;
