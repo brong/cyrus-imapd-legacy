@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.45 1999/11/05 17:57:49 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.46 1999/11/05 18:09:35 leg Exp $
  */
 
 #include <stdio.h>
@@ -599,7 +599,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
  done: /* ALL DATABASE OPERATIONS DONE; NEED TO DO FILESYSTEM OPERATIONS */
     if (!r && !(mbtype & MBTYPE_REMOTE)) {
 	/* recalculate root */
-	sprintf(buf2, "partition-%s", newpartition);
+	sprintf(buf2, "partition-%s", mboxent->partition);
 	root = config_getstring(buf2, (char *)0);
 	
 	/* Create new mailbox and move new mailbox list file into place */
