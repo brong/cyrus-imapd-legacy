@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.26 1999/10/20 20:39:13 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.27 1999/10/21 02:00:13 leg Exp $
  */
 
 #include <stdio.h>
@@ -64,6 +64,8 @@ extern int errno;
 #include "imap_err.h"
 #include "xmalloc.h"
 
+#include "mboxlist.h"
+
 acl_canonproc_t mboxlist_ensureOwnerRights;
 
 static char *listfname;
@@ -73,19 +75,11 @@ static int list_doingfind = 0;
 
 static int mboxlist_opensubs();
 static void mboxlist_closesubs();
-static void mboxlist_reopen();
-static void mboxlist_badline();
-static void mboxlist_parseline();
-static int mboxlist_safe_rename();
 
 static struct quota *mboxlist_newquota;
 static int mboxlist_changequota();
-static int mboxlist_safe_rename();
 
 static char *mboxlist_hash_usersubs(const char *userid);
-
-void mboxlist_open(void);
-void mboxlist_init(void);
 
 #define FNAME_MBOXLIST "/mailboxes.db"
 #define FNAME_DBDIR "/db"
@@ -197,9 +191,9 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
  * is placed in the char * pointed to by it.  If 'acl' is non-nil, a pointer
  * to the mailbox ACL is placed in the char * pointed to by it.
  */
-int mboxlist_lookup(const char *name, char **pathp, char **aclp, DB_TXN *tid)
+int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid)
 {
-    return mboxlist_mylookup(name, pathp, aclp, tid, 0);
+    return mboxlist_mylookup(name, pathp, aclp, (DB_TXN *) tid, 0);
 }
 
 /* same thing, but grab writelocks while doing the read */
@@ -553,12 +547,8 @@ mboxlist_createmailbox(char *name, int format, char *partition,
  * performed by an admin.  The operation removes the user "FOO"'s 
  * subscriptions and all sub-mailboxes of user.FOO
  */
-int mboxlist_deletemailbox(name, isadmin, userid, auth_state, checkacl)
-char *name;
-int isadmin;
-char *userid;
-struct auth_state *auth_state;
-int checkacl;
+int mboxlist_deletemailbox(char *name, int isadmin, char *userid, 
+			   struct auth_state *auth_state, int checkacl)
 {
     int r;
     char *acl;
@@ -851,13 +841,9 @@ int checkacl;
 /*
  * Rename/move a mailbox
  */
-int mboxlist_renamemailbox(oldname, newname, partition, isadmin, userid, auth_state)
-char *oldname;
-char *newname;
-char *partition;
-int isadmin;
-char *userid;
-struct auth_state *auth_state;
+int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
+			   int isadmin, char *userid, 
+			   struct auth_state *auth_state)
 {
     int r;
     long access;
@@ -1098,14 +1084,8 @@ struct auth_state *auth_state;
  * pointer, removes the ACL entry for 'identifier'.   'isadmin' is
  * nonzero if user is a mailbox admin.  'userid' is the user's login id.
  */
-int
-mboxlist_setacl(name, identifier, rights, isadmin, userid, auth_state)
-char *name;
-char *identifier;
-char *rights;
-int isadmin;
-char *userid;
-struct auth_state *auth_state;
+int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin, 
+		    char *userid, struct auth_state *auth_state)
 {
     int useridlen = strlen(userid);
     int r;
@@ -1291,13 +1271,9 @@ struct auth_state *auth_state;
  * and returns that value.  'rock' is passed along as an argument to proc in
  * case it wants some persistant storage or extra data.
  */
-int mboxlist_findall(pattern, isadmin, userid, auth_state, proc, rock)
-char *pattern;
-int isadmin;
-char *userid;
-struct auth_state *auth_state;
-int (*proc)();
-void* rock;
+int mboxlist_findall(char *pattern, int isadmin, char *userid, 
+		     struct auth_state *auth_state, 
+		     int (*proc)(), void *rock)
 {
     struct glob *g;
     char usermboxname[MAX_MAILBOX_NAME+1];
@@ -1612,12 +1588,8 @@ void* rock;
  * is the user's login id.  For each matching mailbox, calls
  * 'proc' with the name of the mailbox.
  */
-int mboxlist_findsub(pattern, isadmin, userid, auth_state, proc)
-char *pattern;
-int isadmin;
-char *userid;
-struct auth_state *auth_state;
-int (*proc)();
+int mboxlist_findsub(char *pattern, int isadmin, char *userid, 
+		     struct auth_state *auth_state, int (*proc)())
 {
     int subsfd;
     const char *subs_base;
@@ -1908,12 +1880,8 @@ int (*proc)();
  * Change 'user's subscription status for mailbox 'name'.
  * Subscribes if 'add' is nonzero, unsubscribes otherwise.
  */
-int 
-mboxlist_changesub(name, userid, auth_state, add)
-const char *name;
-const char *userid;
-struct auth_state *auth_state;
-int add;
+int mboxlist_changesub(const char *name, const char *userid, 
+		       struct auth_state *auth_state, int add)
 {
     int r;
     char *acl;
@@ -2000,10 +1968,7 @@ int add;
 /*
  * Set the quota on or create a quota root
  */
-int
-mboxlist_setquota(root, newquota)
-const char *root;
-int newquota;
+int mboxlist_setquota(const char *root, int newquota)
 {
     char quota_path[MAX_MAILBOX_PATH];
     char pattern[MAX_MAILBOX_PATH];
@@ -2135,11 +2100,7 @@ int newquota;
  * sorted array 'group'.  Mark the ones we have seen in the array
  * 'seen'
  */
-int
-mboxlist_syncnews(num, group, seen)
-int num;
-char **group;
-int *seen;
+int mboxlist_syncnews(int num, char **group, int *seen)
 {
     DB_TXN *tid;
     DB_TXNMGR *txnp = dbenv.tx_info;
