@@ -1,5 +1,5 @@
 /* collectnews.c -- program to add news articles to relevant header files
- $Id: collectnews.c,v 1.19.4.1 1999/11/02 20:56:36 leg Exp $
+ $Id: collectnews.c,v 1.19.4.2 1999/11/02 21:05:04 leg Exp $
  
  # Copyright 1998 Carnegie Mellon University
  # 
@@ -40,6 +40,7 @@
 #include "imap_err.h"
 #include "mailbox.h"
 #include "xmalloc.h"
+#include "mboxlist.h"
 
 extern int errno;
 
