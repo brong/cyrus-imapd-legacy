@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.9 1999/11/03 03:45:37 leg Exp $
+ * $Id: gun.c,v 1.1.2.10 1999/11/03 03:53:31 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -245,6 +245,9 @@ void free_cb(struct cb *ptr)
 void kill_cb(struct cb *ptr)
 {
     struct cb *p2;
+
+    syslog(LOG_ERR, "lost connection with proxy");
+    fprintf(stderr, "lost connection with proxy\n");
 
     /* die proxy die
        well, hopefully you're already dead */
