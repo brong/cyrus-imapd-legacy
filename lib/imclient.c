@@ -1,5 +1,5 @@
 /* imclient.c -- Streaming IMxP client library
- * $Id: imclient.c,v 1.58.2.4 2001/08/03 15:05:34 rjs3 Exp $
+ * $Id: imclient.c,v 1.58.2.5 2001/08/20 17:07:02 rjs3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -81,6 +81,7 @@
 #include "imclient.h"
 #include "nonblock.h"
 #include "util.h"
+#include "iptostring.h"
 
 extern int errno;
 
@@ -1202,30 +1203,6 @@ void fillin_interactions(struct imclient *context,
   }
 }
 
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
-}
-
 /*
  * Params:
  *  mechlist: list of mechanisms seperated by spaces
@@ -1273,10 +1250,12 @@ static int imclient_authenticate_sub(struct imclient *imclient,
   if (getsockname(imclient->fd,(struct sockaddr *)&saddr_l,&addrsize)!=0)
       return 1;
 
-  if(iptostring(&saddr_l, localip, 60) != SASL_OK)
+  if(iptostring((const struct sockaddr *)&saddr_l, sizeof(struct sockaddr_in),
+		localip, 60) != 0)
       return 1;
 
-  if(iptostring(&saddr_r, remoteip, 60) != SASL_OK)
+  if(iptostring((const struct sockaddr *)&saddr_r, sizeof(struct sockaddr_in),
+		remoteip, 60) != 0)
       return 1;
 
   saslresult=sasl_setprop(imclient->saslconn, SASL_IPREMOTEPORT, remoteip);

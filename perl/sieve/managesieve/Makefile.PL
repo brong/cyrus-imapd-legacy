@@ -40,7 +40,7 @@
 use ExtUtils::MakeMaker;
 
 my $SASL_INC = $ENV{SASL_INC};
-my $SASL_LIB = $ENV{SASL_LIB} || "-lsasl";
+my $SASL_LIB = $ENV{SASL_LIB} || "-lsasl2";
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
