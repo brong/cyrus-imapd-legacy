@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.9 2001/08/01 22:16:00 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.10 2001/08/02 17:08:10 ken3 Exp $
  */
 #include <config.h>
 
@@ -132,7 +132,7 @@ static mailbox_decideproc_t expungedeleted;
 
 static void cmd_apop(char *response);
 static int apop_enabled(void);
-static char popd_apop_chal[300]; /* timestamp (44) + config_servername (256) */
+static char popd_apop_chal[45 + MAXHOSTNAMELEN + 1]; /* <rand.time@hostname> */
 
 static void cmd_auth();
 static void cmd_capa();
@@ -325,9 +325,16 @@ int service_main(int argc, char **argv, char **envp)
        TLS negotiation immediatly */
     if (pop3s == 1) cmd_starttls(1);
 
+    /* Create APOP challenge for banner */
+    if (!sasl_mkchal(popd_saslconn, popd_apop_chal, sizeof(popd_apop_chal), 1)) {
+	syslog(LOG_ERROR, "APOP disabled: can't create challenge");
+	*popd_apop_chal = 0;
+    }
+
     prot_printf(popd_out, "+OK %s Cyrus POP3 %s server ready\r\n",
 		apop_enabled() ? popd_apop_chal : config_servername,
 		CYRUS_VERSION);
+
     cmdloop();
 
     /* QUIT executed */
@@ -810,22 +817,11 @@ static void cmd_starttls(int pop3s __attribute__((unused)))
 
 static int apop_enabled(void)
 {
-    static int chal_done = 0;
-
-    /* Check if it is enabled (challenge == NULL) */
-    if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
-	return 0;
-
-    /* Create APOP challenge string for banner */
-    if (!chal_done &&
-	!sasl_mkchal(popd_saslconn, popd_apop_chal, sizeof(popd_apop_chal), 1)) {
-	syslog(LOG_WARNING,
-	       "can't create APOP challenge string - APOP disabled");
-	popd_apop_chal[0] = '\0';
-    }
-
-    chal_done = 1;
-    return *popd_apop_chal;
+    /* Check if pseudo APOP mechanism is enabled (challenge == NULL) */
+    if (sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK) return 0;
+    /* Check if we have a challenge string */
+    if (!*popd_apop_chal) return 0;
+    return 1;
 }
 
 static void cmd_apop(char *response)
@@ -844,10 +840,6 @@ static void cmd_apop(char *response)
 	prot_printf(popd_out, "-ERR Must give PASS command\r\n");
 	return;
     }
-
-    /* Check if it is enabled (challenge == NULL) */
-    if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
-	fatal("cmd_apop called without working sasl_checkapop", EC_SOFTWARE);
 
     sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
