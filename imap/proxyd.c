@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.7 1999/11/05 23:08:38 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.8 1999/11/06 23:13:25 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1169,7 +1169,9 @@ cmdloop()
     char motdfilename[1024];
     char hostname[MAXHOSTNAMELEN+1];
     int c, i;
-    time_t mark;
+    time_t mark, now;
+    struct timeval tv;
+    fd_set rfds;
     int usinguid, havepartition, havenamespace, oldform;
     static struct buf tag, cmd, arg1, arg2, arg3, arg4;
     char *p;
@@ -1194,17 +1196,35 @@ cmdloop()
 	    shutdown_file(fd);
 	}
 
-	i = 0;
-	mark = time(NULL) - IDLE_TIMEOUT;
-	while (backend_cached[i]) {
-	    if ((backend_cached[i]->lastused < mark) &&
-		backend_cached[i] != backend_current) {
-		/* idle and not our current server */
-		proxyd_downserver(backend_cached[i]);
-	    }
-	    i++;
-	}
+	do {
+	    now = time(NULL);
+	    mark = IDLE_TIMEOUT + 1;
+	    while (backend_cached[i]) {
+		if ((backend_cached[i]->lastused != 0) &&
+		    (backend_cached[i] != backend_current)) {
+		    /* server i is connected and not our current server */
 
+		    if (backend_cached[i]->lastused + IDLE_TIMEOUT < now) {
+			/* idle too long */
+			proxyd_downserver(backend_cached[i]);
+		    } else {
+			/* it will timeout in mark seconds */
+			int timeout = backend_cached[i]->lastused + 
+			                IDLE_TIMEOUT - now;
+
+			mark = (timeout < mark ? timeout : mark);
+		    }
+		}
+		i++;
+	    }
+	    tv.tv_sec = mark;
+	    tv.tv_usec = 0;
+	    
+	    FD_ZERO(&rfds);
+	    FD_SET(0, &rfds);
+	} while ((mark != IDLE_TIMEOUT + 1) &&
+		 (select(1, &rfds, NULL, NULL, &tv) == 0));
+	
 	/* Parse tag */
 	c = getword(&tag);
 	if (c == EOF) {
@@ -1214,7 +1234,8 @@ cmdloop()
 	    }
 	    shut_down(0);
 	}
-	if (c != ' ' || !imparse_isatom(tag.s) || (tag.s[0] == '*' && !tag.s[1])) {
+	if (c != ' ' || !imparse_isatom(tag.s) || 
+	    (tag.s[0] == '*' && !tag.s[1])) {
 	    prot_printf(proxyd_out, "* BAD Invalid tag\r\n");
 	    eatline(c);
 	    continue;
@@ -2797,109 +2818,35 @@ void cmd_setacl(char *tag, char *name, char *identifier, char *rights)
  */
 void cmd_getquota(char *tag, char *name)
 {
-#ifdef NEEDS_PROXY
-    int r;
-    struct quota quota;
-    char buf[MAX_MAILBOX_PATH];
-
-    quota.root = name;
-    quota.fd = -1;
-
-    if (!imapd_userisadmin) r = IMAP_PERMISSION_DENIED;
-    else {
-	mailbox_hash_quota(buf, quota.root);
-	quota.fd = open(buf, O_RDWR, 0);
-	if (quota.fd == -1) {
-	    r = IMAP_QUOTAROOT_NONEXISTENT;
-	}
-	else {
-	    r = mailbox_read_quota(&quota);
-	}
-    }
-    
-    if (!r) {
-	prot_printf(imapd_out, "* QUOTA ");
-	printastring(quota.root);
-	prot_printf(imapd_out, " (");
-	if (quota.limit >= 0) {
-	    prot_printf(imapd_out, "STORAGE %u %d",
-			quota.used/QUOTA_UNITS, quota.limit);
-	}
-	prot_printf(imapd_out, ")\r\n");
-    }
-
-    if (quota.fd != -1) {
-	close(quota.fd);
-    }
-
-    if (r) {
-	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
-	return;
-    }
-    
-    prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		error_message(IMAP_OK_COMPLETED));
-#endif
+    prot_printf(proxyd_out, "%s NO not supported from proxy server\r\n");
 }
-
 
 /*
  * Perform a GETQUOTAROOT command
  */
 void cmd_getquotaroot(char *tag, char *name)
 {
-#ifdef NEEDS_PROXY
     char mailboxname[MAX_MAILBOX_NAME+1];
-    struct mailbox mailbox;
+    char *server;
     int r;
-    int doclose = 0;
+    struct backend *s;
 
-    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    r = mboxname_tointernal(name, proxyd_userid, mailboxname);
+    if (!r) r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
+    if (!r) s = proxyd_findserver(server);
 
-    if (!r) {
-	r = mailbox_open_header(mailboxname, imapd_authstate, &mailbox);
+    if (s) {
+	prot_printf(s->out, "%s Getquotaroot {%d+}\r\n%s\r\n",
+		    tag, strlen(name), name);
+	pipe_including_tag(s, tag);
+    } else {
+	r = IMAP_SERVER_UNAVAILABLE;
     }
-
-    if (!r) {
-	doclose = 1;
-	if (!imapd_userisadmin && !(mailbox.myrights & ACL_READ)) {
-	    r = (mailbox.myrights & ACL_LOOKUP) ?
-	      IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
-	}
-    }
-
-    if (!r) {
-	prot_printf(imapd_out, "* QUOTAROOT ");
-	printastring(name);
-	if (mailbox.quota.root) {
-	    prot_printf(imapd_out, " ");
-	    printastring(mailbox.quota.root);
-	    r = mailbox_read_quota(&mailbox.quota);
-	    if (!r) {
-		prot_printf(imapd_out, "\r\n* QUOTA ");
-		printastring(mailbox.quota.root);
-		prot_printf(imapd_out, " (");
-		if (mailbox.quota.limit >= 0) {
-		    prot_printf(imapd_out, "STORAGE %u %d",
-				mailbox.quota.used/QUOTA_UNITS,
-				mailbox.quota.limit);
-		}
-		prot_putc(')', imapd_out);
-	    }
-	}
-	prot_printf(imapd_out, "\r\n");
-    }
-
-    if (doclose) mailbox_close(&mailbox);
 
     if (r) {
-	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+	prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
 	return;
     }
-    
-    prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		error_message(IMAP_OK_COMPLETED));
-#endif
 }
 
 /*
@@ -2908,60 +2855,8 @@ void cmd_getquotaroot(char *tag, char *name)
  */
 void cmd_setquota(char *tag, char *quotaroot)
 {
-#ifdef NEEDS_PROXY
-    int newquota = -1;
-    int badresource = 0;
-    int c;
-    static struct buf arg;
-    char *p;
-    int r;
-
-    c = prot_getc(imapd_in);
-    if (c != '(') goto badlist;
-
-    c = getword(&arg);
-    if (c != ')' || arg.s[0] != '\0') {
-	for (;;) {
-	    if (c != ' ') goto badlist;
-	    if (strcasecmp(arg.s, "storage") != 0) badresource = 1;
-	    c = getword(&arg);
-	    if (c != ' ' && c != ')') goto badlist;
-	    if (arg.s[0] == '\0') goto badlist;
-	    newquota = 0;
-	    for (p = arg.s; *p; p++) {
-		if (!isdigit(*p)) goto badlist;
-		newquota = newquota * 10 + *p - '0';
-	    }
-	    if (c == ')') break;
-	}
-    }
-    c = prot_getc(imapd_in);
-    if (c == '\r') c = prot_getc(imapd_in);
-    if (c != '\n') {
-	prot_printf(imapd_out, "%s BAD Unexpected extra arguments to SETQUOTA\r\n", tag);
-	eatline(c);
-	return;
-    }
-
-    if (badresource) r = IMAP_UNSUPPORTED_QUOTA;
-    else if (!imapd_userisadmin) r = IMAP_PERMISSION_DENIED;
-    else {
-	r = mboxlist_setquota(quotaroot, newquota);
-    }
-
-    if (r) {
-	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
-	return;
-    }
-    
-    prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		error_message(IMAP_OK_COMPLETED));
-    return;
-
- badlist:
-    prot_printf(imapd_out, "%s BAD Invalid quota list in Setquota\r\n", tag);
-    eatline(c);
-#endif
+    prot_printf(proxyd_out, "%s NO not supported from proxy server\r\n");
+    eatline(prot_getc(proxyd_in));
 }
 
 /*
