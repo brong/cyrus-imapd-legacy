@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.4 2002/08/22 20:06:33 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.5 2002/08/29 16:32:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -586,6 +586,7 @@ static test_t *build_address(int t, struct aetags *ae,
 	/*	ret->u.ae.comp = lookup_comp(ae->comparator, ae->comptag,
 		ae->relation, &ret->u.ae.comprock);*/
 	ret->u.ae.relation=ae->relation;
+	ret->u.ae.comparator=strdup(ae->comparator);
 	ret->u.ae.sl = sl;
 	ret->u.ae.pl = pl;
 	ret->u.ae.addrpart = ae->addrtag;
@@ -610,6 +611,7 @@ static test_t *build_header(int t, struct htags *h,
 	/*ret->u.h.comp = lookup_comp(h->comparator, h->comptag,
 				    h->relation, &ret->u.h.comprock);*/
 	ret->u.h.relation=h->relation;
+	ret->u.h.comparator=strdup(h->comparator);
 	ret->u.h.sl = sl;
 	ret->u.h.pl = pl;
 	free_htags(h);
@@ -643,7 +645,7 @@ static commandlist_t *build_notify(int t, struct ntags *n)
     commandlist_t *ret = new_command(t);
 
     assert(t == NOTIFY);
-
+    printf("%s\n", n->message);
     if (ret) {
 	ret->u.n.method = n->method; n->method = NULL;
 	ret->u.n.id = n->id; n->id = NULL;
@@ -666,6 +668,7 @@ static commandlist_t *build_denotify(int t, struct dtags *d)
 	/*ret->u.d.comp = lookup_comp("i;ascii-casemap", d->comptag,
 	  d->relation, &ret->u.d.comprock);*/
 	ret->u.d.relation=d->relation;
+	/*	ret->u.d.comparator=strdup(d->comparator);*/
 	ret->u.d.pattern = d->pattern; d->pattern = NULL;
 	ret->u.d.priority = d->priority;
 	free_dtags(d);
@@ -775,8 +778,13 @@ static struct ntags *canon_ntags(struct ntags *n)
 {
     if (n->priority == NULL) { n->priority = "normal"; }
     if (n->message == NULL) { n->message = strdup("$from$: $subject$"); }
-
+    if (n->method == NULL) { n->method = strdup("none"); }
     return n;
+}
+static struct dtags *canon_dtags(struct dtags *d)
+{
+    if (d->priority == NULL) { d->priority = "ALL"; }
+       return d;
 }
 
 static void free_ntags(struct ntags *n)

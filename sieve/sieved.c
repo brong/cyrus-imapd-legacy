@@ -154,8 +154,8 @@ int printComparison(bytecode_t *d ,int i)
     case B_MATCHES:printf("Matches");break;
     case B_REGEX:printf("Regex");break;
     case B_COUNT: printf("Count");
-      i++;
-      switch(d[i].value)
+     
+      switch(d[i+1].value)
 	{
 	case B_GT: printf(" greater than "); break;   
 	case B_GE: printf(" greater than or equal ");break;
@@ -165,9 +165,9 @@ int printComparison(bytecode_t *d ,int i)
 	case B_EQ: printf(" equal ");break;
 	}
       break;
-    case B_VALUE:printf("Value");break;
-      i++;
-      switch(d[i].value)
+    case B_VALUE:printf("Value");
+     
+      switch(d[i+1].value)
 	{
 	case B_GT: printf(" greater than "); break;   
 	case B_GE: printf(" greater than or equal ");break;
@@ -178,8 +178,14 @@ int printComparison(bytecode_t *d ,int i)
 	}
       break;
     }
+   switch (d[i+2].value)
+     {
+     case B_ASCIICASEMAP: printf("   (ascii-casemap) "); break;
+     case B_OCTET: printf("    (octet) "); break;
+     case B_ASCIINUMERIC:  printf("   (ascii-numeric) "); break;
+     }
    printf("\n");
-  return i+1;
+  return i+3;
 }
 
 
@@ -248,10 +254,11 @@ int dump2_test(bytecode_t * d, int i)
       case B_USER:printf("user");break;
       case B_DETAIL:printf("detail");break;
       }
-    printf("Headers:");
+    printf("              Headers:");
     i=write_list(d[i].len, i+1, d);
-    printf("Data:");
+    printf("              Data:");
     i=write_list(d[i].len, i+1, d);
+    printf("             ]\n");
     break;
   case BC_ENVELOPE:/*8*/
     printf("Envelope (");
@@ -265,18 +272,20 @@ int dump2_test(bytecode_t * d, int i)
       case B_USER:printf("user");break;
       case B_DETAIL:printf("detail");break;
       }
-    printf("Headers:");
+    printf("              Headers:");
     i=write_list(d[i+3].len, i+4, d);
-    printf("Data:");
+    printf("              Data:");
     i=write_list(d[i].len, i+1, d);
+    printf("             ]\n");
     break;
   case BC_HEADER:/*9*/
-    printf("Header (");
+    printf("Header [");
     i= printComparison(d, i+1);
     printf("              Headers: ");
     i=write_list(d[i].len, i+1, d);
-    printf("Data: ");
+    printf("              Data: ");
     i=write_list(d[i].len, i+1, d);
+    printf("             ]\n");
     break;
   default:
     printf("WERT %d ",d[i].value);
@@ -311,8 +320,8 @@ void dump2(bytecode_t *d, int len)
 	    break;
 	    
 	case B_REJECT:/*3*/
-	    printf("%d: REJECT {%d}\n%s\n",i,d[i+1].len,(char *)&(d[i+2].str));
-	    printf("%d words\n", (ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
+	    printf("%d: REJECT {length %d}\n%s  ",i, d[i+1].len,(char *)&(d[i+2].str));
+	    printf("(%d words)\n", (ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
 	    i+=(1+(ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
 	    i++;
 	    break;
@@ -333,13 +342,13 @@ void dump2(bytecode_t *d, int len)
 	    printf("%d: IF ",i);
 	    testtemp=i;
 	    i = dump2_test(d,i+3);
-	    printf(" THEN(%d) \nPOST(%d)\n ",  d[testtemp+1].jump/4,d[testtemp+2].jump/4);
+	    printf("   THEN(%d) \n   POST(%d)\n",  d[testtemp+1].jump/4,d[testtemp+2].jump/4);
 	    break;
 	case B_IFELSE:/*7*/
 	    printf("%d: IF ",i);
 	    testtemp=i;
 	    i = dump2_test(d,i+4);
-	    printf("THEN(%d) \nELSE(%d) \nPOST(%d)\n",
+	    printf("   THEN(%d) \n   ELSE(%d) \n   POST(%d)\n",
 		   d[testtemp+1].jump/4,d[testtemp+2].jump/4,
 		   d[testtemp+3].jump/4);
 	    break;

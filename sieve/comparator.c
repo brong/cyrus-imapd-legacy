@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.5 2002/08/22 20:06:33 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.6 2002/08/29 16:32:29 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -69,7 +69,6 @@ static int rel_gt(const char *text, const char *pat, void *rock)
 static int rel_ge(const char *text, const char *pat, void *rock)
 {
     int (*compar)(const void *, const void *) = rock;
-
     return (compar(text, pat) >= 0);
 }
 
@@ -83,7 +82,6 @@ static int rel_lt(const char *text, const char *pat, void *rock)
 static int rel_le(const char *text, const char *pat, void *rock)
 {
     int (*compar)(const void *, const void *) = rock;
-
     return (compar(text, pat) <= 0);
 }
 
@@ -277,27 +275,21 @@ static comparator_t *lookup_rel(int relation)
     ret = NULL;
     switch (relation)
       {
-      case EQ:
       case B_EQ:
 	ret = &rel_eq;
 	break;
       case B_NE:
-      case NE:
 	ret = &rel_ne; 
 	break;
       case B_GT: 
-      case GT:
 	ret = &rel_gt; 
 	break;
-      case GE:
       case B_GE:
          ret = &rel_ge; 
 	 break;
-      case LT:
       case B_LT:
 	ret = &rel_lt; 
 	break;
-      case LE:
       case B_LE:
 	ret = &rel_le; 
       }
@@ -305,85 +297,75 @@ static comparator_t *lookup_rel(int relation)
     return ret;
 }
 
-comparator_t *lookup_comp(const char *comp, int mode, int relation,
+comparator_t *lookup_comp(int comp, int mode, int relation,
 			  void **comprock)
 {
     comparator_t *ret;
 
     ret = NULL;
     *comprock = NULL;
-    printf("%s %d %d \n", comp, mode, relation); 
-    if (!strcmp(comp, "i;octet")) {
+    printf("\n%d %d %d \n", comp, mode, relation); 
+    switch (comp)
+      {
+      case B_OCTET:    
  	switch (mode) {
-	case IS:
-	case B_IS:
+	  case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &octet_cmp;
 	    break;
-	case CONTAINS:
-	case B_CONTAINS:
+	  case B_CONTAINS:
 	    ret = &octet_contains;
 	    break;
-	case MATCHES:
-	case B_MATCHES:
+	  case B_MATCHES:
 	    ret = &octet_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
-	case B_REGEX:
+	  case B_REGEX:
 	    ret = &octet_regex;
 	    break;
 #endif
-	case VALUE:
-	case B_VALUE:
+	  case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &octet_cmp;
 	    break;
-	}
-    }else if (!strcmp(comp, "i;ascii-casemap")) {
+	  }
+	break;
+      case B_ASCIICASEMAP:
      	switch (mode) {
-	case IS:
 	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &strcasecmp;
 	    break;
-	case CONTAINS:
 	case B_CONTAINS:
 	    ret = &ascii_casemap_contains;
 	    break;
-	case MATCHES:
 	case B_MATCHES:
 	    ret = &ascii_casemap_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
 	case B_REGEX:
 	    /* the ascii-casemap destinction is made during
 	       the compilation of the regex in verify_regex() */
 	    ret = &octet_regex;
 	    break;
 #endif
-	case VALUE:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &strcasecmp;
 	    break;
 	}
-    } else if (!strcmp(comp, "i;ascii-numeric")) {
+      case B_ASCIINUMERIC:
 	switch (mode) {
-	case IS:
 	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &ascii_numeric_cmp;
 	    break;
-	case COUNT:
-	case VALUE:
 	case B_COUNT:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &ascii_numeric_cmp;
 	    break;
 	}
-    }
+      }
     return ret;
 }

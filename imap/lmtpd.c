@@ -1,6 +1,6 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.79.2.2 2002/06/14 18:36:50 jsmith2 Exp $
+ * $Id: lmtpd.c,v 1.79.2.3 2002/08/29 16:32:21 jsmith2 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -801,7 +801,7 @@ static int sieve_notify(void *ac,
 	/* count options */
 	while (nc->options[nopt]) nopt++;
 
-	notify(nc->method ? nc->method : notifier,
+	notify(!strcmp("none",nc->method) ? nc->method : notifier,
 	       "SIEVE", nc->priority, sd->username, NULL,
 	       nopt, nc->options, nc->message);
     }

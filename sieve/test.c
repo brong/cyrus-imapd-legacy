@@ -2,7 +2,7 @@
   
  * test.c -- tester for libsieve
  * Larry Greenfield
- * $Id: test.c,v 1.15.12.4 2002/06/17 17:13:26 jsmith2 Exp $
+ * $Id: test.c,v 1.15.12.5 2002/08/29 16:32:30 jsmith2 Exp $
  *
  * usage: "test message script"
  */
@@ -384,7 +384,6 @@ int keep(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
     int *force_fail = (int*) ic;
 
     printf("keeping message '%s'\n", m->name);
-
     if (kc->imapflags->flag) {
 	int n;
 	printf("\twith flags");
@@ -640,7 +639,7 @@ static int test_comparator(void)
     int didfail = 0;
 
     for (t = tc; t->comp != NULL; t++) {
-	comparator_t *c = lookup_comp(t->comp, t->mode, NULL, NULL);
+	comparator_t *c = lookup_comp(t->comp, t->mode, -1, NULL);
 	int res;
 	char *mode;
 

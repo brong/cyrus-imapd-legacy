@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.11 2002/08/22 20:06:32 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.12 2002/08/29 16:32:28 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -197,7 +197,7 @@ static int bc_relation_generate(int codep, bytecode_info_t *retval, int relat)
       retval->data[codep].value= B_NE;
       break;
     default:
-      return -1;
+      retval->data[codep].value=  -1;
     }
   retval->curlen++;
   return 0;
@@ -270,30 +270,34 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 	    if(!atleast(retval,codep+2)) return -1;
 	    retval->data[codep++].op = BC_HEADER;
 	    switch(t->u.h.comptag) {
-	        case IS:
-		    retval->data[codep++].value = B_IS; break;
-      	        case CONTAINS:
+	        case IS: 
+		   retval->data[codep++].value = B_IS; 	 break;
+	        case CONTAINS:
 		  retval->data[codep++].value = B_CONTAINS; break;
 	        case MATCHES:
-		    retval->data[codep++].value = B_MATCHES; break;
+		  retval->data[codep++].value = B_MATCHES;  break;
 #ifdef ENABLE_REGEX
 	        case REGEX:
-		    retval->data[codep++].value = B_REGEX; break;
+		  retval->data[codep++].value = B_REGEX;  break;
 #endif
 	        case COUNT:
-		    retval->data[codep++].value = B_COUNT;
-		    if (bc_relation_generate(codep++,retval, t->u.h.relation)<0)
-			    {return -1;}
-		    break;
+		  retval->data[codep++].value = B_COUNT; break;
 	        case VALUE:
-		    retval->data[codep++].value = B_VALUE; 
-		    if (bc_relation_generate(codep++, retval, t->u.h.relation)<0)
-			    {return -1;}
-		    break;
+		  retval->data[codep++].value = B_VALUE; break;
 	        default:
-		    return -1;
+		  return -1;
 	    }
-	    retval->curlen+=2;	    
+	    /*relation*/
+	    bc_relation_generate(codep++, retval, t->u.h.relation);
+	    /*comparator*/
+	    if (!strcmp (t->u.h.comparator, "i;octet"))
+	      retval->data[codep++].value = B_OCTET;
+	    else if (!strcmp (t->u.h.comparator, "i;ascii-casemap"))
+	      retval->data[codep++].value = B_ASCIICASEMAP;
+	    else if (!strcmp (t->u.h.comparator, "i;ascii-numeric"))
+	      retval->data[codep++].value = B_ASCIINUMERIC;
+
+	    retval->curlen+=3;	    
 	    codep = bc_stringlist_generate(codep, retval, t->u.h.sl);
 	    return bc_stringlist_generate(codep, retval, t->u.h.pl);	    
 
@@ -306,32 +310,33 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 		                         ? BC_ADDRESS : BC_ENVELOPE;
 	    switch(t->u.ae.comptag) {
 	        case IS:
-		    retval->data[codep++].value = B_IS;
-		    break;
+		    retval->data[codep++].value = B_IS;break;
       	        case CONTAINS:
-		    retval->data[codep++].value = B_CONTAINS;
-		    break;
+		    retval->data[codep++].value = B_CONTAINS;break;
 	        case MATCHES:
-		    retval->data[codep++].value = B_MATCHES;
+		    retval->data[codep++].value = B_MATCHES; break;
 		    break;
 #ifdef ENABLE_REGEX
 	        case REGEX:
-		    retval->data[codep++].value = B_REGEX;
-		    break;
+		    retval->data[codep++].value = B_REGEX; break;
 #endif
 	        case COUNT:
-		   retval->data[codep++].value = B_COUNT;
-		   if (bc_relation_generate(codep++,retval, t->u.ae.relation)<0)
-		     {return -1;}
-		   break;
+		   retval->data[codep++].value = B_COUNT; break;
 	        case VALUE:
-		   retval->data[codep++].value = B_VALUE;
-		   if (bc_relation_generate(codep++,retval, t->u.ae.relation)<0)
-		     {return -1;}
-		   break;
+		   retval->data[codep++].value = B_VALUE;break;
 	        default:
 		    return -1;
 	    }
+	    /*relation*/
+	    bc_relation_generate(codep++, retval, t->u.ae.relation);
+	    /*comparator*/
+	    if (!strcmp (t->u.ae.comparator, "i;octet"))
+	      retval->data[codep++].value = B_OCTET;
+	    else if (!strcmp (t->u.ae.comparator, "i;ascii-casemap"))
+	      retval->data[codep++].value = B_ASCIICASEMAP;
+	    else if (!strcmp (t->u.ae.comparator, "i;ascii-numeric"))
+	      retval->data[codep++].value = B_ASCIINUMERIC;
+	    /*address part*/
 	    switch(t->u.ae.addrpart) {
 	        case ALL:
 		    retval->data[codep++].value = B_ALL;
@@ -351,7 +356,7 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 	        default:
 		    return -1;
 	    }
-	    retval->curlen+=3;	    
+	    retval->curlen+=4;	    
 	    codep = bc_stringlist_generate(codep, retval, t->u.h.sl);
 	    return bc_stringlist_generate(codep, retval, t->u.h.pl);
 	    
@@ -488,7 +493,6 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	     *method/id /options list/priority/message */
 	    if(!atleast(retval,codep+9)) return -1;
 	    retval->data[codep++].op = B_NOTIFY;
-
 	    retval->data[codep++].len = strlen(c->u.n.method);
 	    retval->data[codep++].str = c->u.n.method;
 	    retval->data[codep++].len = strlen(c->u.n.id);
@@ -766,22 +770,21 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
         case BC_HEADER:
         {
 	    int ret;
-	    /* Drop comparitor */
+	    /* Drop match type and comparator */
 	    if(write(fd, &bc->data[codep].value,
 		     sizeof(bc->data[codep].value)) == -1)
 		return -1;
+	    if(write(fd, &bc->data[codep+1].value,
+		     sizeof(bc->data[codep+1].value)) == -1)
+		return -1;
+	    filelen += 2*sizeof(int);
+	    codep += 2;    
+	    /*now drop relation*/
+	    if(write(fd, &bc->data[codep].value,
+		     sizeof(bc->data[codep].value)) == -1)
+	      return -1;
 	    filelen += sizeof(int);
 	    codep++;
-	    /*now drop relation(if needed)*/
-	    if (bc->data[codep-1].value == B_COUNT ||  
-		bc->data[codep-1].value == B_VALUE)
-	      {
-		if(write(fd, &bc->data[codep].value,
-			 sizeof(bc->data[codep].value)) == -1)
-		  return -1;
-		filelen += sizeof(int);
-		codep++;
-	      }
 	    /* Now drop headers */
 	    ret = emit_stringlist(fd, &codep, bc);
 	    if(ret < 0) return -1;
@@ -797,7 +800,7 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
         case BC_ENVELOPE:
         {
 	    int ret;
-	    /* Drop Comparitor & type */
+	    /* Drop match type and Comparator  */
 	    if(write(fd, &bc->data[codep].value,
 		     sizeof(bc->data[codep].value)) == -1)
 		return -1;
@@ -805,7 +808,19 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
 		     sizeof(bc->data[codep+1].value)) == -1)
 		return -1;
 	    filelen += 2*sizeof(int);
-	    codep += 2;
+	    codep += 2;    
+	    /*now drop relation*/
+	    if(write(fd, &bc->data[codep].value,
+		     sizeof(bc->data[codep].value)) == -1)
+	      return -1;
+	    filelen += sizeof(int);
+	    codep++;
+	    /*now drop address part*/
+	    if(write(fd, &bc->data[codep].value,
+		     sizeof(bc->data[codep].value)) == -1)
+	      return -1;
+	    filelen += sizeof(int);
+	    codep++;
 	    /* Now drop headers */
 	    ret = emit_stringlist(fd, &codep, bc);
 	    if(ret < 0) return -1;
@@ -1409,27 +1424,33 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	char * addr;
 	int addrpart=ADDRESS_ALL;/*is this the correct default behavior?*/
 
- 	int headersi=i+3;/*the i value for the begining of hte headers*/
+ 	int headersi=i+5;/*the i value for the begining of hte headers*/
 	int datai=(bc[headersi+1].value/4);
 
 	int numheaders=bc[headersi].len;
 	int numdata=bc[datai].len;
 
 	int currh, currd; /*current header, current data*/
-	res=0;
 
-      /*find the correct comparator*/
-       comp=lookup_comp("i;ascii-casemap",bc[i+1].value, -1, &comprock);
-     
-      /*find the part of the address that we want*/
-      switch(bc[i+2].value)
-	{
-	case B_ALL: addrpart = ADDRESS_ALL; break;
-	case B_LOCALPART: addrpart = ADDRESS_LOCALPART; break;
-	case B_DOMAIN: addrpart = ADDRESS_DOMAIN; break;
-	case B_USER: addrpart = ADDRESS_USER; break;
-	case B_DETAIL: addrpart = ADDRESS_DETAIL; break;
-	}
+	int match=bc[i+1].value;
+	int relation=bc[i+2].value;
+	int comparator=bc[i+3].value;
+	int count=0;
+	char scount[3];
+	res=0;
+	
+	/*find the correct comparator fcn*/
+	comp=lookup_comp(comparator, match, relation, &comprock);
+	
+	/*find the part of the address that we want*/
+	switch(bc[i+3].value)
+	  {
+	  case B_ALL: addrpart = ADDRESS_ALL; break;
+	  case B_LOCALPART: addrpart = ADDRESS_LOCALPART; break;
+	  case B_DOMAIN: addrpart = ADDRESS_DOMAIN; break;
+	  case B_USER: addrpart = ADDRESS_USER; break;
+	  case B_DETAIL: addrpart = ADDRESS_DETAIL; break;
+	  }
 
       /*loop through all the headers*/
       currh=headersi+2;
@@ -1442,30 +1463,47 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	  
 	  /*header exists, now to test it*/
 	  /*search through all teh headers that match*/
-	  for (y=0; val[y]!=NULL && !res; y++)
+	  if  (match == B_COUNT )
+	    {count++;}
+	  else
 	    {
-	      if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
-		{return 0;}
-	      addr=get_address(addrpart, &data, &marker, 0);
-	      /*search through all the data*/ 
-	      currd=datai+2;
-	      for (z=0; z<numdata && !res; z++)
+	      for (y=0; val[y]!=NULL && !res; y++)
 		{
-		  printf("%s,  %s \n",addr, &(bc[currd+1].str));
-		  res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
-		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		  if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
+		    {return 0;}
+		  addr=get_address(addrpart, &data, &marker, 0);
+		  /*search through all the data*/ 
+		  currd=datai+2;
+		  for (z=0; z<numdata && !res; z++)
+		    {
+		      printf("%s,  %s \n",addr, &(bc[currd+1].str));
+		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
+		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		    }
 		}
 	    }
 	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	}
-      i=(bc[datai+1].value/4);
-      break;
+
+	  if  (match == B_COUNT )
+	    {
+	      sprintf(scount, "%u", count);
+	      /*search through all the data*/ 
+	      currd=datai+2;
+	      for (z=0; z<numdata && !res; z++)
+		{ 
+		  res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
+		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		}
+	    }
+	  i=(bc[datai+1].value/4);
+	  break;
       }
     case BC_HEADER:/*9*/
       {
 	const char** val;
 
-	int headersi=i+2;/*the i value for the begining of hte headers*/
+	int headersi=i+4;/*the i value for the begining of hte headers*/
 	int datai=(bc[headersi+1].value/4);
 
 	int numheaders=bc[headersi].len;
@@ -1474,11 +1512,14 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	int currh, currd; /*current header, current data*/
 	int blah;
 
-	/*find the correct comparator*/
-	/*the empty string is a placeholder for a value needed for count and value*/
-	comp=lookup_comp("i;ascii-casemap" ,bc[i+1].value, -1, &comprock );
+	int match=bc[i+1].value;
+	int relation=bc[i+2].value;
+	int comparator=bc[i+3].value;
+	int count=0;	
+	char scount[3];
+	/*find the correct comparator fcn*/
+	comp=lookup_comp(comparator, match, relation, &comprock);
 
-	/*i+=4;*/
 	/*search through all the flags for the header*/
 	currh=headersi+2;
 	for(x=0; x<numheaders && !res; x++)
@@ -1489,21 +1530,39 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      continue; /*this header does not exist, search the next*/ 
 	      }
 	    /*search through all teh headers that match*/
-	    for (y=0; val[y]!=NULL&&!res; y++)
+	    if  (match == B_COUNT )
+	      {count++;}
+	    else
 	      {
-		/*search through all the data*/ 
-		currd=datai+2;
-		for (z=0; z<numdata && !res; z++)
-		  {
-		    printf("%s,  %s \n",val[y], &(bc[currd+1].str));
-		    res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
-
-
-		    currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		for (y=0; val[y]!=NULL&&!res; y++)
+		  {	
+		    /*search through all the data*/ 
+		    currd=datai+2;
+		    for (z=0; z<numdata && !res; z++)
+		      {
+			printf("%s,  %s \n",val[y], &(bc[currd+1].str));
+			res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
+			currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		      }
 		  }
 	      }
 	    currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	  }
+
+
+	  if  (match == B_COUNT )
+	    {
+	      sprintf(scount, "%u", count);
+	      /*search through all the data*/ 
+	      currd=datai+2;
+	      for (z=0; z<numdata && !res; z++)
+		{ 	
+		  printf("WERT-comparing  %s &  %s \n", scount, (char*)&(bc[currd+1].str));
+		  if (comp !=NULL)
+		    res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
+		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
+		}
+	    }
 	i=(bc[datai+1].value/4);
 	break;
       }
@@ -1894,11 +1953,11 @@ static int dump_test(bytecode_info_t *d, int ip) {
         case BC_HEADER:
 	  printf("%d: HEADER (\n",ip++);
 	    if (d->data[ip].value == B_COUNT || d->data[ip].value == B_VALUE)
-	      {printf("      COMP:%d RELATION: %d HEADERS:\n", 
-		   d->data[ip].value, d->data[ip+1].value);
-		ip+=2;}
+	      {printf("      MATCH:%d  RELATION:%d  COMP:%d HEADERS:\n", 
+		   d->data[ip].value, d->data[ip+1].value,d->data[ip+2].value);}
 	    else
-	      {printf("      COMP:%d HEADERS:\n",d->data[ip++].value);}
+	      {printf("      MATCH:%d COMP:%d HEADERS:\n",d->data[ip].value, d->data[ip+2].value);}
+	    ip+=3;
 	    ip = dump_sl(d,ip); ip++;
 	    printf("      DATA:\n");
 	    ip = dump_sl(d,ip);
@@ -1910,14 +1969,12 @@ static int dump_test(bytecode_info_t *d, int ip) {
 		   d->data[ip].op == BC_ADDRESS ? "ADDRESS" : "ENVELOPE");
 	    /*  ip++;*/
 	    if (d->data[ip].value == B_COUNT || d->data[ip].value == B_VALUE)
-	      {printf("      COMP:%d RELATION: %d TYPE: %d HEADERS:\n", 
-		  d->data[ip].value, d->data[ip+1].value, d->data[ip+2].value);
-	      ip+=2;}
-		
+	      {printf("      MATCH:%d RELATION: %d COMP: %d TYPE: %d HEADERS:\n", 
+		  d->data[ip].value, d->data[ip+1].value, d->data[ip+2].value, d->data[ip+3].value);}
 	    else
-	      {printf("      COMP:%d TYPE:%d HEADERS:\n",
-		      d->data[ip].value,d->data[ip+1].value);
-	      ip+=1;}
+	      {printf("      MATCH:%d COMP:%d TYPE:%d HEADERS:\n",
+		      d->data[ip].value,d->data[ip+1].value,d->data[ip+3].value);}
+	    ip+=4;
 	    ip = dump_sl(d,ip); ip++;
 	    printf("      DATA:\n");
 	    ip = dump_sl(d,ip);

@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.8 2002/08/22 20:06:33 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.9 2002/08/29 16:32:29 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -598,8 +598,7 @@ static int do_sieve_error(int ret,
     if (implicit_keep) {
 	sieve_keep_context_t keep_context;
 	int keep_ret;
-
-	keep_context.imapflags = &imapflags;
+	keep_context.imapflags = imapflags;
  
 	lastaction = ACTION_KEEP;
 	keep_ret = interp->keep(&keep_context, interp->interp_context,
@@ -805,13 +804,13 @@ static int do_action_list(sieve_interp_t *interp,
 	    ret = SIEVE_INTERNAL_ERROR;
 	    break;
 	}
-
 	a = a->next;
 
 	if (ret != SIEVE_OK) {
 	    /* uh oh! better bail! */
 	    break;
 	}
+
     }
 
     return do_sieve_error(ret, interp, script_context, message_context, 

@@ -97,27 +97,32 @@ enum bytecode_tags {
     B_ALL,
     B_LOCALPART,
     B_DOMAIN,
-    B_USER,
-    B_DETAIL,
+    B_USER,  /* not required?*/
+    B_DETAIL, /* not required?*/
 
     /* Sizes */
     B_OVER,
     B_UNDER,
     /*sizes, pt 2*/
-    B_GT,
-    B_GE, 
-    B_LT,
-    B_LE,
-    B_EQ,
-    B_NE,
+    B_GT, /* not required*/
+    B_GE, /* not required*/
+    B_LT, /* not required*/
+    B_LE, /* not required*/
+    B_EQ, /* not required*/
+    B_NE, /* not required*/
  
-    /* Comparitors */
+    /* Comparators */
+    B_ASCIICASEMAP,
+    B_OCTET,
+    B_ASCIINUMERIC, /* not required*/
+    
+    /*match types*/
     B_IS,
     B_CONTAINS,
     B_MATCHES,
-    B_REGEX,
-    B_COUNT,
-    B_VALUE
+    B_REGEX,/* not required*/
+    B_COUNT,/* not required*/
+    B_VALUE /* not required*/
 
     /*priorities*/
     /*B_LOW
