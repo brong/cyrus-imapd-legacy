@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.46.2.1 2001/04/17 22:19:07 ken3 Exp $
+ * $Id: imapd.h,v 1.46.2.1.2.1 2001/08/02 17:43:09 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -215,6 +215,15 @@ enum {
     STATUS_UIDNEXT =		(1<<2),
     STATUS_UIDVALIDITY =	(1<<3),
     STATUS_UNSEEN =		(1<<4)
+};
+
+/* Bitmask for list options */
+enum {
+    LIST_LSUB =			(1<<0),
+    LIST_EXT =			(1<<1),
+    LIST_SUBSCRIBED =		(1<<2),
+    LIST_CHILDREN =		(1<<3),
+    LIST_REMOTE =		(1<<4)
 };
 
 extern struct protstream *imapd_out, *imapd_in;
