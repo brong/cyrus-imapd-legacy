@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.12 1999/11/07 03:24:18 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.13 2000/01/13 01:29:17 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -308,11 +308,7 @@ static int pipe_including_tag(struct backend *s, char *tag)
     r = pipe_until_tag(s, tag);
     switch (r) {
     case OK:
-	prot_printf(proxyd_out, "%s %s", tag, s->last_result);
-	break;
     case NO:
-	prot_printf(proxyd_out, "%s %s", tag, s->last_result);
-	break;
     case BAD:
 	prot_printf(proxyd_out, "%s %s", tag, s->last_result);
 	break;

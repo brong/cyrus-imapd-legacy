@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.105.4.3 1999/12/15 19:51:25 leg Exp $
+ * $Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.105.4.3 1999/12/15 19:51:25 leg Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -115,6 +115,9 @@ typedef struct address_data {
 
 typedef struct message_data {
     struct protstream *data;	/* message in temp file */
+    struct stagemsg *stage;	/* staging location for single instance
+				   store */
+
     FILE *f;
     char *notifyheader;
     char *id;			/* message id */
@@ -135,6 +138,7 @@ typedef struct message_data {
 /* data per script */
 typedef struct script_data {
     char *username;
+    char *mailboxname;
     struct auth_state *authstate;
 } script_data_t;
 
@@ -144,6 +148,7 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 
 int dupelim = 0;
 int logdebug = 0;
+int singleinstance = 1;
 
 void savemsg();
 char *convert_lmtp();
@@ -157,6 +162,9 @@ static int _lock_delivered_db();
 static void logdupelem();
 static void usage();
 static void setup_sieve();
+
+int msg_new(message_data_t **m);
+void msg_free(message_data_t *m);
 
 #ifdef USE_SIEVE
 static sieve_interp_t *sieve_interp;
@@ -349,6 +357,8 @@ char **argv;
     }
 #endif USE_SIEVE
 
+    singleinstance = config_getswitch("singleinstancestore", 1);
+
     msg_new(&msgdata);
     memset((void *) delopts, 0, sizeof(deliver_opts_t));
 
@@ -451,9 +461,9 @@ char **argv;
 	}
 
 	exitval = convert_sysexit(r);
-	exit(exitval);
     }
     while (optind < argc) {
+	/* deliver to users */
 	r = deliver(delopts, msgdata, flag, nflags,
 		    argv[optind], mailboxname);
 
@@ -466,6 +476,9 @@ char **argv;
 
 	optind++;
     }
+
+    msg_free(msgdata);
+
     exit(exitval);
 }
 
@@ -1031,7 +1044,7 @@ int sieve_fileinto(char *mailbox, void *ic, void *sc, void *mc)
     if (!sd->authstate)
 	return SIEVE_FAIL;
 
-    ret = deliver_mailbox(md->data, md->size, 0, 0,
+    ret = deliver_mailbox(md->data, &md->stage, md->size, 0, 0,
 			  sd->username, sd->authstate, md->id,
 			  sd->username, md->notifyheader,
 			  mailbox, dop->quotaoverride, 0);
@@ -1049,6 +1062,7 @@ int sieve_keep(char *arg, void *ic, void *sc, void *mc)
     deliver_opts_t *dop = (deliver_opts_t *) ic;
     script_data_t *sd = (script_data_t *) sc;
     message_data_t *md = (message_data_t *) mc;
+    char namebuf[MAX_MAILBOX_PATH];
     int ret;
 
     /* we're now the user who owns the script */
@@ -1056,10 +1070,18 @@ int sieve_keep(char *arg, void *ic, void *sc, void *mc)
     if (!sd->authstate)
 	return SIEVE_FAIL;
 
-    ret = deliver_mailbox(md->data, md->size, 0, 0,
+    if (sd->mailboxname) {
+	strcpy(namebuf, "INBOX.");
+	strcat(namebuf, sd->mailboxname);
+    }
+    else {
+	strcpy(namebuf, "INBOX");
+    }
+
+    ret = deliver_mailbox(md->data, &md->stage, md->size, 0, 0,
 			  sd->username, sd->authstate, md->id,
 			  sd->username, md->notifyheader,
-			  "INBOX", dop->quotaoverride, 1);
+			  namebuf, dop->quotaoverride, 1);
 
     if (ret == 0) {
 	return SIEVE_OK;
@@ -1099,7 +1121,8 @@ int autorespond(unsigned char *hash, int len, int days,
     return ret;
 }
 
-int send_response(char *addr, char *subj, char *msg, int mime, 
+int send_response(char *addr, char *fromaddr,
+		  char *subj, char *msg, int mime, 
 		  void *ic, void *sc, void *mc)
 {
     FILE *sm;
@@ -1142,7 +1165,7 @@ int send_response(char *addr, char *subj, char *msg, int mime,
             tz > 0 ? '-' : '+', tz / 60, tz % 60);
     
     fprintf(sm, "X-Sieve: %s\r\n", sieve_version);
-    fprintf(sm, "From: <%s>\r\n", m->rcpt[m->rcpt_num]->all);
+    fprintf(sm, "From: <%s>\r\n", fromaddr);
     fprintf(sm, "To: <%s>\r\n", addr);
     /* check that subject is sane */
     sl = strlen(subj);
@@ -1417,6 +1440,7 @@ int msg_new(message_data_t **m)
 	return -1;
     }
     ret->data = NULL;
+    ret->stage = NULL;
     ret->f = NULL;
     ret->notifyheader = ret->id = NULL;
     ret->size = 0;
@@ -1442,6 +1466,9 @@ void msg_free(message_data_t *m)
     }
     if (m->f) {
 	fclose(m->f);
+    }
+    if (m->stage) {
+	append_removestage(m->stage);
     }
     if (m->notifyheader) {
 	free(m->notifyheader);
@@ -1562,7 +1589,8 @@ deliver_opts_t *delopts;
 
     for (;;) {
       if (!prot_fgets(buf, sizeof(buf)-1, deliver_in)) {
-	exit(0);
+	  msg_free(msg);
+	  exit(0);
       }
       p = buf + strlen(buf) - 1;
       if (p >= buf && *p == '\n') *p-- = '\0';
@@ -1639,6 +1667,7 @@ deliver_opts_t *delopts;
 
 		     /* read a line */
 		     if (!prot_fgets(buf, sizeof(buf)-1, deliver_in)) {
+			 msg_free(msg);
 			 exit(0);
 		     }
 		     p = buf + strlen(buf) - 1;
@@ -1753,6 +1782,8 @@ deliver_opts_t *delopts;
 	case 'Q':
 	    if (!strcasecmp(buf, "quit")) {
 		prot_printf(deliver_out,"221 2.0.0 bye\r\n");
+		prot_flush(deliver_out);
+		msg_free(msg);
 		exit(0);
 	    }
 	    goto syntaxerr;
@@ -2113,25 +2144,25 @@ savemsg(message_data_t *m, int lmtpmode)
 
 /*"*/
 /* places msg in mailbox mailboxname.  
+ * if you wish to use single instance store, pass stage as non-NULL
  * if you want to deliver message regardless of duplicates, pass id as NULL
  * if you want to notify, pass user
  * if you want to force delivery (to force delivery to INBOX, for instance)
  * pass acloverride
  */
-deliver_mailbox(msg, size, flag, nflags, authuser, authstate, id, 
-		user, notifyheader, mailboxname, quotaoverride, acloverride)
-struct protstream *msg;
-unsigned size;
-char **flag;
-int nflags;
-char *authuser;
-struct auth_state *authstate;
-char *id;
-char *notifyheader;
-char *user;
-char *mailboxname;
-int quotaoverride;
-int acloverride;
+deliver_mailbox(struct protstream *msg,
+		struct stagemsg **stage,
+		unsigned size,
+		char **flag,
+		int nflags,
+		char *authuser,
+		struct auth_state *authstate,
+		char *id,
+		char *user,
+		char *notifyheader,
+		char *mailboxname,
+		int quotaoverride,
+		int acloverride)
 {
     int r;
     struct mailbox mailbox;
@@ -2163,8 +2194,13 @@ int acloverride;
 
     if (!r) {
 	prot_rewind(msg);
-	r = append_fromstream(&mailbox, msg, size, now, flag, nflags,
-			      user);
+	if (singleinstance && stage) {
+	    r = append_fromstage(&mailbox, msg, size, now, flag, nflags,
+				 user, stage);
+	} else {
+	    r = append_fromstream(&mailbox, msg, size, now, flag, nflags,
+				  user);
+	}
 	mailbox_close(&mailbox);
     }
 
@@ -2242,13 +2278,20 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 	    sdata = (script_data_t *) xmalloc(sizeof(script_data_t));
 
 	    sdata->username = user;
+	    sdata->mailboxname = mailboxname;
 	    sdata->authstate = auth_newstate(user, (char *)0);
 	    
+	    /* slap the mailboxname back on so we hash the envelope & id
+	       when we figure out whether or not to keep the message */
+	    strcpy(namebuf, user);
+	    if (mailboxname) {
+		strcat(namebuf, "+");
+		strcat(namebuf, mailboxname);
+	    }
+
 	    /* is this the first time we've sieved the message? */
 	    if (msgdata->id) {
-		/* sigh; this should be hashing the envelope & id 
-		   to figure out whether or not to keep it */
-		char *sdb = make_sieve_db(user);
+		char *sdb = make_sieve_db(namebuf);
 		
 		if (checkdelivered(msgdata->id, strlen(msgdata->id),
 				   sdb, strlen(sdb))) {
@@ -2276,7 +2319,7 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 
 	    if ((r == SIEVE_OK) && (msgdata->id)) {
 		/* ok, we've run the script */
-		char *sdb = make_sieve_db(user);
+		char *sdb = make_sieve_db(namebuf);
 
 		markdelivered(msgdata->id, strlen(msgdata->id), 
 			      sdb, strlen(sdb), time(NULL));
@@ -2303,7 +2346,9 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 		strcpy(namebuf, "INBOX.");
 		strcat(namebuf, mailboxname);
 		
-		r = deliver_mailbox(msgdata->data, msgdata->size, 
+		r = deliver_mailbox(msgdata->data, 
+				    &msgdata->stage, 
+				    msgdata->size, 
 				    flag, nflags, 
 				    delopts->authuser, delopts->authstate,
 				    msgdata->id, user, msgdata->notifyheader,
@@ -2313,7 +2358,9 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 		strcpy(namebuf, "INBOX");
 		
 		/* ignore ACL's trying to deliver to INBOX */
-		r = deliver_mailbox(msgdata->data, msgdata->size, 
+		r = deliver_mailbox(msgdata->data, 
+				    &msgdata->stage,
+				    msgdata->size, 
 				    flag, nflags, 
 				    delopts->authuser, delopts->authstate,
 				    msgdata->id, user, msgdata->notifyheader,
@@ -2322,7 +2369,9 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 	}
     }
     else if (mailboxname) {
-	r = deliver_mailbox(msgdata->data, msgdata->size, 
+	r = deliver_mailbox(msgdata->data, 
+			    &msgdata->stage,
+			    msgdata->size, 
 			    flag, nflags, 
 			    delopts->authuser, delopts->authstate,
 			    msgdata->id, user, msgdata->notifyheader,

@@ -2,7 +2,7 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.5 1999/11/05 22:42:22 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.6 2000/01/13 01:29:16 leg Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -20,6 +20,8 @@
 #define MBTYPE_CONFLICT 0x02
 #define MBTYPE_NETNEWS 0x04
 
+/* master name of the mailboxes file */
+#define FNAME_MBOXLIST "/mailboxes.db"
 
 /* each mailbox has the following data */
 struct mbox_entry {
@@ -99,7 +101,7 @@ int mboxlist_setquota(const char *root, int newquota);
 int mboxlist_syncnews(int num, char **group, int *seen);
 
 /* open the mailboxes db */
-void mboxlist_open();
+void mboxlist_open(char *name);
 
 /* close the database */
 void mboxlist_close(void);

@@ -1,5 +1,6 @@
 /* prot.h -- stdio-like module that handles IMAP protection mechanisms
- * $Id: prot.h,v 1.17.4.2 1999/12/15 19:51:51 leg Exp $
+ * $Id: prot.h,v 1.17.4.3 2000/01/13 01:29:20 leg Exp $
+ 
  #        Copyright 1998 by Carnegie Mellon University
  #
  #                      All Rights Reserved
@@ -63,6 +64,7 @@ struct protstream {
     int maxplain;
     const char *error;
     int eof;
+    int dontblock;
     int read_timeout;
     struct protstream *flushonread;
     prot_readcallback_t *readcallback_proc;

@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.53 1999/12/15 19:51:30 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.54 2000/01/13 01:29:13 leg Exp $
  */
 
 #include <stdio.h>
@@ -107,7 +107,6 @@ struct mbox_txn_setacl {
 
 acl_canonproc_t mboxlist_ensureOwnerRights;
 
-static char *listfname;
 static DB *mbdb;
 static DB_ENV dbenv;
 
@@ -122,7 +121,6 @@ static int mboxlist_changequota();
 
 static char *mboxlist_hash_usersubs(const char *userid);
 
-#define FNAME_MBOXLIST "/mailboxes.db"
 #define FNAME_DBDIR "/db"
 #define FNAME_USERDIR "/user/"
 #define FNAME_SUBSSUFFIX ".sub"
@@ -259,6 +257,52 @@ int mboxlist_lookup_writelock(const char *name, char** pathp, char** aclp,
 			      DB_TXN *tid)
 {
     return mboxlist_mylookup(name, pathp, aclp, tid, DB_RMW);
+}
+
+int mboxlist_findstage(const char *name, char *stagedir) 
+{
+    unsigned long offset, len, partitionlen;
+    DBT key, data;
+    struct mbox_entry *mboxent;
+    char optionbuf[MAX_MAILBOX_NAME+1];
+    char *partition;
+    const char *root;
+
+    assert(stagedir != NULL);
+
+    memset(&key, 0, sizeof(key));
+    key.data = (char *) name;
+    key.size = strlen(name);
+
+    memset(&data, 0, sizeof(key));
+
+    /* Find mailbox */
+    r = mbdb->get(mbdb, NULL, &key, &data, 0);
+    switch (r) {
+    case 0:
+	mboxent = (struct mbox_entry *) data.data;
+	break;
+    case DB_NOTFOUND:
+	return IMAP_MAILBOX_NONEXISTENT;
+	break;
+    default:
+	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+	       name, strerror(r));
+	return IMAP_IOERROR;
+	break;
+    }
+	
+    strcpy(optionbuf, "partition-");
+    strcpy(optionbuf + 10, mboxent->partition);
+    
+    root = config_getstring(optionbuf, (char *)0);
+    if (!root) {
+	return IMAP_PARTITION_UNKNOWN;
+    }
+	
+    sprintf(stagedir, "%s/stage./", root);
+    
+    return 0;
 }
 
 /*
@@ -3304,12 +3348,6 @@ int maycreate;
     return 0;
 }
 
-void
-mboxlist_close(void)
-{
-    /* noop with db */
-}
-
 void db_panic(DB_ENV *dbenv, int errno)
 {
     syslog(LOG_CRIT, "DBERROR: critical database situation");
@@ -3327,31 +3365,34 @@ void mboxlist_init(void)
     int r;
     char dbdir[1024];
     
-    memset(&dbenv, 0, sizeof(dbenv));
-    dbenv.db_paniccall = &db_panic;
-    /* dbenv.db_errcall = &db_err; */
-    dbenv.db_verbose = 1;
-
-    /* create the name of the db file */
-    strcpy(dbdir, config_dir);
-    strcat(dbdir, FNAME_DBDIR);
-    
-    r = db_appinit(dbdir, NULL, &dbenv, 
-		   DB_INIT_LOCK | DB_INIT_MPOOL | DB_INIT_TXN | DB_TXN_NOSYNC
-	         | DB_CREATE);
-    if (r) {
-	char err[1024];
-
-	sprintf(err, "DBERROR: db_appinit failed: %s", strerror(r));
-
-	syslog(LOG_ERR, err);
-	fatal(err, EC_TEMPFAIL);
+    if (!mboxlist_dbinit) {
+	memset(&dbenv, 0, sizeof(dbenv));
+	dbenv.db_paniccall = &db_panic;
+	/* dbenv.db_errcall = &db_err; */
+	dbenv.db_verbose = 1;
+	
+	/* create the name of the db file */
+	strcpy(dbdir, config_dir);
+	strcat(dbdir, FNAME_DBDIR);
+	
+	r = db_appinit(dbdir, NULL, &dbenv, 
+		         DB_INIT_LOCK | DB_INIT_MPOOL 
+		       | DB_INIT_TXN | DB_TXN_NOSYNC
+p		       | DB_CREATE);
+	if (r) {
+	    char err[1024];
+	    
+	    sprintf(err, "DBERROR: db_appinit failed: %s", strerror(r));
+	    
+	    syslog(LOG_ERR, err);
+	    fatal(err, EC_TEMPFAIL);
+	}
+	
+	mboxlist_dbinit = 1;
     }
-
-    mboxlist_dbinit = 1;
 }
 
-void mboxlist_open()
+void mboxlist_open(char *fname)
 {
     int ret;
     DB_INFO dbinfo;
@@ -3359,21 +3400,21 @@ void mboxlist_open()
 
     mboxlist_init();
 
-    /* create db file name if necessary */
-    if (!listfname) {
-	listfname = xmalloc(strlen(config_dir)+sizeof(FNAME_MBOXLIST));
-	strcpy(listfname, config_dir);
-	strcat(listfname, FNAME_MBOXLIST);
+    /* create db file name */
+    if (!fname) {
+	fname = xmalloc(strlen(config_dir)+sizeof(FNAME_MBOXLIST));
+	strcpy(fname, config_dir);
+	strcat(fname, FNAME_MBOXLIST);
     }
 
     memset(&dbinfo, 0, sizeof(dbinfo));
     dbinfo.bt_compare = &mbdb_order;
     /*    dbinfo.bt_prefix = &mbdb_prefix;*/
 
-    ret = db_open(listfname, DB_BTREE, flags, 0664, 
+    ret = db_open(fname, DB_BTREE, flags, 0664, 
 		  &dbenv, &dbinfo, &mbdb);
     if (ret != 0) {
-	syslog(LOG_ERR, "IOERROR: opening %s: %m", listfname);
+	syslog(LOG_ERR, "IOERROR: opening %s: %m", fname);
 	    /* Exiting TEMPFAIL because Sendmail thinks this
 	       EC_OSFILE == permanent failure. */
 	fatal("can't read mailboxes file", EC_TEMPFAIL);
@@ -3382,7 +3423,8 @@ void mboxlist_open()
     mboxlist_dbopen = 1;
 }
 
-void mboxlist_done(void)
+void
+mboxlist_close(void)
 {
     int r;
 
@@ -3393,6 +3435,12 @@ void mboxlist_done(void)
 		   strerror(r));
 	}
     }
+}
+
+void mboxlist_done(void)
+{
+    int r;
+
     if (mboxlist_dbinit) {
 	r = db_appexit(&dbenv);
 	if (r) {

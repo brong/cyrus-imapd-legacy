@@ -26,7 +26,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.50.4.2 1999/12/15 19:51:44 leg Exp $
+ * $Id: pop3d.c,v 1.50.4.3 2000/01/13 01:29:16 leg Exp $
  */
 
 #ifndef __GNUC__
@@ -793,27 +793,26 @@ char *authtype;
     /* if client didn't specify an auth mechanism we give them the list */
     if (!authtype) {
       char *sasllist;
-      int mechnum;
+      unsigned int mechnum;
 
       prot_printf(popd_out, "+OK List of supported mechanisms follows\r\n");
       
       /* SASL special case: print SASL, then a list of supported capabilities
-	 (parsed from the IMAP-style login_capabilities function, then a CRLF */
+       * (parsed from the IMAP-style login_capabilities function, 
+       * then a CRLF */
       if (sasl_listmech(popd_saslconn,
 			"", /* should be id string */
 			"","\r\n","\r\n",
 			&sasllist,
-			NULL,&mechnum)==SASL_OK)
-	{
-	  if (mechnum>0)
-	  {
-	    prot_printf(popd_out,"%s",sasllist);
+			NULL,&mechnum) == SASL_OK) {
+	  if (mechnum>0) {
+	      prot_printf(popd_out,"%s",sasllist);
 	  }
-	}
+      }
       
-	prot_printf(popd_out, ".\r\n");
-
-	return;
+      prot_printf(popd_out, ".\r\n");
+      
+      return;
     }
 
     /* server did specify a command, so let's try to authenticate */

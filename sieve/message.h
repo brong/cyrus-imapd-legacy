@@ -1,6 +1,6 @@
 /* message.h
  * Larry Greenfield
- * $Id: message.h,v 1.2 1999/07/31 21:49:40 leg Exp $
+ * $Id: message.h,v 1.2.4.1 2000/01/13 01:29:21 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -62,6 +62,7 @@ struct Action {
 	} red;
 	struct {
 	    char *addr;		/* freed! */
+	    char *fromaddr;     /* freed! */
 	    char *subj;		/* freed! */
 	    char *msg;
 	    int days;
@@ -94,7 +95,8 @@ int do_fileinto(action_list_t *m, char *mbox);
 int do_forward(action_list_t *m, char *addr);
 int do_keep(action_list_t *m);
 int do_discard(action_list_t *m);
-int do_vacation(action_list_t *m, char *addr, char *subj, char *msg, 
+int do_vacation(action_list_t *m, char *addr, char *fromaddr,
+		char *subj, char *msg, 
 		int days, int mime);
 
 #endif
