@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.37 1999/11/03 17:39:18 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.38 1999/11/03 17:43:21 leg Exp $
  */
 
 #include <stdio.h>
@@ -481,8 +481,9 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 					    strlen(acl));
     memset(mboxent, 0, sizeof(struct mbox_entry)); 
 
-    /* fill in its parameters */
+    /* fill in its fields */
     strcpy(mboxent->name, name);
+    mboxent->mbtype = mbtype;
     strcpy(mboxent->partition, newpartition);
     strcpy(mboxent->acls, acl);
 
