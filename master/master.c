@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: master.c,v 1.56.2.1 2002/06/06 21:08:51 jsmith2 Exp $ */
+/* $Id: master.c,v 1.56.2.2 2002/09/10 20:31:14 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -493,6 +493,7 @@ void spawn_service(struct service *s)
     static char name_env[100];
     struct centry *c;
     time_t now = time(NULL);
+    int msg;
     
     /* update our fork rate */
     if(now - s->last_interval_start >= FORKRATE_INTERVAL) {
@@ -570,11 +571,14 @@ void spawn_service(struct service *s)
 	syslog(LOG_DEBUG, "about to exec %s", path);
 
 	/* add service name to environment */
-	sprintf(name_env, "CYRUS_SERVICE=%s", s->name);
+	snprintf(name_env, sizeof(name_env), "CYRUS_SERVICE=%s", s->name);
 	putenv(name_env);
 
 	execv(path, s->exec);
 	syslog(LOG_ERR, "couldn't exec %s: %m", path);
+	if (write(STATUS_FD, &msg, sizeof(msg)) != sizeof(msg)) {
+	    syslog(LOG_ERR, "unable to tell master %x: %m", msg);
+	}
 	exit(EX_OSERR);
 
     default:			/* parent */

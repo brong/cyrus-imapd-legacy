@@ -1,10 +1,10 @@
-<!-- $Id: install-configure.html,v 1.18.2.1 2002/06/06 21:07:45 jsmith2 Exp $ -->
+<!-- $Id: install-configure.html,v 1.18.2.2 2002/09/10 20:30:35 rjs3 Exp $ -->
 <HTML>
 <HEAD>
-<TITLE>Configuring the IMAP Server
+<TITLE>Installing and configuring the IMAP Server
 </title>
 </head>
-<h1>Configuring the IMAP Server
+<h1>Installing and configuring the IMAP Server
 </h1>
 <body>
 
@@ -158,12 +158,12 @@ Sieve directory:
 If Perl is not available, it should be easy (but time consuming) to
 create these directories by hand. <P>
 
-<li><b>LINUX SYSTEMS USING EXT2FS ONLY</b>: Set the user, quota, and partition
-directories to update synchronously.  Failure to do this may lead to
-data corruption and/or loss of mail after a system
+<li><b>LINUX SYSTEMS USING EXT2FS ONLY</b>: Set the user, quota, and
+partition directories to update synchronously.  Failure to do this may
+lead to data corruption and/or loss of mail after a system
 crash. Unfortunately, doing so may result in a serious performance
 hit.  If you are using a newer filesystem than ext2fs on Linux, this
-step should not be necessary.
+step should not be necessary. (Running ext3 in any mode is safe.)
 
 <pre>
 <kbd>   cd /var/imap
@@ -246,24 +246,155 @@ shut down the mail system by sending it a signal with <tt>kill</tt>.
 <a name="mta"><h3>Configuring the Mail Transfer Agent</h3></a>
 
 <p>In order to deliver mail to the Cyrus system, you'll have to
-configure your MTA (usually <a
-href="http://www.sendmail.org/">Sendmail</a>) appropriately.
+configure your MTA (Sendmail, Postfix, Exim, etc) to use LMTP.
 
-<ol>
-<li> Generate a sendmail configuration file which delivers local mail
-to the IMAP server.  See the files <TT>cf/README</TT> in the Sendmail
-distribution for information on how to do this.  A suggested
-"config.mc" file to create a Sendmail configuration file can be found
-<a href="cyrusv2.mc">here</a>. This requires Sendmail 8.10 or newer.
+<h4>Configuring <a href="http://www.sendmail.org/">Sendmail</a></h4>
 
-<p>The interface between the MTA and Cyrus has changed in Cyrus
-version 2, so take care when using older Sendmails.
+Generate a sendmail configuration file which delivers local mail
+to the IMAP server.  See the file <TT>cf/README</TT> in the Sendmail
+distribution for information on how to create a complete configuration
+file.  This file also lists variables that can be used to customize
+the mailer definitions mentioned below.
 
- <P> <LI> Edit <TT>/etc/group</TT> and add user "<TT>daemon</TT>" to
-the "<TT>mail</TT>" group.  This will permit sendmail to run the
-"<TT>deliver</TT>" program to deliver mail to the IMAP server.
+<p>The following configurations assume that you are using the
+<tt>lmtpunix</tt> service from one of the sample <tt>cyrus.conf</tt>
+files discussed above.
 
-</ol>
+<ul>
+<li> For Sendmail 8.12.4 and higher, use the <tt>cyrusv2</tt> mailer
+definition in the Sendmail distribution:
+
+<pre>
+define(`confLOCAL_MAILER', `cyrusv2')
+MAILER(`cyrusv2')
+</pre>
+
+If you wish to change the name of the UNIX socket or switch to TCP,
+define <tt>CYRUSV2_MAILER_ARGS</tt> appropriately as described in
+<TT>cf/README</TT>.</li>
+
+<p><li> For Sendmail 8.10 - 8.12.3, use the <a
+href="cyrusv2.mc">cyrusv2.mc</a> file as a template to create a
+Sendmail configuration file.</li>
+
+<p><li> For Sendmail 8.9.x and earlier, use the <tt>cyrus</tt> mailer
+definition in the Sendmail distribution:
+
+<pre>
+define(`confLOCAL_MAILER', `cyrus')
+MAILER(`cyrus')
+</pre>
+
+Edit <TT>/etc/group</TT> and
+add user "<TT>daemon</TT>" to the "<TT>mail</TT>" group.  This will
+permit sendmail to run the "<TT>deliver</TT>" (LMTP client) program to
+deliver mail to the IMAP server.</li>
+</ul>
+
+<h4>Configuring <a href="http://www.postfix.org/">Postfix</a></h4>
+
+The Postfix source distribution comes with the
+file "<tt>README_FILES/LMTP_README</tt>".  Even if you are using a
+binary distribution of Postfix, it would be well worth your while
+to download the full Postfix source.  Not only will you get the
+above file, but numerous other "readme" files and sample
+configuration files.
+
+<p>One thing you need to watch out for is the UID and GID of
+the Postfix software.  As it states in the Postfix "<tt>INSTALL</tt>"
+document, you must create a new account that does not share its UID
+and GID with any other user account.  This is for security reasons.
+If you installed Postfix with a GID of "<tt>mail</tt>", you will need
+to select a different GID for Cyrus.  See the Cyrus configure options
+"<tt>--with-cyrus-user</tt>" and "<tt>--with-cyrus-group</tt>".  (This
+was more crucial when the use of Cyrus' "<tt>deliver</tt>" was more
+prevalent, but it is still a good idea to follow this policy.)
+
+<p>Another thing to note is the location of your "<tt>sendmail</tt>"  
+command.  On some platforms this will be "<tt>/usr/sbin/sendmail</tt>",
+on others, "<tt>/usr/lib/sendmail</tt>".  Cyrus will need to know where
+this command is.  See <a href="install-sieve.html">Installing Sieve</a>
+for more details.
+
+<p>Assuming that you are using the <tt>lmtpunix</tt> service from one
+of the sample <tt>cyrus.conf</tt> files discussed above, the Postfix
+configuration file "<tt>/etc/postfix/main.cf</tt>" should have the
+following line:
+
+<pre>
+  mailbox_transport = lmtp:unix:/var/imap/socket/lmtp
+</pre>
+
+<p>Naturally, both the Postfix UID and the Cyrus UID need to be
+able to access the specified socket file.
+
+<p>Starting with Postfix snapshot-20010222, you can improve the
+efficiency of LMTP delivery via the "<tt>mailbox_transport</tt>" by
+putting the following entries in "<tt>/etc/postfix/main.cf</tt>":
+
+<pre>
+  local_destination_recipient_limit = 300
+  local_destination_concurrency_limit = 5
+</pre>
+
+<p>Of course you should adjust these settings as appropriate for
+the capacity of the hardware you are using.  The recipient limit
+setting can be used to take advantage of the single instance
+message store capability of Cyrus.  The concurrency limit can be
+used to control how many simultaneous LMTP sessions will be
+permitted to the Cyrus message store.
+
+<p>Additional examples are included in the Postfix 
+file "<tt>README_FILES/LMTP_README</tt>".
+
+<h4>Configuring <a href="http://www.exim.org/">Exim 4</a></h4>
+
+Generate an Exim configuration file which delivers local mail to the
+IMAP server.  See the Exim documentation for information on how to
+create a complete configuration file.
+
+<p>Cyrus is designed to be used as a black-box server -- there
+are usually no local user accounts.  As a result, you must define the
+following "router":
+
+<ul>
+<pre>
+localuser:
+  driver = accept
+  transport = local_delivery
+</pre>
+</ul>
+
+<p>The following "transports" assume that you are using either the
+<tt>lmtpunix</tt> or <tt>lmtp</tt> service from one of the sample
+<tt>cyrus.conf</tt> files discussed above.
+
+<ul>
+<p><li> Using <tt>lmtpunix</tt> (UNIX socket):
+
+<pre>
+local_delivery:
+  driver = lmtp
+  command = "/usr/cyrus/bin/deliver -l"
+  batch_max = 20
+  user = cyrus
+</pre>
+</li>
+
+<p><li> Using <tt>lmtp</tt> (TCP socket -- Exim and Cyrus on same host):
+
+<pre>
+local_delivery:
+  driver = smtp
+  protocol = lmtp
+  hosts = localhost
+  allow_localhost
+</pre>
+</li>
+</ul>
+
+<p>For more advanced configurations (such as address verification, etc),
+consult the Exim documentation and sample configurations.
 
 <h3>Exporting Netnews via IMAP</h3>
 
@@ -446,5 +577,5 @@ convention, consult <a
 href=altnamespace.html#altnameconfig>altnamespace.html</a>.
 
 <P><HR>
-last modified: $Date: 2002/06/06 21:07:45 $
+last modified: $Date: 2002/09/10 20:30:35 $
 </BODY></HTML>

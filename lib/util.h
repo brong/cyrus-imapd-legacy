@@ -1,5 +1,5 @@
 /* util.h -- general utility functions
- * $Id: util.h,v 1.13 2001/08/13 16:36:56 ken3 Exp $
+ * $Id: util.h,v 1.13.2.1 2002/09/10 20:30:55 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -99,5 +99,10 @@ enum {
  *  of the name.
  */
 extern int dir_hash_c(const char *name);
+
+/* 
+ * create an [unlinked] temporary file and return the file descriptor.
+ */
+extern int create_tempfile();
 
 #endif /* INCLUDED_UTIL_H */

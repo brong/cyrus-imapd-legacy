@@ -1,5 +1,5 @@
 /* mbdump.c -- Mailbox dump routines
- * $Id: mbdump.c,v 1.18.2.2 2002/06/14 18:36:52 jsmith2 Exp $
+ * $Id: mbdump.c,v 1.18.2.3 2002/09/10 20:30:43 rjs3 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -60,6 +60,7 @@
 #include <dirent.h>
 #include <time.h>
 #include <assert.h>
+#include <com_err.h>
 
 #include "exitcodes.h"
 #include "imap_err.h"
@@ -72,6 +73,7 @@
 #include "prot.h"
 #include "seen.h"
 #include "xmalloc.h"
+#include "util.h"
 
 /* is this the active script? */
 static int sieve_isactive(char *sievepath, char *name)
@@ -135,11 +137,20 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
     const int SEEN_DB = 0;
     const int SUBS_DB = 1;
     char *user_data_files[3];
+    int domainlen = 0;
+    char *p = NULL, userbuf[81];
     
     assert(mbpath);
 
-    if(!strncmp(mbname, "user.", 5) && !strchr(mbname+5, '.')) {
-	userid = mbname+5;
+    if (config_virtdomains && (p = strchr(mbname, '!')))
+	domainlen = p - mbname + 1; /* include separator */
+
+    if(!strncmp(mbname+domainlen, "user.", 5) &&
+       !strchr(mbname+domainlen+5, '.')) {
+	strcpy(userbuf, mbname+5);
+	if (domainlen)
+	    sprintf(userbuf+strlen(userbuf), "@%.*s", domainlen-1, mbname);
+	userid = userbuf;
 	memset(user_data_files, 0, sizeof(user_data_files));
 	user_data_files[SEEN_DB] = seen_getpath(userid);
 	user_data_files[SUBS_DB] = mboxlist_hash_usersubs(userid);
@@ -325,7 +336,7 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 
     if(userid) {
 	char sieve_path[MAX_MAILBOX_PATH];
-	int sieve_usehomedir = config_getswitch("sieveusehomedir", 0);
+	int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
 
 	/* need to transfer seen, subs, and sieve files */
 	for(i=0;i<3;i++) {
@@ -377,9 +388,19 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 	    if(mbdir) closedir(mbdir);
 	    mbdir = NULL;
 
-	    snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
-		     config_getstring("sievedir", "/usr/sieve"),
-		     userid[0], userid);
+	    if (domainlen) {
+		*p = '\0'; /* separate domain!mboxname */
+		snprintf(sieve_path, sizeof(sieve_path), "%s%s%c/%s/%c/%s",
+			 config_getstring(IMAPOPT_SIEVEDIR),
+			 FNAME_DOMAINDIR, (char) dir_hash_c(mbname), mbname, 
+			 (char) dir_hash_c(p+6), p+6); /* unqualified userid */
+		*p = '!'; /* reassemble domain!mboxname */
+	    }
+	    else {
+		snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
+			 config_getstring(IMAPOPT_SIEVEDIR),
+			 (char) dir_hash_c(userid), userid);
+	    }
 	    mbdir=opendir(sieve_path);
 	    
 	    if(mbdir) {
@@ -392,7 +413,7 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 			    /* map file */
 			    snprintf(filename, sizeof(filename), "%s/%s",
 				     sieve_path, next->d_name);
-			    syslog(LOG_ERR, "wanting to dump %s", filename);
+			    syslog(LOG_DEBUG, "wanting to dump %s", filename);
 			    filefd = open(filename, O_RDONLY, 0666);
 			    if (filefd == -1) {
 				/* non-fatal */
@@ -457,25 +478,46 @@ int undump_mailbox(const char *mbname, const char *mbpath, const char *mbacl,
 {
     struct buf file, data;
     char c;
+    int quotaused = 0;
     int r = 0;
     int curfile = -1;
     const char *userid = NULL;
     struct mailbox mb;
     char sieve_path[2048];
-    int sieve_usehomedir = config_getswitch("sieveusehomedir", 0);
+    int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
+    int domainlen = 0;
+    char *p = NULL, userbuf[81];
     
     memset(&file, 0, sizeof(struct buf));
     memset(&data, 0, sizeof(struct buf));
 
     c = getword(pin, &data);
 
-    if(!strncmp(mbname, "user.", 5) && !strchr(mbname+5, '.')) {
-	userid = mbname+5;
+    if (config_virtdomains && (p = strchr(mbname, '!')))
+	domainlen = p - mbname + 1; /* include separator */
 
-	if(!sieve_usehomedir)
-	    snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
-		     config_getstring("sievedir", "/usr/sieve"),
-		     userid[0], userid);
+    if(!strncmp(mbname+domainlen, "user.", 5) &&
+       !strchr(mbname+domainlen+5, '.')) {
+	strcpy(userbuf, mbname+5);
+	if (domainlen)
+	    sprintf(userbuf+strlen(userbuf), "@%.*s", domainlen-1, mbname);
+	userid = userbuf;
+
+	if(!sieve_usehomedir) {
+	    if (domainlen) {
+		*p = '\0'; /* separate domain!mboxname */
+		snprintf(sieve_path, sizeof(sieve_path), "%s%s%c/%s/%c/%s",
+			 config_getstring(IMAPOPT_SIEVEDIR),
+			 FNAME_DOMAINDIR, (char) dir_hash_c(mbname), mbname, 
+			 (char) dir_hash_c(p+6), p+6); /* unqualified userid */
+		*p = '!'; /* reassemble domain!mboxname */
+	    }
+	    else {
+		snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
+			 config_getstring(IMAPOPT_SIEVEDIR),
+			 (char) dir_hash_c(userid), userid);
+	    }
+	}
     }
 
     /* we better be in a list now */
@@ -492,7 +534,7 @@ int undump_mailbox(const char *mbname, const char *mbpath, const char *mbacl,
 	mboxlist_unsetquota(mbname);
     } else if(imparse_isnumber(data.s)) {
 	/* Set a Quota */ 
-	mboxlist_setquota(mbname, atoi(data.s));
+	mboxlist_setquota(mbname, atoi(data.s), 0);
     } else {
 	/* Huh? */
 	freebuf(&data);
@@ -593,6 +635,11 @@ int undump_mailbox(const char *mbname, const char *mbpath, const char *mbacl,
 		r = IMAP_PROTOCOL_ERROR;
 		goto done;
 	    }
+	    if(strncmp(file.s, "cyrus.", 6)) {
+		/* it doesn't match cyrus.*, so its a message file.
+		 * charge it against the quota */
+		quotaused += data.len;
+	    }
 	}	
 
 	/* if we haven't opened it, do so */
@@ -623,6 +670,31 @@ int undump_mailbox(const char *mbname, const char *mbpath, const char *mbacl,
 	if(c == ')') break;
     }
     
+    if(!r && quotaused) {
+	struct quota quota;
+	char quota_root[MAX_MAILBOX_PATH];
+	
+	if(mailbox_findquota(quota_root, mbname)) {
+	    /* update the quota file */
+	    memset(&quota, 0, sizeof(quota));
+	    quota.root = quota_root;
+	    quota.fd = -1;
+	    r = mailbox_lock_quota(&quota);
+	    if(!r) {
+		quota.used += quotaused;
+		r = mailbox_write_quota(&quota);
+		close(quota.fd);
+	    } else {
+		syslog(LOG_ERR, "could not lock quota file for %s (%s)",
+		       quota_root, error_message(r));
+	    }
+	    if(r) {
+		syslog(LOG_ERR, "failed writing quota file for %s (%s)",
+		       quota_root, error_message(r));
+	    }
+	}
+    }
+
  done:
     /* eat the rest of the line, we have atleast a \r\n coming */
     eatline(pin, c);

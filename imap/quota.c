@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
-/* $Id: quota.c,v 1.40.2.2 2002/06/14 18:36:58 jsmith2 Exp $ */
+/* $Id: quota.c,v 1.40.2.3 2002/09/10 20:30:46 rjs3 Exp $ */
 
 
 #include <config.h>
@@ -208,10 +208,11 @@ int buildquotalist(char **roots, int nroots)
      * translated name.
      */
     for (i = 0; i < nroots; i++) {
-	mboxname_hiersep_tointernal(&quota_namespace, roots[i]);
+	mboxname_hiersep_tointernal(&quota_namespace, roots[i], 0);
     }
 
-    sprintf(quota_path, "%s%s", config_dir, FNAME_QUOTADIR);
+    snprintf(quota_path, sizeof(quota_path),
+	     "%s%s", config_dir, FNAME_QUOTADIR);
     if (chdir(quota_path)) {
 	return IMAP_IOERROR;
     }

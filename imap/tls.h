@@ -47,7 +47,7 @@
 #define INCLUDED_TLS_H
 
 /* is tls enabled? */
-int tls_enabled(const char *ident);
+int tls_enabled(void);
 
 /* name of the SSL/TLS sessions database */
 #define FNAME_TLSSESSIONS "/tls_sessions.db"
@@ -60,7 +60,6 @@ int tls_enabled(const char *ident);
 int tls_init_serverengine(const char *ident,
 			  int verifydepth, /* depth to verify */
 			  int askcert,     /* 1 = client auth */
-			  int requirecert, /* 1 = require client auth */
 			  int tlsonly);
 
 /* start tls negotiation */

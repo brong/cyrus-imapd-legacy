@@ -1,4 +1,5 @@
 Makefile
+chk_cyrus
 ctl_cyrusdb
 ctl_deliver
 ctl_mboxlist
@@ -11,6 +12,8 @@ idled
 imap_err.c
 imap_err.h
 imapd
+imapopts.c
+imapopts.h
 ipurge
 lmtpd
 lmtpproxyd

@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.44.2.2 2002/06/14 18:36:50 jsmith2 Exp $
+ * $Id: lmtpengine.c,v 1.44.2.3 2002/09/10 20:30:42 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -136,21 +136,6 @@ static struct
     char *authid;
 } saslprops = {NULL,NULL,0,NULL};
 
-/* a simple hash function for sasl mechanisms */
-static int hash_simple (const char *str)
-{
-    int     value = 0;
-    int     i;
-
-    if (!str)
-	return 0;
-    for (i = 0; *str; i++)
-    {
-	value ^= (*str++ << ((i & 3)*8));
-    }
-    return value;
-}
-
 /* round to nearest 1024 bytes and return number of Kbytes.
  used for SNMP updates. */
 static int roundToK(int x)
@@ -199,14 +184,14 @@ static void send_lmtp_error(struct protstream *pout, int r)
 "550-your message, or %s if you believe you\r\n"
 "550-received this message in error.\r\n"
 "550 5.7.1 Permission denied\r\n", 
-			POSTMASTER);
+			config_getstring(IMAPOPT_POSTMASTER));
 	} else {
 	    prot_printf(pout, "550 5.7.1 Permission denied\r\n");
 	}
 	break;
 
     case IMAP_QUOTA_EXCEEDED:
-	if(config_getswitch("lmtp_overquota_perm_failure",0)) {
+	if(config_getswitch(IMAPOPT_LMTP_OVER_QUOTA_PERM_FAILURE)) {
 	    /* Not Default - Perm Failure */
 	    prot_printf(pout, "552 5.2.2 Over quota\r\n");
 	} else {
@@ -741,7 +726,7 @@ static int parseheader(struct protstream *fin, FILE *fout,
     int off = 0;
     state s = NAME_START;
     int r = 0;
-    int reject8bit = config_getswitch("reject8bit", 0);
+    int reject8bit = config_getswitch(IMAPOPT_REJECT8BIT);
 
     if (namelen == 0) {
 	namelen += NAMEINC;
@@ -1001,7 +986,7 @@ static int savemsg(struct clientdata *cd,
 	clean_retpath(rpath);
 	/* Append our hostname if there's no domain in address */
 	hostname = NULL;
-	if (!strchr(rpath, '@')) {
+	if (!strchr(rpath, '@') && strlen(rpath) > 0) {
 	    hostname = config_servername;
 	}
 
@@ -1153,7 +1138,7 @@ static int process_recipient(char *addr,
 	}
     }
     else {
-	while (*addr != '@' && *addr != '>') {
+	while ((config_virtdomains || *addr != '@') && *addr != '>') {
 	    if (*addr == '\\') addr++;
 	    *dest++ = *addr++;
 	}
@@ -1245,8 +1230,12 @@ void lmtpmode(struct lmtp_func *func,
 #endif
     cd.starttls_done = 0;
 
-    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
-    max_msgsize = config_getint("maxmessagesize", INT_MAX);
+    snprintf(shutdownfilename, sizeof(shutdownfilename), 
+	     "%s/msg/shutdown", config_dir);
+    max_msgsize = config_getint(IMAPOPT_MAXMESSAGESIZE);
+
+    /* If max_msgsize is 0, allow any size */
+    if(!max_msgsize) max_msgsize = INT_MAX;
 
     msg_new(&msg);
 
@@ -1317,10 +1306,8 @@ void lmtpmode(struct lmtp_func *func,
     /* set my allowable security properties */
     /* ANONYMOUS is silly because we allow that anyway */
     secflags = SASL_SEC_NOANONYMOUS;
-    plaintext_result = config_getswitch("allowplaintext",1);
-    if (!config_getswitch("lmtp_allowplaintext", plaintext_result)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
+    plaintext_result = config_getswitch(IMAPOPT_ALLOWPLAINTEXT);
+
     secprops = mysasl_secprops(secflags);
     sasl_setprop(cd.conn, SASL_SEC_PROPS, secprops);
 
@@ -1586,7 +1573,7 @@ void lmtpmode(struct lmtp_func *func,
 		  prot_printf(pout, "250-SIZE %d\r\n", max_msgsize);
 	      else
 		  prot_printf(pout, "250-SIZE\r\n");
-	      if (tls_enabled("lmtp") && !func->preauth) {
+	      if (tls_enabled() && !func->preauth) {
 		  prot_printf(pout, "250-STARTTLS\r\n");
 	      }
 	      if (sasl_listmech(cd.conn, NULL, "AUTH ", " ", "", &mechs, 
@@ -1605,7 +1592,7 @@ void lmtpmode(struct lmtp_func *func,
       case 'm':
       case 'M':
 	    if (!authenticated) {
-		if (config_getswitch("soft_noauth", 1)) {
+		if (config_getswitch(IMAPOPT_SOFT_NOAUTH)) {
 		    prot_printf(pout, "430 Authentication required\r\n");
 		} else {
 		    prot_printf(pout, "530 Authentication required\r\n");
@@ -1800,7 +1787,7 @@ void lmtpmode(struct lmtp_func *func,
       case 's':
       case 'S':
 #ifdef HAVE_SSL
-	    if (!strcasecmp(buf, "starttls") && tls_enabled("lmtp") &&
+	    if (!strcasecmp(buf, "starttls") && tls_enabled() &&
 		!func->preauth) { /* don't need TLS for preauth'd connect */
 		int *layerp;
 		sasl_ssf_t ssf;
@@ -1824,7 +1811,6 @@ void lmtpmode(struct lmtp_func *func,
 		r=tls_init_serverengine("lmtp",
 					5,   /* depth to verify */
 					1,   /* can client auth? */
-					0,   /* require client to auth? */
 					1);   /* TLS only? */
 
 		if (r == -1) {
@@ -1970,6 +1956,13 @@ static int revconvert_lmtp(const char *code)
 	    return IMAP_MAILBOX_NONEXISTENT;
 	}
 	return IMAP_PERMISSION_DENIED;
+    case 552:
+	if (code[6] == '2') {
+	    return IMAP_QUOTA_EXCEEDED;
+	} else if (code[6] == '3') {
+	    return IMAP_MESSAGE_TOO_LARGE;
+	}
+	return IMAP_QUOTA_EXCEEDED;
     case 554:
 	return IMAP_MESSAGE_BADHEADER; /* sigh, pick one */
 
@@ -2190,14 +2183,14 @@ int lmtp_connect(const char *phost,
 	/* open unix socket */
 	if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 	    syslog(LOG_ERR, "socket() failed %m");
-	    goto donesock;
+	    goto errsock;
 	}
 	addr.sun_family = AF_UNIX;
 	strcpy(addr.sun_path, host);
 	if (connect(sock, (struct sockaddr *) &addr, 
 		    sizeof(addr.sun_family) + strlen(addr.sun_path) + 1) < 0) {
 	    syslog(LOG_ERR, "connect(%s) failed: %m", addr.sun_path);
-	    goto donesock;
+	    goto errsock;
 	}
 
 	/* set that we are preauthed */
@@ -2221,13 +2214,13 @@ int lmtp_connect(const char *phost,
 
 	if ((hp = gethostbyname(host)) == NULL) {
 	    syslog(LOG_ERR, "gethostbyname(%s) failed", host);
-	    goto donesock;
+	    goto errsock;
 	}
 
 	/* open inet socket */
 	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 	    syslog(LOG_ERR, "socket() failed: %m");
-	    goto donesock;
+	    goto errsock;
 	}
 
 	addr.sin_family = AF_INET;
@@ -2239,22 +2232,15 @@ int lmtp_connect(const char *phost,
 	    int pn = atoi(p);
 	    if (pn == 0) {
 		syslog(LOG_ERR, "couldn't find valid lmtp port");
-		goto donesock;
+		goto errsock;
 	    }
 	    addr.sin_port = htons(pn);
 	}
 
 	if (connect(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 	    syslog(LOG_ERR, "connect(%s:%s) failed: %m", host, p);
-	    goto donesock;
+	    goto errsock;
 	}	    
-    }
-
- donesock:
-    if (sock == -1) {
-	/* error during connection */
-	free(host);
-	return IMAP_IOERROR;
     }
     
     conn = xmalloc(sizeof(struct lmtp_conn));
@@ -2329,6 +2315,13 @@ int lmtp_connect(const char *phost,
 	}
 	return IMAP_SERVER_UNAVAILABLE;
     }
+
+ errsock:
+    /* error during connection */
+    if (sock != -1) close(sock);
+	
+    free(host);
+    return IMAP_IOERROR;
 }
 
 static void pushmsg(struct protstream *in, struct protstream *out,
@@ -2424,7 +2417,7 @@ int lmtp_runtxn(struct lmtp_conn *conn, struct lmtp_txn *txn)
     onegood = 0;
     for (j = 0; j < txn->rcpt_num; j++) {
 	prot_printf(conn->pout, "RCPT TO:<%s>", txn->rcpt[j].addr);
-	if (txn->ignorequota && (conn->capability & CAPA_IGNOREQUOTA)) {
+	if (txn->rcpt[j].ignorequota && (conn->capability & CAPA_IGNOREQUOTA)) {
 	    prot_printf(conn->pout, " IGNOREQUOTA");
 	}
 	prot_printf(conn->pout, "\r\n");
@@ -2580,10 +2573,7 @@ static int reset_saslconn(sasl_conn_t **conn)
     
     secflags = SASL_SEC_NOANONYMOUS;
 
-    plaintext_result = config_getswitch("allowplaintext", 1);
-    if (!config_getswitch("lmtp_allowplaintext", plaintext_result)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
+    plaintext_result = config_getswitch(IMAPOPT_ALLOWPLAINTEXT);
     secprops = mysasl_secprops(secflags);
     ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;

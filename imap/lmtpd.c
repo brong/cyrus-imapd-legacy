@@ -1,6 +1,6 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.79.2.3 2002/08/29 16:32:21 jsmith2 Exp $
+ * $Id: lmtpd.c,v 1.79.2.4 2002/09/10 20:30:42 rjs3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -174,61 +174,9 @@ int deliver_logfd = -1; /* used in lmtpengine.c */
 /* current namespace */
 static struct namespace lmtpd_namespace;
 
-/* should we allow users to proxy?  return SASL_OK if yes,
-   SASL_BADAUTH otherwise */
-static int mysasl_authproc(sasl_conn_t *conn,
-			   void *context __attribute__((unused)),
-			   const char *requested_user __attribute__((unused)),
-			   unsigned rlen __attribute__((unused)),
-			   const char *auth_identity, 
-			   unsigned alen __attribute__((unused)),
-			   const char *def_realm __attribute__((unused)),
-			   unsigned urlen __attribute__((unused)),
-			   struct propctx *propctx __attribute__((unused)))
-{
-    const char *val;
-    char *realm;
-    int allowed=0;
-    struct auth_state *authstate;
-
-    /* check if remote realm */
-    if ((realm = strchr(auth_identity, '@'))!=NULL) {
-	realm++;
-	val = config_getstring("loginrealms", "");
-	while (*val) {
-	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
-		break;
-	    }
-	    /* not this realm, try next one */
-	    while (*val && !isspace((int) *val)) val++;
-	    while (*val && isspace((int) *val)) val++;
-	}
-	if (!*val) {
-	    sasl_seterror(conn, 0, "cross-realm login %s denied",
-			  auth_identity);
-	    return SASL_BADAUTH;
-	}
-    }
-
-    /* ok, is auth_identity an admin? 
-     * for now only admins can do lmtp from another machine
-     */
-    authstate = auth_newstate(auth_identity, NULL);
-    allowed = authisa(authstate, "lmtp", "admins");
-    auth_freestate(authstate);
-    
-    if (!allowed) {
-	sasl_seterror(conn, 0, "only admins may authenticate");
-	return SASL_BADAUTH;
-    }
-
-    return SASL_OK;
-}
-
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
-    { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
+    { SASL_CB_PROXY_POLICY, &mysasl_proxy_policy, NULL },
     { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },
     { SASL_CB_LIST_END, NULL, NULL }
 };
@@ -240,7 +188,6 @@ int service_init(int argc __attribute__((unused)),
 {
     int r;
 
-    config_changeident("lmtpd");
     if (geteuid() == 0) return 1;
     
     signals_set_shutdown(&shut_down);
@@ -248,9 +195,9 @@ int service_init(int argc __attribute__((unused)),
     signal(SIGPIPE, SIG_IGN);
 
 #ifdef USE_SIEVE
-    sieve_usehomedir = config_getswitch("sieveusehomedir", 0);
+    sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
     if (!sieve_usehomedir) {
-	sieve_dir = config_getstring("sievedir", "/usr/sieve");
+	sieve_dir = config_getstring(IMAPOPT_SIEVEDIR);
     } else {
 	sieve_dir = NULL;
     }
@@ -262,16 +209,12 @@ int service_init(int argc __attribute__((unused)),
     setup_sieve();
 #endif /* USE_SIEVE */
 
-    singleinstance = config_getswitch("singleinstancestore", 1);
-    BB = config_getstring("postuser", BB);
+    singleinstance = config_getswitch(IMAPOPT_SINGLEINSTANCESTORE);
+    BB = config_getstring(IMAPOPT_POSTUSER);
 
-    if ((r = sasl_server_init(mysasl_cb, "Cyrus")) != SASL_OK) {
-	syslog(LOG_ERR, "SASL failed initializing: sasl_server_init(): %s", 
-	       sasl_errstring(r, NULL, NULL));
-	return EC_SOFTWARE;
-    }
+    config_sasl_init(0, 1, mysasl_cb);
 
-    dupelim = config_getswitch("duplicatesuppression", 1);
+    dupelim = config_getswitch(IMAPOPT_DUPLICATESUPPRESSION);
     /* initialize duplicate delivery database */
     if (duplicate_init(NULL, 0) != 0) {
 	syslog(LOG_ERR, 
@@ -312,11 +255,12 @@ int service_main(int argc, char **argv,
     prot_setflushonread(deliver_in, deliver_out);
     prot_settimeout(deliver_in, 360);
 
-    while ((opt = getopt(argc, argv, "C:a")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:Da")) != EOF) {
 	switch(opt) {
 	case 'C': /* alt config file - handled by service::main() */
 	    break;
-
+	case 'D': /* ext. debugger - handled by service::main() */
+ 	    break;
 	case 'a':
 	    mylmtp.preauth = 1;
 	    break;
@@ -432,7 +376,7 @@ pid_t open_sendmail(const char *argv[], FILE **sm)
 	close(fds[1]);
 	/* make the pipe be stdin */
 	dup2(fds[0], 0);
-	execv(SENDMAIL, (char **) argv);
+	execv(config_getstring(IMAPOPT_SENDMAIL), (char **) argv);
 
 	/* if we're here we suck */
 	printf("451 lmtpd: didn't exec?!?\r\n");
@@ -517,7 +461,7 @@ int send_rejection(const char *origid,
     fprintf(sm, "Date: %s\r\n", datestr);
 
     fprintf(sm, "X-Sieve: %s\r\n", SIEVE_VERSION);
-    fprintf(sm, "From: Mail Sieve Subsystem <%s>\r\n", POSTMASTER);
+    fprintf(sm, "From: Mail Sieve Subsystem <%s>\r\n", config_getstring(IMAPOPT_POSTMASTER));
     fprintf(sm, "To: <%s>\r\n", rejto);
     fprintf(sm, "MIME-Version: 1.0\r\n");
     fprintf(sm, "Content-Type: "
@@ -542,7 +486,8 @@ int send_rejection(const char *origid,
     if (origreceip)
 	fprintf(sm, "Original-Recipient: rfc822; %s\r\n", origreceip);
     fprintf(sm, "Final-Recipient: rfc822; %s\r\n", mailreceip);
-    fprintf(sm, "Original-Message-ID: %s\r\n", origid);
+    if (origid)
+	fprintf(sm, "Original-Message-ID: %s\r\n", origid);
     fprintf(sm, "Disposition: "
 	    "automatic-action/MDN-sent-automatically; deleted\r\n");
     fprintf(sm, "\r\n");
@@ -652,7 +597,7 @@ int sieve_discard(void *ac __attribute__((unused)),
     snmp_increment(SIEVE_DISCARD, 1);
 
     /* ok, we won't file it, but log it */
-    if (strlen(md->id) < 80) {
+    if (md->id && strlen(md->id) < 80) {
 	char pretty[160];
 
 	beautify_copy(pretty, md->id);
@@ -684,7 +629,13 @@ int sieve_reject(void *ac,
 	*errmsg = "No return-path for reply";
 	return SIEVE_FAIL;
     }
-    
+
+    if (strlen(md->return_path) == 0) {
+	syslog(LOG_INFO, "sieve: discarded reject to <> for %s id %s",
+	       sd->username, md->id);
+        return SIEVE_OK;
+    }
+
     body = msg_getheader(md, "original-recipient");
     origreceip = body ? body[0] : NULL;
     if ((res = send_rejection(md->id, md->return_path, 
@@ -789,7 +740,7 @@ static int sieve_notify(void *ac,
 			void *mc __attribute__((unused)),
 			const char **errmsg __attribute__((unused)))
 {
-    const char *notifier = config_getstring("sievenotifier", NULL);
+    const char *notifier = config_getstring(IMAPOPT_SIEVENOTIFIER);
 
     if (notifier) {
 	sieve_notify_context_t *nc = (sieve_notify_context_t *) ac;
@@ -1052,37 +1003,49 @@ static void setup_sieve(void)
 }
 
 /* returns true if user has a sieve file */
-static FILE *sieve_find_script(const char *user)
+static int sieve_find_script(const char *user)
 {
     char buf[1024];
 
     if (strlen(user) > 900) {
-	return NULL;
+	return -1;
     }
     
     if (!have_dupdb) {
 	/* duplicate delivery database is needed for sieve */
-	return NULL;
+	return -1;
     }
 
     if (sieve_usehomedir) { /* look in homedir */
 	struct passwd *pent = getpwnam(user);
 
 	if (pent == NULL) {
-	    return NULL;
+	    return -1;
 	}
 
 	/* check ~USERNAME/.sieve */
 	snprintf(buf, sizeof(buf), "%s/%s", pent->pw_dir, ".sieve");
     } else { /* look in sieve_dir */
-	char hash;
+	char hash, *domain;
 
-	hash = (char) dir_hash_c(user);
+	if (config_virtdomains && (domain = strchr(user, '@'))) {
+	    char d = (char) dir_hash_c(domain+1);
+	    *domain = '\0';  /* split user@domain */
+	    hash = (char) dir_hash_c(user);
+	    snprintf(buf, sizeof(buf), "%s%s%c/%s/%c/%s/default.bc",
+		     sieve_dir, FNAME_DOMAINDIR, d, domain+1,
+		     hash, user);
+	    *domain = '@';  /* reassemble user@domain */
+	}
+	else {
+	    hash = (char) dir_hash_c(user);
 
-	snprintf(buf, sizeof(buf), "%s/%c/%s/default", sieve_dir, hash, user);
+	    snprintf(buf, sizeof(buf), "%s/%c/%s/default.bc",
+		     sieve_dir, hash, user);
+	}
     }
 	
-    return (fopen(buf, "r"));
+    return (open(buf, O_RDWR));
 }
 #else /* USE_SIEVE */
 static FILE *sieve_find_script(const char *user)
@@ -1126,7 +1089,9 @@ int deliver_mailbox(struct protstream *msg,
     time_t now = time(NULL);
 
     /* Translate any separators in user */
-    if (user) mboxname_hiersep_tointernal(&lmtpd_namespace, user);
+    if (user) mboxname_hiersep_tointernal(&lmtpd_namespace, user,
+					  config_virtdomains ?
+					  strcspn(user, "@") : 0);
 
     r = (*lmtpd_namespace.mboxname_tointernal)(&lmtpd_namespace, mailboxname,
 					       user, namebuf);
@@ -1158,7 +1123,7 @@ int deliver_mailbox(struct protstream *msg,
     }
 
     if (!r && user) {
-	const char *notifier = config_getstring("mailnotifier", NULL);
+	const char *notifier = config_getstring(IMAPOPT_MAILNOTIFIER);
 
 	if (notifier) {
 	    /* do we want to replace user.XXX with INBOX? */
@@ -1194,16 +1159,22 @@ int deliver(message_data_t *msgdata, char *authuser,
     /* loop through each recipient, attempting delivery for each */
     for (n = 0; n < nrcpts; n++) {
 	char *rcpt = xstrdup(msg_getrcpt(msgdata, n));
-	char *plus;
+	char *plus, *domain = NULL, user[256];
 	int quotaoverride = msg_getrcpt_ignorequota(msgdata, n);
 	int r = 0;
+
+	if (config_virtdomains && (domain = strchr(rcpt, '@'))) {
+	    *domain++ = '\0';
+	}
 
 	mydata.cur_rcpt = n;
 	plus = strchr(rcpt, '+');
 	if (plus) *plus++ = '\0';
 	/* case 1: shared mailbox request */
 	if (plus && !strcmp(rcpt, BB)) {
-	    strcpy(namebuf, lmtpd_namespace.prefix[NAMESPACE_SHARED]);
+	    strcpy(namebuf, "");
+	    if (domain) sprintf(namebuf, "%s!", domain);
+	    strcat(namebuf, lmtpd_namespace.prefix[NAMESPACE_SHARED]);
 	    strcat(namebuf, plus);
 	    r = deliver_mailbox(msgdata->data, 
 				mydata.stage,
@@ -1217,28 +1188,33 @@ int deliver(message_data_t *msgdata, char *authuser,
 	/* case 2: ordinary user, might have Sieve script */
 	else if (!strchr(rcpt, lmtpd_namespace.hier_sep) &&
 	         strlen(rcpt) + 30 <= MAX_MAILBOX_PATH) {
-	    FILE *f = sieve_find_script(rcpt);
+	    int f;
+
+	    strcpy(user, rcpt);
+	    if (domain) sprintf(user+strlen(user), "@%s", domain);
 
 #ifdef USE_SIEVE
-	    if (f != NULL) {
+	    f = sieve_find_script(user);
+
+	    if (f != -1) {
 		script_data_t *sdata = NULL;
-		sieve_script_t *s = NULL;
+		sieve_bytecode_t *bc = NULL;
 
 		sdata = (script_data_t *) xmalloc(sizeof(script_data_t));
 
-		sdata->username = rcpt;
+		sdata->username = user;
 		sdata->mailboxname = plus;
-		sdata->authstate = auth_newstate(rcpt, (char *)0);
+		sdata->authstate = auth_newstate(user, (char *)0);
 
 		/* slap the mailboxname back on so we hash the envelope & id
 		   when we figure out whether or not to keep the message */
-		snprintf(namebuf, sizeof(namebuf), "%s+%s", rcpt,
-			 plus ? plus : "");
+		snprintf(namebuf, sizeof(namebuf), "%s+%s@%s", rcpt,
+			 plus ? plus : "", domain ? domain : "");
 		
-		r = sieve_script_parse(sieve_interp, f, (void *) sdata, &s);
-		fclose(f);
+		r = sieve_script_load(sieve_interp, f, namebuf,
+				      (void *) sdata, &bc);
 		if (r == SIEVE_OK) {
-		    r = sieve_execute_script(s, (void *) &mydata);
+		    r = sieve_execute_bytecode(bc, (void *) &mydata);
 		}
 		if ((r == SIEVE_OK) && (msgdata->id)) {
 		    /* ok, we've run the script */
@@ -1251,7 +1227,8 @@ int deliver(message_data_t *msgdata, char *authuser,
 		/* free everything */
 		if (sdata->authstate) auth_freestate(sdata->authstate);
 		if (sdata) free(sdata);
-		sieve_script_free(&s);
+		sieve_script_unload(&bc);
+		close(f);
 		
 		/* if there was an error, r is non-zero and 
 		   we'll do normal delivery */
@@ -1264,7 +1241,7 @@ int deliver(message_data_t *msgdata, char *authuser,
 #endif /* USE_SIEVE */
 
 	    if (r && plus &&
-		strlen(rcpt) + strlen(plus) + 30 <= MAX_MAILBOX_PATH) {
+		strlen(user) + strlen(plus) + 30 <= MAX_MAILBOX_PATH) {
 		/* normal delivery to + mailbox */
 		strcpy(namebuf, lmtpd_namespace.prefix[NAMESPACE_INBOX]);
 		strcat(namebuf, plus);
@@ -1274,7 +1251,7 @@ int deliver(message_data_t *msgdata, char *authuser,
 				    msgdata->size, 
 				    NULL, 0, 
 				    mydata.authuser, mydata.authstate,
-				    msgdata->id, rcpt, mydata.notifyheader,
+				    msgdata->id, user, mydata.notifyheader,
 				    namebuf, quotaoverride, 0);
 	    }
 
@@ -1288,7 +1265,7 @@ int deliver(message_data_t *msgdata, char *authuser,
 				    msgdata->size, 
 				    NULL, 0, 
 				    mydata.authuser, mydata.authstate,
-				    msgdata->id, rcpt, mydata.notifyheader,
+				    msgdata->id, user, mydata.notifyheader,
 				    namebuf, quotaoverride, 1);
 	    }
 	}
@@ -1376,34 +1353,51 @@ static int verify_user(const char *user, long quotacheck,
     char *plus;
     int r;
     int sl = strlen(BB);
+    char *domain = NULL;
+    int userlen = strlen(user), domainlen = 0;
+
+    if (config_virtdomains && (domain = strchr(user, '@'))) {
+	userlen = domain - user;
+	domain++;
+	/* ignore default domain */
+	if (!(config_defdomain && !strcasecmp(config_defdomain, domain)))
+	    domainlen = strlen(domain)+1;
+    }
 
     /* check to see if mailbox exists and we can append to it */
     if (!strncmp(user, BB, sl) && user[sl] == '+') {
 	/* special shared folder address */
-	strcpy(buf, user + sl + 1);
+	if (domainlen)
+	    sprintf(buf, "%s!%.*s", domain, userlen - sl - 1, user + sl + 1);
+	else
+	    sprintf(buf, "%.*s", userlen - sl - 1, user + sl + 1);
 	/* Translate any separators in user */
-	mboxname_hiersep_tointernal(&lmtpd_namespace, buf);
+	mboxname_hiersep_tointernal(&lmtpd_namespace, buf+domainlen, 0);
 	/* - must have posting privileges on shared folders
 	   - don't care about message size (1 msg over quota allowed) */
 	r = append_check(buf, MAILBOX_FORMAT_NORMAL, authstate,
 			 ACL_POST, quotacheck > 0 ? 0 : quotacheck);
     } else {
 	/* ordinary user */
-	if (strlen(user) > sizeof(buf)-10) {
+	if (userlen > sizeof(buf)-10) {
 	    r = IMAP_MAILBOX_NONEXISTENT;
 	} else {
-	    strcpy(buf, "user.");
-	    strcat(buf, user);
+	    if (domainlen)
+		sprintf(buf, "%s!user.%.*s", domain, userlen, user);
+	    else
+		sprintf(buf, "user.%.*s", userlen, user);
 	    plus = strchr(buf, '+');
 	    if (plus) *plus = '\0';
 	    /* Translate any separators in user */
-	    mboxname_hiersep_tointernal(&lmtpd_namespace, buf+5);
+	    mboxname_hiersep_tointernal(&lmtpd_namespace, buf+domainlen+5, 0);
 	    /* - don't care about ACL on INBOX (always allow post)
 	       - don't care about message size (1 msg over quota allowed) */
 	    r = append_check(buf, MAILBOX_FORMAT_NORMAL, authstate,
 			     0, quotacheck > 0 ? 0 : quotacheck);
 	}
     }
+
+    if (r) syslog(LOG_DEBUG, "append_check() of '%s' failed ", buf);
 
     return r;
 }
@@ -1452,12 +1446,16 @@ FILE *spoolfile(message_data_t *msgdata)
      */
     if ((msg_getnumrcpt(msgdata) == 1) || singleinstance) {
 	int r = 0;
-	char *rcpt, *plus, *user = NULL;
+	char *rcpt, *plus, *user = NULL, *domain = NULL;
 	char namebuf[MAX_MAILBOX_PATH], mailboxname[MAX_MAILBOX_PATH];
 	time_t now = time(NULL);
 
 	/* build the mailboxname from the recipient address */
-	rcpt = xstrdup(msg_getrcpt(msgdata, 0));
+	user = rcpt = xstrdup(msg_getrcpt(msgdata, 0));
+	if (config_virtdomains && (domain = strchr(rcpt, '@'))) {
+	    *domain = '\0';
+	}
+
 	plus = strchr(rcpt, '+');
 	if (plus) *plus++ = '\0';
 
@@ -1470,7 +1468,6 @@ FILE *spoolfile(message_data_t *msgdata)
 	/* case 2: ordinary user */
 	else if (!strchr(rcpt, lmtpd_namespace.hier_sep) &&
 	         strlen(rcpt) + 30 <= MAX_MAILBOX_PATH) {
-	    user = rcpt;
 
 	    /* assume delivery to INBOX for now */
 	    strcpy(namebuf, "INBOX");
@@ -1482,9 +1479,18 @@ FILE *spoolfile(message_data_t *msgdata)
 	    r = 1;
 	}
 
+	/* reassemble the user and domain */
+	if (domain) {
+	    *domain = '@';
+	    /* slide the domain up to the user */
+	    if (plus) memmove(plus-1, domain, strlen(domain)+1);
+	}
+
 	if (!r) {
 	    /* Translate any separators in user */
-	    if (user) mboxname_hiersep_tointernal(&lmtpd_namespace, user);
+	    if (user) mboxname_hiersep_tointernal(&lmtpd_namespace, user,
+						  config_virtdomains ?
+						  strcspn(user, "@") : 0);
 
 	    r = (*lmtpd_namespace.mboxname_tointernal)(&lmtpd_namespace,
 						       namebuf,

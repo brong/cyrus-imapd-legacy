@@ -39,11 +39,12 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: backend.h,v 1.3.2.2 2002/06/14 18:36:43 jsmith2 Exp $ */
+/* $Id: backend.h,v 1.3.2.3 2002/09/10 20:30:39 rjs3 Exp $ */
 
 #ifndef _INCLUDED_BACKEND_H
 #define _INCLUDED_BACKEND_H
 
+#include "mboxlist.h"
 #include "prot.h"
 
 /* Functionality to bring up/down connections to backend servers */
@@ -51,7 +52,7 @@
 #define LAST_RESULT_LEN 1024
 
 struct backend {
-    char *hostname;
+    char hostname[MAX_PARTITION_LEN];
     struct sockaddr_in addr;
     int sock;
 
@@ -61,7 +62,7 @@ struct backend {
     sasl_conn_t *saslconn;
 
     enum {
-	ACAP = 0x1, /* not used */
+	ACAP = 0x1, /* obsolete */
 	IDLE = 0x2,
 	MUPDATE = 0x4
     } capability;

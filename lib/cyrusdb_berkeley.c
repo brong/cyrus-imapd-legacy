@@ -1,4 +1,4 @@
-/*  cyrusdb_db3: berkeley db backend
+/*  cyrusdb_berkeley: berkeley db backends
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: cyrusdb_db3.c,v 1.25.2.2 2002/06/06 21:08:33 jsmith2 Exp $ */
+/* $Id: cyrusdb_berkeley.c,v 1.1.4.1 2002/09/10 20:30:54 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -100,7 +100,7 @@ static void db_panic(DB_ENV *dbenv __attribute__((unused)),
 
 static void db_err(const char *db_prfx, char *buffer)
 {
-    syslog(LOG_ERR, "DBERROR %s: %s", db_prfx, buffer);
+    syslog(LOG_WARNING, "DBERROR %s: %s", db_prfx, buffer);
 }
 
 static int init(const char *dbdir, int myflags)
@@ -905,9 +905,9 @@ static int abort_txn(struct db *db __attribute__((unused)),
     return 0;
 }
 
-struct cyrusdb_backend cyrusdb_db3 = 
+struct cyrusdb_backend cyrusdb_berkeley = 
 {
-    "db3",			/* name */
+    "berkeley",			/* name */
 
     &init,
     &done,
@@ -931,9 +931,9 @@ struct cyrusdb_backend cyrusdb_db3 =
     NULL
 };
 
-struct cyrusdb_backend cyrusdb_db3_nosync = 
+struct cyrusdb_backend cyrusdb_berkeley_nosync = 
 {
-    "db3-nosync",		/* name */
+    "berkeley-nosync",		/* name */
 
     &init,
     &done,

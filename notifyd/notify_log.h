@@ -1,6 +1,8 @@
-
-/* 
- * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
+/* notify_log.h -- syslog notification method
+ * Ken Murchison
+ */
+/*
+ * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,26 +40,17 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: notify_log.h,v 1.4.4.1 2002/09/10 20:31:20 rjs3 Exp $
  */
 
-#ifndef ACAPPUSH_H_
-#define ACAPPUSH_H_
+#ifndef _NOTIFY_LOG_H_
+#define _NOTIFY_LOG_H_
 
-/* for bit32 definitions */
-#include "mailbox.h"
+#include <config.h>
 
-/* socket to communicate with the acappusher */
-#define FNAME_ACAPPUSH_SOCK "/socket/acappush"
+char* notify_log(const char *class, const char *priority,
+		 const char *user, const char *mailbox,
+		 int nopt, char **options,
+		 const char *message);
 
-typedef struct acapmbdata_s {
-    unsigned long uidvalidity;
-    unsigned long exists;
-    unsigned long deleted;
-    unsigned long flagged;
-    unsigned long answered;
-
-    /* 1 for null. leave at end of structure for alignment */
-    char name[MAX_MAILBOX_NAME+1];
-} acapmbdata_t;
-
-#endif /* ACAPPUSH_H_ */
+#endif /* _NOTIFY_LOG_H_ */

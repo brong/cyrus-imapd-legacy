@@ -1,4 +1,4 @@
-<!-- $Id: install-upgrade.html,v 1.22.2.1 2002/06/06 21:07:46 jsmith2 Exp $ -->
+<!-- $Id: install-upgrade.html,v 1.22.2.2 2002/09/10 20:30:35 rjs3 Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Upgrading From Previous Versions
@@ -7,6 +7,16 @@
 <body>
 
 <h1>Upgrading From Previous Versions</h1>
+
+<h3>Upgrading from 2.1.x or earlier</h3>
+<ul>
+<li>User moves via RENAME and XFER are now controlled by the
+<tt>allowusermoves</tt> option, which defaults to off.</li>
+<li>Clients that use old-style ACL commands that include the &quot;MAILBOX&quot;
+directive will no longer function.  We do not know of any clients
+that have this problem currently.</li>
+
+</ul>
 
 <h3>Upgrading from 2.1.3 or earlier</h3>
 <ul>
@@ -145,11 +155,9 @@ process Cyrus process and ensure that it starts on boot.  see <a
 href="install-configure.html#master">this section</a> of the
 configuration instructions.
 
-<li>sendmail configuration. You need to use a new cyrus mc file. See
-<a href="cyrusv2.mc"><tt>doc/cyrusv2.mc</tt></a> for a sample mc
-file. This requires Sendmail 8.10 or newer.  See <a
-href="install-configure.html#mta">this section</a> of the
-configuration document.
+<li>MTA configuration. You will have to reconfigure your MTA to speak
+to lmtpd.  See <a href="install-configure.html#mta">this section</a> of
+the configuration document.
 
 <li>cyrus.seen conversion. The cyrus.seen file will be automatically
 upgraded as users read mail.  After some time, you might want to
@@ -231,7 +239,7 @@ worry about it.)
 </ul>
 
 <HR><P>
-last modified: $Date: 2002/06/06 21:07:46 $
+last modified: $Date: 2002/09/10 20:30:35 $
 </BODY></HTML>
 
 

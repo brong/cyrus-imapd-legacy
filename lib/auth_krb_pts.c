@@ -1,5 +1,5 @@
 /* auth_krb_pts.c -- Kerberos authorization with AFS PTServer groups
- * $Id: auth_krb_pts.c,v 1.40.2.1 2002/06/06 21:08:32 jsmith2 Exp $
+ * $Id: auth_krb_pts.c,v 1.40.2.2 2002/09/10 20:30:53 rjs3 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -250,16 +250,6 @@ char *auth_canonifyid(const char *identifier, size_t len)
     memcpy(canon_buf, identifier, len);
     canon_buf[len] = '\0';
    
-    if (strcasecmp(canon_buf, "anonymous") == 0) {
-	free(canon_buf);
-	return "anonymous";
-    }
-    if (strcasecmp(canon_buf, "anybody") == 0 ||
-	strcasecmp(canon_buf, "anyone") == 0) {
-	free(canon_buf);
-	return "anyone";
-    }
-
     aname[0] = inst[0] = realm[0] = '\0';
     if (kname_parse(aname, inst, realm, canon_buf) != 0) {
 	free(canon_buf);
@@ -392,6 +382,7 @@ struct auth_state *auth_newstate(const char *identifier,
     }
     if (lock_shared(fd) < 0) {
         syslog(LOG_ERR, "IOERROR: locking lock file %s: %m", fnamebuf);
+	close(fd);
         return newstate;
     }
     strcpy(fnamebuf, STATEDIR);
@@ -402,6 +393,7 @@ struct auth_state *auth_newstate(const char *identifier,
 
     if (r != 0) {
 	syslog(LOG_ERR, "auth_newstate: db_create: %s", db_strerror(r));
+	close(fd);
 	return newstate;
     }
     
@@ -414,6 +406,7 @@ struct auth_state *auth_newstate(const char *identifier,
     if (r != 0) {
 	syslog(LOG_ERR, "auth_newstate: opening %s: %s", fnamebuf, 
 	       db_strerror(r));
+	close(fd);
 	return newstate;
     }
 

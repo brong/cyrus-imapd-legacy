@@ -37,7 +37,7 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
-# $Id: Shell.pm,v 1.7.2.1 2002/06/06 21:09:03 jsmith2 Exp $
+# $Id: Shell.pm,v 1.7.2.2 2002/09/10 20:31:25 rjs3 Exp $
 #
 # A shell framework for IMAP::Cyrus::Admin
 #
@@ -150,6 +150,11 @@ my %builtins = (exit =>
 		  [\&_sc_version, '',
 		   'display version info of current server'],
 		ver => 'version',
+		xfermailbox =>
+		  [\&_sc_xfer,
+		   '[--partition partition] mailbox server [partition]',
+		   'transfer (relocate) a mailbox to a different server'],
+		xfer => 'xfermailbox',
 		#? alias
 		#? unalias
 		#? load
@@ -181,15 +186,16 @@ my $coll_command = '';
 sub _nexttoken {
   my $lr = shift;
   $$lr =~ s/^(\s+)// and $coll_command .= $1;
-
+  my $quoted = 0;
   my $q = '';
+
   my @tok = ('', undef);
   # this is cute.  (shells are funny that way)
   # we parse "words" which are delimited by whitespace.  except that if a
   # quote appears, we have to gobble to the closing quote and then continue
   # with what we were doing.  and outside quotes, we need to look for special
   # characters (in this case, /&<>;/) and break "words" there.
-  while ($$lr ne '' && $$lr !~ /^\s/) {
+  while ($$lr ne '' && ($quoted || $$lr !~ /^\s/)) {
     $tok[1] ||= 0;
     if ($$lr =~ /^([&<>;])/) {
       last if $tok[0] ne '';
@@ -220,16 +226,18 @@ sub _nexttoken {
       $$lr =~ s/^(\s+)// and $coll_command .= $1 if $q;
       redo;
     }
-    if ($$lr =~ /^([\'\"])/ && $q eq $1) {
+    if ($$lr =~ /^([\'\"])/ && $q eq 'x') {
       $q = '';
       $coll_command .= $1;
       $$lr =~ s///;
+      $quoted = !$quoted;
       next;
     }
     if ($$lr =~ /^([\'\"])/ && $q eq '') {
-      $q = $1;
+      $q = 'x';
       $coll_command .= $1;
       $$lr =~ s///;
+      $quoted = !$quoted;
       next;
     }
     $$lr =~ s/^(.)//;
@@ -989,6 +997,44 @@ sub _sc_rename {
   0;
 }
 
+sub _sc_xfer {
+  my ($cyrref, $name, $fh, $lfh, @argv) = @_;
+  my (@nargv, $opt, $want, $part);
+  shift(@argv);
+  while (defined ($opt = shift(@argv))) {
+    if ($want) {
+      $part = $opt;
+      $want = undef;
+      next;
+    }
+    if ($opt ne '' && '-partition' =~ /^\Q$opt/ || $opt eq '--partition') {
+      $want = 1;
+      next;
+    }
+    last if $opt eq '--';
+    if ($opt =~ /^-/) {
+      die "usage: xfermailbox [--partition name] mailbox " .
+	  "server [partition]\n";
+    }
+    else {
+      push(@nargv, $opt);
+      last;
+    }
+  }
+  push(@nargv, @argv);
+  $part = pop(@nargv) if @nargv > 2 && !defined($part);
+  if (@nargv != 2) {
+    die "usage: xfermailbox [--partition name] mailbox " .
+	"server [partition]\n";
+  }
+  if (!$cyrref || !$$cyrref) {
+    die "xfermailbox: no connection to server\n";
+  }
+  $$cyrref->xfer($nargv[0], $nargv[1], $part) ||
+    die "xfermailbox: " . $$cyrref->error . "\n";
+  0;
+}
+
 sub _sc_deleteacl {
   my ($cyrref, $name, $fh, $lfh, @argv) = @_;
   my (@nargv, $opt);
@@ -1153,9 +1199,25 @@ sub _sc_info {
     $lfh->[2]->print($$cyrref->error, "\n");
     return 1;
   }
-  foreach my $attrib (keys %info) {
+
+  # keep track of what mailboxes we've printed a header for already
+  my %section = ();
+  foreach my $attrib (sort keys %info) {
+    $attrib =~ /(\{.*\})/;
+    my $sect = $1;
+    if(!defined($sect)) {
+	$sect = "Server Wide";
+    }
+
+    if(!exists $section{$sect}) {
+	$section{$sect} = 'x';
+	print "$sect:\n";
+    }
+
     $attrib =~ /([^\/]*)$/;
-    $lfh->[1]->print($1, ": ", $info{$attrib}, "\n");
+    my $attrname = $1;
+
+    $lfh->[1]->print("  ", $attrname, ": ", $info{$attrib}, "\n");
   }
   0;
 }
@@ -1458,6 +1520,18 @@ be the special string C<none> which will remove the quota.
 =item C<ver>
 
 Display the version info of the current server.
+
+=item C<xfermailbox> [C<--partition> I<partition>] I<mailbox> I<server>
+
+=item C<xfer> [C<--partition> I<partition>] I<mailbox> I<server>
+
+=item C<xfermailbox> I<mailbox> I<server> [I<partition>]
+
+=item C<xfer> I<mailbox> I<server> [I<partition>]
+
+Transfer (relocate) the specified mailbox to a different server.
+Both old-style and getopt-style usages are accepted; combining them will
+produce an error.
 
 =back
 

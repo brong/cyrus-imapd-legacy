@@ -1,5 +1,5 @@
 /* append.c -- Routines for appending messages to a mailbox
- * $Id: append.c,v 1.82.2.2 2002/06/14 18:36:43 jsmith2 Exp $
+ * $Id: append.c,v 1.82.2.3 2002/09/10 20:30:39 rjs3 Exp $
  *
  * Copyright (c)1998, 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -48,6 +48,7 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
+#include <com_err.h>
 #include <sys/types.h>
 #include <syslog.h>
 #include <sys/stat.h>
@@ -248,7 +249,6 @@ int append_commit(struct appendstate *as,
     int r = 0;
     
     if (as->s == APPEND_DONE) return 0;
-    as->s = APPEND_DONE;
 
     if (start) *start = as->m.last_uid + 1;
     if (num) *num = as->nummsg;
@@ -256,6 +256,8 @@ int append_commit(struct appendstate *as,
 
     /* write out the header if we created new user flags */
     if (as->writeheader && (r = mailbox_write_header(&as->m))) {
+	syslog(LOG_ERR, "IOERROR: writing header for %s: %s",
+	       as->m.name, error_message(r));
 	append_abort(as);
 	return r;
     }
@@ -290,10 +292,11 @@ int append_commit(struct appendstate *as,
 	as->m.minor_version = MAILBOX_MINOR_VERSION;
     }
     
-    /* Write out index header & synchronize to disk.
-       this writes to acappush too. */
+    /* Write out index header & synchronize to disk. */
     r = mailbox_write_index_header(&as->m);
     if (r) {
+	syslog(LOG_ERR, "IOERROR: writing index header for %s: %s",
+	       as->m.name, error_message(r));
 	append_abort(as);
 	return r;
     }
@@ -319,6 +322,8 @@ int append_commit(struct appendstate *as,
     mailbox_unlock_index(&as->m);
     mailbox_unlock_header(&as->m);
     mailbox_close(&as->m);
+
+    as->s = APPEND_DONE;
 
     return 0;
 }
@@ -393,7 +398,8 @@ FILE *append_newstage(const char *mailboxname, time_t internaldate,
     stage->parts = xzmalloc(5 * MAX_MAILBOX_PATH * sizeof(char));
     stage->partend = stage->parts + 5 * MAX_MAILBOX_PATH * sizeof(char);
 
-    sprintf(stage->fname, "%d-%d",(int) getpid(), (int) internaldate);
+    snprintf(stage->fname, sizeof(stage->fname), "%d-%d",
+	     (int) getpid(), (int) internaldate);
 
     /* xxx check errors */
     mboxlist_findstage(mailboxname, stagedir);

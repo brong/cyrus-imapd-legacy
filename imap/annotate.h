@@ -39,14 +39,30 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: annotate.h,v 1.2.2.2 2002/06/14 18:36:43 jsmith2 Exp $
+ * $Id: annotate.h,v 1.2.2.3 2002/09/10 20:30:39 rjs3 Exp $
  */
 
 #ifndef ANNOTATE_H
 #define ANNOTATE_H
 
+#include "charset.h" /* for comp_pat */
 #include "imapd.h"
 #include "mboxname.h"
+#include "prot.h"
+
+/* List of strings, for fetch and search argument blocks */
+struct strlist {
+    char *s;                   /* String */
+    comp_pat *p;               /* Compiled pattern, for search */
+    struct strlist *next;
+};
+
+/* List of attrib-value pairs */
+struct attvaluelist {
+    char *attrib;
+    char *value;
+    struct attvaluelist *next;
+};
 
 /* entry-attribute(s) struct */
 struct entryattlist {
@@ -55,6 +71,15 @@ struct entryattlist {
     struct entryattlist *next;
 };
 
+/* String List Management */
+void appendstrlist(struct strlist **l, char *s);
+void freestrlist(struct strlist *l);
+
+/* Attribute Management (also used by ID) */
+void appendattvalue(struct attvaluelist **l, char *attrib, const char *value);
+void freeattvalues(struct attvaluelist *l);
+
+/* Entry Management */
 void appendentryatt(struct entryattlist **l, char *entry,
 		    struct attvaluelist *attvalues);
 void freeentryatts(struct entryattlist *l);
@@ -63,9 +88,10 @@ void freeentryatts(struct entryattlist *l);
 #define FNAME_ANNOTATIONS "/annotations.db"
 
 /* initialize database structures */
-#define ANNOTATE_RECOVER 0x01
-#define ANNOTATE_SYNC 0x01
-void annotatemore_init(int flags);
+#define ANNOTATE_RECOVER (1 << 0)
+#define ANNOTATE_SYNC (1 << 1)
+void annotatemore_init(int flags, int (*func)(const char *, const char *,
+					      struct strlist *));
 
 /* open the annotation db */
 void annotatemore_open(char *name);
@@ -73,7 +99,7 @@ void annotatemore_open(char *name);
 /* fetch annotations */
 int annotatemore_fetch(struct strlist *entries, struct strlist *attribs,
 		       struct namespace *namespace, int isadmin, char *userid,
-		       struct auth_state *auth_state, struct entryattlist **l);
+		       struct auth_state *auth_state, struct protstream *pout);
 
 /* store annotations */
 int annotatemore_store(struct entryattlist *l, int isadmin, char *userid,

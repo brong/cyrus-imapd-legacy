@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.27.2.2 2002/06/14 18:36:56 jsmith2 Exp $
+ * $Id: pop3proxyd.c,v 1.27.2.3 2002/09/10 20:30:45 rjs3 Exp $
  */
 #include <config.h>
 
@@ -81,6 +81,7 @@
 #include "version.h"
 #include "xmalloc.h"
 #include "mboxlist.h"
+#include "telemetry.h"
 
 #ifdef HAVE_KRB
 /* kerberos des is purported to conflict with OpenSSL DES */
@@ -111,6 +112,7 @@ char *popd_userid = 0;
 struct sockaddr_in popd_localaddr, popd_remoteaddr;
 int popd_haveaddr = 0;
 char popd_clienthost[250] = "[local]";
+static int popd_logfd = -1;
 struct protstream *popd_out = NULL;
 struct protstream *popd_in = NULL;
 int popd_starttls_done = 0;
@@ -119,6 +121,11 @@ int popd_auth_done = 0;
 struct protstream *backend_out, *backend_in;
 int backend_sock;
 sasl_conn_t *backend_saslconn;
+
+/* the sasl proxy policy context */
+static struct proxy_context popd_proxyctx = {
+    0, 0, NULL, NULL, NULL
+};
 
 /* current namespace */
 static struct namespace popd_namespace;
@@ -157,6 +164,8 @@ static struct
 
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
+    { SASL_CB_PROXY_POLICY, &mysasl_proxy_policy, (void*) &popd_proxyctx },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },   
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -168,7 +177,6 @@ int service_init(int argc, char **argv, char **envp)
 {
     int r;
 
-    config_changeident("pop3d");
     if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
     setproctitle_init(argc, argv, envp);
 
@@ -177,18 +185,8 @@ int service_init(int argc, char **argv, char **envp)
     signals_add_handlers();
     signal(SIGPIPE, SIG_IGN);
 
-    /* set the SASL allocation functions */
-    sasl_set_alloc((sasl_malloc_t *) &xmalloc, 
-		   (sasl_calloc_t *) &calloc, 
-		   (sasl_realloc_t *) &xrealloc, 
-		   (sasl_free_t *) &free);
-
     /* load the SASL plugins */
-    if ((r = sasl_server_init(mysasl_cb, "Cyrus")) != SASL_OK) {
-	syslog(LOG_ERR, "SASL failed initializing: sasl_server_init(): %s", 
-	       sasl_errstring(r, NULL, NULL));
-	return 2;
-    }
+    config_sasl_init(1, 1, mysasl_cb);
 
     /* open the mboxlist, we'll need it for real work */
     mboxlist_init(0);
@@ -221,18 +219,20 @@ int service_main(int argc, char **argv, char **envp __attribute__((unused)))
     popd_in = prot_new(0, 0);
     popd_out = prot_new(1, 1);
 
-    while ((opt = getopt(argc, argv, "C:sk")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:Dsk")) != EOF) {
 	switch(opt) {
 	case 'C': /* alt config file - handled by service::main() */
 	    break;
-
+	case 'D': /* ext. debugger - handled by service::main() */
+ 	    break;
 	case 's': /* pop3s (do starttls right away) */
 	    pop3s = 1;
-	    if (!tls_enabled("pop3")) {
+	    if (!tls_enabled()) {
 		syslog(LOG_ERR, "pop3s: required OpenSSL options not present");
 		fatal("pop3s: required OpenSSL options not present",
 		      EC_CONFIG);
 	    }
+            break;
 	case 'k':
 	    kflag++;
 	    break;
@@ -285,7 +285,7 @@ int service_main(int argc, char **argv, char **envp __attribute__((unused)))
     proc_register("pop3d", popd_clienthost, NULL, NULL);
 
     /* Set inactivity timer */
-    timeout = config_getint("poptimeout", 10);
+    timeout = config_getint(IMAPOPT_POPTIMEOUT);
     if (timeout < 10) timeout = 10;
     prot_settimeout(popd_in, timeout*60);
     prot_setflushonread(popd_in, popd_out);
@@ -349,6 +349,9 @@ void shut_down(int code)
 	prot_free(popd_out);
     }
 
+    if(popd_logfd != -1)
+	close(popd_logfd);
+
 #ifdef HAVE_SSL
     tls_shutdown_serverengine();
 #endif
@@ -385,7 +388,8 @@ void shutdown_file(void)
     static char shutdownfilename[1024];
     
     if (!shutdownfilename[0])
-	sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
+	snprintf(shutdownfilename, sizeof(shutdownfilename), 
+		 "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) == -1) return;
 
     shutdown_in = prot_new(fd, 0);
@@ -417,7 +421,7 @@ static void kpop(void)
 	fatal("Cannot get client's IP address", EC_OSERR);
     }
 
-    srvtab = config_getstring("srvtab", "");
+    srvtab = config_getstring(IMAPOPT_SRVTAB);
 
     strcpy(instance, "*");
     r = krb_recvauth(0L, 0, &ticket, "pop", instance,
@@ -534,7 +538,7 @@ static void cmdloop(void)
 	else if (!strcmp(inputbuf, "auth")) {
 	    cmd_auth(arg);
 	}
-	else if (!strcmp(inputbuf, "stls") && tls_enabled("pop3")) {
+	else if (!strcmp(inputbuf, "stls") && tls_enabled()) {
 	    if (arg) {
 		prot_printf(popd_out,
 			    "-ERR STLS doesn't take any arguements\r\n");
@@ -551,7 +555,6 @@ static void cmdloop(void)
 #ifdef HAVE_SSL
 static void cmd_starttls(int pop3s)
 {
-    char *tls_cert, *tls_key;
     int result;
     int *layerp;
     char *auth_id;
@@ -567,15 +570,9 @@ static void cmd_starttls(int pop3s)
 	return;
     }
 
-    tls_cert = (char *)config_getstring("tls_pop3_cert_file",
-					config_getstring("tls_cert_file", ""));
-    tls_key = (char *)config_getstring("tls_pop3_key_file",
-				       config_getstring("tls_key_file", ""));
-
     result=tls_init_serverengine("pop3",
 				 5,        /* depth to verify */
 				 !pop3s,   /* can client auth? */
-				 0,        /* require client to auth? */
 				 !pop3s);  /* TLSv1 only? */
 
     if (result == -1) {
@@ -676,7 +673,8 @@ static void cmd_apop(char *response)
     if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
 	fatal("cmd_apop called without working sasl_checkapop", EC_SOFTWARE);
 
-    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
+    snprintf(shutdownfilename, sizeof(shutdownfilename), 
+	     "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
 	shutdown_in = prot_new(fd, 0);
 	prot_fgets(buf, sizeof(buf), shutdown_in);
@@ -714,7 +712,7 @@ static void cmd_apop(char *response)
 
     /*
      * get the userid from SASL --- already canonicalized from
-     * mysasl_authproc()
+     * mysasl_proxy_policy()
      */
     sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
 			       (const void **) &canon_user);
@@ -730,6 +728,10 @@ static void cmd_apop(char *response)
 	   popd_clienthost, popd_userid, "User logged in");
 
     openproxy();
+
+    /* Create telemetry log */
+    popd_logfd = telemetry_log(popd_userid, popd_in, popd_out);
+
     popd_auth_done = 1;
 }
 
@@ -737,11 +739,11 @@ void
 cmd_user(user)
 char *user;
 {
-    char *p;
+    char *p, *dot, *domain;
 
     /* possibly disallow USER */
     if (!(kflag || popd_starttls_done ||
-	  config_getswitch("allowplaintext", 1))) {
+	  config_getswitch(IMAPOPT_ALLOWPLAINTEXT))) {
 	prot_printf(popd_out,
 		    "-ERR [AUTH] USER command only available under a layer\r\n");
 	return;
@@ -753,9 +755,11 @@ char *user;
     }
 
     shutdown_file(); /* check for shutdown file */
-    if (!(p = auth_canonifyid(user,0)) ||
+    if (!(p = canonify_userid(user, NULL, NULL)) ||
 	/* '.' isn't allowed if '.' is the hierarchy separator */
-	(popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
+	(popd_namespace.hier_sep == '.' && (dot = strchr(p, '.')) &&
+	 !(config_virtdomains &&  /* allow '.' in dom.ain */
+	   (domain = strchr(p, '@')) && (dot > domain))) ||
 	strlen(p) + 6 > MAX_MAILBOX_PATH) {
 
 	prot_printf(popd_out, "-ERR [AUTH] Invalid user\r\n");
@@ -795,13 +799,17 @@ void cmd_pass(char *pass)
 
 	openproxy();
 	syslog(LOG_NOTICE, "login: %s %s kpop", popd_clienthost, popd_userid);
+
+	/* Create telemetry log */
+	popd_logfd = telemetry_log(popd_userid, popd_in, popd_out);
+
 	popd_auth_done = 1;
 	return;
     }
 #endif
 
     if (!strcmp(popd_userid, "anonymous")) {
-	if (config_getswitch("allowanonymouslogin", 0)) {
+	if (config_getswitch(IMAPOPT_ALLOWANONYMOUSLOGIN)) {
 	    pass = beautify_string(pass);
 	    if (strlen(pass) > 500) pass[500] = '\0';
 	    syslog(LOG_NOTICE, "login: %s anonymous %s",
@@ -835,11 +843,15 @@ void cmd_pass(char *pass)
 	       popd_userid, popd_starttls_done ? "+TLS" : "", 
 	       reply ? reply : "");
 
-	plaintextloginpause = config_getint("plaintextloginpause", 0);
+	plaintextloginpause = config_getint(IMAPOPT_PLAINTEXTLOGINPAUSE);
 	if (plaintextloginpause) sleep(plaintextloginpause);
     }
 
     openproxy();
+
+    /* Create telemetry log */
+    popd_logfd = telemetry_log(popd_userid, popd_in, popd_out);
+
     popd_auth_done = 1;
 }
 
@@ -848,8 +860,8 @@ void cmd_pass(char *pass)
 void
 cmd_capa()
 {
-    int minpoll = config_getint("popminpoll", 0) * 60;
-    int expire = config_getint("popexpiretime", -1);
+    int minpoll = config_getint(IMAPOPT_POPMINPOLL) * 60;
+    int expire = config_getint(IMAPOPT_POPEXPIRETIME);
     unsigned mechcount;
     const char *mechlist;
 
@@ -864,7 +876,7 @@ cmd_capa()
 	prot_write(popd_out, mechlist, strlen(mechlist));
     }
 
-    if (tls_enabled("pop3")) {
+    if (tls_enabled()) {
 	prot_printf(popd_out, "STLS\r\n");
     }
     if (expire < 0) {
@@ -880,7 +892,7 @@ cmd_capa()
     prot_printf(popd_out, "RESP-CODES\r\n");
     prot_printf(popd_out, "AUTH-RESP-CODE\r\n");
 
-    if (kflag || popd_starttls_done || config_getswitch("allowplaintext", 1)) {
+    if (kflag || popd_starttls_done || config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
 	prot_printf(popd_out, "USER\r\n");
     }
     
@@ -996,8 +1008,6 @@ void cmd_auth(char *arg)
     {
 	sleep(3);      
 
-	reset_saslconn(&popd_saslconn);
-	
 	/* convert the sasl error code to a string */
 	prot_printf(popd_out, "-ERR [AUTH] authenticating: %s\r\n",
 		    sasl_errstring(sasl_result, NULL, NULL));
@@ -1009,6 +1019,8 @@ void cmd_auth(char *arg)
 	    syslog(LOG_NOTICE, "badlogin: %s %s",
 		   popd_clienthost, sasl_errdetail(popd_saslconn));
 	}
+
+	reset_saslconn(&popd_saslconn);
 	
 	return;
     }
@@ -1016,7 +1028,7 @@ void cmd_auth(char *arg)
     /* successful authentication */
 
     /* get the userid from SASL --- already canonicalized from
-     * mysasl_authproc()
+     * mysasl_proxy_policy()
      */
     /* FIXME XXX: popd_userid is NOT CONST */
     sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
@@ -1037,20 +1049,35 @@ void cmd_auth(char *arg)
     prot_setsasl(popd_in,  popd_saslconn);
     prot_setsasl(popd_out, popd_saslconn);
 
+    /* Create telemetry log */
+    popd_logfd = telemetry_log(popd_userid, popd_in, popd_out);
+
     popd_auth_done = 1;
 }
 
+/* status is only set *if* it is non-null *and* we return something other
+ * than SASL_CONTINUE */
 static int mysasl_getauthline(struct protstream *p, char **line, 
-			      unsigned int *linelen)
+			      unsigned int *linelen, char **status)
 {
     char buf[2096];
     char *str = (char *) buf;
+
+    if(status) *status = NULL;
     
     if (!prot_fgets(str, sizeof(buf), p)) {
 	return SASL_FAIL;
     }
-    if (!strncasecmp(str, "+OK", 3)) { return SASL_OK; }
-    if (!strncasecmp(str, "-ERR", 4)) { return SASL_BADAUTH; }
+    if (!strncasecmp(str, "+OK", 3)) {
+	if(status)
+	    *status = xstrdup(str + 3);
+	return SASL_OK;
+    }
+    if (!strncasecmp(str, "-ERR", 4)) {
+	if(status)
+	    *status = xstrdup(str + 4);
+	return SASL_BADAUTH;
+    }
     if (str[0] == '+' && str[1] == ' ') {
 	size_t len;
 	str += 2; /* jump past the "+ " */
@@ -1075,6 +1102,10 @@ static int mysasl_getauthline(struct protstream *p, char **line,
 	}
     } else {
 	/* huh??? */
+
+	if(status)
+	    *status = xstrdup(" Unknown Error");
+
 	return SASL_FAIL;
     }
 }
@@ -1085,7 +1116,54 @@ extern sasl_callback_t *mysasl_callbacks(const char *username,
 					 const char *password);
 extern void free_callbacks(sasl_callback_t *in);
 
-static int proxy_authenticate(const char *hostname)
+static char *parsemechlist(char *str)
+{
+  char *tmp;
+  char *ret=malloc(strlen(str)+1);
+  if (ret==NULL) return NULL;
+
+  strcpy(ret,"");
+
+  if ((tmp=strstr(str,"SASL "))!=NULL)
+  {
+    char *end=tmp+5;
+    tmp+=5;
+
+    while(((*end)!='\n') && ((*end)!='\0'))
+      end++;
+
+    (*end)='\0';
+
+    strcpy(ret, tmp);
+  }
+
+  return ret;
+}
+
+static char *ask_capability(struct protstream *pout, struct protstream *pin)
+{
+  char str[1024];
+  char *ret = NULL;
+
+  /* request capabilities of server */
+  prot_printf(pout, "CAPA\r\n");
+  prot_flush(pout);
+
+  do {
+      if (prot_fgets(str,sizeof(str),pin) == NULL) {
+	  return NULL;
+      }
+      if (!strncasecmp(str,"SASL ",5)) {
+	  ret=parsemechlist(str);
+      }
+  } while (strncasecmp(str, ".", 1));
+
+  return ret;
+}
+
+/* status is only set *if* it is non-null *and* we return something other
+ * than SASL_CONTINUE */
+static int proxy_authenticate(const char *hostname, char **authline_status)
 {
     int r;
     sasl_security_properties_t *secprops = NULL;
@@ -1098,7 +1176,8 @@ static int proxy_authenticate(const char *hostname)
     char *in, *p;
     const char *out;
     unsigned int inlen, outlen;
-    const char *mechusing;
+    const char *mech_conf, *mechusing;
+    char *mechlist;
     unsigned b64len;
     char localip[60], remoteip[60];
     const char *pass;
@@ -1107,23 +1186,12 @@ static int proxy_authenticate(const char *hostname)
     p = strchr(optstr, '.');
     if (p) *p = '\0';
     strcat(optstr, "_password");
-    pass = config_getstring(optstr, NULL);
+    pass = config_getoverflowstring(optstr, NULL);
+    if(!pass) pass = config_getstring(IMAPOPT_PROXY_PASSWORD);
     cb = mysasl_callbacks(popd_userid, 
-			  config_getstring("proxy_authname", "proxy"),
-			  config_getstring("proxy_realm", NULL),
+			  config_getstring(IMAPOPT_PROXY_AUTHNAME),
+			  config_getstring(IMAPOPT_PROXY_REALM),
 			  pass);
-
-    r = sasl_client_new("pop", hostname, NULL, NULL,
-			cb, 0, &backend_saslconn);
-    if (r != SASL_OK) {
-	return r;
-    }
-
-    secprops = mysasl_secprops(0);
-    r = sasl_setprop(backend_saslconn, SASL_SEC_PROPS, secprops);
-    if (r != SASL_OK) {
-	return r;
-    }
 
     /* set the IP addresses */
     addrsize=sizeof(struct sockaddr_in);
@@ -1140,25 +1208,47 @@ static int proxy_authenticate(const char *hostname)
 		   sizeof(struct sockaddr_in), localip, 60) != 0)
 	return SASL_FAIL;
 
-    r = sasl_setprop(backend_saslconn, SASL_IPLOCALPORT, localip);
-    if (r != SASL_OK) return r;
-    r = sasl_setprop(backend_saslconn, SASL_IPREMOTEPORT, remoteip);
-    if (r != SASL_OK) return r;
+    r = sasl_client_new("pop", hostname, localip, remoteip,
+			cb, 0, &backend_saslconn);
+    if (r != SASL_OK) {
+	return r;
+    }
+
+    secprops = mysasl_secprops(0);
+    r = sasl_setprop(backend_saslconn, SASL_SEC_PROPS, secprops);
+    if (r != SASL_OK) {
+	return r;
+    }
 
     /* read the initial greeting */
     if (!prot_fgets(buf, sizeof(buf), backend_in)) {
 	return SASL_FAIL;
     }
 
+    /* Get SASL mechanism list */
+    /* We can force a particular mechanism using a <shorthost>_mechs option */
     strcpy(buf, hostname);
     p = strchr(buf, '.');
     *p = '\0';
     strcat(buf, "_mechs");
+    mech_conf = config_getoverflowstring(buf, NULL);
+    
+    /* If we don't have a mech_conf, ask the server what it can do */
+    if(!mech_conf) {
+	mechlist = ask_capability(backend_out, backend_in);
+    } else {
+	mechlist = xstrdup(mech_conf);
+    }
 
     /* we now do the actual SASL exchange */
     r = sasl_client_start(backend_saslconn, 
-			  config_getstring(buf, "KERBEROS_V4"),
+			  mechlist,
 			  NULL, &out, &outlen, &mechusing);
+
+    /* garbage collect */
+    free(mechlist);
+    mechlist = NULL;
+
     if ((r != SASL_OK) && (r != SASL_CONTINUE)) {
 	return r;
     }
@@ -1174,7 +1264,7 @@ static int proxy_authenticate(const char *hostname)
 
     in = NULL;
     inlen = 0;
-    r = mysasl_getauthline(backend_in, &in, &inlen);
+    r = mysasl_getauthline(backend_in, &in, &inlen, authline_status);
     while (r == SASL_CONTINUE) {
 	r = sasl_client_step(backend_saslconn, in, inlen, NULL, &out, &outlen);
 	if (in) { 
@@ -1192,16 +1282,11 @@ static int proxy_authenticate(const char *hostname)
 	prot_write(backend_out, buf, b64len);
 	prot_printf(backend_out, "\r\n");
 
-	r = mysasl_getauthline(backend_in, &in, &inlen);
+	r = mysasl_getauthline(backend_in, &in, &inlen, authline_status);
     }
 
     /* Done with callbacks */
     free_callbacks(cb);
-
-    if (r == SASL_OK) {
-	prot_setsasl(backend_in, backend_saslconn);
-	prot_setsasl(backend_out, backend_saslconn);
-    }
 
     /* r == SASL_OK on success */
     return r;
@@ -1211,19 +1296,25 @@ static void openproxy(void)
 {
     struct hostent *hp;
     struct sockaddr_in sin;
+    char *userid;
     char inboxname[MAX_MAILBOX_PATH];
     int r;
     char *server = NULL;
+    char *statusline = NULL;
+
+    /* Translate any separators in userid
+       (use a copy since we need the original userid for AUTH to backend) */
+    userid = strdup(popd_userid);
+    mboxname_hiersep_tointernal(&popd_namespace, userid,
+				config_virtdomains ?
+				strcspn(userid, "@") : 0);
 
     /* have to figure out what server to connect to */
-    strcpy(inboxname, "user.");
-    strcat(inboxname, popd_userid);
+    r = (*popd_namespace.mboxname_tointernal)(&popd_namespace, "INBOX",
+					      userid, inboxname);
+    free(userid);
 
-    /* Translate any separators in userid part of inboxname
-       (we need the original userid for AUTH to backend) */
-    mboxname_hiersep_tointernal(&popd_namespace, inboxname+5);
-
-    r = mboxlist_lookup(inboxname, &server, NULL, NULL);
+    if (!r) r = mboxlist_lookup(inboxname, &server, NULL, NULL);
     if (r) fatal("couldn't find backend server", EC_CONFIG);
 
     /* xxx hide the fact that we are storing partitions */
@@ -1252,13 +1343,25 @@ static void openproxy(void)
     backend_out = prot_new(backend_sock, 1);
     prot_setflushonread(backend_in, backend_out);
 
-    if (proxy_authenticate(server) != SASL_OK) {
+    if (proxy_authenticate(server, &statusline) != SASL_OK) {
 	syslog(LOG_ERR, "couldn't authenticate to backend server");
-	fatal("couldn't authenticate to backend server", 1);
+	prot_printf(popd_out, "-ERR%s",
+		    statusline ? statusline : " Authentication to backend server failed\r\n");
+	prot_flush(popd_out);
+	if(statusline) free(statusline);
+
+	shut_down(0); /* no process reuse */
+    } else {
+	prot_setsasl(backend_in, backend_saslconn);
+	prot_setsasl(backend_out, backend_saslconn);
     }
 
-    prot_printf(popd_out, "+OK Maildrop locked and ready\r\n");
+    prot_printf(popd_out, "+OK%s",
+		statusline ? statusline : " Mailbox locked and ready");
     prot_flush(popd_out);
+
+    free(statusline);
+
     return;
 }
 

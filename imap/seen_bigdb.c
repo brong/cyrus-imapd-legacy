@@ -1,5 +1,5 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
-   $Id: seen_bigdb.c,v 1.1.12.2 2002/06/14 18:36:59 jsmith2 Exp $
+   $Id: seen_bigdb.c,v 1.1.12.3 2002/09/10 20:30:46 rjs3 Exp $
  
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -70,8 +70,8 @@
 
 #define FNAME_SEENDB "/seenstate.db"
 
-/* choose "flat" or "db3" here --- db3 highly recommended */
-#define DB (&cyrusdb_db3)
+/* choose "flat" or "berkeley" here --- berkeley highly recommended */
+#define DB (&cyrusdb_berkeley)
 
 enum {
     MAX_KEY = MAX_MAILBOX_PATH + MAX_MAILBOX_NAME + 30,
@@ -300,7 +300,6 @@ int seen_close(struct seen *seendb)
 	if (r != CYRUSDB_OK) {
 	    syslog(LOG_ERR, "DBERROR: error committing seen txn; "
 		   "seen state lost: %s", cyrusdb_strerror(r));
-	    DB->abort(bigdb, seendb->tid);
 	}
 	seendb->tid = NULL;
     }
@@ -326,7 +325,6 @@ int seen_unlock(struct seen *seendb)
     if (r != CYRUSDB_OK) {
 	syslog(LOG_ERR, "DBERROR: error committing seen txn; "
 	       "seen state lost: %s", cyrusdb_strerror(r));
-	DB->abort(bigdb, seendb->tid);
     }
     seendb->tid = NULL;
 
@@ -356,6 +354,11 @@ int seen_create_user(const char *user)
 }
 
 int seen_delete_user(const char *user)
+{
+    return 0;			/* noop */
+}
+
+int seen_rename_user(const char *olduser, const char *newuser)
 {
     return 0;			/* noop */
 }

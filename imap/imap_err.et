@@ -44,6 +44,9 @@ ec IMAP_PERMISSION_DENIED,
 ec IMAP_QUOTA_EXCEEDED,
    "Over quota"
 
+ec IMAP_MESSAGE_TOO_LARGE,
+   "Message size exceeds fixed limit"
+
 ec IMAP_USERFLAG_EXHAUSTED,
    "Too many user flags in mailbox"
 

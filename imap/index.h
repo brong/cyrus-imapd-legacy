@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.h,v 1.4.2.1 2002/06/06 21:08:06 jsmith2 Exp $
+ * $Id: index.h,v 1.4.2.2 2002/09/10 20:30:42 rjs3 Exp $
  */
 
 /* Header for internal usage of index.c + programs that make raw access
@@ -65,6 +65,7 @@
 #include <ctype.h>
 #include <time.h>
 
+#include "annotate.h" /* for strlist functionality */
 #include "mailbox.h" /* for bit32 */
 
 /* Access macros for the memory-mapped index file data */

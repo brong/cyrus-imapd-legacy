@@ -1,5 +1,5 @@
 dnl look for the ucdsnmp libraries
-dnl $Id: ucdsnmp.m4,v 1.2.2.1 2002/06/06 21:07:38 jsmith2 Exp $
+dnl $Id: ucdsnmp.m4,v 1.2.2.2 2002/09/10 20:30:32 rjs3 Exp $
 
 AC_DEFUN(CMU_UCDSNMP, [
   AC_REQUIRE([CMU_SOCKETS])
@@ -12,8 +12,8 @@ AC_DEFUN(CMU_UCDSNMP, [
       LDFLAGS="$LDFLAGS -L${with_ucdsnmp}/lib"
     fi
     cmu_save_LIBS="$LIBS"
-    AC_CHECK_LIB(snmp, sprint_objid,
-		 AC_CHECK_HEADER(ucd-snmp/version.h,, with_ucdsnmp=no),
+    AC_CHECK_LIB(snmp, sprint_objid, [
+		 AC_CHECK_HEADER(ucd-snmp/version.h,, with_ucdsnmp=no)],
 		 with_ucdsnmp=no, ${LIB_SOCKET})
     LIBS="$cmu_save_LIBS"
   fi

@@ -40,7 +40,7 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 # 
-# $Id: Makefile.in,v 1.19.2.1 2002/06/06 21:08:44 jsmith2 Exp $
+# $Id: Makefile.in,v 1.19.2.2 2002/09/10 20:31:12 rjs3 Exp $
 srcdir = @srcdir@
 VPATH = @srcdir@
 
@@ -63,7 +63,7 @@ exec_prefix = @exec_prefix@
 cyrus_prefix = @cyrus_prefix@
 
 MAN1 = $(srcdir)/imtest.1 $(srcdir)/pop3test.1 $(srcdir)/lmtptest.1 \
-	$(srcdir)/smtptest.1 $(srcdir)/sivtest.1 \
+	$(srcdir)/smtptest.1 $(srcdir)/sivtest.1 $(srcdir)/mupdatetest.1 \
 	$(srcdir)/installsieve.1 $(srcdir)/sieveshell.1
 MAN3 = $(srcdir)/imclient.3
 MAN5 = $(srcdir)/imapd.conf.5 $(srcdir)/krb.equiv.5 $(srcdir)/cyrus.conf.5
@@ -81,6 +81,9 @@ all: $(MAN1) $(MAN3) $(MAN5) $(MAN8)
 $(srcdir)/sieveshell.1: $(srcdir)/../perl/sieve/scripts/sieveshell.pl
 	@echo creating sieveshell.1
 	pod2man $(srcdir)/../perl/sieve/scripts/sieveshell.pl > $(srcdir)/sieveshell.1
+
+imapd.conf.5: $(srcdir)/../imap/imapoptions $(srcdir)/../tools/config2header
+	$(srcdir)/../tools/config2man $(srcdir)/../imap/imapoptions > imapd.conf.5
 
 install:
 	for file in $(MAN1); \

@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.27.2.1 2002/06/06 21:07:25 jsmith2 Exp $ */
+/* $Id: acconfig.h,v 1.27.2.2 2002/09/10 20:30:24 rjs3 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -143,6 +143,15 @@
 /* do we have fdatasync */
 #undef HAVE_FDATASYNC
 
+/* Database Backends that are configurable */
+#undef CONFIG_DB_DUPLICATE
+#undef CONFIG_DB_MBOX
+#undef CONFIG_DB_SEEN
+#undef CONFIG_DB_SUBS
+#undef CONFIG_DB_TLS
+
+@BOTTOM@
+
 /* This allows us to work even when we don't have an fdatasync */
 #ifndef HAVE_FDATASYNC
 #define fdatasync(fd) fsync(fd)
@@ -158,15 +167,6 @@
 #    define O_DSYNC     O_FSYNC         /* BSD */
 #  endif
 #endif
-
-/* Database Backends that are configurable */
-#undef CONFIG_DB_DUPLICATE
-#undef CONFIG_DB_MBOX
-#undef CONFIG_DB_SEEN
-#undef CONFIG_DB_SUBS
-#undef CONFIG_DB_TLS
-
-@BOTTOM@
 
 /* where are our binaries? */
 #define SERVICE_PATH (CYRUS_PATH "/bin")
@@ -186,9 +186,6 @@ typedef int rlim_t;
 
 /* some potentially memory saving tradeoffs, 
    preconfigured in memory-saving mode */
-
-/* call sasl_client_init() at the start of imapd */
-#define DELAY_SASL_CLIENT_INIT
 
 /* save the cmdlines for the ID command */
 #undef ID_SAVE_CMDLINE

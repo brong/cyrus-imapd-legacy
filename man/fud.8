@@ -39,7 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
-.\" $Id: fud.8,v 1.3.10.1 2002/06/06 21:08:45 jsmith2 Exp $
+.\" $Id: fud.8,v 1.3.10.2 2002/09/10 20:31:12 rjs3 Exp $
 .SH NAME
 FUD \- provide information about user mailboxes
 .SH SYNOPSIS
@@ -47,6 +47,9 @@ FUD \- provide information about user mailboxes
 [
 .B \-C
 .I config-file
+]
+[
+.B \-D
 ]
 .SH DESCRIPTION
 .B FUD
@@ -71,6 +74,9 @@ file unless specified otherwise by \fB-C\fR.
 .TP
 .BI \-C " config-file"
 Read configuration options from \fIconfig-file\fR.
+.TP
+.BI \-D
+Run external debugger specified in debug_command.
 .SH FILES
 .TP
 .B /etc/imapd.conf
@@ -83,7 +89,12 @@ Though not really a bug,
 .B FUD
 will silently ignore any requests that it does not consider valid.
 .PP
+Also not really a bug,
+.B FUD
+requires that the anonymous user has the 0 (zero) right on the mailbox
+in question.  This is only a "bug" because 0 is not a standard IMAP ACL bit.
+.PP
 .B FUD
 is an experimental interface meant to provide information to build a
-finger-like service around.  Eventually it should be superceded by LDAP
-or ACAP (using the mailbox dataset).
+finger-like service around.  Eventually it should be superceded by a
+more standards-based protocol.

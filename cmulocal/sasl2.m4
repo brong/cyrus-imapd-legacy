@@ -1,6 +1,6 @@
 dnl sasl2.m4--sasl2 libraries and includes
 dnl Rob Siemborski
-dnl $Id: sasl2.m4,v 1.6.2.1 2002/06/06 21:07:38 jsmith2 Exp $
+dnl $Id: sasl2.m4,v 1.6.2.2 2002/09/10 20:30:31 rjs3 Exp $
 
 AC_DEFUN(SASL_GSSAPI_CHK,[
  AC_ARG_ENABLE(gssapi, [  --enable-gssapi=<DIR>   enable GSSAPI authentication [yes] ],
@@ -12,8 +12,8 @@ AC_DEFUN(SASL_GSSAPI_CHK,[
        CPPFLAGS="$CPPFLAGS -I$gssapi/include"
        LDFLAGS="$LDFLAGS -L$gssapi/lib"
     fi
-    AC_CHECK_HEADER(gssapi.h, AC_DEFINE(HAVE_GSSAPI_H),
-      AC_CHECK_HEADER(gssapi/gssapi.h,, AC_WARN(Disabling GSSAPI); gssapi=no))
+    AC_CHECK_HEADER(gssapi.h, AC_DEFINE(HAVE_GSSAPI_H), [
+      AC_CHECK_HEADER(gssapi/gssapi.h,, AC_WARN(Disabling GSSAPI); gssapi=no)])
  fi
 
  if test "$gssapi" != no; then
@@ -128,8 +128,8 @@ AC_ARG_WITH(staticsasl,
 	    with_staticsasl="/usr"
 	  fi
 
-	  AC_CHECK_HEADER(sasl/sasl.h,
-	    AC_CHECK_HEADER(sasl/saslutil.h,
+	  AC_CHECK_HEADER(sasl/sasl.h, [
+	    AC_CHECK_HEADER(sasl/saslutil.h, [
 	     if test -r ${with_staticsasl}/lib/libsasl2.a; then
 		ac_cv_found_sasl=yes
 		AC_MSG_CHECKING(for static libsasl)
@@ -138,7 +138,7 @@ AC_ARG_WITH(staticsasl,
 	        AC_MSG_CHECKING(for static libsasl)
 		AC_ERROR([Could not find ${with_staticsasl}/lib/libsasl2.a])
 	     fi
-	    ))
+	    ])])
 
 	  AC_MSG_RESULT(found)
 
@@ -161,12 +161,12 @@ AC_ARG_WITH(staticsasl,
 	fi
 
 	dnl be sure to check for a SASLv2 specific function
-	AC_CHECK_HEADER(sasl/sasl.h,
-	    AC_CHECK_HEADER(sasl/saslutil.h,
+	AC_CHECK_HEADER(sasl/sasl.h, [
+	    AC_CHECK_HEADER(sasl/saslutil.h, [
 	      AC_CHECK_LIB(sasl2, prop_get, 
                            ac_cv_found_sasl=yes,
-		           ac_cv_found_sasl=no),
-	                   ac_cv_found_sasl=no), ac_cv_found_sasl=no)
+		           ac_cv_found_sasl=no)],
+	                   ac_cv_found_sasl=no)], ac_cv_found_sasl=no)
 
 	if test "$ac_cv_found_sasl" = "yes"; then
 	    if test "$ac_cv_sasl_where_lib" != ""; then
@@ -199,6 +199,27 @@ if test "$ac_cv_found_sasl" != "yes"; then
         AC_ERROR([Cannot continue without libsasl2.
 Get it from ftp://ftp.andrew.cmu.edu/pub/cyrus-mail/.])
 fi])
+
+AC_DEFUN(CMU_SASL2_REQUIRE_VER, [
+	AC_REQUIRE([CMU_SASL2_REQUIRED])
+	AC_TRY_CPP([
+#include <sasl/sasl.h>
+
+#ifndef SASL_VERSION_MAJOR
+#error SASL_VERSION_MAJOR not defined
+#endif
+#ifndef SASL_VERSION_MINOR
+#error SASL_VERSION_MINOR not defined
+#endif
+#ifndef SASL_VERSION_STEP
+#error SASL_VERSION_STEP not defined
+#endif
+
+#if SASL_VERSION_MAJOR < $1 || SASL_VERSION_MINOR < $2 || SASL_VERSION_STEP < $3
+#error SASL version is less than $1.$2.$3
+#endif
+	],,AC_ERROR([Incorrect SASL headers found.  This package requires SASL $1.$2.$3 or newer.]))
+])
 
 AC_DEFUN(CMU_SASL2_CHECKAPOP_REQUIRED, [
 	AC_REQUIRE([CMU_SASL2_REQUIRED])

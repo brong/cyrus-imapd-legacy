@@ -1,6 +1,6 @@
 /* imclient.c -- Streaming IMxP client library
  *
- * $Id: imclient.c,v 1.61.2.1 2002/06/06 21:08:35 jsmith2 Exp $
+ * $Id: imclient.c,v 1.61.2.2 2002/09/10 20:30:54 rjs3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -508,7 +508,7 @@ va_dcl
     }
     
     /* Write the tag */
-    sprintf(buf, "%lu ", imclient->gensym);
+    snprintf(buf, sizeof(buf), "%lu ", imclient->gensym);
     imclient_write(imclient, buf, strlen(buf));
 
     /* Process the command format */
@@ -532,13 +532,13 @@ va_dcl
 	    
 	case 'd':
 	    num = va_arg(pvar, int);
-	    sprintf(buf, "%d", num);
+	    snprintf(buf, sizeof(buf), "%d", num);
 	    imclient_write(imclient, buf, strlen(buf));
 	    break;
 
 	case 'u':
 	    unum = va_arg(pvar, unsigned);
-	    sprintf(buf, "%lu", (unsigned long)unum);
+	    snprintf(buf, sizeof(buf), "%lu", (unsigned long)unum);
 	    imclient_write(imclient, buf, strlen(buf));
 	    break;
 
@@ -606,12 +606,12 @@ static int imclient_writeastring(struct imclient *imclient, const char *str)
     else {
 	/* Literal */
 	if (imclient->flags & IMCLIENT_CONN_NONSYNCLITERAL) {
-	    sprintf(buf, "{%u+}\r\n", len);
+	    snprintf(buf, sizeof(buf), "{%u+}\r\n", len);
 	    imclient_write(imclient, buf, strlen(buf));
 	}
 	else {
 	    imclient->readytag = imclient->gensym;
-	    sprintf(buf, "{%u}\r\n", len);
+	    snprintf(buf, sizeof(buf), "{%u}\r\n", len);
 	    imclient_write(imclient, buf, strlen(buf));
 	    while (imclient->readytag) {
 		imclient_processoneevent(imclient);
@@ -1343,12 +1343,15 @@ static int imclient_authenticate_sub(struct imclient *imclient,
 	}
     }
 
-    /* send to server */
-    /* Send our reply to the server */
+    /* send our reply to the server */
     if ((saslresult==SASL_OK) || (saslresult==SASL_CONTINUE)) {
-	imclient_writebase64(imclient, out, outlen);
+        if (out == NULL || outlen == 0) {
+            imclient_write(imclient, "\r\n", 2);
+        } else {
+            imclient_writebase64(imclient, out, outlen);
+        }
     } else {
-	imclient_write(imclient,"*\r\n",3);
+	imclient_write(imclient,"*\r\n", 3);
 	return saslresult;
     }
 

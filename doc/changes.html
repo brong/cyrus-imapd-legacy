@@ -1,19 +1,103 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<!-- $Id: changes.html,v 1.24.2.1 2002/06/06 21:07:43 jsmith2 Exp $ -->
+<!-- $Id: changes.html,v 1.24.2.2 2002/09/10 20:30:34 rjs3 Exp $ -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
 <title>Changes to the Cyrus IMAP Server</title>
 </head>
 <body>
-<h1>Changes to the Cyrus IMAP Server</h1>
+<h1>Changes to the Cyrus IMAP Server since 2.1.x</h1>
+
+<ul>
+<li>There have been extensive performance and consistancy changes to
+the configuration subsystem.  This will both ensure greater consistancy
+between the documentation and the code, as well as a more standard format
+for specifing service-specific configuration options in imapd.conf.  Important
+changes are detailed here:
+<ul>
+  <li> The tls_[service]_* configuration options have been removed.  Now
+use [servicename]_tls_*, where servicename is the service identifier from
+cyrus.conf for that particular process.</li>
+  <li> Administrative groups (e.g. admins and lmtp_admins) no longer union,
+service groups completely override the generic group. </li>
+  <li> lmtp_allowplaintext is no longer a defined parameter and must
+be specified using the service name of your lmtp process if you
+require a specific value</li>
+</ul></li>
+
+<li> Virtual domain support.  See the <a
+href="install-virtdomains.html">virtual domains</a> document for
+details.</li>
+
+<li> Users can now be renamed (even across domains).  Note that this
+is not atomic and weirdness may occur if the user is logged in during
+the rename.  See ??? for details.</li>
+
+<li> The <tt>db3</tt> and <tt>db3-nosync</tt> database backends have
+been renamed to <tt>berkeley</tt> and <tt>berkeley-nosync</tt>
+respectively (to avoid confusion over whether or not db4 is supported).</li>
+
+</ul>
 
 <h2>Changes to the Cyrus IMAP Server since 2.1.4</h2>
 
 <ul>
+
 <li> Sieve is no longer dependent on duplicate delivery suppression
 (it still uses the duplicate delivery database however). </li>
+
+<li> Sieve now supports <tt>draft-segmuller-sieve-relation-02.txt</tt></li>
+
+<li> <tt>imtest</tt> now includes all the functionality previously
+kept in pop3test, lmtptest, smtptest, and mupdatetest.  imtest will
+notice if it is invoked with one of these names and do the right
+thing.  The -P  flag can be used to force a particular protocol.  As
+part of this, the default install location for mupdatetest has changed
+to be the same as the other test utilities.  <tt>imtest</tt> also
+includes new MANAGESIEVE functionality (sivtest) as well as the
+ability to reconnect to the same server multiple times (useful for testing
+SSL/TLS session caching and DIGEST-MD5 fast reauth).</li> 
+
+<li>snmpgen generates stubbed out code so we don't waste resources on
+something that just doesn't work. At some point in time, we'll make it
+work again as it would be useful to gather aggregate statistics on
+what commands are being used so we can better tune the server.  This
+change closes bug #1191. New bug 1267 opened to re-enable the feature.</li>
+
+<li>Added the chk_cyrus program to help point out missing message
+files and/or mailboxes</li>
+
+<li>ANNOTATEMORE improvements.  Server annotation support has been added.
+We are also now using the /vendor/cmu/cyrus-imapd hierarchy.
+The "info" command in cyradm now returns annotations for the given mailbox
+(provided that ANNOTATEMORE support is compiled into the server)</li>
+
+<li>The RENAME command has been almost entirely rewritten.  Now we rely
+on mailbox-level locking instead of locking the entire mailboxes file
+for the duration of the rename.  <tt>ctl_cyrusdb -r</tt> now also
+cleans up "reserved" mailboxes that may appear in the event of a crash.</li>
+
+<li><tt>ctl_mboxlist</tt> can now dump only a particular partition</li>
+
+<li>The configuration subsystem now uses a hash table to speed up lookups
+of options.  Additionally, the hash table implementation has been updated
+to possibly take advantage of memory pools.</li>
+
+<li>Many bugfixes related to the Cyrus Murder.  Includes improvments to
+subscription handling as well as correct merging of seen state on
+mailbox moves.</li>
+
+<li>Can now configure an external debugger (<tt>debug_command</tt> option
+in imapd.conf.</li>
+
+<li>Misc. autoconf-related fixes (most notably those related to sasl_checkapop
+and O_DSYNC).</li>
+
+<li>Misc. locking-related fixes.</li>
+
+<li>Security fixes related to handling large literals in getxstring(), as
+well as correct usage of layers in timsieved.</li>
 
 </ul>
 
@@ -222,8 +306,6 @@ Hoeger, <tt>choeger@suse.de</tt>)</li>
 
 <li>added '-i' switch to sendmail command line for SIEVE reject,
 redirect and vacation</li>
-
-<li>reconstruct -m works again???</li>
 
 <li>small fixes to notify_unix</li>
 
@@ -1588,7 +1670,7 @@ message for this common configuration error.</li>
 </ul>
 
 <hr />
-last modified: $Date: 2002/06/06 21:07:43 $ <br />
+last modified: $Date: 2002/09/10 20:30:34 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

@@ -37,14 +37,14 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
-# $Id: Admin.pm,v 1.6.6.1 2002/06/06 21:09:02 jsmith2 Exp $
+# $Id: Admin.pm,v 1.6.6.2 2002/09/10 20:31:25 rjs3 Exp $
 
 package Cyrus::IMAP::Admin;
 use strict;
 use Cyrus::IMAP;
 use vars qw($VERSION
 	    *create *delete *deleteacl *listacl *list *rename *setacl
-	    *subscribed *quota *quotaroot *info *setinfo);
+	    *subscribed *quota *quotaroot *info *setinfo *xfer);
 
 $VERSION = '1.00';
 
@@ -130,7 +130,7 @@ sub reconstruct {
     my $rc;
     my $msg;
     if($recurse == 1) {
-      ($rc, $msg) = $self->send('', '', 'RECONSTRUCT "%s" RECURSEIVE',
+      ($rc, $msg) = $self->send('', '', 'RECONSTRUCT "%s" RECURSIVE',
 				$mailbox);
     } else {
       ($rc, $msg) = $self->send('', '', 'RECONSTRUCT "%s"', $mailbox);
@@ -140,7 +140,7 @@ sub reconstruct {
       $rc = 1;
     } else {
       if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-	my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+	my ($refserver, $box) = $self->fromURL($1);
 	my $port = 143;
 	
 	if($refserver =~ /:/) {
@@ -157,6 +157,7 @@ sub reconstruct {
 	  or die "cyradm: cannot authenticate to $refserver\n";
 	
 	my $ret = $cyradm->reconstruct($mailbox,$recurse);
+	$self->{error} = $cyradm->{error};
 	$cyradm = undef;
 	return $ret;
       } else {
@@ -176,7 +177,7 @@ sub createmailbox {
     1;
   } else {
     if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+      my ($refserver, $box) = $self->fromURL($1);
       my $port = 143;
 
       if($refserver =~ /:/) {
@@ -210,7 +211,7 @@ sub deletemailbox {
     1;
   } else {
     if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+      my ($refserver, $box) = $self->fromURL($1);
       my $port = 143;
 
       if($refserver =~ /:/) {
@@ -393,7 +394,7 @@ sub listquota {
     @info;
   } else {
     if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+      my ($refserver, $box) = $self->fromURL($1);
       my $port = 143;
 
       if($refserver =~ /:/) {
@@ -447,7 +448,7 @@ sub listquotaroot {
     ($qr, @info);
   } else {
     if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+      my ($refserver, $box) = $self->fromURL($1);
       my $port = 143;
 
       if($refserver =~ /:/) {
@@ -495,8 +496,8 @@ sub renamemailbox {
     if($self->{support_referrals} &&
        $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\s+([^\]\s]+)\]|) {
       # We need two referrals for this to be valid
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
-      my ($refserver2, $nbox) = Cyrus::IMAP->fromURL($2);
+      my ($refserver, $box) = $self->fromURL($1);
+      my ($refserver2, $nbox) = $self->fromURL($2);
       my $port = 143;
 
       if(!($refserver eq $refserver2)) {
@@ -527,6 +528,29 @@ sub renamemailbox {
 }
 *rename = *renamemailbox;
 
+sub xfermailbox {
+  my ($self, $mbox, $server, $ptn) = @_;
+
+  $self->addcallback({-trigger => 'NO',
+		      -callback => sub {
+			print $_ . "\n";
+		      }});
+
+  my ($rc, $msg) = $self->send('', '', 'XFER %s %s%a%a', $mbox, $server,
+			       $ptn ? ' ' : $ptn, $ptn);
+
+  $self->addcallback({-trigger => 'NO'});
+		    
+  if ($rc eq 'OK') {
+    $self->{error} = undef;
+    1;
+  } else {
+    $self->{error} = $msg;
+    undef;
+  }
+}
+*xfer = *xfermailbox;
+
 # hm.  this list can't be confused with valid ACL values as of 1.6.19, except
 # for "all".  sigh.
 my %aclalias = (none => '',
@@ -549,7 +573,7 @@ sub setaclmailbox {
       $cnt++;
     } else {
       if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-	my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+	my ($refserver, $box) = $self->fromURL($1);
 	my $port = 143;
 
 	if($refserver =~ /:/) {
@@ -607,7 +631,7 @@ sub setquota {
     1;
   } else {
     if($self->{support_referrals} && $msg =~ m|^\[REFERRAL\s+([^\]\s]+)\]|) {
-      my ($refserver, $box) = Cyrus::IMAP->fromURL($1);
+      my ($refserver, $box) = $self->fromURL($1);
       my $port = 143;
 
       if($refserver =~ /:/) {
@@ -655,7 +679,7 @@ sub getinfo {
 			my $text = $d{-text};
 
 			if($text =~ /^\(.*\)$/) {
-			  # list of annotations
+			  # list of annotations (old style)
 			  $text =~ s/^\(//;
 			  
 			  while($text !~ /^\)/) {
@@ -671,9 +695,19 @@ sub getinfo {
 			  }
 			} elsif ($text =~
 			       /^\s*\"([^\"]*)\"\s+\(\"([^\"]*)\"\s+\"([^\"]*)\"\)/) {
-			  # Single annotation, but possibly multiple values
+			  # Single annotation, not literal,
+			  # but possibly multiple values
 			  # however, we are only asking for one value, so...
 			  $d{-rock}{$1} = $3;
+		        }  elsif ($text =~
+			       /^\s*\"([^\"]*)\"\s+\(\"([^\"]*)\"\s+\{(.*)\}\r\n/) {
+			  my $len = $3;
+			  $text =~ s/^\s*\"([^\"]*)\"\s+\(\"([^\"]*)\"\s+\{(.*)\}\r\n//s;
+			  $text = substr($text, 0, $len);
+			  # Single annotation (literal style),
+			  # possibly multiple values
+			  # however, we are only asking for one value, so...
+			  $d{-rock}{$1} = $text;
 		        } else {
 			  next;
 			}
@@ -702,7 +736,7 @@ sub setinfoserver {
     return undef;
   }
 
-  my ($rc, $msg) = $self->send('', '', "SETANNOTATION \"/server/%s\" (\"value.shared\" \"%s\")",
+  my ($rc, $msg) = $self->send('', '', "SETANNOTATION \"/server/%s\" (\"value.shared\" %s)",
 			       $entry, $value);
 
   if ($rc eq 'OK') {
@@ -744,6 +778,7 @@ Cyrus::IMAP::Admin - Cyrus administrative interface Perl module
   $rc = $client->rename($old, $new[, $partition]);
   $rc = $client->setacl($mailbox, $user =E<gt> $acl[, ...]);
   $rc = $client->setquota($mailbox, $resource =E<gt> $quota[, ...]);
+  $rc = $client->xfer($mailbox, $server[, $partition]);
 
 =head1 DESCRIPTION
 
@@ -894,6 +929,12 @@ Administer (SETACL)
 
 Set quotas on a mailbox.  Note that Cyrus currently only defines one resource,
 C<STORAGE>.
+
+=item xfermailbox($mailbox, $server[, $partition])
+
+=item xfer($mailbox, $server[, $partition])
+
+Transfers (relocates) the specified mailbox to a different server.
 
 =back
 

@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.170.2.2 2002/06/14 18:36:48 jsmith2 Exp $
+ * $Id: index.c,v 1.170.2.3 2002/09/10 20:30:42 rjs3 Exp $
  */
 #include <config.h>
 
@@ -59,24 +59,25 @@
 #include <time.h>
 
 #include "acl.h"
-#include "util.h"
-#include "map.h"
-#include "assert.h"
-#include "exitcodes.h"
-#include "gmtoff.h"
-#include "imap_err.h"
-#include "mailbox.h"
-#include "imapd.h"
+#include "annotate.h"
 #include "append.h"
+#include "assert.h"
 #include "charset.h"
-#include "xmalloc.h"
-#include "seen.h"
+#include "exitcodes.h"
+#include "hash.h"
+#include "imap_err.h"
+#include "imapconf.h"
+#include "imapd.h"
 #include "lsort.h"
+#include "mailbox.h"
+#include "map.h"
 #include "message.h"
 #include "parseaddr.h"
-#include "hash.h"
-#include "stristr.h"
 #include "search_engines.h"
+#include "seen.h"
+#include "stristr.h"
+#include "util.h"
+#include "xmalloc.h"
 
 extern int errno;
 
@@ -1259,7 +1260,7 @@ index_copy(struct mailbox *mailbox,
     if (!r) {
 	copyuid_size = 1024;
 	copyuid = xmalloc(copyuid_size);
-	sprintf(copyuid, "%lu", uidvalidity);
+	snprintf(copyuid, copyuid_size, "%lu", uidvalidity);
 	copyuid_len = strlen(copyuid);
 	sepchar = ' ';
 
@@ -1268,8 +1269,8 @@ index_copy(struct mailbox *mailbox,
 		copyuid_size += 1024;
 		copyuid = xrealloc(copyuid, copyuid_size);
 	    }
-	    sprintf(copyuid+copyuid_len, "%c%lu", sepchar,
-		    copyargs.copymsg[i].uid);
+	    snprintf(copyuid+copyuid_len, copyuid_size-copyuid_len, 
+		    "%c%lu", sepchar, copyargs.copymsg[i].uid);
 	    copyuid_len += strlen(copyuid+copyuid_len);
 	    if (i+1 < copyargs.nummsg &&
 		copyargs.copymsg[i+1].uid == copyargs.copymsg[i].uid + 1) {
@@ -1277,16 +1278,17 @@ index_copy(struct mailbox *mailbox,
 		    i++;
 		} while (i+1 < copyargs.nummsg &&
 			 copyargs.copymsg[i+1].uid == copyargs.copymsg[i].uid + 1);
-		sprintf(copyuid+copyuid_len, ":%lu",
+		snprintf(copyuid+copyuid_len, copyuid_size-copyuid_len, ":%lu",
 			copyargs.copymsg[i].uid);
 		copyuid_len += strlen(copyuid+copyuid_len);
 	    }
 	    sepchar = ',';
 	}
 	if (num == 1) {
-	    sprintf(copyuid+copyuid_len, " %lu", startuid);
+	    snprintf(copyuid+copyuid_len, copyuid_size-copyuid_len, " %lu",
+		     startuid);
 	} else {
-	    sprintf(copyuid+copyuid_len, " %lu:%lu",
+	    snprintf(copyuid+copyuid_len, copyuid_size-copyuid_len, " %lu:%lu",
 		    startuid, startuid + num - 1);
 	}
 	*copyuidp = copyuid;
@@ -2327,27 +2329,10 @@ void *rock;
     }
     if (fetchitems & FETCH_INTERNALDATE) {
 	time_t msgdate = INTERNALDATE(msgno);
-	struct tm *tm = localtime(&msgdate);
-	long gmtoff = gmtoff_of(tm, msgdate);
-	int gmtnegative = 0;
-	static const char *monthname[] = {
-	    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-	    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 	char datebuf[30];
 
-	if (msgdate == 0 || tm->tm_year < 69) {
-	    abort();
-	}
+	cyrus_ctime(msgdate, datebuf);
 
-	if (gmtoff < 0) {
-	    gmtoff = -gmtoff;
-	    gmtnegative = 1;
-	}
-	gmtoff /= 60;
-	sprintf(datebuf, "%2u-%s-%u %.2u:%.2u:%.2u %c%.2lu%.2lu",
-		tm->tm_mday, monthname[tm->tm_mon], tm->tm_year+1900,
-		tm->tm_hour, tm->tm_min, tm->tm_sec,
-		gmtnegative ? '-' : '+', gmtoff/60, gmtoff%60);
 	prot_printf(imapd_out, "%cINTERNALDATE \"%s\"",
 		    sepchar, datebuf);
 	sepchar = ' ';
@@ -2579,7 +2564,7 @@ void *rock;
 	}
     }
 
-    /* save old for acapmbox foo */
+    /* save old */
     oldflags = record.system_flags;
 
     if (storeargs->operation == STORE_REPLACE) {
@@ -3572,14 +3557,31 @@ static char *find_msgid(char *str, char **rem)
     msgid = NULL;
     src = str;
 
-    /* find the start of a msgid */
-    while ((cp = src = strchr(src, '<')) != NULL) {
+    /* find the start of a msgid (don't go past the end of the header) */
+    while ((cp = src = strpbrk(src, "<\r")) != NULL) {
+
+	/* check for fold or end of header
+	 *
+	 * Per RFC 2822 section 2.2.3, a long header may be folded by
+	 * inserting CRLF before any WSP (SP and HTAB, per section 2.2.2).
+	 * Any other CRLF is the end of the header.
+	 */
+	if (*cp++ == '\r') {
+	    if (*cp++ == '\n' && !(*cp == ' ' || *cp == '\t')) {
+		/* end of header, we're done */
+		break;
+	    }
+
+	    /* skip fold (or junk) */
+	    src++;
+	    continue;
+	}
 
 	/* see if we have (and skip) a quoted localpart */
-	if (*++cp == '\"') {
+	if (*cp == '\"') {
 	    /* find the endquote, making sure it isn't escaped */
 	    do {
-		cp = strchr(++cp, '\"');
+		++cp; cp = strchr(cp, '\"');
 	    } while (cp && *(cp-1) == '\\');
 
 	    /* no endquote, so bail */
@@ -3647,7 +3649,7 @@ void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers)
     msgdata->msgid = find_msgid(envtokens[ENV_MSGID], NULL);
      /* if we don't have one, create one */
     if (!msgdata->msgid) {
-	sprintf(buf, "<Empty-ID: %u>", msgdata->msgno);
+	snprintf(buf, sizeof(buf), "<Empty-ID: %u>", msgdata->msgno);
 	msgdata->msgid = xstrdup(buf);
     }
 
@@ -4088,7 +4090,7 @@ static void ref_link_messages(MsgData *msgdata, Thread **newnode,
 	     * on the old one.
 	     */
 	    if (cur->msgdata) {
-		sprintf(buf, "-dup%d", dup_count++);
+		snprintf(buf, sizeof(buf), "-dup%d", dup_count++);
 		msgdata->msgid =
 		    (char *) xrealloc(msgdata->msgid,
 				      strlen(msgdata->msgid) + strlen(buf) + 1);
@@ -4196,7 +4198,7 @@ static void ref_prune_tree(Thread *parent)
 	    cur = prev;
 	}
 
-	/* if we have empty container with children, AND
+	/* if we have an empty container with children, AND
 	 * we're not at the root OR we only have one child,
 	 * then remove the container but promote its children to this level
 	 * (splice them into the current child list)
@@ -4284,7 +4286,7 @@ static void ref_group_subjects(Thread *root, unsigned nroot, Thread **newnode)
     /* Step 5.A: create a subj_table with one bucket for every possible
      * subject in the root set
      */
-    construct_hash_table(&subj_table, nroot);
+    construct_hash_table(&subj_table, nroot, 1);
 
     /* Step 5.B: populate the table with a container for each subject
      * at the root
@@ -4526,7 +4528,7 @@ static void _index_thread_ref(unsigned *msgno_list, int nmsg,
      * - We also will need containers for references to non-existent messages.
      *   To make sure we have enough, we will take the worst case and
      *   use the sum of the number of references for all messages.
-     * - Finally, we will might need containers to group threads with the same
+     * - Finally, we will need containers to group threads with the same
      *   subject together.  To make sure we have enough, we will take the
      *   worst case which will be half of the number of messages.
      *
@@ -4545,7 +4547,7 @@ static void _index_thread_ref(unsigned *msgno_list, int nmsg,
     /* Step 0: create an id_table with one bucket for every possible
      * message-id and reference (nmsg + tref)
      */
-    construct_hash_table(&id_table, nmsg + tref);
+    construct_hash_table(&id_table, nmsg + tref, 1);
 
     /* Step 1: link messages together */
     ref_link_messages(msgdata, &newnode, &id_table);

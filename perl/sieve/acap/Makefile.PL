@@ -37,11 +37,13 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
-# $Id: Makefile.PL,v 1.9.2.1 2002/06/06 21:09:08 jsmith2 Exp $
+# $Id: Makefile.PL,v 1.9.2.2 2002/09/10 20:31:28 rjs3 Exp $
 use ExtUtils::MakeMaker;
 
 my $SASL_INC = $ENV{SASL_INC};
 my $SASL_LIB = $ENV{SASL_LIB} || "-lsasl2";
+my $OPENSSL_INC = $ENV{OPENSSL_INC};
+my $OPENSSL_LIB = $ENV{OPENSSL_LIB};
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
@@ -49,7 +51,7 @@ WriteMakefile(
     'NAME'	=> 'Cyrus::SIEVE::acap',
     'VERSION_FROM' => 'acap.pm', # finds $VERSION
     'MYEXTLIB'  => '../../../acap/acap.o ../../../acap/acap_err.o ../../../acap/acapsieve.o ../../../acap/skip-list.o ../../../lib/libcyrus.a',
-    'LIBS'	=> ["$SASL_LIB -lssl -lcrypto"],   # e.g., '-lm' 
+    'LIBS'	=> ["$SASL_LIB $OPENSSL_LIB -lssl -lcrypto"],   # e.g., '-lm' 
     'DEFINE'	=> '-DPERL_POLLUTE',     # e.g., '-DHAVE_SOMETHING' 
-    'INC'	=> "-I../../../acap/ $SASL_INC",     # e.g., '-I/usr/include/other' 
+    'INC'	=> "-I../../../acap/ $SASL_INC $OPENSSL_INC",     # e.g., '-I/usr/include/other' 
 );

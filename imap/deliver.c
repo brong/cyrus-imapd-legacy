@@ -259,7 +259,7 @@ int main(int argc, char **argv)
 
     config_init(alt_config, "deliver");
 
-    sockaddr = config_getstring("lmtpsocket", NULL);
+    sockaddr = config_getstring(IMAPOPT_LMTPSOCKET);
     if (!sockaddr) {	
 	strcpy(buf, config_dir);
 	strcat(buf, "/socket/lmtp");
@@ -335,16 +335,16 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
     /* setup txn */
     txn->from = return_path;
     txn->auth = authuser;
-    txn->ignorequota = ignorequota;
     txn->data = deliver_in;
     txn->isdotstuffed = 0;
     txn->rcpt_num = numusers ? numusers : 1;
     if (mailbox) ml = strlen(mailbox);
     if (numusers == 0) {
 	/* just deliver to mailbox 'mailbox' */
-	const char *BB = config_getstring("postuser", "");
-	txn->rcpt[0].addr = (char *) xmalloc(ml + strlen(BB) + 2); /* leaks! */
+	const char *BB = config_getstring(IMAPOPT_POSTUSER);
+	txn->rcpt[0].addr = (char *) xmalloc(ml + strlen(BB) + 2); /* xxx leaks! */
 	sprintf(txn->rcpt[0].addr, "%s+%s", BB, mailbox);
+	txn->rcpt[0].ignorequota = ignorequota;
     } else {
 	/* setup each recipient */
 	for (j = 0; j < numusers; j++) {
@@ -356,6 +356,7 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
 	    } else {
 		txn->rcpt[j].addr = users[j];
 	    }
+	    txn->rcpt[j].ignorequota = ignorequota;
 	}
     }
 

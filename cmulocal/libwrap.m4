@@ -1,5 +1,5 @@
 dnl libwrap.m4 --- do we have libwrap, the access control library?
-dnl $Id: libwrap.m4,v 1.3.2.1 2002/06/06 21:07:37 jsmith2 Exp $
+dnl $Id: libwrap.m4,v 1.3.2.2 2002/09/10 20:30:31 rjs3 Exp $
 
 AC_DEFUN(CMU_LIBWRAP, [
   AC_REQUIRE([CMU_SOCKETS])
@@ -12,8 +12,8 @@ AC_DEFUN(CMU_LIBWRAP, [
       LDFLAGS="$LDFLAGS -L${with_libwrap}/lib"
     fi
     cmu_save_LIBS="$LIBS"
-    AC_CHECK_LIB(wrap, request_init,
-		 AC_CHECK_HEADER(tcpd.h,, with_libwrap=no),
+    AC_CHECK_LIB(wrap, request_init, [
+		 AC_CHECK_HEADER(tcpd.h,, with_libwrap=no)],
 		 with_libwrap=no, ${LIB_SOCKET})
     LIBS="$cmu_save_LIBS"
   fi

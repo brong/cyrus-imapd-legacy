@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: reconstruct.c,v 1.64.2.2 2002/06/14 18:36:58 jsmith2 Exp $ */
+/* $Id: reconstruct.c,v 1.64.2.3 2002/09/10 20:30:46 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -92,7 +92,6 @@
 #include "retry.h"
 #include "convert_code.h"
 #include "util.h"
-#include "acapmbox.h"
 
 extern int errno;
 extern int optind;
@@ -114,8 +113,6 @@ void usage(void);
 void shut_down(int code);
 
 extern cyrus_acl_canonproc_t mboxlist_ensureOwnerRights;
-
-static acapmbox_handle_t *acaphandle = NULL;
 
 int code = 0;
 
@@ -195,8 +192,10 @@ int main(int argc, char **argv)
     for (i = optind; i < argc; i++) {
 	strcpy(buf, argv[i]);
 	/* Translate any separators in mailboxname */
-	mboxname_hiersep_tointernal(&recon_namespace, buf);
-	do_reconstruct(buf, 0, 0, fflag ? &head : NULL);
+	mboxname_hiersep_tointernal(&recon_namespace, buf, 0);
+	(*recon_namespace.mboxlist_findall)(&recon_namespace, buf, 1, 0,
+					    0, do_reconstruct, 
+					    fflag ? &head : NULL);
 	if (rflag) {
 	    strcat(buf, ".*");
 	    (*recon_namespace.mboxlist_findall)(&recon_namespace, buf, 1, 0,
@@ -253,23 +252,32 @@ int compare_uid(const void *a, const void *b)
  */
 int
 do_reconstruct(char *name,
-	       int matchlen __attribute__((unused)),
+	       int matchlen,
 	       int maycreate __attribute__((unused)),
 	       void *rock)
 {
     int r;
     char buf[MAX_MAILBOX_PATH];
+    static char lastname[MAX_MAILBOX_PATH] = "";
 
     signals_poll();
-    r = reconstruct(name, rock);
+
+    /* don't repeat */
+    if (matchlen == strlen(lastname) &&
+	!strncmp(name, lastname, matchlen)) return 0;
+
+    strncpy(lastname, name, matchlen);
+    lastname[matchlen] = '\0';
+
+    r = reconstruct(lastname, rock);
     if (r) {
 	com_err(name, r, (r == IMAP_IOERROR) ? error_message(errno) : NULL);
 	code = convert_code(r);
     }
     else {
 	/* Convert internal name to external */
-	(*recon_namespace.mboxname_toexternal)(&recon_namespace, name,
-					       "cyrus", buf);
+	(*recon_namespace.mboxname_toexternal)(&recon_namespace, lastname,
+					       NULL, buf);
 	printf("%s\n", buf);
     }
 
@@ -585,9 +593,6 @@ int reconstruct(char *name, struct discovered *found)
 	return IMAP_IOERROR;
     }
     
-    acapmbox_setproperty(acaphandle, mailbox.name, ACAPMBOX_UIDVALIDITY,
-			 mailbox.uidvalidity);
-
     fclose(newindex);
     r = seen_reconstruct(&mailbox, (time_t)0, (time_t)0, (int (*)())0, (void *)0);
     mailbox_close(&mailbox);
@@ -698,8 +703,8 @@ char *cleanacl(char *acl, char *mboxname)
     char *rights;
 
     /* Rebuild ACL */
-    if (!strncmp(mboxname, "user.", 5)) {
-	strcpy(owner, mboxname+5);
+    if ((p = mboxname_isusermailbox(mboxname, 0))) {
+	strcpy(owner, p);
 	p = strchr(owner, '.');
 	if (p) *p = '\0';
 	aclcanonproc = mboxlist_ensureOwnerRights;

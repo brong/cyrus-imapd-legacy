@@ -41,7 +41,7 @@
  */
 
 /*
- * $Id: auth_unix.c,v 1.29.2.1 2002/06/06 21:08:33 jsmith2 Exp $
+ * $Id: auth_unix.c,v 1.29.2.2 2002/09/10 20:30:53 rjs3 Exp $
  */
 
 #include <config.h>
@@ -52,6 +52,7 @@
 #include <string.h>
 
 #include "auth.h"
+#include "libcyr_cfg.h"
 #include "xmalloc.h"
 
 const char *auth_method_desc = "unix";
@@ -165,14 +166,6 @@ size_t len;
     if(!len) len = strlen(identifier);
     if(len >= sizeof(retbuf)) return NULL;
 
-    if (strcasecmp(identifier, "anonymous") == 0) {
-	return "anonymous";
-    }
-    if (strcasecmp(identifier, "anybody") == 0 ||
-	strcasecmp(identifier, "anyone") == 0) {
-	return "anyone";
-    }
-    
     memcpy(retbuf, identifier, len);
     retbuf[len] = '\0';
 
@@ -239,7 +232,10 @@ const char *cacheid;
 
     strcpy(newstate->userid, identifier);
     newstate->ngroups = 0;
-    newstate->group = (char **) 0;
+    newstate->group = NULL;
+    
+    if(!libcyrus_config_getswitch(CYRUSOPT_AUTH_UNIX_GROUP_ENABLE))
+	return newstate;
 
     setgrent();
     while ((grp = getgrent())) {

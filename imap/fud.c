@@ -42,7 +42,7 @@
 
 #include <config.h>
 
-/* $Id: fud.c,v 1.24.2.2 2002/06/14 18:36:45 jsmith2 Exp $ */
+/* $Id: fud.c,v 1.24.2.3 2002/09/10 20:30:40 rjs3 Exp $ */
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -99,21 +99,23 @@ int soc = 0; /* inetd (master) has handed us the port as stdin */
 char who[16];
 
 #define MAXLOGNAME 16		/* should find out for real */
+#define MAXDOMNAME 20		/* should find out for real */
 
 int begin_handling(void)
 {
         struct sockaddr_in  sfrom;
         socklen_t sfromsiz = sizeof(sfrom);
         int r;
-        char    buf[MAXLOGNAME + MAX_MAILBOX_NAME + 1];
-        char    username[MAXLOGNAME];
+        char    buf[MAXLOGNAME + MAXDOMNAME+ MAX_MAILBOX_NAME + 1];
+        char    username[MAXLOGNAME + MAXDOMNAME];
         char    mbox[MAX_MAILBOX_NAME+1];
         char    *q;
         int     off;
+	int     maxuserlen = MAXLOGNAME + config_virtdomains ? MAXDOMNAME : 0;
 
         while(1) {
             /* For safety */
-            memset(username,'\0',MAXLOGNAME);	
+            memset(username,'\0',MAXLOGNAME + MAXDOMNAME);	
             memset(mbox,'\0',MAX_MAILBOX_NAME+1);
             memset(buf, '\0', MAXLOGNAME + MAX_MAILBOX_NAME + 1);
 
@@ -123,15 +125,17 @@ int begin_handling(void)
             if (r == -1) {
 		return(errno);
 	    }
-            for(off = 0; buf[off] != '|' && off < MAXLOGNAME; off++);
-            if(off < MAXLOGNAME) {
-		strlcpy(username,buf,off);
+            for(off = 0; buf[off] != '|' && off < maxuserlen; off++);
+            if(off > 0 && off < maxuserlen) {
+		strncpy(username,buf,off);
+		username[off] = '\0';
             } else {
 		continue;
             }
+
+	    /* Copy what is past the | to the mailbox name */
             q = buf + off + 1;
-            strlcpy(mbox,q,(r - (off + 1)  < MAX_MAILBOX_NAME) ? 
-		    r - (off + 1) : MAX_MAILBOX_NAME);
+            strlcpy(mbox, q, sizeof(mbox));
 
             handle_request(username,mbox,sfrom);
         }
@@ -158,16 +162,16 @@ int service_init(int argc, char **argv, char **envp)
 {
     int opt;
    
-    config_changeident("fud");
-
     if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
 
     setproctitle_init(argc, argv, envp);
 
-    while ((opt = getopt(argc, argv, "C:")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:D")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file - handled by service::main() */
 	    break;
+	case 'D': /* external debugger - handled by service::main() */
+ 	    break;
 	default:
 	    break;
 	}
@@ -188,7 +192,9 @@ void service_abort(int error)
     shut_down(error);
 }
 
-int service_main(int argc, char **argv, char **envp)
+int service_main(int argc __attribute__((unused)),
+		 char **argv __attribute__((unused)),
+		 char **envp __attribute__((unused)))
 {
     int r = 0; 
 
@@ -219,13 +225,12 @@ int do_proxy_request(const char *who, const char *name,
     int csoc = -1;
     struct sockaddr_in cin, cout;
     struct hostent *hp;
-    int backend_port = 4201; /* default fud udp port */
-    static struct servent *sp = NULL;
+    static int backend_port = 0; /* fud port in NETWORK BYTE ORDER */
 
     /* Open a UDP socket to the Cyrus mail server */
-    if(!sp) {
-	sp = getservbyname("fud", "udp");
-	if(sp) backend_port = sp->s_port;
+    if(!backend_port) {
+	struct servent *sp = getservbyname("fud", "udp");
+	backend_port = sp ? sp->s_port : htons(4201); /* default fud port */
     }
 
     hp = gethostbyname (backend_host);
@@ -242,7 +247,7 @@ int do_proxy_request(const char *who, const char *name,
 
     /* Write a Cyrus query into *tmpbuf */
     memset (tmpbuf, '\0', sizeof(tmpbuf));
-    sprintf (tmpbuf, "%s|%s", who, name);
+    snprintf (tmpbuf, sizeof(tmpbuf), "%s|%s", who, name);
     x = sizeof (cin);
 
     /* Send the query and wait for a reply */
@@ -399,7 +404,7 @@ send_reply(struct sockaddr_in sfrom, int status,
             sendto(soc,"PERMDENY",9,0,(struct sockaddr *) &sfrom, sizeof(sfrom));       
             break;
         case REQ_OK:
-            siz = sprintf(buf,"%s|%s|%d|%d|%d",user,mbox,numrecent,(int) lastread,(int) lastarrived);
+            siz = snprintf(buf, sizeof(buf), "%s|%s|%d|%d|%d",user,mbox,numrecent,(int) lastread,(int) lastarrived);
             sendto(soc,buf,siz,0,(struct sockaddr *) &sfrom, sizeof(sfrom));       
             break;
         case REQ_UNK:

@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.112.2.2 2002/06/14 18:36:56 jsmith2 Exp $
+ * $Id: pop3d.c,v 1.112.2.3 2002/09/10 20:30:45 rjs3 Exp $
  */
 #include <config.h>
 
@@ -132,6 +132,11 @@ static struct mailbox mboxstruct;
 
 static mailbox_decideproc_t expungedeleted;
 
+/* the sasl proxy policy context */
+static struct proxy_context popd_proxyctx = {
+    0, 1, NULL, NULL, NULL
+};
+
 /* current namespace */
 static struct namespace popd_namespace;
 
@@ -170,72 +175,10 @@ static struct
     char *authid;
 } saslprops = {NULL,NULL,0,NULL};
 
-
-/* should we allow users to proxy?  return SASL_OK if yes,
-   SASL_BADAUTH otherwise */
-static int mysasl_authproc(sasl_conn_t *conn,
-			   void *context __attribute__((unused)),
-			   const char *requested_user, unsigned rlen,
-			   const char *auth_identity, unsigned alen,
-			   const char *def_realm __attribute__((unused)),
-			   unsigned urlen __attribute__((unused)),
-			   struct propctx *propctx __attribute__((unused)))
-{
-    const char *val;
-    struct auth_state *authstate;
-    int userisadmin = 0;
-    char *realm;
-
-    /* check if remote realm */
-    if ((realm = strchr(auth_identity, '@'))!=NULL) {
-	realm++;
-	val = config_getstring("loginrealms", "");
-	while (*val) {
-	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
-		break;
-	    }
-	    /* not this realm, try next one */
-	    while (*val && !isspace((int) *val)) val++;
-	    while (*val && isspace((int) *val)) val++;
-	}
-	if (!*val) {
-	    sasl_seterror(conn, 0, "cross-realm login %s denied",
-			  auth_identity);
-	    return SASL_BADAUTH;
-	}
-    }
-
-    authstate = auth_newstate(auth_identity, NULL);
-
-    /* ok, is auth_identity an admin? */
-    userisadmin = authisa(authstate, "imap", "admins");
-
-    if (alen != rlen || strncmp(auth_identity, requested_user, alen)) {
-	/* we want to authenticate as a different user; we'll allow this
-	   if we're an admin or if we've allowed ACL proxy logins */
-	if (userisadmin ||
-	    authisa(authstate, "imap", "proxyservers")) {
-
-	    /* proxy ok! */
-	    auth_freestate(authstate);
-	    return SASL_OK;
-	} else {
-	    sasl_seterror(conn, 0, "user %s is not allowed to proxy",
-			  auth_identity);
-
-	    auth_freestate(authstate);
-
-	    return SASL_BADAUTH;
-	}
-    }
-
-    return SASL_OK;
-}
-
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
-    { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
+    { SASL_CB_PROXY_POLICY, &mysasl_proxy_policy, (void*) &popd_proxyctx },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -312,7 +255,6 @@ int service_init(int argc __attribute__((unused)),
     int r;
     int opt;
 
-    config_changeident("pop3d");
     if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
     setproctitle_init(argc, argv, envp);
 
@@ -321,18 +263,8 @@ int service_init(int argc __attribute__((unused)),
     signals_add_handlers();
     signal(SIGPIPE, SIG_IGN);
 
-    /* set the SASL allocation functions */
-    sasl_set_alloc((sasl_malloc_t *) &xmalloc, 
-		   (sasl_calloc_t *) &calloc, 
-		   (sasl_realloc_t *) &xrealloc, 
-		   (sasl_free_t *) &free);
-
     /* load the SASL plugins */
-    if ((r = sasl_server_init(mysasl_cb, "Cyrus")) != SASL_OK) {
-	syslog(LOG_ERR, "SASL failed initializing: sasl_server_init(): %s", 
-	       sasl_errstring(r, NULL, NULL));
-	return 2;
-    }
+    config_sasl_init(0, 1, mysasl_cb);
 
     /* open the mboxlist, we'll need it for real work */
     mboxlist_init(0);
@@ -347,14 +279,15 @@ int service_init(int argc __attribute__((unused)),
 	fatal(error_message(r), EC_CONFIG);
     }
 
-    while ((opt = getopt(argc, argv, "C:sk")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:Dsk")) != EOF) {
 	switch(opt) {
 	case 'C': /* alt config file - handled by service::main() */
 	    break;
-
+	case 'D': /* external debugger - handled by service::main() */
+ 	    break;
 	case 's': /* pop3s (do starttls right away) */
 	    pop3s = 1;
-	    if (!tls_enabled("pop3")) {
+	    if (!tls_enabled()) {
 		syslog(LOG_ERR, "pop3s: required OpenSSL options not present");
 		fatal("pop3s: required OpenSSL options not present",
 		      EC_CONFIG);
@@ -433,7 +366,7 @@ int service_main(int argc, char **argv, char **envp)
     proc_register("pop3d", popd_clienthost, NULL, NULL);
 
     /* Set inactivity timer */
-    timeout = config_getint("poptimeout", 10);
+    timeout = config_getint(IMAPOPT_POPTIMEOUT);
     if (timeout < 10) timeout = 10;
     prot_settimeout(popd_in, timeout*60);
     prot_setflushonread(popd_in, popd_out);
@@ -544,7 +477,7 @@ void kpop(void)
 	fatal("Cannot get client's IP address", EC_OSERR);
     }
 
-    srvtab = config_getstring("srvtab", "");
+    srvtab = config_getstring(IMAPOPT_SRVTAB);
 
     strcpy(instance, "*");
     r = krb_recvauth(0L, 0, &ticket, "pop", instance,
@@ -650,7 +583,7 @@ static void cmdloop(void)
 		cmd_capa();
 	    }
 	}
-	else if (!strcmp(inputbuf, "stls") && tls_enabled("pop3")) {
+	else if (!strcmp(inputbuf, "stls") && tls_enabled()) {
 	    if (arg) {
 		prot_printf(popd_out,
 			    "-ERR STLS doesn't take any arguments\r\n");
@@ -871,7 +804,6 @@ static void cmd_starttls(int pop3s)
     result=tls_init_serverengine("pop3",
 				 5,        /* depth to verify */
 				 !pop3s,   /* can client auth? */
-				 0,        /* require client to auth? */
 				 !pop3s);  /* TLS only? */
 
     if (result == -1) {
@@ -968,7 +900,8 @@ static void cmd_apop(char *response)
 	return;
     }
 
-    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
+    snprintf(shutdownfilename, sizeof(shutdownfilename), 
+	     "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
 	shutdown_in = prot_new(fd, 0);
 	prot_fgets(buf, sizeof(buf), shutdown_in);
@@ -1006,7 +939,7 @@ static void cmd_apop(char *response)
 
     /*
      * get the userid from SASL --- already canonicalized from
-     * mysasl_authproc()
+     * mysasl_proxy_policy()
      */
     sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
 			       (const void **) &canon_user);
@@ -1031,12 +964,12 @@ char *user;
     int fd;
     struct protstream *shutdown_in;
     char buf[1024];
-    char *p;
+    char *p, *dot, *domain;
     char shutdownfilename[1024];
 
     /* possibly disallow USER */
     if (!(kflag || popd_starttls_done ||
-	  config_getswitch("allowplaintext", 1))) {
+	  config_getswitch(IMAPOPT_ALLOWPLAINTEXT))) {
 	prot_printf(popd_out,
 		    "-ERR [AUTH] USER command only available under a layer\r\n");
 	return;
@@ -1047,7 +980,8 @@ char *user;
 	return;
     }
 
-    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
+    snprintf(shutdownfilename, sizeof(shutdownfilename),
+	     "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
 	shutdown_in = prot_new(fd, 0);
 	prot_fgets(buf, sizeof(buf), shutdown_in);
@@ -1059,9 +993,11 @@ char *user;
 	prot_flush(popd_out);
 	shut_down(0);
     }
-    else if (!(p = auth_canonifyid(user,0)) ||
+    else if (!(p = canonify_userid(user, NULL, NULL)) ||
 	     /* '.' isn't allowed if '.' is the hierarchy separator */
-	     (popd_namespace.hier_sep == '.' && strchr(p, '.')) ||
+	     (popd_namespace.hier_sep == '.' && (dot = strchr(p, '.')) &&
+	      !(config_virtdomains &&  /* allow '.' in dom.ain */
+		(domain = strchr(p, '@')) && (dot > domain))) ||
 	     strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR [AUTH] Invalid user\r\n");
 	syslog(LOG_NOTICE,
@@ -1107,7 +1043,7 @@ char *pass;
 #endif
 
     if (!strcmp(popd_userid, "anonymous")) {
-	if (config_getswitch("allowanonymouslogin", 0)) {
+	if (config_getswitch(IMAPOPT_ALLOWANONYMOUSLOGIN)) {
 	    pass = beautify_string(pass);
 	    if (strlen(pass) > 500) pass[500] = '\0';
 	    syslog(LOG_NOTICE, "login: %s anonymous %s",
@@ -1141,7 +1077,8 @@ char *pass;
 	       popd_userid, popd_starttls_done ? "+TLS" : "", 
 	       reply ? reply : "");
 
-	if ((plaintextloginpause = config_getint("plaintextloginpause", 0))!=0) {
+	if ((plaintextloginpause = config_getint(IMAPOPT_PLAINTEXTLOGINPAUSE))
+	     != 0) {
 	    sleep(plaintextloginpause);
 	}
     }
@@ -1153,8 +1090,8 @@ char *pass;
 void
 cmd_capa()
 {
-    int minpoll = config_getint("popminpoll", 0) * 60;
-    int expire = config_getint("popexpiretime", -1);
+    int minpoll = config_getint(IMAPOPT_POPMINPOLL) * 60;
+    int expire = config_getint(IMAPOPT_POPEXPIRETIME);
     unsigned mechcount;
     const char *mechlist;
 
@@ -1169,7 +1106,7 @@ cmd_capa()
 	prot_write(popd_out, mechlist, strlen(mechlist));
     }
 
-    if (tls_enabled("pop3")) {
+    if (tls_enabled()) {
 	prot_printf(popd_out, "STLS\r\n");
     }
     if (expire < 0) {
@@ -1185,7 +1122,8 @@ cmd_capa()
     prot_printf(popd_out, "RESP-CODES\r\n");
     prot_printf(popd_out, "AUTH-RESP-CODE\r\n");
 
-    if (kflag || popd_starttls_done || config_getswitch("allowplaintext", 1)) {
+    if(kflag || popd_starttls_done
+    || config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
 	prot_printf(popd_out, "USER\r\n");
     }
     
@@ -1322,7 +1260,7 @@ void cmd_auth(char *arg)
     /* successful authentication */
 
     /* get the userid from SASL --- already canonicalized from
-     * mysasl_authproc()
+     * mysasl_proxy_policy()
      */
     sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
 			       (const void **) &canon_user);
@@ -1359,11 +1297,14 @@ int openinbox(void)
     popd_login_time = time(0);
 
     /* Translate any separators in userid */
-    mboxname_hiersep_tointernal(&popd_namespace, popd_userid);
+    mboxname_hiersep_tointernal(&popd_namespace, popd_userid,
+				config_virtdomains ?
+				strcspn(popd_userid, "@") : 0);
 
-    strcpy(inboxname, "user.");
-    strcat(inboxname, popd_userid);
-    r = mailbox_open_header(inboxname, 0, &mboxstruct);
+    r = (*popd_namespace.mboxname_tointernal)(&popd_namespace, "INBOX",
+					      popd_userid, inboxname);
+
+    if (!r) r = mailbox_open_header(inboxname, 0, &mboxstruct);
     if (r) {
 	free(popd_userid);
 	popd_userid = 0;
@@ -1382,7 +1323,7 @@ int openinbox(void)
 	return 1;
     }
 
-    if ((minpoll = config_getint("popminpoll", 0)) &&
+    if ((minpoll = config_getint(IMAPOPT_POPMINPOLL)) &&
 	mboxstruct.pop3_last_login + 60*minpoll > popd_login_time) {
 	prot_printf(popd_out,
 	    "-ERR [LOGIN-DELAY] Logins must be at least %d minute%s apart\r\n",

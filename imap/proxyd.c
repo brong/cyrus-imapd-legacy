@@ -39,9 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.79.2.2 2002/06/14 18:36:57 jsmith2 Exp $ */
-
-#undef PROXY_IDLE
+/* $Id: proxyd.c,v 1.79.2.3 2002/09/10 20:30:45 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -119,6 +117,9 @@ struct backend *backend_current = NULL;
 /* our cached connections */
 struct backend **backend_cached = NULL;
 
+/* are we doing virtdomains with multiple IPs? */
+static int disable_referrals;
+
 /* has the client issued an RLIST or RLSUB? */
 static int supports_referrals;
 
@@ -137,7 +138,8 @@ static sasl_ssf_t extprops_ssf = 0;
 /* per-user session state */
 struct protstream *proxyd_out = NULL;
 struct protstream *proxyd_in = NULL;
-char proxyd_clienthost[250] = "[local]";
+static char proxyd_clienthost[250] = "[local]";
+static int proxyd_logfd = -1;
 time_t proxyd_logtime;
 char *proxyd_userid = NULL;
 struct auth_state *proxyd_authstate = 0;
@@ -147,6 +149,11 @@ int proxyd_starttls_done = 0; /* have we done a successful starttls yet? */
 #ifdef HAVE_SSL
 static SSL *tls_conn;
 #endif /* HAVE_SSL */
+
+/* the sasl proxy policy context */
+static struct proxy_context proxyd_proxyctx = {
+    1, 1, &proxyd_authstate, &proxyd_userisadmin, NULL
+};
 
 /* current namespace */
 static struct namespace proxyd_namespace;
@@ -181,10 +188,11 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition);
 void cmd_find(char *tag, char *namespace, char *pattern);
 void cmd_list(char *tag, int subscribed, char *reference, char *pattern);
 void cmd_changesub(char *tag, char *namespace, char *name, int add);
-void cmd_getacl(char *tag, char *name, int oldform);
+void cmd_getacl(const char *tag, const char *name);
 void cmd_listrights(char *tag, char *name, char *identifier);
-void cmd_myrights(char *tag, char *name, int oldform);
-void cmd_setacl(char *tag, char *name, char *identifier, char *rights);
+void cmd_myrights(const char *tag, const char *name);
+void cmd_setacl(char *tag, const char *name,
+		const char *identifier, const char *rights);
 void cmd_getquota(char *tag, char *name);
 void cmd_getquotaroot(char *tag, char *name);
 void cmd_setquota(char *tag, char *quotaroot);
@@ -225,11 +233,8 @@ int getannotatefetchdata(char *tag,
 int getannotatestoredata(char *tag, struct entryattlist **entryatts);
 
 void annotate_response(struct entryattlist *l);
-
-void appendstrlist(struct strlist **l, char *s);
-void freestrlist(struct strlist *l);
-void appendattvalue(struct attvaluelist **l, char *attrib, char *value);
-void freeattvalues(struct attvaluelist *l);
+int annotate_proxy(const char *server, const char *entry_pat,
+		   struct strlist *attribute_pat);
 #endif /* ENABLE_ANNOTATEMORE */
 
 void printstring (const char *s);
@@ -238,6 +243,9 @@ void printastring (const char *s);
 static int mailboxdata(char *name, int matchlen, int maycreate, void *rock);
 static int listdata(char *name, int matchlen, int maycreate, void *rock);
 static void mstringdata(char *cmd, char *name, int matchlen, int maycreate);
+
+static int mlookup(const char *name, char **pathp, 
+		   char **aclp, void *tid);
 
 /* Enable the resetting of a sasl_conn_t */
 static int reset_saslconn(sasl_conn_t **conn);
@@ -303,7 +311,7 @@ static int pipe_until_tag(struct backend *s, char *tag, int force_notfatal)
 	    return PROXY_NOCONNECTION;
 	}
 	if (!cont && buf[taglen] == ' ' && !strncmp(tag, buf, taglen)) {
-	    strlcpy(s->last_result, buf + taglen + 1, LAST_RESULT_LEN);
+	    strlcpy(s->last_result, buf + taglen + 1, sizeof(s->last_result));
 	    /* guarantee that 's->last_result' has \r\n\0 at the end */
 	    s->last_result[LAST_RESULT_LEN - 3] = '\r';
 	    s->last_result[LAST_RESULT_LEN - 2] = '\n';
@@ -626,6 +634,230 @@ static int pipe_command(struct backend *s, int optimistic_literal)
     }
 }
 
+/* This handles piping of the LSUB command, because we have to figure out
+ * what mailboxes actually exist before passing them to the end user.
+ *
+ * It is also needed if we are doing a FIND MAILBOXES, for that we do an
+ * LSUB on the backend anyway, because the semantics of FIND do not allow
+ * it to return nonexistant mailboxes (RFC1176), but we need to really dumb
+ * down the response when this is the case.
+ */
+static int pipe_lsub(struct backend *s, char *tag, int force_notfatal,
+		     int for_find) 
+{
+    int taglen = strlen(tag);
+    int c;
+    int r = PROXY_OK;
+    int exist_r;
+    char mailboxname[MAX_MAILBOX_PATH + 1];
+    static struct buf tagb, cmd, sep, name;
+    int cur_flags_size = 64;
+    char *flags = xmalloc(cur_flags_size);
+
+    const char *end_strip_flags[] = { " \\NonExistent)", "\\NonExistent)",
+				      NULL };
+    const char *mid_strip_flags[] = { "\\NonExistent ",
+				      NULL 
+				    };
+
+    assert(s);
+    assert(s->timeout);
+    
+    s->timeout->mark = time(NULL) + IDLE_TIMEOUT;
+
+    while(1) {
+	c = getword(s->in, &tagb);
+
+	if(c == EOF) {
+	    if(s == backend_current && !force_notfatal)
+		fatal("Lost connection to selected backend", EC_UNAVAILABLE);
+	    proxyd_downserver(s);
+	    free(flags);
+	    return PROXY_NOCONNECTION;
+	}
+
+	if(!strncmp(tag, tagb.s, taglen)) {
+	    char buf[2048];
+	    if(!prot_fgets(buf, sizeof(buf), s->in)) {
+		if(s == backend_current && !force_notfatal)
+		    fatal("Lost connection to selected backend",
+			  EC_UNAVAILABLE);
+		proxyd_downserver(s);
+		free(flags);
+		return PROXY_NOCONNECTION;
+	    }	
+	    /* Got the end of the response */
+	    strlcpy(s->last_result, buf, sizeof(s->last_result));
+	    /* guarantee that 's->last_result' has \r\n\0 at the end */
+	    s->last_result[LAST_RESULT_LEN - 3] = '\r';
+	    s->last_result[LAST_RESULT_LEN - 2] = '\n';
+	    s->last_result[LAST_RESULT_LEN - 1] = '\0';
+	    switch (buf[0]) {
+	    case 'O': case 'o':
+		r = PROXY_OK;
+		break;
+	    case 'N': case 'n':
+		r = PROXY_NO;
+		break;
+	    case 'B': case 'b':
+		r = PROXY_BAD;
+		break;
+	    default: /* huh? no result? */
+		if(s == backend_current && !force_notfatal)
+		    fatal("Lost connection to selected backend",
+			  EC_UNAVAILABLE);
+		proxyd_downserver(s);
+		r = PROXY_NOCONNECTION;
+		break;
+	    }
+	    break; /* we're done */
+	}
+
+	c = getword(s->in, &cmd);
+
+	if(c == EOF) {
+	    if(s == backend_current && !force_notfatal)
+		fatal("Lost connection to selected backend", EC_UNAVAILABLE);
+	    proxyd_downserver(s);
+	    free(flags);
+	    return PROXY_NOCONNECTION;
+	}
+
+	if(strncasecmp("LSUB", cmd.s, 4)) {
+	    prot_printf(proxyd_out, "%s %s ", tagb.s, cmd.s);
+	    r = pipe_to_end_of_response(s, force_notfatal);
+	    if(r != PROXY_OK) {
+		free(flags);
+		return r;
+	    }
+	} else {
+	    /* build up the response bit by bit */
+	    int i = 0;
+	    char *p;
+
+	    c = prot_getc(s->in);
+	    while(c != ')' && c != EOF) {
+		flags[i++] = c;
+		if(i == cur_flags_size) {
+		    /* expand our buffer */
+		    cur_flags_size *= 2;
+		    flags = xrealloc(flags, cur_flags_size);
+		}
+		c = prot_getc(s->in);
+	    }
+
+	    if(c != EOF) {
+		/* terminate string */
+		flags[i++] = ')';
+		if(i == cur_flags_size) {
+		    /* expand our buffer */
+		    cur_flags_size *= 2;
+		    flags = xrealloc(flags, cur_flags_size);
+		}
+		flags[i] = '\0';
+		/* get the next character */
+ 		c = prot_getc(s->in);
+	    }
+	    
+	    if(c != ' ') {
+		if(s == backend_current && !force_notfatal)
+		    fatal("Bad LSUB response from selected backend",
+			  EC_UNAVAILABLE);
+		proxyd_downserver(s);
+		free(flags);
+		return PROXY_NOCONNECTION;
+	    }
+
+	    /* Check for flags that we should remove
+	     * (e.g. NoSelect, NonExistent) */
+	    for(i=0; end_strip_flags[i]; i++) {
+		p = strstr(flags, end_strip_flags[i]);
+		if(p) {
+		    *p = ')';
+		    *(p+1) = '\0';
+		}
+	    }
+
+	    for(i=0; mid_strip_flags[i]; i++) {
+		int mid_strip_len = strlen(mid_strip_flags[i]);
+		p = strstr(flags, mid_strip_flags[i]);
+		while(p) {
+		    strcpy(p, p + mid_strip_len);
+		    p = strstr(flags, mid_strip_flags[i]);
+		}
+	    }
+		
+	    /* Get separator */
+	    c = getastring(s->in, s->out, &sep);
+
+	    if(c != ' ') {
+		if(s == backend_current && !force_notfatal)
+		    fatal("Bad LSUB response from selected backend",
+			  EC_UNAVAILABLE);
+		proxyd_downserver(s);
+		free(flags);
+		return PROXY_NOCONNECTION;
+	    }
+
+	    /* Get name */
+	    c = getastring(s->in, s->out, &name);
+
+	    if(c == '\r') c = prot_getc(s->in);
+	    if(c != '\n') {
+		if(s == backend_current && !force_notfatal)
+		    fatal("Bad LSUB response from selected backend",
+			  EC_UNAVAILABLE);
+		proxyd_downserver(s);
+		free(flags);
+		return PROXY_NOCONNECTION;
+	    }
+
+	    /* lookup name */
+	    exist_r = 1;
+	    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace,
+							name.s,
+							proxyd_userid,
+							mailboxname);
+	    if (!r) {
+		int mbtype;
+		exist_r = mboxlist_detail(mailboxname, &mbtype,
+					  NULL, NULL, NULL, NULL);
+		if(!exist_r && (mbtype & MBTYPE_RESERVE))
+		    exist_r = IMAP_MAILBOX_RESERVED;
+	    } else {
+		/* skip this one */
+		syslog(LOG_ERR, "could not convert %s to internal form",
+		       name.s);
+		continue;
+	    }
+
+	    /* send our response */
+	    /* we need to set \Noselect if it's not in our mailboxes.db */
+	    if(!for_find) {
+		if(!exist_r) {
+		    prot_printf(proxyd_out, "* LSUB %s \"%s\" ",
+				flags, sep.s);
+		} else {
+		    prot_printf(proxyd_out, "* LSUB (\\Noselect) \"%s\" ",
+				sep.s);
+		}
+
+		printstring(name.s);
+		prot_printf(proxyd_out, "\r\n");
+
+	    } else if(for_find && !exist_r) {
+		/* Note that it has to exist for a find response */
+
+		/* xxx what happens if name.s isn't an atom? */
+		prot_printf(proxyd_out, "* MAILBOX %s\r\n",name.s);
+	    }
+	}
+    } /* while(1) */
+
+    free(flags);
+    return r;
+}
+
 void proxyd_downserver(struct backend *s)
 {
     if (!s || !s->timeout) {
@@ -664,7 +896,7 @@ struct prot_waitevent *backend_timeout(struct protstream *s,
 }
 
 /* return the connection to the server */
-struct backend *proxyd_findserver(char *server)
+struct backend *proxyd_findserver(const char *server)
 {
     int i = 0;
     struct backend *ret = NULL;
@@ -801,100 +1033,10 @@ static void proxyd_refer(const char *tag,
 		tag, url);
 }
 
-/*
- * acl_ok() checks to see if the the inbox for 'user' grants the 'a'
- * right to the principal 'auth_identity'. Returns 1 if so, 0 if not.
- */
-static int acl_ok(const char *user, const char *auth_identity)
-{
-    char *acl;
-    char inboxname[1024];
-    int r;
-    struct auth_state *authstate;
-
-    if (strchr(user, '.') || strlen(user)+6 >= sizeof(inboxname)) return 0;
-
-    strcpy(inboxname, "user.");
-    strcat(inboxname, user);
-
-    if (!(authstate = auth_newstate(auth_identity, (char *)0)) ||
-	mlookup(inboxname, (char **)0, &acl, NULL)) {
-	r = 0;  /* Failed so assume no proxy access */
-    }
-    else {
-	r = (cyrus_acl_myrights(authstate, acl) & ACL_ADMIN) != 0;
-    }
-    if (authstate) auth_freestate(authstate);
-    return r;
-}
-
-/* should we allow users to proxy?  return SASL_OK if yes,
-   SASL_BADAUTH otherwise */
-static int mysasl_authproc(sasl_conn_t *conn,
-			   void *context,
-			   const char *requested_user, unsigned rlen,
-			   const char *auth_identity, unsigned alen,
-			   const char *def_realm, unsigned urlen,
-			   struct propctx *propctx)
-{
-    const char *val;
-    char *realm;
-
-    /* check if remote realm */
-    if ((realm = strchr(auth_identity, '@'))!=NULL) {
-	realm++;
-	val = config_getstring("loginrealms", "");
-	while (*val) {
-	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
-		break;
-	    }
-	    /* not this realm, try next one */
-	    while (*val && !isspace((int) *val)) val++;
-	    while (*val && isspace((int) *val)) val++;
-	}
-	if (!*val) {
-	    sasl_seterror(conn, 0, "cross-realm login %s denied",
-			  auth_identity);
-	    return SASL_BADAUTH;
-	}
-    }
-
-    proxyd_authstate = auth_newstate(auth_identity, NULL);
-
-    /* ok, is auth_identity an admin? */
-    proxyd_userisadmin = authisa(proxyd_authstate, "imap", "admins");
-
-    if (strcmp(auth_identity, requested_user)) {
-	/* we want to authenticate as a different user; we'll allow this
-	   if we're an admin or if we've allowed ACL proxy logins */
-	int use_acl = config_getswitch("loginuseacl", 0);
-
-	if (proxyd_userisadmin ||
-	    (use_acl && acl_ok(requested_user, auth_identity)) ||
-	    authisa(proxyd_authstate, "imap", "proxyservers")) {
-	    /* proxy ok! */
-
-	    proxyd_userisadmin = 0;	/* no longer admin */
-	    auth_freestate(proxyd_authstate);
-	    
-	    proxyd_authstate = auth_newstate(requested_user, NULL);
-	} else {
-	    sasl_seterror(conn, 0, "user %s is not allowed to proxy", auth_identity);
-	    
-	    auth_freestate(proxyd_authstate);
-	    
-	    return SASL_BADAUTH;
-	}
-    }
-
-    return SASL_OK;
-}
-
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
-    { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
-    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },   
+    { SASL_CB_PROXY_POLICY, &mysasl_proxy_policy, (void*) &proxyd_proxyctx },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, (void*) &disable_referrals },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -910,9 +1052,7 @@ extern void proc_cleanup(void);
 int service_init(int argc, char **argv, char **envp)
 {
     int opt;
-    int r;
 
-    config_changeident("proxyd");
     if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
     setproctitle_init(argc, argv, envp);
 
@@ -921,36 +1061,22 @@ int service_init(int argc, char **argv, char **envp)
     signals_add_handlers();
     signal(SIGPIPE, SIG_IGN);
 
-    /* set the SASL allocation functions */
-    sasl_set_alloc((sasl_malloc_t *) &xmalloc, 
-		   (sasl_calloc_t *) &calloc, 
-		   (sasl_realloc_t *) &xrealloc, 
-		   (sasl_free_t *) &free);
-
     /* load the SASL plugins */
-    if ((r = sasl_server_init(mysasl_cb, "Cyrus")) != SASL_OK) {
-	syslog(LOG_ERR, "SASL failed initializing: sasl_server_init(): %s", 
-	       sasl_errstring(r, NULL, NULL));
-	return EC_SOFTWARE;
-    }
-
-    if ((r = sasl_client_init(NULL)) != SASL_OK) {
-	syslog(LOG_ERR, "SASL failed initializing: sasl_client_init(): %s", 
-	       sasl_errstring(r, NULL, NULL));
-	return EC_SOFTWARE;
-    }
+    config_sasl_init(1, 1, mysasl_cb);
 
     /* open the mboxlist, we'll need it for real work */
     mboxlist_init(0);
     mboxlist_open(NULL);
 
-    while ((opt = getopt(argc, argv, "C:sp:")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:Dsp:")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file - handled by service::main() */
 	    break;
+	case 'D': /* ext. debugger - handled by service::main() */
+ 	    break;
 	case 's': /* imaps (do starttls right away) */
 	    imaps = 1;
-	    if (!tls_enabled("imap")) {
+	    if (!tls_enabled()) {
 		syslog(LOG_ERR, "imaps: required OpenSSL options not present");
 		fatal("imaps: required OpenSSL options not present",
 		      EC_CONFIG);
@@ -963,6 +1089,11 @@ int service_init(int argc, char **argv, char **envp)
 	    break;
 	}
     }
+
+#ifdef ENABLE_ANNOTATEMORE
+    /* Initialize the annotatemore extention */
+    annotatemore_init(0,annotate_proxy);
+#endif 
 
     return 0;
 }
@@ -1003,12 +1134,18 @@ static void proxyd_reset(void)
     
     /* Cleanup Globals */
     proxyd_cmdcnt = 0;
+    disable_referrals = 0;
     supports_referrals = 0;
     proxyd_userisadmin = 0;
     proxyd_starttls_done = 0;
     proxyd_logtime = 0;
 
     strcpy(proxyd_clienthost, "[local]");
+
+    if(proxyd_logfd != -1) {
+	close(proxyd_logfd);
+	proxyd_logfd = -1;
+    }
 
     if(proxyd_userid) {
 	free(proxyd_userid);
@@ -1119,7 +1256,7 @@ int service_main(int argc, char **argv, char **envp)
     proc_register("proxyd", proxyd_clienthost, (char *)0, (char *)0);
 
     /* Set inactivity timer */
-    timeout = config_getint("timeout", 30);
+    timeout = config_getint(IMAPOPT_TIMEOUT);
     if (timeout < 30) timeout = 30;
     prot_settimeout(proxyd_in, timeout*60);
     prot_setflushonread(proxyd_in, proxyd_out);
@@ -1254,19 +1391,20 @@ void cmdloop()
     char motdfilename[1024];
     char hostname[MAXHOSTNAMELEN+1];
     int c;
-    int usinguid, havepartition, havenamespace, oldform;
+    int usinguid, havepartition, havenamespace;
     static struct buf tag, cmd, arg1, arg2, arg3, arg4;
     char *p;
     const char *err;
 
-    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
+    snprintf(shutdownfilename, sizeof(shutdownfilename), 
+	     "%s/msg/shutdown", config_dir);
 
     gethostname(hostname, sizeof(hostname));
     prot_printf(proxyd_out,
 		"* OK %s Cyrus IMAP4 Murder %s server ready\r\n", hostname,
 		CYRUS_VERSION);
 
-    sprintf(motdfilename, "%s/msg/motd", config_dir);
+    snprintf(motdfilename, sizeof(motdfilename), "%s/msg/motd", config_dir);
     if ((fd = open(motdfilename, O_RDONLY, 0)) != -1) {
 	motd_file(fd);
 	close(fd);
@@ -1427,10 +1565,6 @@ void cmdloop()
 	    else if (!strcmp(cmd.s, "Deleteacl")) {
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
-		if (!strcasecmp(arg1.s, "mailbox")) {
-		    if (c != ' ') goto missingargs;
-		    c = getastring(proxyd_in, proxyd_out, &arg1);
-		}
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg2);
 		if (c == EOF) goto missingargs;
@@ -1485,18 +1619,12 @@ void cmdloop()
 
 	case 'G':
 	    if (!strcmp(cmd.s, "Getacl")) {
-		oldform = 0;
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
-		if (!strcasecmp(arg1.s, "mailbox")) {
-		    oldform = 1;
-		    if (c != ' ') goto missingargs;
-		    c = getastring(proxyd_in, proxyd_out, &arg1);
-		}
 		if (c == EOF) goto missingargs;
 		if (c == '\r') c = prot_getc(proxyd_in);
 		if (c != '\n') goto extraargs;
-		cmd_getacl(tag.s, arg1.s, oldform);
+		cmd_getacl(tag.s, arg1.s);
 	    }
 #ifdef ENABLE_ANNOTATEMORE
 	    else if (!strcmp(cmd.s, "Getannotation")) {
@@ -1587,18 +1715,12 @@ void cmdloop()
 
 	case 'M':
 	    if (!strcmp(cmd.s, "Myrights")) {
-		oldform = 0;
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
-		if (!strcasecmp(arg1.s, "mailbox")) {
-		    oldform = 1;
-		    if (c != ' ') goto missingargs;
-		    c = getastring(proxyd_in, proxyd_out, &arg1);
-		}
 		if (c == EOF) goto missingargs;
 		if (c == '\r') c = prot_getc(proxyd_in);
 		if (c != '\n') goto extraargs;
-		cmd_myrights(tag.s, arg1.s, oldform);
+		cmd_myrights(tag.s, arg1.s);
 	    }
 	    else goto badcmd;
 	    break;
@@ -1661,7 +1783,7 @@ void cmdloop()
 		cmd_rename(tag.s, arg1.s, arg2.s, havepartition ? arg3.s : 0);
 	    }
 	    else if (!strcmp(cmd.s, "Rlist")) {
-		supports_referrals = 1;
+		supports_referrals = !disable_referrals;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg2);
@@ -1670,7 +1792,7 @@ void cmdloop()
 		cmd_list(tag.s, 0, arg1.s, arg2.s);
 	    }
 	    else if (!strcmp(cmd.s, "Rlsub")) {
-		supports_referrals = 1;
+		supports_referrals = !disable_referrals;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg2);
@@ -1698,7 +1820,7 @@ void cmdloop()
 	    
 	case 'S':
 	    if (!strcmp(cmd.s, "Starttls")) {
-		if (!tls_enabled("imap")) {
+		if (!tls_enabled()) {
 		    /* we don't support starttls */
 		    goto badcmd;
 		}
@@ -1775,10 +1897,6 @@ void cmdloop()
 	    else if (!strcmp(cmd.s, "Setacl")) {
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg1);
-		if (!strcasecmp(arg1.s, "mailbox")) {
-		    if (c != ' ') goto missingargs;
-		    c = getastring(proxyd_in, proxyd_out, &arg1);
-		}
 		if (c != ' ') goto missingargs;
 		c = getastring(proxyd_in, proxyd_out, &arg2);
 		if (c != ' ') goto missingargs;
@@ -1950,9 +2068,6 @@ void cmd_login(char *tag, char *user)
     struct buf passwdbuf;
     char *passwd;
     char *reply = 0;
-    const char *val;
-    char buf[MAX_MAILBOX_PATH];
-    char *p;
     int plaintextloginpause;
     int r;
 
@@ -1962,7 +2077,7 @@ void cmd_login(char *tag, char *user)
 	return;
     }
 
-    canon_user = auth_canonifyid(user, 0);
+    canon_user = canonify_userid(user, NULL, &disable_referrals);
 
     if (!canon_user) {
 	syslog(LOG_NOTICE, "badlogin: %s plaintext %s invalid user",
@@ -1974,7 +2089,7 @@ void cmd_login(char *tag, char *user)
 
     /* possibly disallow login */
     if ((proxyd_starttls_done == 0) &&
-	(config_getswitch("allowplaintext", 1) == 0) &&
+	(config_getswitch(IMAPOPT_ALLOWPLAINTEXT) == 0) &&
 	strcmp(canon_user, "anonymous") != 0) {
 	eatline(proxyd_in, ' ');
 	prot_printf(proxyd_out, "%s NO Login only available under a layer\r\n",
@@ -1998,7 +2113,7 @@ void cmd_login(char *tag, char *user)
     passwd = passwdbuf.s;
 
     if (!strcmp(canon_user, "anonymous")) {
-	if (config_getswitch("allowanonymouslogin", 0)) {
+	if (config_getswitch(IMAPOPT_ALLOWANONYMOUSLOGIN)) {
 	    passwd = beautify_string(passwd);
 	    if (strlen(passwd) > 500) passwd[500] = '\0';
 	    syslog(LOG_NOTICE, "login: %s anonymous %s",
@@ -2044,7 +2159,7 @@ void cmd_login(char *tag, char *user)
 	       canon_user, proxyd_starttls_done ? "+TLS" : "", 
 	       reply ? reply : "");
 
-	plaintextloginpause = config_getint("plaintextloginpause", 0);
+	plaintextloginpause = config_getint(IMAPOPT_PLAINTEXTLOGINPAUSE);
 	if (plaintextloginpause) {
 
 	    /* Apply penalty only if not under layer */
@@ -2054,33 +2169,27 @@ void cmd_login(char *tag, char *user)
     }
     
 
-    proxyd_authstate = auth_newstate(canon_user, (char *)0);
+    proxyd_authstate = auth_newstate(proxyd_userid, (char *)0);
 
-    val = config_getstring("admins", "");
-    while (*val) {
-	for (p = (char *)val; *p && !isspace((int) *p); p++);
-	strlcpy(buf, val, p - val);
-	buf[p-val] = 0;
-	if (auth_memberof(proxyd_authstate, buf)) {
-	    proxyd_userisadmin = 1;
-	    break;
-	}
-	val = p;
-	while (*val && isspace((int) *val)) val++;
-    }
+    proxyd_userisadmin = config_authisa(proxyd_authstate, IMAPOPT_ADMINS);
 
     if (!reply) reply = "User logged in";
 
     prot_printf(proxyd_out, "%s OK %s\r\n", tag, reply);
 
     /* Create telemetry log */
-    telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
+    proxyd_logfd = telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
 
     /* Set namespace */
     if ((r = mboxname_init_namespace(&proxyd_namespace, proxyd_userisadmin)) != 0) {
 	syslog(LOG_ERR, error_message(r));
 	fatal(error_message(r), EC_CONFIG);
     }
+
+    /* Translate any separators in userid */
+    mboxname_hiersep_tointernal(&proxyd_namespace, proxyd_userid,
+				config_virtdomains ?
+				strcspn(proxyd_userid, "@") : 0);
 
     freebuf(&passwdbuf);
     return;
@@ -2169,7 +2278,7 @@ void cmd_authenticate(char *tag, char *authtype)
     /* successful authentication */
 
     /* get the userid from SASL --- already canonicalized from
-     * mysasl_authproc()
+     * mysasl_proxy_policy()
      */
     sasl_result = sasl_getprop(proxyd_saslconn, SASL_USERNAME,
 			       (const void **)&userid_buf);
@@ -2214,13 +2323,18 @@ void cmd_authenticate(char *tag, char *authtype)
     prot_setsasl(proxyd_out, proxyd_saslconn);
 
     /* Create telemetry log */
-    telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
+    proxyd_logfd = telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
 
     /* Set namespace */
     if ((r = mboxname_init_namespace(&proxyd_namespace, proxyd_userisadmin)) != 0) {
 	syslog(LOG_ERR, error_message(r));
 	fatal(error_message(r), EC_CONFIG);
     }
+
+    /* Translate any separators in userid */
+    mboxname_hiersep_tointernal(&proxyd_namespace, proxyd_userid,
+				config_virtdomains ?
+				strcspn(proxyd_userid, "@") : 0);
 
     return;
 }
@@ -2388,7 +2502,7 @@ void cmd_id(char *tag)
 
     /* spit out our ID string.
        eventually this might be configurable. */
-    if (config_getswitch("imapidresponse", 1)) {
+    if (config_getswitch(IMAPOPT_IMAPIDRESPONSE)) {
 	id_response(proxyd_out);
 
 	/* add info about the backend */
@@ -2445,15 +2559,19 @@ void id_freeparamlist(struct idparamlist *l)
  */
 void cmd_idle(char *tag)
 {
-#ifdef PROXY_IDLE
     static int idle_period = -1;
     int c;
     static struct buf arg;
 
     /* get polling period */
     if (idle_period == -1) {
-      idle_period = config_getint("imapidlepoll", 60);
-      if (idle_period < 1) idle_period = 1;
+      idle_period = config_getint(IMAPOPT_IMAPIDLEPOLL);
+      if (idle_period < 1) idle_period = 0;
+    }
+
+    if (!idle_period) {
+	prot_printf(proxyd_out, "%s NO idle disabled\r\n", tag);
+	return;
     }
 
     if (!backend_current) {
@@ -2476,9 +2594,6 @@ void cmd_idle(char *tag)
 	    eatline(proxyd_in, c);
 	}
     }
-#else
-    prot_printf(proxyd_out, "%s NO idle disabled\r\n", tag);
-#endif
 }
 
 /* Check for alerts */ 
@@ -2487,6 +2602,8 @@ struct prot_waitevent *idle_getalerts(struct protstream *s,
 {
     int idle_period = *((int *) rock);
     int fd;
+
+    ev->mark = time(NULL) + idle_period;
 
     if (! proxyd_userisadmin &&
 	(fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
@@ -2498,7 +2615,6 @@ struct prot_waitevent *idle_getalerts(struct protstream *s,
 	shutdown_file(fd);
     }
 
-    ev->mark = time(NULL) + idle_period;
     return ev;
 }
 
@@ -2650,14 +2766,14 @@ void cmd_capability(char *tag)
     prot_printf(proxyd_out, "* CAPABILITY ");
     prot_printf(proxyd_out, CAPABILITY_STRING);
 
-#ifdef PROXY_IDLE
-    prot_printf(proxyd_out, " IDLE");
-#endif
+    if (config_getint(IMAPOPT_IMAPIDLEPOLL) > 0) {
+	prot_printf(proxyd_out, " IDLE");
+    }
 
-    if (tls_enabled("imap")) {
+    if (tls_enabled()) {
 	prot_printf(proxyd_out, " STARTTLS");
     }
-    if (!proxyd_starttls_done && !config_getswitch("allowplaintext", 1)) {
+    if (!proxyd_starttls_done && !config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
 	prot_printf(proxyd_out, " LOGINDISABLED");	
     }
 
@@ -2705,7 +2821,7 @@ void cmd_append(char *tag, char *name)
 	r = mlookup(mailboxname, &newserver, NULL, NULL);
     }
     if (!r && supports_referrals) { 
-	proxyd_refer(tag, newserver, mailboxname);
+	proxyd_refer(tag, newserver, name);
 	/* Eat the argument */
 	eatline(proxyd_in, prot_getc(proxyd_in));
 	return;
@@ -2762,7 +2878,7 @@ void cmd_select(char *tag, char *cmd, char *name)
 
     if (!r) r = mlookup(mailboxname, &newserver, NULL, NULL);
     if (!r && supports_referrals) { 
-	proxyd_refer(tag, newserver, mailboxname);
+	proxyd_refer(tag, newserver, name);
 	return;
     }
 
@@ -3258,6 +3374,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 			    int j = (sz > sizeof(buf) ? sizeof(buf) : sz);
 
 			    j = prot_read(backend_current->in, buf, j);
+			    if(!j) break;
 			    prot_write(s->out, buf, j);
 			    sz -= j;
 			}
@@ -3393,17 +3510,7 @@ void cmd_create(char *tag, char *name, char *server)
     }
     if (!r) {
 	if (!CAPA(s, MUPDATE)) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    
-	    /* reserve mailbox on ACAP */
-	    acapmbox_new(&mboxdata, s->hostname, mailboxname);
-	    r = acapmbox_create(acaphandle, &mboxdata);
-	    if (r) {
-		syslog(LOG_ERR, "ACAP: unable to reserve %s: %s\n",
-		       name, error_message(r));
-	    }
-#endif
+	    /* reserve mailbox on MUPDATE */
 	}
     }
 
@@ -3415,32 +3522,7 @@ void cmd_create(char *tag, char *name, char *server)
 	tag = "*";		/* can't send another tagged response */
 	
 	if (!CAPA(s, MUPDATE)) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    
-	    switch (res) {
-	    case PROXY_OK:
-		/* race condition here, but not much we can do about it */
-		mboxdata.acl = acl;
-
-		/* commit mailbox */
-		r = acapmbox_markactive(acaphandle, &mboxdata);
-		if (r) {
-		    syslog(LOG_ERR, "ACAP: unable to commit %s: %s\n",
-			   mailboxname, error_message(r));
-		}
-		break;
-		
-	    default:
-		/* abort mailbox */
-		r = acapmbox_delete(acaphandle, mailboxname);
-		if (r) {
-		    syslog(LOG_ERR, "ACAP: unable to unreserve %s: %s\n", 
-			   mailboxname, error_message(r));
-		}
-		break;
-	    }
-#endif
+	    /* do MUPDATE create operations */
 	}
 	/* make sure we've seen the update */
 	if (ultraparanoid && res == PROXY_OK) kick_mupdate();
@@ -3464,7 +3546,7 @@ void cmd_delete(char *tag, char *name)
 
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
     if (!r && supports_referrals) { 
-	proxyd_refer(tag, server, mailboxname);
+	proxyd_refer(tag, server, name);
 	referral_kick = 1;
 	return;
     }
@@ -3481,17 +3563,7 @@ void cmd_delete(char *tag, char *name)
 	tag = "*";		/* can't send another tagged response */
 
 	if (!CAPA(s, MUPDATE) && res == PROXY_OK) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    
-	    /* delete mailbox from acap server */
-	    r = acapmbox_delete(acaphandle, mailboxname);
-	    if (r) {
-		syslog(LOG_ERR, 
-		       "ACAP: can't delete mailbox entry %s: %s",
-		       name, error_message(r));
-	    }
-#endif
+	    /* do MUPDATE delete operations */
 	}
 
 	/* make sure we've seen the update */
@@ -3522,7 +3594,7 @@ void cmd_reconstruct(char *tag, char *name)
 	r = mlookup(mailboxname, &server, NULL, NULL);
 
     if(!r) {
-	proxyd_refer(tag, server, mailboxname);
+	proxyd_refer(tag, server, name);
     } else {
 	prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
     }
@@ -3556,7 +3628,7 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 	
 	if(strcmp(oldname, newname)) {
 	    prot_printf(s->out,
-			"%s NO Cross-server move w/rename not supported\r\n",
+			"%s NO Cross-server or cross-partition move w/rename not supported\r\n",
 			tag);
 	    return;
 	}
@@ -3568,12 +3640,25 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 	    strcpy(newmailboxname,partition);
 	    newmailboxname[destpart-partition]='\0';
 	    destpart++;
-	    /* <tag> XFER <name> <dest server> <dest partition> */
-	    prot_printf(s->out,
-			"%s XFER {%d+}\r\n%s {%d+}\r\n%s {%d+}\r\n%s\r\n", 
-			tag, strlen(oldname), oldname,
-			strlen(newmailboxname), newmailboxname,
-			strlen(destpart), destpart);
+
+	    if(!strcmp(server, newmailboxname)) {
+		/* Same Server, different partition */
+		/* xxx this would require administrative access to the
+		 * backend, which we won't get */
+		prot_printf(proxyd_out,
+			    "%s NO Can't move across partitions via a proxy\r\n",
+			    tag);
+		return;
+	    } else {
+		/* Cross Server */
+		/* <tag> XFER <name> <dest server> <dest partition> */
+		prot_printf(s->out,
+			    "%s XFER {%d+}\r\n%s {%d+}\r\n%s {%d+}\r\n%s\r\n", 
+			    tag, strlen(oldname), oldname,
+			    strlen(newmailboxname), newmailboxname,
+			    strlen(destpart), destpart);
+	    }
+	    
 	} else {
 	    /* <tag> XFER <name> <dest server> */
 	    prot_printf(s->out, "%s XFER {%d+}\r\n%s {%d+}\r\n%s\r\n", 
@@ -3591,17 +3676,7 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 
     if (!r) {
 	if (!CAPA(s, MUPDATE)) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    
-	    /* reserve new mailbox */
-	    acapmbox_new(&mboxdata, s->hostname, newmailboxname);
-	    r = acapmbox_create(acaphandle, &mboxdata);
- 	    if (r) {
-		syslog(LOG_ERR, "ACAP: unable to reserve %s: %s\n",
-		       newmailboxname, error_message(r));
-	    }
-#endif
+	    /* do MUPDATE create operations for new mailbox */
 	}
 
 	prot_printf(s->out, "%s RENAME {%d+}\r\n%s {%d+}\r\n%s\r\n", 
@@ -3611,38 +3686,10 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 	tag = "*";		/* can't send another tagged response */
 	
 	if (!CAPA(s, MUPDATE)) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    
-	    switch (res) {
-	    case PROXY_OK:
-		/* commit new mailbox */
-		mboxdata.acl = acl;
-		r = acapmbox_markactive(acaphandle, &mboxdata);
-		if (r) {
-		    syslog(LOG_ERR, "ACAP: unable to commit %s: %s\n",
-			   oldmailboxname, error_message(r));
-		}
-
-		/* delete old mailbox */
-		r = acapmbox_delete(acaphandle, oldmailboxname);
-		if (r) {
-		    syslog(LOG_ERR, "ACAP: unable to delete %s: %s\n", 
-			   oldmailboxname, error_message(r));
-		}
-		break;
-		
-	    default:
-		/* abort new mailbox */
-		r = acapmbox_delete(acaphandle, newmailboxname);
-		if (r) {
-		    syslog(LOG_ERR, "ACAP: unable to unreserve %s: %s\n", 
-			   newmailboxname, error_message(r));
-		}
-		break;
-	    }
-#endif
+	    /* Activate/abort new mailbox in MUPDATE*/
+	    /* delete old mailbox from MUPDATE */
 	}
+
 	/* make sure we've seen the update */
 	if (res == PROXY_OK) kick_mupdate();
     }
@@ -3662,21 +3709,29 @@ void cmd_find(char *tag, char *namespace, char *pattern)
 	if (*p == '%') *p = '?';
     }
 
-    /* Translate any separators in pattern */
-    mboxname_hiersep_tointernal(&proxyd_namespace, pattern);
+    if (!strcasecmp(namespace, "mailboxes")) {
+	if (!backend_inbox) {
+	    backend_inbox = proxyd_findinboxserver();
+	}
 
-    if (!strcmp(namespace, "mailboxes")) {
-	(*proxyd_namespace.mboxlist_findsub)(&proxyd_namespace, pattern,
-					     proxyd_userisadmin, proxyd_userid,
-					     proxyd_authstate, mailboxdata,
-					     NULL, 1);
-    } else if (!strcmp(namespace, "all.mailboxes")) {
+	if (backend_inbox) {
+	    prot_printf(backend_inbox->out, 
+			"%s Lsub \"\" {%d+}\r\n%s\r\n",
+			tag, strlen(pattern), pattern);
+	    pipe_lsub(backend_inbox, tag, 0, 1);
+	} else {		/* user doesn't have an INBOX */
+	    /* noop */
+	}
+    } else if (!strcasecmp(namespace, "all.mailboxes")) {
+	/* Translate any separators in pattern */
+	mboxname_hiersep_tointernal(&proxyd_namespace, pattern, 0);
+
 	(*proxyd_namespace.mboxlist_findall)(&proxyd_namespace, pattern,
 					     proxyd_userisadmin, proxyd_userid,
 					     proxyd_authstate, mailboxdata,
 					     NULL);
-    } else if (!strcmp(namespace, "bboards")
-	       || !strcmp(namespace, "all.bboards")) {
+    } else if (!strcasecmp(namespace, "bboards")
+	       || !strcasecmp(namespace, "all.bboards")) {
 	;
     } else {
 	prot_printf(proxyd_out, "%s BAD Invalid FIND subcommand\r\n", tag);
@@ -3696,183 +3751,6 @@ void cmd_find(char *tag, char *namespace, char *pattern)
 		error_message(IMAP_OK_COMPLETED));
 }
 
-static int pipe_lsub(struct backend *s, char *tag, int force_notfatal) 
-{
-    int taglen = strlen(tag);
-    int c;
-    int r = PROXY_OK;
-    int exist_r;
-    char mailboxname[MAX_MAILBOX_PATH + 1];
-    static struct buf tagb, cmd, sep, name;
-    int cur_flags_size = 64;
-    char *flags = xmalloc(cur_flags_size);
-    
-    assert(s);
-    assert(s->timeout);
-    
-    s->timeout->mark = time(NULL) + IDLE_TIMEOUT;
-
-    while(1) {
-	c = getword(s->in, &tagb);
-
-	if(c == EOF) {
-	    if(s == backend_current && !force_notfatal)
-		fatal("Lost connection to selected backend", EC_UNAVAILABLE);
-	    proxyd_downserver(s);
-	    free(flags);
-	    return PROXY_NOCONNECTION;
-	}
-
-	if(!strncmp(tag, tagb.s, taglen)) {
-	    char buf[2048];
-	    if(!prot_fgets(buf, sizeof(buf), s->in)) {
-		if(s == backend_current && !force_notfatal)
-		    fatal("Lost connection to selected backend",
-			  EC_UNAVAILABLE);
-		proxyd_downserver(s);
-		free(flags);
-		return PROXY_NOCONNECTION;
-	    }	
-	    /* Got the end of the response */
-	    strlcpy(s->last_result, buf, LAST_RESULT_LEN);
-	    /* guarantee that 's->last_result' has \r\n\0 at the end */
-	    s->last_result[LAST_RESULT_LEN - 3] = '\r';
-	    s->last_result[LAST_RESULT_LEN - 2] = '\n';
-	    s->last_result[LAST_RESULT_LEN - 1] = '\0';
-	    switch (buf[0]) {
-	    case 'O': case 'o':
-		r = PROXY_OK;
-		break;
-	    case 'N': case 'n':
-		r = PROXY_NO;
-		break;
-	    case 'B': case 'b':
-		r = PROXY_BAD;
-		break;
-	    default: /* huh? no result? */
-		if(s == backend_current && !force_notfatal)
-		    fatal("Lost connection to selected backend",
-			  EC_UNAVAILABLE);
-		proxyd_downserver(s);
-		r = PROXY_NOCONNECTION;
-		break;
-	    }
-	    break; /* we're done */
-	}
-
-	c = getword(s->in, &cmd);
-
-	if(c == EOF) {
-	    if(s == backend_current && !force_notfatal)
-		fatal("Lost connection to selected backend", EC_UNAVAILABLE);
-	    proxyd_downserver(s);
-	    free(flags);
-	    return PROXY_NOCONNECTION;
-	}
-
-	if(strncmp("LSUB", cmd.s, 4)) {
-	    prot_printf(proxyd_out, "%s %s ", tagb.s, cmd.s);
-	    r = pipe_to_end_of_response(s, force_notfatal);
-	    if(r != PROXY_OK) {
-		free(flags);
-		return r;
-	    }
-	} else {
-	    /* build up the response bit by bit */
-	    int i = 0;
-
-	    c = prot_getc(s->in);
-	    while(c != ')' && c != EOF) {
-		flags[i++] = c;
-		if(i == cur_flags_size) {
-		    /* expand our buffer */
-		    cur_flags_size *= 2;
-		    flags = xrealloc(flags, cur_flags_size);
-		}
-		c = prot_getc(s->in);
-	    }
-
-	    if(c != EOF) {
-		/* terminate string */
-		flags[i++] = ')';
-		if(i == cur_flags_size) {
-		    /* expand our buffer */
-		    cur_flags_size *= 2;
-		    flags = xrealloc(flags, cur_flags_size);
-		}
-		flags[i] = '\0';
-		/* get the next character */
- 		c = prot_getc(s->in);
-	    }
-	    
-	    if(c != ' ') {
-		if(s == backend_current && !force_notfatal)
-		    fatal("Bad LSUB response from  selected backend",
-			  EC_UNAVAILABLE);
-		proxyd_downserver(s);
-		free(flags);
-		return PROXY_NOCONNECTION;
-	    }
-
-	    /* Get separator */
-	    c = getastring(s->in, s->out, &sep);
-
-	    if(c != ' ') {
-		if(s == backend_current && !force_notfatal)
-		    fatal("Bad LSUB response from selected backend",
-			  EC_UNAVAILABLE);
-		proxyd_downserver(s);
-		free(flags);
-		return PROXY_NOCONNECTION;
-	    }
-
-	    /* Get name */
-	    c = getastring(s->in, s->out, &name);
-
-	    if(c == '\r') c = prot_getc(s->in);
-	    if(c != '\n') {
-		if(s == backend_current && !force_notfatal)
-		    fatal("Bad LSUB response from selected backend",
-			  EC_UNAVAILABLE);
-		proxyd_downserver(s);
-		free(flags);
-		return PROXY_NOCONNECTION;
-	    }
-
-	    /* lookup name */
-	    exist_r = 1;
-	    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace,
-							name.s,
-							proxyd_userid,
-							mailboxname);
-	    if (!r) {
-		exist_r = mlookup(mailboxname, NULL, NULL, NULL);
-	    } else {
-		/* skip this one */
-		syslog(LOG_ERR, "could not convert %s to internal form",
-		       name.s);
-		continue;
-	    }
-
-	    /* send our response */
-	    /* we need to set \Noselect if it's not in our mailboxes.db */
-	    if(!exist_r) {
-		prot_printf(proxyd_out, "* LSUB %s \"%s\" ",
-			    flags, sep.s);
-	    } else {
-		prot_printf(proxyd_out, "* LSUB (\\Noselect) \"%s\" ",
-			    sep.s);
-	    }
-
-	    printstring(name.s);
-	    prot_printf(proxyd_out, "\r\n");
-	}
-    } /* while(1) */
-
-    free(flags);
-    return r;
-}
-
 /*
  * Perform a LIST or LSUB command
  * LISTs we do locally
@@ -3888,7 +3766,7 @@ void cmd_list(char *tag, int subscribed, char *reference, char *pattern)
     /* Ignore the reference argument?
        (the behavior in 1.5.10 & older) */
     if (ignorereference == -1) {
-	ignorereference = config_getswitch("ignorereference", 0);
+	ignorereference = config_getswitch(IMAPOPT_IGNOREREFERENCE);
     }
 
     /* Reset state in mstringdata */
@@ -3908,7 +3786,7 @@ void cmd_list(char *tag, int subscribed, char *reference, char *pattern)
 			"%s Lsub {%d+}\r\n%s {%d+}\r\n%s\r\n",
 			tag, strlen(reference), reference,
 			strlen(pattern), pattern);
-	    pipe_lsub(backend_inbox, tag, 0);
+	    pipe_lsub(backend_inbox, tag, 0, 0);
 	} else {		/* user doesn't have an INBOX */
 	    /* noop */
 	}
@@ -3940,7 +3818,9 @@ void cmd_list(char *tag, int subscribed, char *reference, char *pattern)
 	}
 
 	/* Translate any separators in pattern */
-	mboxname_hiersep_tointernal(&proxyd_namespace, pattern);
+	mboxname_hiersep_tointernal(&proxyd_namespace, pattern,
+ 				    config_virtdomains ?
+ 				    strcspn(pattern, "@") : 0);
 
 	(*proxyd_namespace.mboxlist_findall)(&proxyd_namespace, pattern,
 					     proxyd_userisadmin, proxyd_userid,
@@ -4017,7 +3897,7 @@ void cmd_changesub(char *tag, char *namespace, char *name, int add)
 /*
  * Perform a GETACL command
  */
-void cmd_getacl(char *tag, char *name, int oldform)
+void cmd_getacl(const char *tag, const char *name)
 {
     char mailboxname[MAX_MAILBOX_NAME+1];
     int r, access;
@@ -4044,47 +3924,25 @@ void cmd_getacl(char *tag, char *name, int oldform)
 	return;
     }
     
-    if (oldform) {
-	while (acl) {
-	    rights = strchr(acl, '\t');
-	    if (!rights) break;
-	    *rights++ = '\0';
-
-	    nextid = strchr(rights, '\t');
-	    if (!nextid) break;
-	    *nextid++ = '\0';
-
-	    prot_printf(proxyd_out, "* ACL MAILBOX ");
-	    printastring(name);
-	    prot_printf(proxyd_out, " ");
-	    printastring(acl);
-	    prot_printf(proxyd_out, " ");
-	    printastring(rights);
-	    prot_printf(proxyd_out, "\r\n");
-	    acl = nextid;
-	}
-    }
-    else {
-	prot_printf(proxyd_out, "* ACL ");
-	printastring(name);
+    prot_printf(proxyd_out, "* ACL ");
+    printastring(name);
+    
+    while (acl) {
+	rights = strchr(acl, '\t');
+	if (!rights) break;
+	*rights++ = '\0';
 	
-	while (acl) {
-	    rights = strchr(acl, '\t');
-	    if (!rights) break;
-	    *rights++ = '\0';
-
-	    nextid = strchr(rights, '\t');
-	    if (!nextid) break;
-	    *nextid++ = '\0';
-
-	    prot_printf(proxyd_out, " ");
-	    printastring(acl);
-	    prot_printf(proxyd_out, " ");
-	    printastring(rights);
-	    acl = nextid;
-	}
-	prot_printf(proxyd_out, "\r\n");
+	nextid = strchr(rights, '\t');
+	if (!nextid) break;
+	*nextid++ = '\0';
+	
+	prot_printf(proxyd_out, " ");
+	printastring(acl);
+	prot_printf(proxyd_out, " ");
+	printastring(rights);
+	acl = nextid;
     }
+    prot_printf(proxyd_out, "\r\n");
     prot_printf(proxyd_out, "%s OK %s\r\n", tag,
 		error_message(IMAP_OK_COMPLETED));
 }
@@ -4118,18 +3976,26 @@ void cmd_listrights(char *tag, char *name, char *identifier)
     }
 
     if (!r) {
-	canon_identifier = auth_canonifyid(identifier, 0);
+	struct auth_state *authstate = auth_newstate(identifier, NULL);
+
+	if (config_authisa(authstate, IMAPOPT_ADMINS))
+	    canon_identifier = identifier; /* don't canonify global admins */
+	else
+	    canon_identifier = canonify_userid(identifier, proxyd_userid, NULL);
+	auth_freestate(authstate);
+
 	if (canon_identifier) canonidlen = strlen(canon_identifier);
 
 	if (!canon_identifier) {
 	    rightsdesc = "\"\"";
 	}
-	else if (!strncmp(mailboxname, "user.", 5) &&
-		 !strchr(canon_identifier, '.') &&
-		 !strncmp(mailboxname+5, canon_identifier, canonidlen) &&
-		 (mailboxname[5+canonidlen] == '\0' ||
-		  mailboxname[5+canonidlen] == '.')) {
+	else if (mboxname_userownsmailbox("INBOX", mailboxname)) {
+	    /* identifier's personal mailbox */
 	    rightsdesc = "lca r s w i p d 0 1 2 3 4 5 6 7 8 9";
+	}
+	else if (mboxname_isusermailbox(mailboxname, 1)) {
+	    /* anyone can post to an INBOX */
+	    rightsdesc = "p l r s w i c d a 0 1 2 3 4 5 6 7 8 9";
 	}
 	else {
 	    rightsdesc = "\"\" l r s w i p c d a 0 1 2 3 4 5 6 7 8 9";
@@ -4138,7 +4004,7 @@ void cmd_listrights(char *tag, char *name, char *identifier)
 	prot_printf(proxyd_out, "* LISTRIGHTS ");
 	printastring(name);
 	prot_putc(' ', proxyd_out);
-	printastring(identifier);
+	printastring(canon_identifier);
 	prot_printf(proxyd_out, " %s", rightsdesc);
 
 	prot_printf(proxyd_out, "\r\n%s OK %s\r\n", tag,
@@ -4152,7 +4018,7 @@ void cmd_listrights(char *tag, char *name, char *identifier)
 /*
  * Perform a MYRIGHTS command
  */
-void cmd_myrights(char *tag, char *name, int oldform)
+void cmd_myrights(const char *tag, const char *name)
 {
     char mailboxname[MAX_MAILBOX_NAME+1];
     int r, rights = 0;
@@ -4185,7 +4051,6 @@ void cmd_myrights(char *tag, char *name, int oldform)
     }
     
     prot_printf(proxyd_out, "* MYRIGHTS ");
-    if (oldform) prot_printf(proxyd_out, "MAILBOX ");
     printastring(name);
     prot_printf(proxyd_out, " ");
     printastring(cyrus_acl_masktostr(rights, str));
@@ -4196,7 +4061,8 @@ void cmd_myrights(char *tag, char *name, int oldform)
 /*
  * Perform a SETACL command
  */
-void cmd_setacl(char *tag, char *name, char *identifier, char *rights)
+void cmd_setacl(char *tag, const char *name,
+		const char *identifier, const char *rights)
 {
     int r, res;
     char mailboxname[MAX_MAILBOX_NAME+1];
@@ -4233,38 +4099,7 @@ void cmd_setacl(char *tag, char *name, char *identifier, char *rights)
 	res = pipe_including_tag(s, tag, 0);
 	tag = "*";		/* can't send another tagged response */
 	if (!CAPA(s, MUPDATE) && res == PROXY_OK) {
-#if 0
-	    acapmbox_handle_t *acaphandle = acapmbox_get_handle();
-	    int mode;
-	    
-	    /* calculate new ACL; race conditions here */
-	    if (rights) {
-		mode = ACL_MODE_SET;
-		if (*rights == '+') {
-		    rights++;
-		    mode = ACL_MODE_ADD;
-		} else if (*rights == '-') {
-		    rights++;
-		    mode = ACL_MODE_REMOVE;
-		}
-		
-		if (cyrus_acl_set(&acl, identifier, mode, cyrus_acl_strtomask(rights),
-			    NULL, proxyd_userid)) {
-		    r = IMAP_INVALID_IDENTIFIER;
-		}
-	    } else {
-		if (cyrus_acl_remove(&acl, identifier, NULL, proxyd_userid)) {
-		    r = IMAP_INVALID_IDENTIFIER;
-		}
-	    }
-	    
-	    /* change the ACAP server */
-	    r = acapmbox_setproperty_acl(acaphandle, mailboxname, acl);
-	    if (r) {
-		syslog(LOG_ERR, "ACAP: unable to change ACL on %s: %s\n", 
-		       mailboxname, error_message(r));
-	    }
-#endif
+	    /* setup new ACL in MUPDATE */
 	}
 	/* make sure we've seen the update */
 	if (ultraparanoid && res == PROXY_OK) kick_mupdate();
@@ -4327,7 +4162,7 @@ void cmd_getquota(char *tag, char *name)
 
     if (!r) {
 	/* Do the referral */
-	proxyd_refer(tag, server_rock, mailboxname);
+	proxyd_refer(tag, server_rock, name);
 	free(server_rock);
     } else {
 	if(server_rock) free(server_rock);
@@ -4441,7 +4276,7 @@ void cmd_setquota(char *tag, char *quotaroot)
 
     if (!r) {
 	/* Do the referral */
-	proxyd_refer(tag, server_rock, mailboxname);
+	proxyd_refer(tag, server_rock, quotaroot);
 	free(server_rock);
     } else {
 	if(server_rock) free(server_rock);
@@ -4484,7 +4319,6 @@ void cmd_starttls(char *tag, int imaps)
     result=tls_init_serverengine("imap",
 				 5,        /* depth to verify */
 				 !imaps,   /* can client auth? */
-				 0,        /* require client to auth? */
 				 !imaps);  /* TLSv1 only? */
 
     if (result == -1) {
@@ -4574,8 +4408,9 @@ void cmd_status(char *tag, char *name)
 						proxyd_userid, mailboxname);
 
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
-    if (!r && supports_referrals) { 
-	proxyd_refer(tag, server, mailboxname);
+    if (!r && supports_referrals
+	&& config_getswitch(IMAPOPT_PROXYD_ALLOW_STATUS_REFERRAL)) { 
+	proxyd_refer(tag, server, name);
 	/* Eat the argument */
 	eatline(proxyd_in, prot_getc(proxyd_in));
 	return;
@@ -4619,8 +4454,7 @@ cmd_netscape(tag)
     const char *url;
     /* so tempting, and yet ... */
     /* url = "http://random.yahoo.com/ryl/"; */
-    url = config_getstring("netscapeurl",
-			   "http://andrew2.andrew.cmu.edu/cyrus/imapd/netscape-admin.html");
+    url = config_getstring(IMAPOPT_NETSCAPEURL);
 
     /* I only know of three things to reply with: */
     prot_printf(proxyd_out,
@@ -4655,7 +4489,7 @@ static int namespacedata(name, matchlen, maycreate, rock)
     if (!(strncmp(name, "INBOX.", 6))) {
 	/* The user has a "personal" namespace. */
 	sawone[NAMESPACE_INBOX] = 1;
-    } else if (!(strncmp(name, "user.", 5))) {
+    } else if (mboxname_isusermailbox(name, 0)) {
 	/* The user can see the "other users" namespace. */
 	sawone[NAMESPACE_USER] = 1;
     } else {
@@ -5113,7 +4947,6 @@ void cmd_getannotation(char *tag)
 {
     int c, r = 0;
     struct strlist *entries = NULL, *attribs = NULL;
-    struct entryattlist *entryatts = NULL;
 
     c = getannotatefetchdata(tag, &entries, &attribs);
     if (c == EOF) {
@@ -5134,26 +4967,18 @@ void cmd_getannotation(char *tag)
 
     r = annotatemore_fetch(entries, attribs, &proxyd_namespace,
 			   proxyd_userisadmin, proxyd_userid,
-			   proxyd_authstate, &entryatts);
+			   proxyd_authstate, proxyd_out);
 
     if (r) {
 	prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
-    }
-    else if (entryatts) {
-	prot_printf(proxyd_out, "* ANNOTATION ");
-	annotate_response(entryatts);
-	prot_printf(proxyd_out, "\r\n");
+    } else {
 	prot_printf(proxyd_out, "%s OK %s\r\n",
 		    tag, error_message(IMAP_OK_COMPLETED));
     }
-    else
-	prot_printf(proxyd_out, "%s NO %s\r\n", tag,
-		    error_message(IMAP_NO_NOSUCHANNOTATION));
-
+    
   freeargs:
     if (entries) freestrlist(entries);
     if (attribs) freestrlist(attribs);
-    if (entryatts) freeentryatts(entryatts);
 
     return;
 }
@@ -5191,71 +5016,35 @@ void cmd_setannotation(char *tag)
     return;
 }
 
-/*
- * Append 's' to the strlist 'l'.
- */
-void
-appendstrlist(l, s)
-struct strlist **l;
-char *s;
+/* Proxy annotation commands to backend */
+int annotate_proxy(const char *server, const char *entry_pat,
+		   struct strlist *attribute_pat) 
 {
-    struct strlist **tail = l;
+    struct backend *be;
+    struct strlist *l;
+    char mytag[128];
+    
+    assert(server && entry_pat && attribute_pat);
+    
+    be = proxyd_findserver(server);    
+    if(!be) return IMAP_SERVER_UNAVAILABLE;
 
-    while (*tail) tail = &(*tail)->next;
-
-    *tail = (struct strlist *)xmalloc(sizeof(struct strlist));
-    (*tail)->s = xstrdup(s);
-    (*tail)->p = 0;
-    (*tail)->next = 0;
-}
-
-/*
- * Free the strlist 'l'
- */
-void
-freestrlist(l)
-struct strlist *l;
-{
-    struct strlist *n;
-
-    while (l) {
-	n = l->next;
-	free(l->s);
-	if (l->p) charset_freepat(l->p);
-	free((char *)l);
-	l = n;
+    /* Send command to remote */
+    proxyd_gentag(mytag);
+    prot_printf(be->out, "%s GETANNOTATION \"%s\" (", mytag, entry_pat);
+    for(l=attribute_pat;l;l=l->next) {
+	prot_printf(be->out, "\"%s\"", l->s);
     }
+    prot_printf(be->out, ")\r\n");
+    prot_flush(be->out);
+
+    /* Pipe the results.  Note that backend-current may also pipe us other
+       messages. */
+    pipe_until_tag(be, mytag, 0);
+
+    return 0;
 }
 
-/*
- * Append the 'attrib'/'value' pair to the attvaluelist 'l'.
- */
-void appendattvalue(struct attvaluelist **l, char *attrib, char *value)
-{
-    struct attvaluelist **tail = l;
-
-    while (*tail) tail = &(*tail)->next;
-
-    *tail = (struct attvaluelist *)xmalloc(sizeof(struct attvaluelist));
-    (*tail)->attrib = xstrdup(attrib);
-    (*tail)->value = xstrdup(value);
-    (*tail)->next = 0;
-}
-
-/*
- * Free the attvaluelist 'l'
- */
-void freeattvalues(struct attvaluelist *l)
-{
-    struct attvaluelist *n;
-
-    while (l) {
-	n = l->next;
-	free(l->attrib);
-	free(l->value);
-	l = n;
-    }
-}
 #endif /* ENABLE_ANNOTATEMORE */
 
 /* Reset the given sasl_conn_t to a sane state */

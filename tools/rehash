@@ -45,7 +45,7 @@ exec perl -x -S $0 ${1+"$@"} # -*-perl-*-
 #
 # Written by Gary Mills <mills@cc.UManitoba.CA>
 #
-# $Id: rehash,v 1.3.4.1 2002/06/06 21:09:24 jsmith2 Exp $
+# $Id: rehash,v 1.3.4.2 2002/09/10 20:31:45 rjs3 Exp $
 
 if ($] !~ /^5\..*/) {
   # uh-oh. this isn't perl 5.
@@ -333,13 +333,17 @@ unless ($nosievedir) {
 		    while ($s = readdir SUB) {
 			unless ($s =~ /^\./) {
 			    $h = dir_hash_c($s);
-			    rename("$i/$s", "$h/$s")
+			    rename("$i/$s", ".$h/$s")
 				or ouch "couldn't move $s back!";
 			}
 		    }
 		    closedir SUB;
 		    rmdir "$i" or die "couldn't remove $i";
 		}
+	    }
+	    # now move each temporary directory to the right place
+	    foreach $i (@{$dirs}) { 
+		rename (".$i", $i) or ouch "couldn't rename $i into place";
 	    }
 	}
     }

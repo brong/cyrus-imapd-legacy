@@ -41,13 +41,23 @@
  * Author: Chris Newman
  * Start Date: 4/6/93
  */
-/* $Id: util.c,v 1.19 2001/09/25 19:35:27 ken3 Exp $
+/* $Id: util.c,v 1.19.2.1 2002/09/10 20:30:55 rjs3 Exp $
  */
 
 #include <config.h>
+
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>
+#endif
+
+#include "exitcodes.h"
+#include "libcyr_cfg.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -254,4 +264,34 @@ int dir_hash_c(const char *name)
     if (!isascii(c) || !islower(c)) c = 'q';
 #endif
     return c;
+}
+
+/* Given a mkstemp(3) pattern for a filename,
+ * create the file and return the file descriptor.
+ *
+ * This routine also unlinks the file so it won't appear in the
+ * directory listing (but you won't have to worry about cleaning up
+ * after it)
+ */
+int create_tempfile() 
+{
+    int fd;
+    char pattern[2048];
+    const char *path = libcyrus_config_getstring(CYRUSOPT_TEMP_PATH);
+
+    if(snprintf(pattern, sizeof(pattern), "%s/cyrus_tmpfile_XXXXXX",
+		path) >= sizeof(pattern)){
+	fatal("temporary file pathname is too long in prot_flush",
+	      EC_TEMPFAIL);
+    }
+
+    fd = mkstemp(pattern);
+    if(fd == -1) {
+	return -1;
+    } else if(unlink(pattern) == -1) {
+	close(fd);
+	return -1;
+    }
+
+    return fd;
 }

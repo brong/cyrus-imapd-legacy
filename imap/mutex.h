@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
+/* mutex.h - header for mutex functions
+
+ * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,15 +37,17 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- *
  */
+/* $Id: mutex.h,v 1.1.4.1 2002/09/10 20:30:45 rjs3 Exp $ */
 
-/* $Id: acap.h,v 1.2.12.1 2002/06/06 21:09:08 jsmith2 Exp $ */
+#ifndef CYRUS_MUTEX_H
+#define CYRUS_MUTEX_H
 
-#include "acapsieve.h"
+#include <config.h>
 
-struct xscyrus {
-  acapsieve_handle_t *handle;
+void *cyrus_mutex_alloc(void);
+int cyrus_mutex_lock(void *mutex);
+int cyrus_mutex_unlock(void *mutex);
+void cyrus_mutex_free(void *mutex);
 
-    char *class; /* needed by perl */
-};
+#endif

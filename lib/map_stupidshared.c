@@ -3,7 +3,7 @@
  * This file is like map_shared.c, but doesn't use any "SLOP", since
  * "Digital Unix" doesn't permit mapping a region past the end of a file.
  
- $Id: map_stupidshared.c,v 1.9 2000/05/23 20:56:17 robeson Exp $
+ $Id: map_stupidshared.c,v 1.9.12.1 2002/09/10 20:30:55 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -55,6 +55,8 @@
 #include "map.h"
 #include "exitcodes.h"
 
+const char *map_method_desc = "stupidshared";
+
 /*
  * Create/refresh mapping of file
  */
@@ -75,7 +77,7 @@ const char *mboxname;
 	if (fstat(fd, &sbuf) == -1) {
 	    syslog(LOG_ERR, "IOERROR: fstating %s file%s%s: %m", name,
 		   mboxname ? " for " : "", mboxname ? mboxname : "");
-	    sprintf(buf, "failed to fstat %s file", name);
+	    snprintf(buf, sizeof(buf), "failed to fstat %s file", name);
 	    fatal(buf, EC_IOERR);
 	}
 	newlen = sbuf.st_size;
@@ -97,7 +99,7 @@ const char *mboxname;
     if (*base == (char *)-1) {
 	syslog(LOG_ERR, "IOERROR: mapping %s file%s%s: %m", name,
 	       mboxname ? " for " : "", mboxname ? mboxname : "");
-	sprintf(buf, "failed to mmap %s file", name);
+	snprintf(buf, sizeof(buf), "failed to mmap %s file", name);
 	fatal(buf, EC_IOERR);
     }
     *len = newlen;

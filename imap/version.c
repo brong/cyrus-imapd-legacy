@@ -37,7 +37,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: version.c,v 1.4.2.2 2002/06/14 18:37:01 jsmith2 Exp $
+ * $Id: version.c,v 1.4.2.3 2002/09/10 20:30:47 rjs3 Exp $
  */
 
 #include <config.h>
@@ -57,7 +57,9 @@
 #include "xversion.h"
 #include "prot.h"
 #include "cyrusdb.h"
+#include "map.h"
 #include "lock.h"
+#include "nonblock.h"
 #include "idle.h"
 #include "sieve_interface.h"
 
@@ -85,6 +87,8 @@ void id_getcmdline(int argc, char **argv)
 void id_response(struct protstream *pout)
 {
     struct utsname os;
+    const char *sasl_imp;
+    int sasl_ver;
     char env_buf[MAXIDVALUELEN+1];
 
     prot_printf(pout, "* ID ("
@@ -111,9 +115,18 @@ void id_response(struct protstream *pout)
     }
 #endif
 
-    /* add the environment info */
-    snprintf(env_buf, MAXIDVALUELEN,"Cyrus SASL %d.%d.%d",
+    /* SASL information */
+    snprintf(env_buf, MAXIDVALUELEN,"Built w/Cyrus SASL %d.%d.%d",
 	     SASL_VERSION_MAJOR, SASL_VERSION_MINOR, SASL_VERSION_STEP);
+
+    sasl_version(&sasl_imp, &sasl_ver);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; Running w/%s %d.%d.%d", sasl_imp,
+	     (sasl_ver & 0xFF000000) >> 24,
+	     (sasl_ver & 0x00FF0000) >> 16,
+	     (sasl_ver & 0x0000FFFF));
+
+    /* add the environment info */
 #ifdef DB_VERSION_STRING
     snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
 	     "; %s", DB_VERSION_STRING);
@@ -139,7 +152,11 @@ void id_response(struct protstream *pout)
 	     "; UCD-SNMP %s", VersionInfo);
 #endif
     snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; mmap = %s", map_method_desc);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
 	     "; lock = %s", lock_method_desc);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; nonblock = %s", nonblock_method_desc);
     snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
 	     "; auth = %s", auth_method_desc);
 #ifdef HAVE_KRB

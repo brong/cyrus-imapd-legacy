@@ -1,5 +1,5 @@
 /* lmtpengine.h: lmtp protocol engine interface
- * $Id: lmtpengine.h,v 1.7.2.2 2002/06/14 18:36:51 jsmith2 Exp $
+ * $Id: lmtpengine.h,v 1.7.2.3 2002/09/10 20:30:43 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -42,13 +42,6 @@
 
 #ifndef LMTPENGINE_H
 #define LMTPENGINE_H
-
-/* configuration parameters */
-#define DEFAULT_SENDMAIL ("/usr/lib/sendmail")
-#define DEFAULT_POSTMASTER ("postmaster")
-
-#define SENDMAIL (config_getstring("sendmail", DEFAULT_SENDMAIL))
-#define POSTMASTER (config_getstring("postmaster", DEFAULT_POSTMASTER))
 
 /***************** server-side LMTP *******************/
 
@@ -136,13 +129,13 @@ struct lmtp_conn;
 struct lmtp_txn {
     const char *from;
     const char *auth;
-    int ignorequota;
     int isdotstuffed;		/* 1 if 'data' is a dotstuffed stream
                                    (including end-of-file \r\n.\r\n) */
     struct protstream *data;
     int rcpt_num;
     struct lmtp_rcpt {
 	char *addr;
+	int ignorequota;
 	enum {
 	    RCPT_GOOD,
 	    RCPT_TEMPFAIL,

@@ -40,7 +40,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * 
- * $Id: chk_cyrus.c,v 1.6.2.1 2002/06/06 21:07:58 jsmith2 Exp $
+ * $Id: chk_cyrus.c,v 1.6.2.2 2002/09/10 20:30:39 rjs3 Exp $
  */
 
 #include <config.h>
@@ -169,7 +169,7 @@ static int chkmbox(char *name,
 
 	/* xxx check for monotonic increasing UIDs in the index file */
 
-	sprintf(filebuf, "%s/%d.", path, UID(i));
+	snprintf(filebuf, sizeof(filebuf), "%s/%d.", path, UID(i));
 	if(stat(filebuf, &sbuf) == -1) {
 	    fprintf(stderr, " -> %s missing\n", filebuf);
 	    printf("%s\n",filebuf);

@@ -1,8 +1,8 @@
-# Makefile for imtest
-# 
+# Makefile.in - notifyd makefile
+# $Id: Makefile.in,v 1.4.6.1 2002/09/10 20:31:20 rjs3 Exp $
 # @configure_input@
 # 
-# Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
+# Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -40,57 +40,72 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
-# $Id: Makefile.in,v 1.2.12.1 2002/06/06 21:09:08 jsmith2 Exp $
-#
+
 srcdir = @srcdir@
 VPATH = @srcdir@
 
 CC = @CC@
-INSTALL = @INSTALL@
 RANLIB = @RANLIB@
 
-DEFS = @DEFS@ -Dbool=char -DHAS_BOOL
-CPPFLAGS = -I. -I$(srcdir) @CPPFLAGS@ -I/usr/local/lib/perl5/5.004/CORE -I$(srcdir)/../../../acap
-LIBS = @LIBS@ ../../../acap/libacapsieve.a ../../../acap/libacap.a
-IMAP_LIBS = @IMAP_LIBS@
-DEPLIBS = ../../../acap/libacapsieve.a ../../../acap/libacap.a @DEPLIBS@
+INSTALL = @INSTALL@
+CYRUS_USER=@cyrus_user@
+CYRUS_GROUP=@cyrus_group@
 
-CFLAGS = -g
-LDFLAGS = -g @LDFLAGS@
-
-SHELL = /bin/sh
-MAKEDEPEND = @MAKEDEPEND@
+DEFS = @DEFS@ @LOCALDEFS@
+CPPFLAGS = -I. -I.. -I../sieve/ -I$(srcdir) -I$(srcdir)/../sieve -I$(srcdir)/../imap -I$(srcdir)/../lib @COM_ERR_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@
+CFLAGS = @CFLAGS@
+LDFLAGS = @LDFLAGS@
 
 prefix = @prefix@
 exec_prefix = @exec_prefix@
 cyrus_prefix = @cyrus_prefix@
 
-PERL=perl5
-PERLINC=-I/usr/local/lib/perl5/5.004 -I/usr/local/lib/perl5
+MAKEDEPEND = @MAKEDEPEND@
 
-OBJS=Cyrus.o
+NOTIFYD_LIBS = @NOTIFYD_LIBS@
 
-all: Cyrus.so
+SERVICE=../master/service.o
+
+IMAP_LIBS = @IMAP_LIBS@
+IMAP_COM_ERR_LIBS = @IMAP_COM_ERR_LIBS@
+LIB_WRAP = @LIB_WRAP@
+LIBS = @ZEPHYR_LIBS@ @LIBS@ $(IMAP_COM_ERR_LIBS)
+DEPLIBS=../imap/mutex_fake.o ../imap/libimap.a ../lib/libcyrus.a @DEPLIBS@
+
+PURIFY=/usr/local/bin/purify
+PUREOPT=-best-effort
+
+all: notifyd
 
 install:
-	$(INSTALL) -s -m 755 imtest $(DESTDIR)$(exec_prefix)/bin
+	$(INSTALL) -m 755 notifyd $(DESTDIR)$(cyrus_prefix)/bin
 
-Cyrus.c: Cyrus.xs typemap
-	$(PERL) $(PERLINC) /usr/local/lib/perl5/ExtUtils/xsubpp -typemap /usr/local/lib/perl5/ExtUtils/typemap -typemap $(srcdir)/typemap $(srcdir)/Cyrus.xs >Cyrus.c
+OBJS= notifyd.o notify_null.o notify_log.o notify_mailto.o notify_zephyr.o
 
-Cyrus.o: Cyrus.c
-	$(CC) -c $(CPPFLAGS) $(DEFS) $(CFLAGS) $<
+notifytest: notifytest.o
+	$(CC) $(LDFLAGS) -o notifytest \
+	 notifytest.o $(DEPLIBS) $(IMAP_LIBS) $(LIBS) $(LIB_WRAP)
 
-Cyrus.so: $(OBJS) 
-	$(CC) -shared $(OBJS) -o Cyrus.so $(LIBS)
+notifyd: $(OBJS) $(SERVICE)
+	$(CC) $(LDFLAGS) -o notifyd \
+	 $(SERVICE) $(OBJS) $(DEPLIBS) $(IMAP_LIBS) $(LIBS) $(LIB_WRAP)
+
+notifyd.pure: $(OBJS) $(SERVICE)
+	$(PURIFY) $(PUREOPT) \
+	$(CC) $(LDFLAGS) -o notifyd.pure \
+	 $(SERVICE) $(OBJS) $(DEPLIBS) $(IMAP_LIBS) $(LIBS) $(LIB_WRAP)
 
 clean:
-	rm -f *.o Makefile.bak makedepend.log Cyrus.so Cyrus.c
+	rm -f notifyd notifytest *.o *.a *~ Makefile.bak makedepend.log
 
 distclean: clean
 	rm -f Makefile
 
-depend: 
-	${MAKEDEPEND} $(CPPFLAGS) $(DEFS) $(CFLAGS) *.c $(srcdir)/*.c 1> makedepend.log 2>&1
+depend:
+	${MAKEDEPEND} $(CPPFLAGS) $(DEFS) -I$(srcdir) $(CFLAGS) *.c $(srcdir)/*.c 1>makedepend.log 2>&1
+
+.c.o:
+	$(CC) -c $(CPPFLAGS) $(DEFS) -I$(srcdir) -I. $(CFLAGS) \
+	$<
 
 # DO NOT DELETE THIS LINE -- make depend depends on it.

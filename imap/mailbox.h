@@ -1,5 +1,5 @@
 /* mailbox.h -- Mailbox format definitions
- $Id: mailbox.h,v 1.64.2.2 2002/06/14 18:36:52 jsmith2 Exp $
+ $Id: mailbox.h,v 1.64.2.3 2002/09/10 20:30:43 rjs3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -43,6 +43,7 @@
 #define INCLUDED_MAILBOX_H
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <limits.h>
 
 #include "auth.h"
@@ -237,6 +238,12 @@ extern void mailbox_unmap_message(struct mailbox *mailbox,
 				  const char **basep, unsigned long *lenp);
 
 extern void mailbox_reconstructmode(void);
+
+extern int mailbox_stat(const char *mbpath,
+			struct stat *header,
+			struct stat *index,
+			struct stat *cache);
+
 extern int mailbox_open_header(const char *name, struct auth_state *auth_state,
 			       struct mailbox *mailbox);
 extern int mailbox_open_header_path(const char *name, const char *path,
@@ -305,9 +312,9 @@ extern int mailbox_rename_copy(struct mailbox *oldmailbox,
 			       const char *newname, char *newpath,
 			       bit32 *olduidvalidityp, bit32 *newuidvalidityp,
 			       struct mailbox *mailboxp);
-extern int mailbox_rename_finish(struct mailbox *oldmailbox,
-				 struct mailbox *newmailbox,
-				 int isinbox);
+extern int mailbox_rename_finish(struct mailbox *newmailbox);
+extern int mailbox_rename_cleanup(struct mailbox *oldmailbox,
+				  int isinbox);
 
 extern int mailbox_sync(const char *oldname, const char *oldpath, 
 			const char *oldacl, 

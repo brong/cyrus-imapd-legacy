@@ -94,7 +94,7 @@
 *
 */
 
-/* $Id: tls.c,v 1.29.2.2 2002/06/14 18:37:00 jsmith2 Exp $ */
+/* $Id: tls.c,v 1.29.2.3 2002/09/10 20:30:47 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -149,19 +149,14 @@ static int tls_serverengine = 0; /* server engine initialized? */
 static int do_dump = 0;		/* actively dumping protocol? */
 
 
-int tls_enabled(const char *ident)
+int tls_enabled(void)
 {
-    char buf[50];
     const char *val;
 
-    sprintf(buf, "tls_%s_cert_file", ident);
-    val = config_getstring(buf,
-			   config_getstring("tls_cert_file", NULL));
+    val = config_getstring(IMAPOPT_TLS_CERT_FILE);
     if (!val || !strcasecmp(val, "disabled")) return 0;
 
-    sprintf(buf, "tls_%s_key_file", ident);
-    val = config_getstring(buf,
-			   config_getstring("tls_key_file", NULL));
+    val = config_getstring(IMAPOPT_TLS_KEY_FILE);
     if (!val || !strcasecmp(val, "disabled")) return 0;
 
     return 1;
@@ -210,7 +205,9 @@ static void apps_ssl_info_callback(SSL * s, int where, int ret)
 
 /* taken from OpenSSL apps/s_cb.c */
 
-static RSA *tmp_rsa_cb(SSL * s, int export, int keylength)
+static RSA *tmp_rsa_cb(SSL * s __attribute__((unused)),
+		       int export __attribute__((unused)),
+		       int keylength)
 {
     static RSA *rsa_tmp = NULL;
 
@@ -384,7 +381,8 @@ static int set_cert_stuff(SSL_CTX * ctx,
  * negotiated and session caching is enabled.  We save the session in
  * a database so that we can share sessions between processes. 
  */ 
-static int new_session_cb(SSL *ssl, SSL_SESSION *sess)
+static int new_session_cb(SSL *ssl __attribute__((unused)),
+			  SSL_SESSION *sess)
 {
     int len;
     unsigned char *data = NULL, *asn;
@@ -472,7 +470,8 @@ static void remove_session(unsigned char *id, int idlen)
  * removed because it is expired or when a connection was not shutdown
  * cleanly.
  */
-static void remove_session_cb(SSL_CTX *ctx, SSL_SESSION *sess)
+static void remove_session_cb(SSL_CTX *ctx __attribute__((unused)),
+			      SSL_SESSION *sess)
 {
     assert(sess);
 
@@ -485,7 +484,8 @@ static void remove_session_cb(SSL_CTX *ctx, SSL_SESSION *sess)
  * called, also when session caching was disabled.  We lookup the
  * session in our database in case it was stored by another process.
  */
-static SSL_SESSION *get_session_cb(SSL *ssl, unsigned char *id, int idlen,
+static SSL_SESSION *get_session_cb(SSL *ssl __attribute__((unused)),
+				   unsigned char *id, int idlen,
 				   int *copy)
 {
     int ret;
@@ -563,17 +563,16 @@ static int tls_rand_init(void)
 int     tls_init_serverengine(const char *ident,
 			      int verifydepth,
 			      int askcert,
-			      int requirecert,
 			      int tlsonly)
 {
     int     off = 0;
     int     verify_flags = SSL_VERIFY_NONE;
-    char    buf[50];
     const char   *cipher_list;
     const char   *CApath;
     const char   *CAfile;
     const char   *s_cert_file;
     const char   *s_key_file;
+    int    requirecert;
     int    timeout;
 
     if (tls_serverengine)
@@ -619,7 +618,7 @@ int     tls_init_serverengine(const char *ident,
 				   SSL_SESS_CACHE_NO_INTERNAL_LOOKUP);
 
     /* Get the session timeout from the config file (in minutes) */
-    timeout = config_getint("tls_session_timeout", 1440); /* 24 hours */
+    timeout = config_getint(IMAPOPT_TLS_SESSION_TIMEOUT);
     if (timeout < 0) timeout = 0;
     if (timeout > 1440) timeout = 1440; /* 24 hours max */
 
@@ -645,8 +644,7 @@ int     tls_init_serverengine(const char *ident,
 	r = DB->init(dbdir, 0);
 
 	if (r != 0)
-	    syslog(LOG_ERR, "DBERROR: init %s: %s", buf,
-		   cyrusdb_strerror(r));
+	    syslog(LOG_ERR, "DBERROR: init: %s", cyrusdb_strerror(r));
 	else {
 	    /* create the name of the db file */
 	    strcpy(dbdir, config_dir);
@@ -662,15 +660,15 @@ int     tls_init_serverengine(const char *ident,
 	}
     }
 
-    cipher_list = config_getstring("tls_cipher_list", "DEFAULT");
+    cipher_list = config_getstring(IMAPOPT_TLS_CIPHER_LIST);
     if (!SSL_CTX_set_cipher_list(ctx, cipher_list)) {
 	syslog(LOG_ERR,"TLS engine: cannot load cipher list '%s'",
 	       cipher_list);
 	return (-1);
     }
 
-    CAfile = config_getstring("tls_ca_file", NULL);
-    CApath = config_getstring("tls_ca_path", NULL);
+    CAfile = config_getstring(IMAPOPT_TLS_CA_FILE);
+    CApath = config_getstring(IMAPOPT_TLS_CA_PATH);
 
     if ((!SSL_CTX_load_verify_locations(ctx, CAfile, CApath)) ||
 	(!SSL_CTX_set_default_verify_paths(ctx))) {
@@ -678,13 +676,8 @@ int     tls_init_serverengine(const char *ident,
 	syslog(LOG_NOTICE,"TLS engine: cannot load CA data");	
     }
 
-    sprintf(buf, "tls_%s_cert_file", ident);
-    s_cert_file = config_getstring(buf,
-				   config_getstring("tls_cert_file", NULL));
-
-    sprintf(buf, "tls_%s_key_file", ident);
-    s_key_file = config_getstring(buf,
-				  config_getstring("tls_key_file", NULL));
+    s_cert_file = config_getstring(IMAPOPT_TLS_CERT_FILE);
+    s_key_file = config_getstring(IMAPOPT_TLS_KEY_FILE);
 
     if (!set_cert_stuff(ctx, s_cert_file, s_key_file)) {
 	syslog(LOG_ERR,"TLS engine: cannot load cert/key data");
@@ -695,6 +688,8 @@ int     tls_init_serverengine(const char *ident,
     verify_depth = verifydepth;
     if (askcert!=0)
 	verify_flags |= SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE;
+
+    requirecert = config_getswitch(IMAPOPT_TLS_REQUIRE_CERT);
     if (requirecert)
 	verify_flags |= SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT
 	    | SSL_VERIFY_CLIENT_ONCE;
@@ -1058,7 +1053,7 @@ int tls_get_info(SSL *conn, char *buf, size_t len)
 
 #else
 
-int tls_enabled(const char *ident)
+int tls_enabled(void)
 {
     return 0;
 }

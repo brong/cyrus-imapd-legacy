@@ -1,5 +1,5 @@
 /* map_shared.c -- memory-mapping routines.
- $Id: map_shared.c,v 1.16 2000/05/23 20:56:17 robeson Exp $
+ $Id: map_shared.c,v 1.16.12.1 2002/09/10 20:30:55 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -53,6 +53,8 @@
 
 #define SLOP (8*1024)
 
+const char *map_method_desc = "shared";
+
 /*
  * Create/refresh mapping of file
  */
@@ -73,7 +75,7 @@ const char *mboxname;
 	if (fstat(fd, &sbuf) == -1) {
 	    syslog(LOG_ERR, "IOERROR: fstating %s file%s%s: %m", name,
 		   mboxname ? " for " : "", mboxname ? mboxname : "");
-	    sprintf(buf, "failed to fstat %s file", name);
+	    snprintf(buf, sizeof(buf), "failed to fstat %s file", name);
 	    fatal(buf, EC_IOERR);
 	}
 	newlen = sbuf.st_size;
@@ -99,7 +101,7 @@ const char *mboxname;
     if (*base == (char *)-1) {
 	syslog(LOG_ERR, "IOERROR: mapping %s file%s%s: %m", name,
 	       mboxname ? " for " : "", mboxname ? mboxname : "");
-	sprintf(buf, "failed to mmap %s file", name);
+	snprintf(buf, sizeof(buf), "failed to mmap %s file", name);
 	fatal(buf, EC_IOERR);
     }
     *len = newlen;

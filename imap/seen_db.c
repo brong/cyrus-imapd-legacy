@@ -1,5 +1,5 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
-   $Id: seen_db.c,v 1.24.2.2 2002/06/14 18:36:59 jsmith2 Exp $
+   $Id: seen_db.c,v 1.24.2.3 2002/09/10 20:30:46 rjs3 Exp $
  
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -87,7 +87,6 @@ struct seen {
 
 static struct seen *lastseen = NULL;
 
-/* choose "flat" or "db3" here */
 #define DB (CONFIG_DB_SEEN)
 
 static void abortcurrent(struct seen *s)
@@ -104,13 +103,24 @@ static void abortcurrent(struct seen *s)
 
 char *seen_getpath(const char *userid)
 {
-    char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_USERDIR) +
-		    strlen(userid) + sizeof(FNAME_SEENSUFFIX) + 10);
-    char c;
+    char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_DOMAINDIR) +
+			  sizeof(FNAME_USERDIR) + strlen(userid) +
+			  sizeof(FNAME_SEENSUFFIX) + 10);
+    char c, *domain;
 
-    c = (char) dir_hash_c(userid);
-    sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
-	    FNAME_SEENSUFFIX);
+    if (config_virtdomains && (domain = strchr(userid, '@'))) {
+	char d = (char) dir_hash_c(domain+1);
+	*domain = '\0';  /* split user@domain */
+	c = (char) dir_hash_c(userid);
+	sprintf(fname, "%s%s%c/%s%s%c/%s%s", config_dir, FNAME_DOMAINDIR, d,
+		domain+1, FNAME_USERDIR, c, userid, FNAME_SEENSUFFIX);
+	*domain = '@';  /* reassemble user@domain */
+    }
+    else {
+	c = (char) dir_hash_c(userid);
+	sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
+		FNAME_SEENSUFFIX);
+    }
 
     return fname;
 }
@@ -239,8 +249,7 @@ static int seen_readold(struct seen *seendb,
     while (p < base + offset + linelen && !isspace((int) *p)) p++;
 
     *seenuidsptr = xmalloc(p - buf + 1);
-    strlcpy(*seenuidsptr, buf, p - buf);
-    (*seenuidsptr)[p - buf] = '\0';
+    strlcpy(*seenuidsptr, buf, p - buf + 1);
 
     map_free(&base, &len);
     close(fd);
@@ -353,7 +362,7 @@ int seen_write(struct seen *seendb, time_t lastread, unsigned int lastuid,
 	       seendb->uniqueid, seendb->user);
     }
 
-    sprintf(data, "%d %d %d %d %s", SEEN_VERSION, 
+    snprintf(data, sz, "%d %d %d %d %s", SEEN_VERSION, 
 	    (int) lastread, lastuid, (int) lastchange, seenuids);
     datalen = strlen(data);
 
@@ -390,7 +399,6 @@ int seen_close(struct seen *seendb)
 	if (r != CYRUSDB_OK) {
 	    syslog(LOG_ERR, "DBERROR: error committing seen txn; "
 		   "seen state lost: %s", cyrusdb_strerror(r));
-	    DB->abort(seendb->db, seendb->tid);
 	}
 	seendb->tid = NULL;
     }
@@ -463,11 +471,35 @@ int seen_delete_user(const char *user)
 
     /* erp! */
     r = unlink(fname);
-    if (r < 0) {
+    if (r < 0 && errno == ENOENT) {
+	syslog(LOG_WARNING, "can not unlink %s: %m", fname);
+	/* but maybe the user just never read anything? */
+	r = 0;
+    }
+    else if (r < 0) {
 	syslog(LOG_ERR, "error unlinking %s: %m", fname);
 	r = IMAP_IOERROR;
     }
     free(fname);
+    
+    return r;
+}
+
+int seen_rename_user(const char *olduser, const char *newuser)
+{
+    char *oldfname = seen_getpath(olduser);
+    char *newfname = seen_getpath(newuser);
+    int r;
+
+    if (SEEN_DEBUG) {
+	syslog(LOG_DEBUG, "seen_db: seen_rename_user(%s, %s)", 
+	       olduser, newuser);
+    }
+
+    r = seen_merge(oldfname, newfname);
+
+    free(oldfname);
+    free(newfname);
     
     return r;
 }
@@ -500,7 +532,6 @@ int seen_unlock(struct seen *seendb)
     if (r != CYRUSDB_OK) {
 	syslog(LOG_ERR, "DBERROR: error committing seen txn; "
 	       "seen state lost: %s", cyrusdb_strerror(r));
-	DB->abort(seendb->db, seendb->tid);
     }
     seendb->tid = NULL;
 

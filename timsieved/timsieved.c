@@ -1,7 +1,7 @@
 /* timsieved.c -- main file for timsieved (sieve script accepting program)
  * Tim Martin
  * 9/21/99
- * $Id: timsieved.c,v 1.31.2.1 2002/06/06 21:09:23 jsmith2 Exp $
+ * $Id: timsieved.c,v 1.31.2.2 2002/09/10 20:31:42 rjs3 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -104,6 +104,12 @@ int sieved_haveaddr = 0;
 char sieved_clienthost[250] = "[local]";
 
 int sieved_userisadmin;
+int sieved_domainfromip = 0;
+
+/* the sasl proxy policy context */
+static struct proxy_context sieved_proxyctx = {
+    1, 1, &sieved_authstate, &sieved_userisadmin, NULL
+};
 
 /*
  * Cleanly shut down and exit
@@ -163,107 +169,17 @@ void fatal(const char *s, int code)
     shut_down(EC_TEMPFAIL);
 }
 
-/*
- * acl_ok() checks to see if the the inbox for 'user' grants the 'a'
- * right to the principal 'auth_identity'. Returns 1 if so, 0 if not.
- */
-static int acl_ok(const char *user, 
-                  const char *auth_identity,
-                  struct auth_state *authstate)
-{
-    char *acl;
-    char inboxname[1024];
-    int r;
-
-    if (strchr(user, '.') || strlen(user)+6 >= sizeof(inboxname)) return 0;
-
-    strcpy(inboxname, "user.");
-    strcat(inboxname, user);
-
-    if (!authstate ||
-        mboxlist_lookup(inboxname, (char **)0, &acl, NULL)) {
-        r = 0;  /* Failed so assume no proxy access */
-    }
-    else {
-        r = (cyrus_acl_myrights(authstate, acl) & ACL_ADMIN) != 0;
-    }
-
-    return r;
-}
-
-/* should we allow users to proxy?  return SASL_OK if yes,
-   SASL_BADAUTH otherwise */
-static int mysasl_authproc(sasl_conn_t *conn,
-			   void *context,
-			   const char *requested_user, unsigned rlen,
-			   const char *auth_identity, unsigned alen,
-			   const char *def_realm, unsigned urlen,
-			   struct propctx *propctx)
-{
-    const char *val;
-    char *realm;
-
-    /* check if remote realm */
-    if ((realm = strchr(auth_identity, '@'))!=NULL) {
-	realm++;
-	val = config_getstring("loginrealms", "");
-	while (*val) {
-	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
-		break;
-	    }
-	    /* not this realm, try next one */
-	    while (*val && !isspace((int) *val)) val++;
-	    while (*val && isspace((int) *val)) val++;
-	}
-	if (!*val) {
-	    sasl_seterror(conn, 0, "cross-realm login %s denied",
-			  auth_identity);
-	    return SASL_BADAUTH;
-	}
-    }
-
-    sieved_authstate = auth_newstate(auth_identity, NULL);
-
-    /* ok, is auth_identity an admin? */
-    sieved_userisadmin = authisa(sieved_authstate, "sieve", "admins");
-
-    if (strcmp(auth_identity, requested_user)) {
-        /* we want to authenticate as a different user; we'll allow this
-           if we're an admin or if we've allowed ACL proxy logins */
-        int use_acl = config_getswitch("loginuseacl", 0);
-
-        if (sieved_userisadmin ||
-            (use_acl && acl_ok(requested_user, auth_identity, sieved_authstate)) ||
-            authisa(sieved_authstate, "sieve", "proxyservers")) {
-            /* proxy ok! */
-
-	    sieved_userisadmin = 0; /* no longer admin */
-	    auth_freestate(sieved_authstate);
-	    
-	    sieved_authstate = auth_newstate(requested_user, NULL);
-	} else {
-          sasl_seterror(conn, 0, "user %s is not allowed to proxy",
-                          auth_identity);
-	    
-	    auth_freestate(sieved_authstate);
-	    
-	    return SASL_BADAUTH;
-	}
-    }
-
-    return SASL_OK;
-}
-
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
-    { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
-    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },
+    { SASL_CB_PROXY_POLICY, &mysasl_proxy_policy, (void*) &sieved_proxyctx },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, (void*) &sieved_domainfromip },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
 int service_init(int argc, char **argv, char **envp)
 {
+    config_sasl_init(0, 1, mysasl_cb);
+
     /* open mailboxes */
     mboxlist_init(0);
     mboxlist_open(NULL);
@@ -289,8 +205,7 @@ int service_main(int argc, char **argv, char **envp)
     sieved_in = prot_new(0, 0);
     sieved_out = prot_new(1, 1);
 
-    config_changeident("timsieved");
-    timeout = config_getint("timeout", 10);
+    timeout = config_getint(IMAPOPT_TIMEOUT);
     if (timeout < 10) timeout = 10;
     prot_settimeout(sieved_in, timeout * 60);
     prot_setflushonread(sieved_in, sieved_out);
@@ -321,16 +236,6 @@ int service_main(int argc, char **argv, char **envp)
 	}
     }
 
-    /* set the SASL allocation functions */
-    sasl_set_alloc((sasl_malloc_t *) &xmalloc, 
-		   (sasl_calloc_t *) &calloc, 
-		   (sasl_realloc_t *) &xrealloc, 
-		   (sasl_free_t *) &free);
-
-    /* Make a SASL connection and setup some properties for it */
-    if (sasl_server_init(mysasl_cb, "Cyrus") != SASL_OK)
-	fatal("SASL failed initializing: sasl_server_init()", -1); 
-
     /* other params should be filled in */
     if (sasl_server_new(SIEVE_SERVICE_NAME, config_servername, NULL,
 			NULL, NULL, NULL, SASL_SUCCESS_DATA,
@@ -350,7 +255,7 @@ int service_main(int argc, char **argv, char **envp)
 
     /* will always return something valid */
     /* should be configurable! */
-    if (!config_getswitch("allowplaintext", 1)) {
+    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
 	secflags |= SASL_SEC_NOPLAINTEXT;
     }
     secprops = mysasl_secprops(secflags);
@@ -389,7 +294,7 @@ int reset_saslconn(sasl_conn_t **conn, sasl_ssf_t ssf, char *authid)
 			   saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
     
-    if (!config_getswitch("allowplaintext", 1)) {
+    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
 	secflags |= SASL_SEC_NOPLAINTEXT;
     }
     secprops = mysasl_secprops(secflags);

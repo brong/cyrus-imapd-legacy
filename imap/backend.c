@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: backend.c,v 1.7.2.2 2002/06/14 18:36:43 jsmith2 Exp $ */
+/* $Id: backend.c,v 1.7.2.3 2002/09/10 20:30:39 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -234,10 +234,11 @@ static int backend_authenticate(struct backend *s, const char *userid)
     p = strchr(optstr, '.');
     if (p) *p = '\0';
     strcat(optstr, "_password");
-    pass = config_getstring(optstr, NULL);
+    pass = config_getoverflowstring(optstr, NULL);
+    if(!pass) pass = config_getstring(IMAPOPT_PROXY_PASSWORD);
     cb = mysasl_callbacks(userid, 
-			  config_getstring("proxy_authname", "proxy"),
-			  config_getstring("proxy_realm", NULL),
+			  config_getstring(IMAPOPT_PROXY_AUTHNAME),
+			  config_getstring(IMAPOPT_PROXY_REALM),
 			  pass);
 
     /* set the IP addresses */
@@ -255,8 +256,10 @@ static int backend_authenticate(struct backend *s, const char *userid)
 		  localip, 60) != 0)
 	return SASL_FAIL;
 
+    /* Require proxying if we have an "interesting" userid (authzid) */
     r = sasl_client_new("imap", s->hostname, localip, remoteip,
-			cb, 0, &s->saslconn);
+			cb, (userid  && *userid ? SASL_NEED_PROXY : 0),
+			&s->saslconn);
     if (r != SASL_OK) {
 	return r;
     }
@@ -279,9 +282,9 @@ static int backend_authenticate(struct backend *s, const char *userid)
     /* We can force a particular mechanism using a <shorthost>_mechs option */
     strcpy(buf, s->hostname);
     p = strchr(buf, '.');
-    *p = '\0';
+    if (p) *p = '\0';
     strcat(buf, "_mechs");
-    mech_conf = config_getstring(buf, NULL);
+    mech_conf = config_getoverflowstring(buf, NULL);
     
     /* If we don't have a mech_conf, ask the server what it can do */
     if(!mech_conf) {
@@ -350,7 +353,7 @@ struct backend *findserver(struct backend *ret, const char *server,
 
 	ret = xmalloc(sizeof(struct backend));
 	memset(ret, 0, sizeof(struct backend));
-	ret->hostname = xstrdup(server);
+	strlcpy(ret->hostname, server, sizeof(ret->hostname));
 	if ((hp = gethostbyname(server)) == NULL) {
 	    syslog(LOG_ERR, "gethostbyname(%s) failed: %m", server);
 	    free(ret);
@@ -371,6 +374,7 @@ struct backend *findserver(struct backend *ret, const char *server,
     if (connect(sock, (struct sockaddr *) &ret->addr, 
 		sizeof(ret->addr)) < 0) {
 	syslog(LOG_ERR, "connect(%s) failed: %m", server);
+        close(sock);
 	free(ret);
 	return NULL;
     }
@@ -385,6 +389,7 @@ struct backend *findserver(struct backend *ret, const char *server,
 	syslog(LOG_ERR, "couldn't authenticate to backend server: %s",
 	       sasl_errstring(r, NULL, NULL));
 	free(ret);
+        close(sock);
 	return NULL;
     }
     
@@ -419,6 +424,15 @@ void downserver(struct backend *s)
 
     /* close/free socket & prot layer */
     close(s->sock);
+    s->sock = -1;
+    
     prot_free(s->in);
     prot_free(s->out);
+    s->in = s->out = NULL;
+
+    /* Free saslconn */
+    if(s->saslconn) {
+	sasl_dispose(&(s->saslconn));
+	s->saslconn = NULL;
+    }
 }

@@ -42,7 +42,7 @@
  */
 
 /*
- * $Id: message.c,v 1.88 2000/12/26 21:35:41 leg Exp $
+ * $Id: message.c,v 1.88.12.1 2002/09/10 20:30:44 rjs3 Exp $
  */
 
 #include <config.h>
@@ -228,7 +228,7 @@ unsigned size;
     int r = 0;
     int n;
     int sawcr = 0, sawnl;
-    int reject8bit = config_getswitch("reject8bit", 0);
+    int reject8bit = config_getswitch(IMAPOPT_REJECT8BIT);
     int inheader = 1, blankline = 1;
 
     while (size) {
@@ -732,8 +732,7 @@ char **hdrp;
 
     /* Save encoding token */
     *hdrp = xmalloc(len + 1);
-    strlcpy(*hdrp, hdr, len);
-    (*hdrp)[len] = '\0';
+    strlcpy(*hdrp, hdr, len + 1);
     for (p = *hdrp; *p; p++) {
 	if (islower((int) *p)) *p = toupper((int) *p);
     }
@@ -771,8 +770,7 @@ char **hdrp;
     /* Save header value */
     len = hdrend - hdr;
     *hdrp = xmalloc(len + 1);
-    strlcpy(*hdrp, hdr, len);
-    (*hdrp)[len] = '\0';
+    strlcpy(*hdrp, hdr, len + 1);
 
     /* Un-fold header */
     hdrend = *hdrp;
@@ -813,7 +811,7 @@ struct ibuf *ibuf;
     /* Save header value */
     len = hdrend - hdr;
     message_ibuf_ensure(ibuf, len+2);
-    strlcpy(ibuf->end, hdr, len);
+    strncpy(ibuf->end, hdr, len);
     ibuf->end += len;
     *(ibuf->end)++ = '\r';
     *(ibuf->end)++ = '\n';
@@ -873,14 +871,12 @@ struct body *body;
 
     /* Save content type & subtype */
     body->type = xmalloc(typelen + 1);
-    strlcpy(body->type, type, typelen);
-    body->type[typelen] = '\0';
+    strlcpy(body->type, type, typelen + 1);
     for (p = body->type; *p; p++) {
 	if (islower((int) *p)) *p = toupper((int) *p);
     }
     body->subtype = xmalloc(subtypelen + 1);
-    strlcpy(body->subtype, subtype, subtypelen);
-    body->subtype[subtypelen] = '\0';
+    strlcpy(body->subtype, subtype, subtypelen + 1);
     for (p = body->subtype; *p; p++) {
 	if (islower((int) *p)) *p = toupper((int) *p);
     }
@@ -926,8 +922,8 @@ struct body *body;
 
     /* Save content disposition */
     body->disposition = xmalloc(dispositionlen + 1);
-    strlcpy(body->disposition, disposition, dispositionlen);
-    body->disposition[dispositionlen] = '\0';
+    strlcpy(body->disposition, disposition, dispositionlen + 1);
+
     for (p = body->disposition; *p; p++) {
 	if (islower((int) *p)) *p = toupper((int) *p);
     }
@@ -1011,8 +1007,8 @@ struct param **paramp;
 	*paramp = param = (struct param *)xmalloc(sizeof(struct param));
 	memset(param, 0, sizeof(struct param));
 	param->attribute = xmalloc(attributelen + 1);
-	strlcpy(param->attribute, attribute, attributelen);
-	param->attribute[attributelen] = '\0';
+	strlcpy(param->attribute, attribute, attributelen + 1);
+
 	for (p = param->attribute; *p; p++) {
 	    if (islower((int) *p)) *p = toupper((int) *p);
 	}
@@ -1028,8 +1024,7 @@ struct param **paramp;
 	    *p = '\0';
 	}
 	else {
-	    strlcpy(param->value, value, valuelen);
-	    param->value[valuelen] = '\0';
+	    strlcpy(param->value, value, valuelen + 1);
 	}
 
 	/* Get ready to parse the next parameter */
@@ -1246,8 +1241,8 @@ struct param **paramp;
 	*paramp = param = (struct param *)xmalloc(sizeof(struct param));
 	memset(param, 0, sizeof(struct param));
 	param->value = xmalloc(valuelen + 1);
-	strlcpy(param->value, value, valuelen);
-	param->value[valuelen] = '\0';
+	strlcpy(param->value, value, valuelen + 1);
+
 	for (p = param->value; *p; p++) {
 	    if (islower((int) *p)) *p = toupper((int) *p);
 	}
@@ -2069,7 +2064,7 @@ char *s;
     if (*p || len >= 1024) {
 	/* Write out as literal */
 	char buf[100];
-	sprintf(buf, "{%u}\r\n", strlen(s));
+	snprintf(buf, sizeof(buf), "{%u}\r\n", strlen(s));
 	message_ibuf_ensure(ibuf, strlen(s)+strlen(buf));
 	for (p = buf; *p; p++) *(ibuf->end)++ = *p;
 	for (p = s; *p; p++) *(ibuf->end)++ = *p;
@@ -2107,7 +2102,7 @@ unsigned n;
 {
     char buf[100], *p;
 
-    sprintf(buf, "%u", n);
+    snprintf(buf, sizeof(buf), "%u", n);
 
     message_ibuf_ensure(ibuf, strlen(buf));
     for (p = buf; *p; p++) *(ibuf->end)++ = *p;

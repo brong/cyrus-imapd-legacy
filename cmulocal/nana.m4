@@ -1,10 +1,10 @@
 dnl nana.m4--nana macro
 dnl Rob Earhart
-dnl $Id: nana.m4,v 1.2.8.1 2002/06/06 21:07:37 jsmith2 Exp $
+dnl $Id: nana.m4,v 1.2.8.2 2002/09/10 20:30:31 rjs3 Exp $
 
 AC_DEFUN(CMU_NANA, [
   AC_REQUIRE([AC_PROG_CC])
-  AC_ARG_WITH(nana, [  --with-nana             use NANA [yes]],,with_nana=yes)
+  AC_ARG_WITH(nana, [[  --with-nana             use NANA [yes] ]],,with_nana=yes)
   if test "$GCC" != yes; then
     with_nana=no
   elif test "$with_nana" = yes; then

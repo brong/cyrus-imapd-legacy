@@ -1,5 +1,5 @@
 /* config.h -- Configuration routines
- * $Id: imapconf.h,v 1.11.2.2 2002/06/14 18:36:46 jsmith2 Exp $
+ * $Id: imapconf.h,v 1.11.2.3 2002/09/10 20:30:40 rjs3 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -44,14 +44,25 @@
 #define INCLUDED_IMAPCONF_H
 
 #include <sasl/sasl.h>
+#include "imapopts.h"
 #include "auth.h"
+#include "mboxname.h"
 
+/* Startup the configuration subsystem */
 extern int config_init(const char *alt_config, const char *ident);
-extern const char *config_getstring(const char *key, const char *def);
-extern int config_getint(const char *key, int def);
-extern int config_getswitch(const char *key, int def);
+extern void config_sasl_init(int client, int server,
+			     const sasl_callback_t *callbacks);
+
+/* these will assert() if they're called on the wrong type of
+   option (imapopt.c) */
+extern const char *config_getstring(enum imapopt opt);
+extern int config_getint(enum imapopt opt);
+extern int config_getswitch(enum imapopt opt);
+
+/* these work on additional strings that are not defined in the
+ * imapoptions table */
+extern const char *config_getoverflowstring(const char *key, const char *def);
 extern const char *config_partitiondir(const char *partition);
-extern int config_changeident(const char *ident);
 
 /* sasl configuration */
 extern int mysasl_config(void *context,
@@ -61,10 +72,9 @@ extern int mysasl_config(void *context,
 			 unsigned *len);
 extern sasl_security_properties_t *mysasl_secprops(int flags);
 
-#define HAS_SASL_2_1 ((SASL_VERSION_MAJOR > 2) || \
-	((SASL_VERSION_MAJOR == 2) && (SASL_VERSION_MINOR >= 1)))
+/* user canonification */
+extern char *canonify_userid(char *user, char *loginid, int *domain_from_ip);
 
-#if HAS_SASL_2_1
 extern int mysasl_canon_user(sasl_conn_t *conn,
 		             void *context,
 		             const char *user, unsigned ulen,
@@ -72,36 +82,29 @@ extern int mysasl_canon_user(sasl_conn_t *conn,
 		             const char *user_realm,
 		             char *out_user,
 		             unsigned out_max, unsigned *out_ulen);
-#else /* SASL 2.0 */
-extern int mysasl_canon_user(sasl_conn_t *conn,
-                             void *context,
-                             const char *user, unsigned ulen,
-                             const char *authid, unsigned alen,
-                             unsigned flags,
-                             const char *user_realm,
-                             char *out_user,
-                             unsigned out_max, unsigned *out_ulen,
-                             char *out_authid,
-                             unsigned out_amax, unsigned *out_alen);
-#endif
+
+extern int mysasl_proxy_policy(sasl_conn_t *conn,
+			       void *context,
+			       const char *requested_user, unsigned rlen,
+			       const char *auth_identity, unsigned alen,
+			       const char *def_realm __attribute__((unused)),
+			       unsigned urlen __attribute__((unused)),
+			       struct propctx *propctx __attribute__((unused)));
 
 /* check if `authstate' is a valid member of class */
-extern int authisa(struct auth_state *authstate, 
-		   const char *service, const char *class);
+extern int config_authisa(struct auth_state *authstate, 
+			  enum imapopt opt);
 
 /* Values of mandatory options */
 extern const char *config_filename;
-
 extern const char *config_dir;
 extern const char *config_defpartition;
-extern const char *config_newsspool;
-
 extern const char *config_servername;
 extern const char *config_mupdate_server;
-
 extern int config_hashimapspool;
 
-void config_scanpartition( void (*proc)() );
+extern int config_virtdomains;
+extern const char *config_defdomain;
 
 /* signal handling (signals.c) */
 typedef void shutdownfn(int);
@@ -116,6 +119,14 @@ struct buf {
     char *s;
     int len;
     int alloc;
+};
+
+struct proxy_context {
+    int use_acl;
+    int proxy_servers;
+    struct auth_state **authstate;
+    int *userisadmin;
+    int *userisproxyadmin;
 };
 
 /* base64 authentication functions (base64.c) */
@@ -145,9 +156,13 @@ void freebuf(struct buf *buf);
 
 void eatline(struct protstream *pin, int c);
 
+/* Misc utils */
+extern void cyrus_ctime(time_t date, char *datebuf);
+
 /* filenames */
 #define FNAME_DBDIR "/db"
 #define FNAME_USERDIR "/user/"
+#define FNAME_DOMAINDIR "/domain/"
 #define FNAME_LOGDIR "/log/"
 
 #endif /* INCLUDED_IMAPCONF_H */

@@ -1,5 +1,5 @@
 /* assert.c -- handle assertion failures
- $Id: assert.c,v 1.14 2001/05/21 18:28:34 leg Exp $
+ $Id: assert.c,v 1.14.6.1 2002/09/10 20:30:53 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -56,7 +56,7 @@ const char *expr;
 {
     char buf[1024];
 
-    sprintf(buf, "Internal error: assertion failed: %s: %d%s%s",
+    snprintf(buf, sizeof(buf), "Internal error: assertion failed: %s: %d%s%s",
 	    file, line, expr ? ": " : "", expr ? expr : "");
     fatal(buf, EC_SOFTWARE);
 }
