@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.2 1999/11/03 00:07:52 leg Exp $
+ * $Id: target.c,v 1.1.2.3 1999/11/03 00:55:47 leg Exp $
  */
 
 #include <stdio.h>
@@ -185,7 +185,7 @@ void be_connect(struct be *ptr)
     /* ptr is currently DOWN.  let's try to make it UP */
     assert(ptr->be_status == DOWN);
 
-    fprintf(stderr, "attempting connection to '%s'...\n", host);
+    fprintf(stderr, "attempting connection to '%s'...\n", ptr->hostname);
 
     if ((hp = gethostbyname(ptr->hostname)) == NULL) {
 	syslog(LOG_ERR, "gethostbyname(): unknown host: %s\n", ptr->hostname);
@@ -252,11 +252,15 @@ void be_connect(struct be *ptr)
     if (ch != '-') {
 	/* protocol failure */
 	cr = 1;
+    } else {
+        cr = 0;
     }
     /* ok, we now have to synchronize our mailboxes file with the information
        we just received */
     if (!cr) {
 	rock = (struct be_mblist *) xmalloc(sizeof(struct be_mblist));
+
+	fprintf(stderr, "got %d mailboxes\n", num);
 
 	rock->ents = mboxent;
 	rock->num = num;
@@ -289,11 +293,11 @@ void be_connect(struct be *ptr)
     }
 
     if (!cr) fprintf(stderr, "about to send\n");
-    else fprintf(stderr, "bad connection\n");
     
     /* done */
     if (!cr) cr = prot_putc('o', ptr->out);
     if (!cr) cr = prot_putc('k', ptr->out);
+    if (!cr) cr = prot_flush(ptr->out);
 
     if (cr) { /* damn it */
 	free(mboxent);
@@ -301,8 +305,12 @@ void be_connect(struct be *ptr)
 	prot_free(ptr->out);
 	close(ptr->sock);
 	ptr->lastcontact = now;
+        fprintf(stderr, "bad connection\n");
 	return;
     }
+
+    fprintf(stderr, "good connection\n");
+    ptr->be_status = UP;
 }
 
 int do_txn(char *host, struct inmsg *msg, void **txn)
@@ -497,6 +505,8 @@ int main(int argc, char *argv[], char *envp[])
 
     for (;;) {
 	now = time(NULL);
+
+	fprintf(stderr, "checking DOWN servers\n");
 
 	/* check on all b.e. servers that we previously thought were DOWN */
 	for (ptr = head; ptr != NULL; ptr = ptr->next) {
