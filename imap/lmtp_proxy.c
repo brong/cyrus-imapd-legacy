@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.c,v 1.1.2.3 2004/02/18 19:08:50 ken3 Exp $
+ * $Id: lmtp_proxy.c,v 1.1.2.4 2004/02/18 19:28:25 ken3 Exp $
  */
 
 #include <config.h>
@@ -61,8 +61,6 @@
 #include "prot.h"
 #include "proxy.h"
 #include "xmalloc.h"
-
-extern struct backend **backend_cached;
 
 void adddest(remote_msgdata_t *mydata, const char *rcpt,
 	     char *server, char *mailbox, const char *authas)
@@ -98,7 +96,8 @@ void adddest(remote_msgdata_t *mydata, const char *rcpt,
     d->to = new_rcpt;
 }
 
-void runme(remote_msgdata_t *mydata, message_data_t *msgdata)
+void runme(remote_msgdata_t *mydata, message_data_t *msgdata,
+	   struct backend ***cache)
 {
     struct dest *d;
 
@@ -128,7 +127,7 @@ void runme(remote_msgdata_t *mydata, message_data_t *msgdata)
 	assert(i == d->rnum);
 
 	remote = proxy_findserver(d->server, &protocol[PROTOCOL_LMTP], "",
-				  &backend_cached, NULL, NULL, NULL);
+				  cache, NULL, NULL, NULL);
 	if (remote) {
 	    r = lmtp_runtxn(remote, lt);
 	} else {
