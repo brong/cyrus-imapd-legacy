@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.7 1999/12/15 19:51:26 leg Exp $ */
+/* $Id: imapd.c,v 1.180.4.8 1999/12/15 20:18:54 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1257,16 +1257,7 @@ char *passwd;
 				    strlen(canon_user),
 				    passwd,
 				    strlen(passwd),
-				    (const char **) &reply))!=SASL_OK) {
-	const char *errorstring = sasl_errstring(result, NULL, NULL);
-	if (reply) {
-=======
-    else if ((result = sasl_checkpass(imapd_saslconn,
-				      canon_user,
-				      strlen(canon_user),
-				      passwd,
-				      strlen(passwd),
-				      &reply)) != SASL_OK) { 
+				    (const char **) &reply)) != SASL_OK) {
 	if (reply) {
 	    syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
 		   imapd_clienthost, canon_user, reply);
