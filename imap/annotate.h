@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: annotate.h,v 1.2.2.4 2002/11/19 18:10:41 rjs3 Exp $
+ * $Id: annotate.h,v 1.2.2.5 2002/11/19 18:24:42 rjs3 Exp $
  */
 
 #ifndef ANNOTATE_H
@@ -85,6 +85,7 @@ void appendentryatt(struct entryattlist **l, char *entry,
 void freeentryatts(struct entryattlist *l);
 
 /* name of the annotation database */
+#define ANNOTATE_RECOVER 0x1 /* xxx obsolete */
 #define FNAME_ANNOTATIONS "/annotations.db"
 
 /* initialize database structures */
