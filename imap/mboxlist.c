@@ -1,4 +1,4 @@
-/* mboxlist.c -- Mailbox list manipulation routines
+* mboxlist.c -- Mailbox list manipulation routines
  * 
  * Copyright 1998 Carnegie Mellon University
  * 
@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.55 2000/01/14 23:47:46 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.56 2000/01/15 00:14:19 leg Exp $
  */
 
 #include <stdio.h>
@@ -197,7 +197,7 @@ static int mboxlist_mylookup(const char* name, char** pathp, char** aclp,
 	acllen = strlen(mboxent->acls);
 	break;
 
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
       return IMAP_AGAIN;
       break;
 
@@ -366,7 +366,7 @@ mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition,
       break;
     case DB_NOTFOUND:
       break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
       return IMAP_AGAIN;
       break;
     default:
@@ -401,7 +401,7 @@ mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition,
 	  parentacllen = strlen(mboxent->acls); 
                /* xxx this could be better */
 	  break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    return IMAP_AGAIN;
 	    break;
 	default:
@@ -619,7 +619,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     switch (r) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -749,7 +749,7 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 	switch (r) {
 	case 0:
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -871,7 +871,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	switch (r) {
 	case 0:
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;	  
 	    break;
 	default:
@@ -905,7 +905,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
     switch (r) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -933,7 +933,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
     switch(r) {
     case 0: /* success */
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -997,7 +997,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	case DB_NOTFOUND:
 	    deletequotaroot = 1;
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -1010,7 +1010,7 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	switch (r2 = cursor->c_close(cursor)) {
 	case 0:
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -1182,7 +1182,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    goto done;
 	}
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     case DB_NOTFOUND:
@@ -1282,7 +1282,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     switch (r) {
     case 0: /* success */
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     case DB_NOTFOUND:
@@ -1320,7 +1320,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     switch (r) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -1478,7 +1478,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	case DB_NOTFOUND:
 	    r = IMAP_MAILBOX_NONEXISTENT;
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	default:
 	    syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
@@ -1545,7 +1545,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     switch (r) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -1821,7 +1821,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		break;
 	    case DB_NOTFOUND:
 		break;
-	    case EAGAIN:
+	    case DB_LOCK_DEADLOCK:
 		goto retry;
 	    default: /* DB error */
 		syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
@@ -1847,7 +1847,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 		break;
 	    case DB_NOTFOUND:
 		break;
-	    case EAGAIN:
+	    case DB_LOCK_DEADLOCK:
 		goto retry;
 		break;
 	    default: /* DB error */
@@ -1922,7 +1922,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    case 0:
 	      break;
 		
-	    case EAGAIN:
+	    case DB_LOCK_DEADLOCK:
 		goto retry;
 		break;
 		
@@ -2003,7 +2003,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	case 0:
 	    break;
 
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	    
@@ -2077,7 +2077,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	switch (r2 = cursor->c_close(cursor)) {
 	case 0:
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -2276,7 +2276,7 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 		  /* didn't find the entry; take away the subscription */
 		  mboxlist_changesub(namebuf, userid, auth_state, 0);
 		  break;
-		case EAGAIN:
+		case DB_LOCK_DEADLOCK:
 		  goto retry;
 		  break;
 		default:
@@ -2343,7 +2343,7 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
 	      /* didn't find the entry; take away the subscription */
 	      mboxlist_changesub(namebuf, userid, auth_state, 0);
 	      break;
-	    case EAGAIN:
+	    case IMAP_AGAIN:
 	      goto retry;
 	      break;
 	    default:
@@ -2447,7 +2447,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	case 0:
 	    mboxent = (struct mbox_entry *) data.data;
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -2494,7 +2494,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
 	switch (r) {
 	case 0:
 	    break;
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 	default:
@@ -2518,7 +2518,7 @@ int mboxlist_foreach(foreach_proc *p, void *rock, int rw)
     switch (r2) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     default:
@@ -2818,7 +2818,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	case 0:
 	    break;
 
-	case EAGAIN:
+	case DB_LOCK_DEADLOCK:
 	    goto retry;
 	    break;
 
@@ -2873,7 +2873,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
 	    case 0:
 		break;
 
-	    case EAGAIN:
+	    case DB_LOCK_DEADLOCK:
 		goto retry;
 		break;
 
@@ -2889,7 +2889,7 @@ int mboxlist_syncnews(int num, char **group, int *seen)
     switch (cursor->c_close(cursor)) {
     case 0:
 	break;
-    case EAGAIN:
+    case DB_LOCK_DEADLOCK:
 	goto retry;
 	break;
     }
