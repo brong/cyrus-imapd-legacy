@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.12 1999/11/03 04:46:38 leg Exp $
+ * $Id: gun.c,v 1.1.2.13 1999/11/03 17:52:36 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -462,7 +462,7 @@ int main(int argc, char *argv[], char *envp[])
 		break;
 		
 	    case SETACL:
-		printf("got RENAMEMAILBOX:\n");
+		printf("got SETACL:\n");
 		printf("\t(%s, %s, %d, %s, %s)\n", inbuf.name, inbuf.userid,
 		       inbuf.isadmin, inbuf.u.amb.ident, inbuf.u.amb.rights);
 		r = real_mboxlist_setacl(inbuf.name,

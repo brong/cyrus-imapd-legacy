@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.38 1999/11/03 17:43:21 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.39 1999/11/03 17:52:37 leg Exp $
  */
 
 #include <stdio.h>
@@ -1534,9 +1534,8 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin, 
 		    char *userid, struct auth_state *auth_state)
 {
-    return real_mboxlist_renamemailbox(name, identifier, rights, isadmin,
-				       userid, auth_state, NULL);
-
+    return real_mboxlist_setacl(name, identifier, rights, isadmin,
+				userid, auth_state, NULL);
 }
 #else
 /* STUB ROUTINES FOR COMMUNICATING WITH GUARDIAN */
