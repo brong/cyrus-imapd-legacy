@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.11 1999/11/06 23:44:04 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.12 1999/11/07 03:24:18 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1197,6 +1197,10 @@ cmdloop()
 	    shutdown_file(fd);
 	}
 
+#if NEEDS_PROXY
+	/* this doesn't properly work with the prot layer; perhaps do
+           it with a read callback in the prot layer? */
+
 	prot_flush(proxyd_out);
 	do {
 	    now = time(NULL);
@@ -1227,6 +1231,7 @@ cmdloop()
 	    FD_SET(0, &rfds);
 	} while ((mark != IDLE_TIMEOUT + 1) &&
 		 (select(1, &rfds, NULL, NULL, &tv) == 0));
+#endif
 	
 	/* Parse tag */
 	c = getword(&tag);
@@ -2309,8 +2314,8 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 #if NEEDS_PROXY
 	/* this is the hard case; we have to fetch the messages and append
 	   them to the other mailbox */
-	prot_printf(proxyd_out, "%s NO i don't like you\r\n");
 #endif
+	prot_printf(proxyd_out, "%s NO i don't like you\r\n");
     }
 }    
 
