@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.2 2001/08/01 15:32:50 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.3 2001/08/01 16:21:27 ken3 Exp $
  */
 #include <config.h>
 
@@ -130,7 +130,7 @@ static struct mailbox mboxstruct;
 
 static mailbox_decideproc_t expungedeleted;
 
-static void cmd_apop(char *user, char *digest);
+static void cmd_apop(char *response);
 static int apop_enabled(void);
 static char popd_apop_chal[300]; /* timestamp (44) + config_servername (256) */
 
@@ -555,26 +555,8 @@ static void cmdloop(void)
 		else cmd_pass(arg);
 	    }
 	    else if (!strcmp(inputbuf, "apop") && apop_enabled()) {
-		char *user = NULL, *digest = NULL;
-
-		/* Parse out username and digest.
-		 *
-		 * Per RFC 1939, response must be "<user> <digest>", where
-		 * <digest> is a 16-octet value which is sent in hexadecimal
-		 * format, using lower-case ASCII characters.
-		 */
-		if (arg) {
-		    user = arg;
-		    arg = strrchr(arg, ' ');
-		}
 		if (!arg) prot_printf(popd_out, "-ERR Missing argument\r\n");
-		else if (strspn(arg + 1, "0123456789abcdef") != 32)
-		    prot_printf(popd_out, "-ERR Invalid digest string\r\n");
-		else {
-		    *arg++ = '\0';
-		    digest = arg;
-		    cmd_apop(user, digest);
-		}
+		else cmd_apop(arg);
 	    }
 	    else if (!strcmp(inputbuf, "auth")) {
 		cmd_auth(arg);
@@ -866,16 +848,17 @@ static int apop_enabled(void)
     return *popd_apop_chal;
 }
 
-static void cmd_apop(char *user, char *digest)
+static void cmd_apop(char *response)
 {
     int fd;
     struct protstream *shutdown_in;
     char buf[1024];
     char *p;
     char shutdownfilename[1024];
-    char *reply = 0;
+    int sasl_result;
+    char *canon_user;
 
-    assert((user != NULL) && (digest != NULL));
+    assert(response != NULL);
 
     if (popd_userid) {
 	prot_printf(popd_out, "-ERR Must give PASS command\r\n");
@@ -894,31 +877,46 @@ static void cmd_apop(char *user, char *digest)
 	prot_flush(popd_out);
 	shut_down(0);
     }
-    else if (!(p = auth_canonifyid(user,0)) ||
-	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
-	prot_printf(popd_out, "-ERR Invalid user\r\n");
-	syslog(LOG_NOTICE,
-	       "badlogin: %s APOP %s invalid user",
-	       popd_clienthost, beautify_string(user));
-	return;
-    }
-    /* XXX FIXME: This is broken, checkapop needs the entire response! */
-    else if ((sasl_checkapop(popd_saslconn,
+
+    sasl_result = sasl_checkapop(popd_saslconn,
 			     popd_apop_chal,
 			     strlen(popd_apop_chal),
-			     digest,
-			     strlen(digest)))!=SASL_OK) { 
-	syslog(LOG_NOTICE, "badlogin: %s APOP %s %s",
-	       popd_clienthost, p, sasl_errdetail(popd_saslconn));
-	sleep(3);
-	prot_printf(popd_out, "-ERR Invalid login\r\n");
+			     response,
+			     strlen(response));
+
+    /* failed authentication */
+    if (sasl_result != SASL_OK)
+    {
+	sleep(3);      
+		
+	prot_printf(popd_out, "-ERR authenticating: %s\r\n",
+		    sasl_errstring(sasl_result, NULL, NULL));
+
+	syslog(LOG_NOTICE, "badlogin: %s %s %s",
+	       popd_clienthost, authtype,
+	       sasl_errstring(sasl_result, NULL, NULL));
+	
 	return;
     }
-    else {
-	popd_userid = xstrdup(p);
-	syslog(LOG_NOTICE, "login: %s %s APOP %s",
-	       popd_clienthost, popd_userid, reply ? reply : "");
+
+    /* successful authentication */
+
+    /* get the userid from SASL --- already canonicalized from
+     * mysasl_authproc()
+     */
+    sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
+			       (const void **) &canon_user);
+    popd_userid = xstrdup(canon_user);
+    if (sasl_result != SASL_OK) {
+	prot_printf(popd_out, 
+		    "-ERR weird SASL error %d getting SASL_USERNAME\r\n", 
+		    sasl_result);
+	return;
     }
+    
+    syslog(LOG_NOTICE, "login: %s %s APOP %s",
+	   popd_clienthost, popd_userid, "User logged in");
+
     openinbox();
 }
 #else
@@ -927,8 +925,7 @@ static int apop_enabled(void)
     return 0;
 }
 
-static void cmd_apop(char *user __attribute__((unused)),
-		     char *digest __attribute__((unused)))
+static void cmd_apop(char *response __attribute__((unused)))
 {
     fatal("cmd_apop() called, but no sasl_checkapop()", EC_SOFTWARE);
 }
