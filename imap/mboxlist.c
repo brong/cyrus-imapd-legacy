@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.24 1999/10/20 18:20:58 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.25 1999/10/20 20:36:07 leg Exp $
  */
 
 #include <stdio.h>
@@ -637,7 +637,6 @@ int checkacl;
     DB_TXNMGR *txnp = dbenv.tx_info;
     DBT key, data;
     DBC *cursor=NULL;
-    int havewritelock;
 
     /* restart transaction place */
     if (0) {
@@ -649,15 +648,11 @@ int checkacl;
 	}
     }
 
-    havewritelock=0;
-
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
 	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", strerror(r));
 	return IMAP_IOERROR;
     }
-
-
 
     /* Check for request to delete a user:
        user.<x> with no dots after it */
@@ -672,7 +667,6 @@ int checkacl;
 	if (!isadmin) { r = IMAP_PERMISSION_DENIED; goto done; }
 
 	r = mboxlist_lookup_writelock(name, &path, &acl, tid);
-	havewritelock=1;
 	if (r) {
 	  goto done;
 	}
@@ -699,10 +693,8 @@ int checkacl;
 	}
     }
 
-    if (havewritelock==1)
-      r = mboxlist_lookup(name, &path, &acl, tid);
-    else
-      r = mboxlist_lookup_writelock(name, &path, &acl, tid);
+    /* if we already have the writelock, this doesn't hurt */
+    r = mboxlist_lookup_writelock(name, &path, &acl, tid);
 
     if (r!=0) {
       goto done;
