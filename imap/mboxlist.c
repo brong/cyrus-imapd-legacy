@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.147.2.4.2.6 2001/07/12 00:43:00 ken3 Exp $
+ * $Id: mboxlist.c,v 1.147.2.4.2.7 2001/07/29 00:28:36 ken3 Exp $
  */
 
 #include <config.h>
@@ -1377,8 +1377,12 @@ static int find_cb(void *rockp,
 	
 	matchlen = glob_test(g, namebuf+rock->inboxoffset,
 			     keylen-rock->inboxoffset, &minmatch);
-	if (matchlen == -1) break;
-	
+
+	if (matchlen == -1) {
+	    r = 0;
+	    break;
+	}
+
 	switch (r) {
 	case 0:
 	    /* found the entry; output it */
