@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.15 2002/09/05 17:19:57 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.16 2003/01/08 18:22:32 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,7 +55,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-/*#define DUMPCODE 1  */
+#define DUMPCODE 0  
+#define VERBOSE 1
 
 #if DUMPCODE
 void dump(bytecode_info_t *d);
@@ -208,19 +209,17 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 {
     if(!retval) return -1;
     switch(t->type) {
-	case STRUE:
+    case STRUE:
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = BC_TRUE;
 	    retval->curlen++;
-	    return codep;
-
-	case SFALSE:
+	    break;
+    case SFALSE:
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = BC_FALSE;
 	    retval->curlen++;
-	    return codep;
-
-        case NOT:
+	    break;
+    case NOT:
         {
 	    int safe_codep;
 	
@@ -233,37 +232,37 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 	    
 	    codep = bc_test_generate(codep, retval, t->u.t);
 	    retval->data[safe_codep].jump = codep;
-	    return codep;
+	    break;
 	}
 
-	case SIZE:
+    case SIZE:
 	    if(!atleast(retval,codep+3)) return -1;
 	    retval->data[codep++].op = BC_SIZE;
 	    retval->data[codep++].value = (t->u.sz.t == OVER
 					   ? B_OVER : B_UNDER);
 	    retval->data[codep++].value = t->u.sz.n;
 	    retval->curlen+=3;
-	    return codep;
+	    break;
 
-	case EXISTS:
+    case EXISTS:
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = BC_EXISTS;
 	    retval->curlen++;
-	    return bc_stringlist_generate(codep, retval, t->u.sl);
-
-	case ANYOF:
+	    codep= bc_stringlist_generate(codep, retval, t->u.sl);
+	    break;
+    case ANYOF:
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = BC_ANYOF;
 	    retval->curlen++;
-	    return bc_testlist_generate(codep, retval, t->u.tl);
-
-	case ALLOF:
+	    codep=bc_testlist_generate(codep, retval, t->u.tl);
+	    break;
+    case ALLOF:
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = BC_ALLOF;
 	    retval->curlen++;
-	    return bc_testlist_generate(codep, retval, t->u.tl);
-
-        case HEADER:
+	    codep= bc_testlist_generate(codep, retval, t->u.tl);
+	    break;
+    case HEADER:
 	    /* FIXME: not done */
 	    /* header, comparitor type, headers, patterns */
 	    if(!atleast(retval,codep+2)) return -1;
@@ -298,10 +297,10 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 
 	    retval->curlen+=3;	    
 	    codep = bc_stringlist_generate(codep, retval, t->u.h.sl);
-	    return bc_stringlist_generate(codep, retval, t->u.h.pl);	    
-
-        case ADDRESS:
-        case ENVELOPE:
+	    codep=bc_stringlist_generate(codep, retval, t->u.h.pl);
+	    break;
+    case ADDRESS:
+    case ENVELOPE:
 	    /* FIXME: not done */
 	    /* header, comparitor type, headers, patterns */
 	    if(!atleast(retval,codep+3)) return -1;
@@ -321,7 +320,7 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 #endif
 	        case COUNT:
 		   retval->data[codep++].value = B_COUNT; break;
-	        case VALUE:
+	    case VALUE:
 		   retval->data[codep++].value = B_VALUE;break;
 	        default:
 		    return -1;
@@ -357,11 +356,13 @@ static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t)
 	    }
 	    retval->curlen+=4;	    
 	    codep = bc_stringlist_generate(codep, retval, t->u.h.sl);
-	    return bc_stringlist_generate(codep, retval, t->u.h.pl);
-	    
-	default:
-	    return -1;
+	    codep = bc_stringlist_generate(codep, retval, t->u.h.pl);
+	    break;
+    default:
+      return -1;
+      
     }
+    return codep;
 }
 
 /* generate a not-quite-flattened bytecode */
@@ -431,7 +432,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->data[codep++].str = c->u.d.pattern;
 
 	    retval->data[codep++].len = strlen(c->u.d.priority);
-	    retval->data[codep++].str = c->u.d.priority;
+	    retval->data[codep++].str = (c->u.d.priority);
 
 	    retval->curlen+=6;
 	    break;
@@ -541,6 +542,10 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    if(codep == -1) return -1;
 	    break;
       case IF:
+	{int jumpVal; /* do not remove this variable. 
+			 the function test_generate might change the value 
+			 of retval and this makes things unhappy*/
+
 	    /* IF (test / codep else / codep done) */
 	    baseloc = codep;
 
@@ -558,46 +563,57 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	        retval->curlen+=3;
 	    	retval->data[codep++].op = B_IF;
 	    }
-
+	    
 	    /* offset to if code */
-	    retval->data[codep].jump = 
-		bc_test_generate(jumploc,retval,c->u.i.t);
-	    codep++;
-	    if(retval->data[codep-1].jump == -1) return -1;
-
+	    
+	    jumpVal= bc_test_generate(jumploc,retval,c->u.i.t);
+	    if(jumpVal == -1) 
+	      {return -1;}
+	    else 
+	      {retval->data[codep].jump = jumpVal;
+	      codep++;}
+	    
 	    /* find then code and offset to else code,
 	     * we want to write this code starting at the offset we
 	     * just found */
-	    retval->data[codep].jump =
-		bc_generate(retval->data[codep-1].jump, retval,
-			    c->u.i.do_then);
-	    if(retval->data[codep].jump == -1) return -1;
-
+	
+	    jumpVal= bc_generate(jumpVal,retval, c->u.i.do_then);
+	    if(jumpVal == -1) 
+	      {return -1;}
+	    else 
+	      {retval->data[codep].jump = jumpVal;
+	      }
+	    
 	    /* write else code */
 	    if(c->u.i.do_else) {
+	      codep++;
+	      
+	      jumpVal= bc_generate(jumpVal,retval, c->u.i.do_else);
+	      if(jumpVal == -1) 
+		{return -1;}
+	      else 
+		{retval->data[codep].jump = jumpVal;
 		codep++;
-		retval->data[codep].jump =
-		    bc_generate(retval->data[codep-1].jump, retval,
-				c->u.i.do_else);
-		codep++;
-		if(retval->data[codep-1].jump == -1) return -1;
-
-		/* Update code pointer to end of else code */
-		codep = retval->data[codep-1].jump;
+		}
+	      
+	      
+	      /* Update code pointer to end of else code */
+	      codep = retval->data[codep-1].jump;
 	    } else {
-		/* Update code pointer to end of then code */
-		codep = retval->data[codep].jump;
+	      /* Update code pointer to end of then code */
+	      codep = retval->data[codep].jump;
 	    }
-
+	    
 	    break;
+	}
       default:
-	    return -1;
-      }
-
+	return -1;
+    }
+      
       /* generate from next command */
       c = c->next;
     } while(c);
-
+    
     return codep;
 }
 
@@ -1534,10 +1550,12 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	break;
       }
     default:
+#if VERBOSE
       printf("WERT, can't evaluate if statement.");
+#endif     
+      exit(1);
     }
   *ip=i;
-  printf("%d", i);
   return res;
 }
 
@@ -1555,23 +1573,26 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
     bytecode_t *bc = (bytecode_t *)bc_in;
     
     if(!bc) return SIEVE_FAIL;
-
-    /* printf("version number %d\n",bc[0].op); */
-
+#if VERBOSE
+    printf("version number %d\n",bc[0].op); 
+#endif
     for(ip=1; ip<=bc_len; ) { 
       if (needtojump)
 	{if (jumpat==ip)
-	  {/*printf("jumping from %d to %d\n",ip, jumpto);*/
+	  {
+#if VERBOSE
+	    printf("jumping from %d to %d\n",ip, jumpto);
+#endif
 	    ip=jumpto;
-	  jumpto=-1;
-	  jumpat=-1;
-	  needtojump=0;
+	    jumpto=-1;
+	    jumpat=-1;
+	    needtojump=0;
 	  }
 	else if (ip>jumpat)
 	  {res= -1; /*if this ever happens there is somethign wrong with teh bytecode*/
 	  *errmsg ="Bytecode Error in IF statement."; 
 	  return res;
-	  /*printf("ip=%d jumpat=%d WERT, this should never have happened\n", ip, jumpat);*/}
+	  }
 	}
       switch(bc[ip].op) {
       case B_STOP:/*0*/
@@ -1746,7 +1767,6 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  
 	  res = do_denotify(notify_list, comp, pattern, comprock, priority);
 	  
-	  printf("(de)notify not yet implemented??");
 	  break;
 	}
       case B_VACATION:
@@ -1802,15 +1822,15 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  }
       default:
 	
-	 if(errmsg) *errmsg = "Invalid sieve bytecode";
-	 return SIEVE_FAIL;
+	if(errmsg) *errmsg = "Invalid sieve bytecode";
+	return SIEVE_FAIL;
       }
-
+      
       if (res) /* we've either encountered an error or a stop */
 	break;
-    }
-    return res;
-
+	}
+      return res;
+      
 }
 
 #if DUMPCODE

@@ -32,7 +32,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 /* yes, lots of these are superfluous, it's for clarity */
-typedef union bytecode 
+typedef union 
 {
     int op; /* OPTYPE */
     int value;
