@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: master.c,v 1.42 2001/07/16 18:23:11 leg Exp $ */
+/* $Id: master.c,v 1.42.2.1 2001/10/01 19:55:00 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -69,6 +69,7 @@
 #include <arpa/inet.h>
 #include <sysexits.h>
 #include <errno.h>
+#include <limits.h>
 
 #ifndef INADDR_NONE
 #define INADDR_NONE 0xffffffff
@@ -147,15 +148,29 @@ int become_cyrus(void)
 {
     struct passwd *p;
     static int uid = 0;
+    static int gid = 0;
 
     if (uid) return setuid(uid);
 
     p = getpwnam(CYRUS_USER);
     if (p == NULL) {
-	syslog(LOG_ERR, "no entry in /etc/passwd for %s", CYRUS_USER);
+	syslog(LOG_ERR, "no entry in /etc/passwd for user %s", CYRUS_USER);
 	return -1;
     }
     uid = p->pw_uid;
+    gid = p->pw_gid;
+
+    if (initgroups(CYRUS_USER, gid)) {
+        syslog(LOG_ERR, "unable to initialize groups for user %s: %s",
+	       CYRUS_USER, strerror(errno));
+        return -1;
+    }
+
+    if (setgid(gid)) {
+        syslog(LOG_ERR, "unable to set group id to %d for user %s: %s",
+              gid, CYRUS_USER, strerror(errno));
+        return -1;
+    }
 
     return setuid(uid);
 }
@@ -417,7 +432,7 @@ void run_startup(char **cmd)
 	syslog(LOG_DEBUG, "about to exec %s", path);
 	execv(path, cmd);
 	syslog(LOG_ERR, "can't exec %s for startup: %m", path);
-	exit(1);
+	exit(EX_OSERR);
 	
     default:
 	if (waitpid(pid, &status, 0) < 0) {
@@ -448,7 +463,8 @@ void spawn_service(struct service *s)
 
     switch (p = fork()) {
     case -1:
-	syslog(LOG_ERR, "can't fork process to run checkpoint");
+	syslog(LOG_ERR, "can't fork process to run service %s: %m",
+	       Services[i].name);
 	break;
 
     case 0:
@@ -497,6 +513,7 @@ void spawn_service(struct service *s)
 
 	execv(path, s->exec);
 	syslog(LOG_ERR, "couldn't exec %s: %m", path);
+	exit(EX_OSERR);
 
     default:			/* parent */
 	s->ready_workers++;
@@ -571,7 +588,7 @@ void spawn_schedule(time_t now)
 	    syslog(LOG_DEBUG, "about to exec %s", path);
 	    execv(path, a->exec);
 	    syslog(LOG_ERR, "can't exec %s on schedule: %m", path);
-	    exit(1);
+	    exit(EX_OSERR);
 	    break;
 	    
 	default:
@@ -739,6 +756,10 @@ void process_msg(struct service *s, int msg)
     case MASTER_SERVICE_UNAVAILABLE:
 	s->ready_workers--;
 	break;
+
+    case MASTER_SERVICE_CONNECTION:
+	s->nconnections++;
+	break;
 	
     default:
 	syslog(LOG_ERR, "unrecognized message for service '%s': %x", 
@@ -825,7 +846,10 @@ void add_service(const char *name, struct entry *e, void *rock)
 	Services[i].exec = tokenize(cmd);
 	if (!Services[i].exec) fatal("out of memory", EX_UNAVAILABLE);
 	Services[i].desired_workers = prefork;
-	Services[i].max_workers = (unsigned int) atoi(max);
+	Services[i].max_workers = atoi(max);
+	if (Services[i].max_workers == -1) {
+	    Services[i].max_workers = INT_MAX;
+	}
 
 	if (verbose > 2)
 	    syslog(LOG_DEBUG, "reconfig: service %s (%s, %s/%s, %d, %d)",
@@ -856,10 +880,14 @@ void add_service(const char *name, struct entry *e, void *rock)
 	Services[nservices].ready_workers = 0;
 	Services[nservices].desired_workers = prefork;
 	Services[nservices].max_workers = atoi(max);
+	if (Services[i].max_workers == -1) {
+	    Services[i].max_workers = INT_MAX;
+	}
 	memset(Services[nservices].stat, 0, sizeof(Services[nservices].stat));
 
 	Services[nservices].nforks = 0;
 	Services[nservices].nactive = 0;
+	Services[nservices].nconnections = 0;
 
 	if (verbose > 2)
 	    syslog(LOG_DEBUG, "add: service %s (%s, %s/%s, %d, %d)",
@@ -915,7 +943,7 @@ void limit_fds(rlim_t x)
     rl.rlim_cur = x;
     rl.rlim_max = x;
     if (setrlimit(RLIMIT_NUMFDS, &rl) < 0) {
-	syslog(LOG_ERR, "unable to change limit of file descriptors available");
+	syslog(LOG_ERR, "setrlimit: Unable to set file descriptors limit to %d: %m", x);
     }
 
     if (verbose > 1) {
@@ -956,6 +984,7 @@ void reread_conf(void)
 	    Services[i].desired_workers = 0;
 	    Services[i].nforks = 0;
 	    Services[i].nactive = 0;
+	    Services[i].nconnections = 0;
 
 	    /* close all listeners */
 	    if (Services[i].socket > 0) close(Services[i].socket);
@@ -1131,7 +1160,8 @@ int main(int argc, char **argv, char **envp)
 	    if (x > maxfd) maxfd = x;
 
 	    /* connections */
-	    if (y > 0 && Services[i].ready_workers == 0) {
+	    if (y > 0 && Services[i].ready_workers == 0 &&
+		Services[i].nactive < Services[i].max_workers) {
 		if (verbose > 2)
 		    syslog(LOG_DEBUG, "listening for connections for %s", 
 			   Services[i].name);
@@ -1180,18 +1210,19 @@ int main(int argc, char **argv, char **envp)
 	    }
 
 	    if (Services[i].nactive < Services[i].max_workers) {
+		/* bring us up to desired_workers */
 		for (j = Services[i].ready_workers;
 		     j < Services[i].desired_workers; 
 		     j++)
 		{
 		    spawn_service(&Services[i]);
 		}
-	    }
 
-	    if (Services[i].ready_workers == 0 && 
-		FD_ISSET(y, &rfds)) {
-		/* huh, someone wants to talk to us */
-		spawn_service(&Services[i]);
+		if (Services[i].ready_workers == 0 && 
+		    FD_ISSET(y, &rfds)) {
+		    /* huh, someone wants to talk to us */
+		    spawn_service(&Services[i]);
+		}
 	    }
 	}
     }

@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.5 2001/08/09 19:19:52 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.6 2001/10/01 19:54:50 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -78,6 +78,7 @@
 #include "auth.h"
 #include "map.h"
 #include "imapconf.h"
+#include "tls.h"
 #include "version.h"
 #include "charset.h"
 #include "imparse.h"
@@ -93,7 +94,6 @@
 #include "imapurl.h"
 #include "pushstats.h"
 #include "telemetry.h"
-#include "namespace.h"
 
 /* PROXY STUFF */
 /* we want a list of our outgoing connections here and which one we're
@@ -146,8 +146,6 @@ extern char *optarg;
 extern int errno;
 
 #ifdef HAVE_SSL
-#include "tls.h"
-
 static SSL *tls_conn;
 #endif /* HAVE_SSL */
 
@@ -223,7 +221,6 @@ char idle_passthrough(char* tag, int idle_period, struct buf *arg);
 char idle_simulate(char* tag, int idle_period, struct buf *arg);
 
 void cmd_starttls(char *tag, int imaps);
-int starttls_enabled(void);
 
 #ifdef ENABLE_X_NETSCAPE_HACK
 void cmd_netscape (char* tag);
@@ -1077,7 +1074,7 @@ int service_main(int argc, char **argv, char **envp)
 
 	case 's': /* imaps (do starttls right away) */
 	    imaps = 1;
-	    if (!starttls_enabled()) {
+	    if (!tls_enabled("imap")) {
 		syslog(LOG_ERR, "imaps: required OpenSSL options not present");
 		fatal("imaps: required OpenSSL options not present",
 		      EC_CONFIG);
@@ -1227,6 +1224,9 @@ void shut_down(int code)
 
     mboxlist_close();
     mboxlist_done();
+#ifdef HAVE_SSL
+    tls_shutdown_serverengine();
+#endif
     prot_flush(proxyd_out);
     exit(code);
 }
@@ -1680,7 +1680,7 @@ cmdloop()
 	    
 	case 'S':
 	    if (!strcmp(cmd.s, "Starttls")) {
-		if (!starttls_enabled()) {
+		if (!tls_enabled("imap")) {
 		    /* we don't support starttls */
 		    goto badcmd;
 		}
@@ -1926,7 +1926,7 @@ void cmd_login(char *tag, char *user, char *passwd)
     char buf[MAX_MAILBOX_PATH];
     char *p;
     int plaintextloginpause;
-    int result;
+    int result, r;
 
     canon_user = auth_canonifyid(user, 0);
 
@@ -2022,9 +2022,9 @@ void cmd_login(char *tag, char *user, char *passwd)
     telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
 
     /* Set namespace */
-    if (!namespace_init(&proxyd_namespace, proxyd_userisadmin)) {
-	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
-	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    if ((r = mboxname_init_namespace(&proxyd_namespace, proxyd_userisadmin)) != 0) {
+	syslog(LOG_ERR, error_message(result));
+	fatal(error_message(result), EC_CONFIG);
     }
 
     return;
@@ -2046,6 +2046,8 @@ void cmd_authenticate(char *tag, char *authtype)
 
     const int *ssfp;
     char *ssfmsg=NULL;
+
+    int r;
 
     sasl_result = sasl_server_start(proxyd_saslconn, authtype,
 				    NULL, 0,
@@ -2139,9 +2141,9 @@ void cmd_authenticate(char *tag, char *authtype)
     telemetry_log(proxyd_userid, proxyd_in, proxyd_out);
 
     /* Set namespace */
-    if (!namespace_init(&proxyd_namespace, proxyd_userisadmin)) {
-	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
-	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    if ((r = mboxname_init_namespace(&proxyd_namespace, proxyd_userisadmin)) != 0) {
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     return;
@@ -2646,7 +2648,7 @@ void cmd_capability(char *tag)
 #endif
     prot_printf(proxyd_out, " MAILBOX-REFERRALS");
 
-    if (starttls_enabled())
+    if (tls_enabled("imap"))
 	prot_printf(proxyd_out, " STARTTLS");
     if (!proxyd_starttls_done && !config_getswitch("allowplaintext", 1))
 	prot_printf(proxyd_out, " LOGINDISABLED");	
@@ -2683,7 +2685,7 @@ void cmd_append(char *tag, char *name)
 
     /* we want to pipeline this whole command through to the server that
        has name on it, and then do a noop on our current server */
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) {
@@ -2739,7 +2741,7 @@ void cmd_select(char *tag, char *cmd, char *name)
 	r = IMAP_MAILBOX_NONEXISTENT;
     }
     else {
-	r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+	r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						    proxyd_userid, mailboxname);
     }
 
@@ -2977,7 +2979,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 
     assert(backend_current != NULL);
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
     if (!r) s = proxyd_findserver(server);
@@ -3347,7 +3349,7 @@ void cmd_create(char *tag, char *name, char *server)
     }
 
     if (!r)
-	r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+	r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						    proxyd_userid, mailboxname);
 
     if (!r && !server) {
@@ -3422,7 +3424,7 @@ void cmd_delete(char *tag, char *name)
     struct backend *s = NULL;
     char mailboxname[MAX_MAILBOX_NAME+1];
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
@@ -3479,9 +3481,9 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 	return;
     }
 
-    r = (*proxyd_namespace.mboxname_tointernal)(oldname, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, oldname,
 						proxyd_userid, oldmailboxname);
-    if (!r) (*proxyd_namespace.mboxname_tointernal)(newname, &proxyd_namespace,
+    if (!r) (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, newname,
 						    proxyd_userid, newmailboxname);
     if (!r) r = mlookup(oldmailboxname, &server, &acl, NULL);
     if (!r) {
@@ -3556,25 +3558,19 @@ void cmd_find(char *tag, char *namespace, char *pattern)
 	if (*p == '%') *p = '?';
     }
 
-    /* Translate pattern */
-    hier_sep_tointernal(pattern, &proxyd_namespace);
+    /* Translate any separators in pattern */
+    mboxname_hiersep_tointernal(&proxyd_namespace, pattern);
 
     if (!strcmp(namespace, "mailboxes")) {
-	if (proxyd_namespace.isalt)
-	    mboxlist_findsub_alt(pattern, &proxyd_namespace,
-				 proxyd_userisadmin, proxyd_userid,
-				 proxyd_authstate, mailboxdata, NULL, 1);
-	else
-	    mboxlist_findsub(pattern, proxyd_userisadmin, proxyd_userid,
-			     proxyd_authstate, mailboxdata, NULL, 1);
+	(*proxyd_namespace.mboxlist_findsub)(&proxyd_namespace, pattern,
+					     proxyd_userisadmin, proxyd_userid,
+					     proxyd_authstate, mailboxdata,
+					     NULL, 1);
     } else if (!strcmp(namespace, "all.mailboxes")) {
-	if (proxyd_namespace.isalt)
-	    mboxlist_findall_alt(pattern, &proxyd_namespace,
-				 proxyd_userisadmin, proxyd_userid,
-				 proxyd_authstate, mailboxdata, NULL);
-	else
-	    mboxlist_findall(pattern, proxyd_userisadmin, proxyd_userid,
-			     proxyd_authstate, mailboxdata, NULL);
+	(*proxyd_namespace.mboxlist_findall)(&proxyd_namespace, pattern,
+					     proxyd_userisadmin, proxyd_userid,
+					     proxyd_authstate, mailboxdata,
+					     NULL);
     } else if (!strcmp(namespace, "bboards")
 	       || !strcmp(namespace, "all.bboards")) {
 	;
@@ -3662,16 +3658,12 @@ void cmd_list(char *tag, int subscribed, char *reference, char *pattern)
 	    pattern = buf;
 	}
 
-	/* Translate pattern */
-	hier_sep_tointernal(pattern, &proxyd_namespace);
+	/* Translate any separators in pattern */
+	mboxname_hiersep_tointernal(&proxyd_namespace, pattern);
 
-	if (proxyd_namespace.isalt)
-	    mboxlist_findall_alt(pattern, &proxyd_namespace,
-				 proxyd_userisadmin, proxyd_userid,
-				 proxyd_authstate, listdata, NULL);
-	else
-	    mboxlist_findall(pattern, proxyd_userisadmin, proxyd_userid,
-			     proxyd_authstate, listdata, NULL);
+	(*proxyd_namespace.mboxlist_findall)(&proxyd_namespace, pattern,
+					     proxyd_userisadmin, proxyd_userid,
+					     proxyd_authstate, listdata, NULL);
 	listdata((char *)0, 0, 0, 0);
 
 	if (buf) free(buf);
@@ -3735,7 +3727,7 @@ void cmd_getacl(char *tag, char *name, int oldform)
     char *acl;
     char *rights, *nextid;
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) r = mlookup(mailboxname, (char **)0, &acl, NULL);
@@ -3812,7 +3804,7 @@ void cmd_listrights(char *tag, char *name, char *identifier)
     char *acl;
     char *rightsdesc;
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) {
@@ -3870,7 +3862,7 @@ void cmd_myrights(char *tag, char *name, int oldform)
     char *acl;
     char str[ACL_MAXSTR];
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) {
@@ -3915,7 +3907,7 @@ void cmd_setacl(char *tag, char *name, char *identifier, char *rights)
     struct backend *s = NULL;
     char *acl = NULL;
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
     if (!r) r = mlookup(mailboxname, &server, &acl, NULL);
     if (!r) {
@@ -3994,7 +3986,7 @@ void cmd_getquotaroot(char *tag, char *name)
     int r;
     struct backend *s = NULL;
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
     if (!r) s = proxyd_findserver(server);
@@ -4031,13 +4023,6 @@ void cmd_setquota(char *tag, char *quotaroot)
  * layer that was passed on the command line is disgarded. this should
  * be fixed.
  */
-int starttls_enabled(void)
-{
-    if (config_getstring("tls_cert_file", NULL) == NULL) return 0;
-    if (config_getstring("tls_key_file", NULL) == NULL) return 0;
-    return 1;
-}
-
 /* imaps - weather this is an imaps transaction or not */
 void cmd_starttls(char *tag, int imaps)
 {
@@ -4056,22 +4041,14 @@ void cmd_starttls(char *tag, int imaps)
 	return;
     }
 
-    result=tls_init_serverengine(5,        /* depth to verify */
+    result=tls_init_serverengine("imap",
+				 5,        /* depth to verify */
 				 !imaps,   /* can client auth? */
 				 0,        /* require client to auth? */
-				 !imaps,   /* TLSv1 only? */
-				 (char *)config_getstring("tls_ca_file", ""),
-				 (char *)config_getstring("tls_ca_path", ""),
-				 (char *)config_getstring("tls_cert_file", ""),
-				 (char *)config_getstring("tls_key_file", ""));
+				 !imaps);  /* TLSv1 only? */
 
     if (result == -1) {
-	syslog(LOG_ERR, "error initializing TLS: "
-	       "[CA_file: %s] [CA_path: %s] [cert_file: %s] [key_file: %s]",
-	       (char *) config_getstring("tls_ca_file", ""),
-	       (char *) config_getstring("tls_ca_path", ""),
-	       (char *) config_getstring("tls_cert_file", ""),
-	       (char *) config_getstring("tls_key_file", ""));
+	syslog(LOG_ERR, "error initializing TLS");
 
 	if (imaps == 0)
 	    prot_printf(proxyd_out, "%s NO %s\r\n", 
@@ -4122,11 +4099,6 @@ void cmd_starttls(char *tag, int imaps)
     proxyd_starttls_done = 1;
 }
 #else
-int starttls_enabled(void)
-{
-    return 0;
-}
-
 void cmd_starttls(char *tag, int imaps)
 {
     fatal("cmd_starttls() executed, but starttls isn't implemented!",
@@ -4145,7 +4117,7 @@ void cmd_status(char *tag, char *name)
     char *server;
     struct backend *s = NULL;
 
-    r = (*proxyd_namespace.mboxname_tointernal)(name, &proxyd_namespace,
+    r = (*proxyd_namespace.mboxname_tointernal)(&proxyd_namespace, name,
 						proxyd_userid, mailboxname);
 
     if (!r) r = mlookup(mailboxname, &server, NULL, NULL);
@@ -4249,8 +4221,10 @@ void cmd_namespace(tag)
     int sawone[3] = {0, 0, 0};
     char* pattern = xstrdup("%");
 
-    /* now find all the exciting toplevel namespaces */
-    mboxlist_findall(pattern, proxyd_userisadmin, proxyd_userid,
+    /* now find all the exciting toplevel namespaces -
+     * we're using internal names here
+     */
+    mboxlist_findall(NULL, pattern, proxyd_userisadmin, proxyd_userid,
 		     proxyd_authstate, namespacedata, (void*) sawone);
     free(pattern);
 
@@ -4346,7 +4320,7 @@ void* rock;
 {
     char mboxname[MAX_MAILBOX_PATH+1];
 
-    (*proxyd_namespace.mboxname_toexternal)(name, &proxyd_namespace,
+    (*proxyd_namespace.mboxname_toexternal)(&proxyd_namespace, name,
 					    proxyd_userid, mboxname);
     prot_printf(proxyd_out, "* MAILBOX %s\r\n", mboxname);
     return 0;
@@ -4386,7 +4360,7 @@ int maycreate;
 		    lastnamenoinferiors ? "\\Noinferiors" :
 		    lastnamehassub ? "\\HasChildren" : "\\HasNoChildren",
 		    proxyd_namespace.hier_sep);
-	(*proxyd_namespace.mboxname_toexternal)(lastname, &proxyd_namespace,
+	(*proxyd_namespace.mboxname_toexternal)(&proxyd_namespace, lastname,
 						proxyd_userid, mboxname);
 	printstring(mboxname);
 	prot_printf(proxyd_out, "\r\n");
@@ -4427,7 +4401,7 @@ int maycreate;
     prot_printf(proxyd_out, "* %s (%s) \"%c\" ", cmd,
 		c ? "\\HasChildren \\Noselect" : "",
 		proxyd_namespace.hier_sep);
-    (*proxyd_namespace.mboxname_toexternal)(name, &proxyd_namespace,
+    (*proxyd_namespace.mboxname_toexternal)(&proxyd_namespace, name,
 					    proxyd_userid, mboxname);
     printstring(mboxname);
     prot_printf(proxyd_out, "\r\n");

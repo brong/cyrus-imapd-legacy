@@ -1,5 +1,5 @@
 /* mailbox.c -- Mailbox manipulation routines
- $Id: mailbox.c,v 1.114 2001/05/29 19:24:01 leg Exp $
+ $Id: mailbox.c,v 1.114.2.1 2001/10/01 19:54:47 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -2300,19 +2300,17 @@ void mailbox_hash_mbox(char *buf,
 		       const char *root,
 		       const char *name)
 {
-    char *idx, *p;
-    char c;
+    const char *idx;
+    char c, *p;
 
     if (config_hashimapspool) {
 	idx = strchr(name, '.');
 	if (idx == NULL) {
-	    c = *name;
+	    idx = name;
 	} else {
-	    c = *(idx + 1);
+	    idx++;
 	}
-	c = (char) tolower((int) c);
-	if (!islower((int) c))
-	    c = 'q';
+	c = (char) dir_hash_c(idx);
 	
 	sprintf(buf, "%s/%c/%s", root, c, name);
     } else {
@@ -2330,18 +2328,16 @@ void mailbox_hash_mbox(char *buf,
    our human time is worth more than efficiency */
 void mailbox_hash_quota(char *buf, const char *qr)
 {
-    char *idx;
+    const char *idx;
     char c;
 
     idx = strchr(qr, '.'); /* skip past user. */
     if (idx == NULL) {
-	c = *qr;
+	idx = qr;
     } else {
-	c = *(idx + 1);
+	idx++;
     }
-    c = (char) tolower((int) c);
-    if (!islower((int) c))
-	c = 'q';
+    c = (char) dir_hash_c(idx);
 
     sprintf(buf, "%s%s%c/%s", config_dir, FNAME_QUOTADIR, c, qr);
 }

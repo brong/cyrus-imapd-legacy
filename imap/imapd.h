@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.46.4.1 2001/08/07 21:51:19 rjs3 Exp $
+ * $Id: imapd.h,v 1.46.4.2 2001/10/01 19:54:44 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -47,7 +47,6 @@
 #include "prot.h"
 #include "charset.h"
 #include "mailbox.h"
-#include "namespace.h"
 
 /* Userid client has logged in as */
 extern char *imapd_userid;
@@ -243,13 +242,13 @@ extern void index_fetch(struct mailbox *mailbox, char *sequence,
 extern int index_store(struct mailbox *mailbox, char *sequence,
 			  int usinguid, struct storeargs *storeargs,
 			  char **flag, int nflags);
-extern void index_search(struct mailbox *mailbox,
-			    struct searchargs *searchargs, int usinguid);
+extern int index_search(struct mailbox *mailbox,
+			struct searchargs *searchargs, int usinguid);
 extern int find_thread_algorithm(char *arg);
-extern void index_sort(struct mailbox *mailbox, struct sortcrit *sortcrit,
-		       struct searchargs *searchargs, int usinguid);
-extern void index_thread(struct mailbox *mailbox, int algorithm,
-			 struct searchargs *searchargs, int usinguid);
+extern int index_sort(struct mailbox *mailbox, struct sortcrit *sortcrit,
+		      struct searchargs *searchargs, int usinguid);
+extern int index_thread(struct mailbox *mailbox, int algorithm,
+			struct searchargs *searchargs, int usinguid);
 extern int index_copy(struct mailbox *mailbox, char *sequence,
 			 int usinguid, char *name, char **copyuidp);
 extern int index_status(struct mailbox *mailbox, char *name,
@@ -261,7 +260,13 @@ extern int index_checkstate(struct mailbox *mailbox, unsigned indexdate,
 			       unsigned seendate);
 
 extern int index_finduid(unsigned uid);
+extern int index_getuid(unsigned msgno);
 
 extern mailbox_decideproc_t index_expungeuidlist;
+
+/* See lib/charset.h for the definition of receiver. */
+extern void index_getsearchtext(struct mailbox* mailbox,
+                                index_search_text_receiver_t receiver,
+                                void* rock);
 
 #endif /* INCLUDED_IMAPD_H */

@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.148.2.1 2001/08/07 21:51:20 rjs3 Exp $
+ * $Id: mboxlist.c,v 1.148.2.2 2001/10/01 19:54:47 rjs3 Exp $
  */
 
 #include <config.h>
@@ -81,7 +81,6 @@ extern int errno;
 #include "acap.h"
 #include "acapmbox.h"
 #include "mboxname.h"
-#include "namespace.h"
 
 #include "mboxlist.h"
 
@@ -1426,7 +1425,8 @@ static int find_cb(void *rockp,
  * case it wants some persistant storage or extra data.
  */
 /* Find all mailboxes that match 'pattern'. */
-int mboxlist_findall(char *pattern, int isadmin, char *userid, 
+int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
+		     char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock)
 {
     struct find_rock cbrock;
@@ -1538,8 +1538,8 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
     return r;
 }
 
-int mboxlist_findall_alt(char *pattern, struct namespace *namespace,
-			 int isadmin, char *userid,
+int mboxlist_findall_alt(struct namespace *namespace,
+			 char *pattern, int isadmin, char *userid,
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock)
 {
@@ -1770,8 +1770,8 @@ int mboxlist_setquota(const char *root, int newquota)
     
     /* top level mailbox */
     mboxlist_changequota(quota.root, 0, 0);
-    /* submailboxes */
-    mboxlist_findall(pattern, 1, 0, 0, mboxlist_changequota, NULL);
+    /* submailboxes - we're using internal names here */
+    mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_changequota, NULL);
     
     r = mailbox_write_quota(&quota);
     if (quota.fd != -1) {
@@ -1961,10 +1961,7 @@ char *mboxlist_hash_usersubs(const char *userid)
 			  strlen(userid) + sizeof(FNAME_SUBSSUFFIX) + 10);
     char c;
 
-    c = (char) tolower((int) *userid);
-    if (!islower((int) c)) {
-	c = 'q';
-    }
+    c = (char) dir_hash_c(userid);
     sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
 	    FNAME_SUBSSUFFIX);
 
@@ -1983,17 +1980,6 @@ mboxlist_opensubs(const char *userid,
 {
     int r = 0;
     char *subsfname;
-    char inboxname[MAX_MAILBOX_NAME+1];
-
-    /* Users without INBOXes may not keep subscriptions */
-    if (strchr(userid, '.') || strlen(userid) + 6 > MAX_MAILBOX_NAME) {
-	return IMAP_PERMISSION_DENIED;
-    }
-    strcpy(inboxname, "user.");
-    strcat(inboxname, userid);
-    if (mboxlist_lookup(inboxname, NULL, NULL, NULL) != 0) {
-	return IMAP_PERMISSION_DENIED;
-    }
 
     /* Build subscription list filename */
     subsfname = mboxlist_hash_usersubs(userid);
@@ -2020,7 +2006,8 @@ static void mboxlist_closesubs(struct db *sub)
  * is the user's login id.  For each matching mailbox, calls
  * 'proc' with the name of the mailbox.
  */
-int mboxlist_findsub(char *pattern, int isadmin, char *userid, 
+int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
+		     char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, 
 		     int (*proc)(), void *rock, int force)
 {
@@ -2142,8 +2129,8 @@ int mboxlist_findsub(char *pattern, int isadmin, char *userid,
     return r;
 }
 
-int mboxlist_findsub_alt(char *pattern, struct namespace *namespace,
-			 int isadmin, char *userid, 
+int mboxlist_findsub_alt(struct namespace *namespace,
+			 char *pattern, int isadmin, char *userid, 
 			 struct auth_state *auth_state, 
 			 int (*proc)(), void *rock, int force)
 {

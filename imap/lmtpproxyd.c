@@ -1,6 +1,6 @@
 /* lmtpproxyd.c -- Program to sieve and proxy mail delivery
  *
- * $Id: lmtpproxyd.c,v 1.15.6.3 2001/08/14 17:45:43 rjs3 Exp $
+ * $Id: lmtpproxyd.c,v 1.15.6.4 2001/10/01 19:54:46 rjs3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -41,8 +41,6 @@
  *
  *
  */
-
-/*static char _rcsid[] = "$Id: lmtpproxyd.c,v 1.15.6.3 2001/08/14 17:45:43 rjs3 Exp $";*/
 
 #include <config.h>
 
@@ -95,7 +93,6 @@
 #include "append.h"
 #include "mboxlist.h"
 #include "notify.h"
-#include "namespace.h"
 
 #include "lmtpengine.h"
 #include "lmtpstats.h"
@@ -310,7 +307,7 @@ int service_init(int argc, char **argv, char **envp)
 
     /* initialize duplicate delivery database */
     dupelim = 1;
-    if (duplicate_init(0) != 0) {
+    if (duplicate_init(NULL, 0) != 0) {
 	syslog(LOG_ERR, 
 	       "deliver: unable to init duplicate delivery database\n");
 	dupelim = 0;
@@ -321,9 +318,9 @@ int service_init(int argc, char **argv, char **envp)
     mboxlist_open(NULL);
 
     /* Set namespace */
-    if (!namespace_init(&lmtpd_namespace, 0)) {
-	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
-	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    if ((r = mboxname_init_namespace(&lmtpd_namespace, 0)) != 0) {
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     /* create connection to the SNMP listener, if available. */
@@ -371,6 +368,8 @@ int service_main(int argc, char **argv, char **envp)
 /* called if 'service_init()' was called but not 'service_main()' */
 void service_abort(void)
 {
+    duplicate_done();
+
     mboxlist_close();
     mboxlist_done();
 }
@@ -1440,8 +1439,13 @@ void fatal(const char* s, int code)
 void shut_down(int code) __attribute__((noreturn));
 void shut_down(int code)
 {
+    duplicate_done();
+
     mboxlist_close();
     mboxlist_done();
+#ifdef HAVE_SSL
+    tls_shutdown_serverengine();
+#endif
     prot_flush(deliver_out);
 
     snmp_increment(ACTIVE_CONNECTIONS, -1);
@@ -1459,8 +1463,8 @@ static int verify_user(const char *user)
     if (!strncmp(user, BB, sl) && user[sl] == '+') {
 	/* special shared folder address */
 	strcpy(buf, user + sl + 1);
-	/* Translate user */
-	hier_sep_tointernal(buf, &lmtpd_namespace);
+	/* Translate any separators in user */
+	mboxname_hiersep_tointernal(&lmtpd_namespace, buf);
 	r = mboxlist_lookup(buf, NULL, NULL, NULL);
     } else {			/* ordinary user */
 	int l;
@@ -1477,8 +1481,8 @@ static int verify_user(const char *user)
 	    strcpy(buf, "user.");
 	    strncat(buf, user, l);
 	    buf[l + 5] = '\0';
-	    /* Translate user */
-	    hier_sep_tointernal(buf+5, &lmtpd_namespace);
+	    /* Translate any separators in user */
+	    mboxname_hiersep_tointernal(&lmtpd_namespace, buf+5);
 	    r = mboxlist_lookup(buf, NULL, NULL, NULL);
 	}
     }

@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62.6.5 2001/08/03 15:04:24 rjs3 Exp $
+ * $Id: imtest.c,v 1.62.6.6 2001/10/01 19:54:54 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -300,6 +300,20 @@ static void apps_ssl_info_callback(SSL * s, int where, int ret)
 }
 
 
+/*
+ * Seed the random number generator.
+ */
+static int tls_rand_init(void)
+{
+#ifdef EGD_SOCKET
+    return (RAND_egd(EGD_SOCKET));
+#else
+    /* otherwise let OpenSSL do it internally */
+    return 0;
+#endif
+}
+
+
 char *var_tls_CAfile="";
 char *var_tls_CApath="";
  /*
@@ -323,6 +337,10 @@ static int tls_init_clientengine(int verifydepth, char *var_tls_cert_file, char 
 
     SSL_load_error_strings();
     SSLeay_add_ssl_algorithms();
+    if (tls_rand_init() == -1) {
+	printf("TLS engine: cannot seed PRNG\n");
+	return IMTEST_FAIL;
+    }
 
     tls_ctx = SSL_CTX_new(TLSv1_client_method());
     if (tls_ctx == NULL) {

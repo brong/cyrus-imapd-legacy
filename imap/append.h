@@ -1,5 +1,5 @@
 /* append.h -- Description of messages to be copied 
- $Id: append.h,v 1.19 2000/08/04 18:38:27 leg Exp $ 
+ $Id: append.h,v 1.19.8.1 2001/10/01 19:54:42 rjs3 Exp $ 
 
  * Copyright (c) 1998, 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -92,6 +92,10 @@ struct appendstate {
 /* add helper function to determine uid range appended? */
 
 struct stagemsg;
+
+extern int append_check(const char *name, int format, 
+			struct auth_state *auth_state,
+			long aclcheck, long quotacheck);
 
 /* appendstate must be allocated by client */
 extern int append_setup(struct appendstate *mailbox, const char *name,

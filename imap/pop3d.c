@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.12 2001/08/07 21:51:22 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.13 2001/10/01 19:54:49 rjs3 Exp $
  */
 #include <config.h>
 
@@ -57,6 +57,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <syslog.h>
+#include <com_err.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -82,7 +83,6 @@
 #include "mboxlist.h"
 #include "idle.h"
 #include "telemetry.h"
-#include "namespace.h"
 
 #ifdef HAVE_KRB
 /* kerberos des is purported to conflict with OpenSSL DES */
@@ -143,7 +143,6 @@ static void cmd_capa();
 static void cmd_pass();
 static void cmd_user();
 static void cmd_starttls(int pop3s);
-static int starttls_enabled(void);
 static void blat(int msg,int lines);
 int openinbox(void);
 static void cmdloop(void);
@@ -191,13 +190,8 @@ static void popd_reset(void)
     popd_starttls_done = 0;
 #ifdef HAVE_SSL
     if (tls_conn) {
-#ifdef TLS_REUSE
-	/* make sure we re-use sessions */
-	SSL_set_shutdown(tls_conn,SSL_SENT_SHUTDOWN|SSL_RECEIVED_SHUTDOWN);
-#else
-	tls_free(&tls_conn);
+	tls_reset_servertls(&tls_conn);
 	tls_conn = NULL;
-#endif
     }
 #endif
 
@@ -243,9 +237,9 @@ int service_init(int argc, char **argv, char **envp)
     idle_enabled();
 
     /* Set namespace */
-    if (!namespace_init(&popd_namespace, 0)) {
-	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
-	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    if ((r = mboxname_init_namespace(&popd_namespace, 0)) != 0) {
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     while ((opt = getopt(argc, argv, "C:sk")) != EOF) {
@@ -255,7 +249,7 @@ int service_init(int argc, char **argv, char **envp)
 
 	case 's': /* pop3s (do starttls right away) */
 	    pop3s = 1;
-	    if (!starttls_enabled()) {
+	    if (!tls_enabled("pop3")) {
 		syslog(LOG_ERR, "pop3s: required OpenSSL options not present");
 		fatal("pop3s: required OpenSSL options not present",
 		      EC_CONFIG);
@@ -386,6 +380,9 @@ void shut_down(int code)
     if (popd_mailbox) {
 	mailbox_close(popd_mailbox);
     }
+#ifdef HAVE_SSL
+    tls_shutdown_serverengine();
+#endif
     prot_flush(popd_out);
     exit(code);
 }
@@ -529,18 +526,16 @@ static void cmdloop(void)
 		cmd_capa();
 	    }
 	}
-	else if (!strcmp(inputbuf, "stls") && starttls_enabled()) {
+	else if (!strcmp(inputbuf, "stls") && tls_enabled("pop3")) {
 	    if (arg) {
 		prot_printf(popd_out,
-			    "-ERR STLS doesn't take any arguements\r\n");
+			    "-ERR STLS doesn't take any arguments\r\n");
 	    } else {
 		cmd_starttls(0);
 	    }
 	}
 	else if (!popd_mailbox) {
-	    if (!strcmp(inputbuf, "user") &&
-		(kflag || popd_starttls_done ||
-		 config_getswitch("allowplaintext", 1))) {
+	    if (!strcmp(inputbuf, "user")) {
 		if (!arg) {
 		    prot_printf(popd_out, "-ERR Missing argument\r\n");
 		}
@@ -548,9 +543,7 @@ static void cmdloop(void)
 		    cmd_user(arg);
 		}
 	    }
-	    else if (!strcmp(inputbuf, "pass") &&
-		     (kflag || popd_starttls_done ||
-		      config_getswitch("allowplaintext", 1))) {
+	    else if (!strcmp(inputbuf, "pass")) {
 		if (!arg) prot_printf(popd_out, "-ERR Missing argument\r\n");
 		else cmd_pass(arg);
 	    }
@@ -721,13 +714,6 @@ static void cmdloop(void)
 }
 
 #ifdef HAVE_SSL
-static int starttls_enabled(void)
-{
-    if (config_getstring("tls_cert_file", NULL) == NULL) return 0;
-    if (config_getstring("tls_key_file", NULL) == NULL) return 0;
-    return 1;
-}
-
 static void cmd_starttls(int pop3s)
 {
     int result;
@@ -745,22 +731,14 @@ static void cmd_starttls(int pop3s)
 	return;
     }
 
-    result=tls_init_serverengine(5,        /* depth to verify */
+    result=tls_init_serverengine("pop3",
+				 5,        /* depth to verify */
 				 !pop3s,   /* can client auth? */
 				 0,        /* require client to auth? */
-				 !pop3s,   /* TLS only? */
-				 (char *)config_getstring("tls_ca_file", ""),
-				 (char *)config_getstring("tls_ca_path", ""),
-				 (char *)config_getstring("tls_cert_file", ""),
-				 (char *)config_getstring("tls_key_file", ""));
+				 !pop3s);  /* TLS only? */
 
     if (result == -1) {
-	syslog(LOG_ERR, "[pop3d] error initializing TLS: "
-	       "[CA_file: %s] [CA_path: %s] [cert_file: %s] [key_file: %s]",
-	       (char *) config_getstring("tls_ca_file", ""),
-	       (char *) config_getstring("tls_ca_path", ""),
-	       (char *) config_getstring("tls_cert_file", ""),
-	       (char *) config_getstring("tls_key_file", ""));
+	syslog(LOG_ERR, "[pop3d] error initializing TLS");
 
 	if (pop3s == 0)
 	    prot_printf(popd_out, "-ERR %s\r\n", "Error initializing TLS");
@@ -809,11 +787,6 @@ static void cmd_starttls(int pop3s)
     popd_starttls_done = 1;
 }
 #else
-static int starttls_enabled(void)
-{
-    return 0;
-}
-
 static void cmd_starttls(int pop3s __attribute__((unused)))
 {
     fatal("cmd_starttls() called, but no OpenSSL", EC_SOFTWARE);
@@ -911,6 +884,14 @@ char *user;
     char buf[1024];
     char *p;
     char shutdownfilename[1024];
+
+    /* possibly disallow USER */
+    if (!(kflag || popd_starttls_done ||
+	  config_getswitch("allowplaintext", 1))) {
+	prot_printf(popd_out,
+		    "-ERR USER command only available under a layer\r\n");
+	return;
+    }
 
     if (popd_userid) {
 	prot_printf(popd_out, "-ERR Must give PASS command\r\n");
@@ -1037,7 +1018,7 @@ cmd_capa()
 	prot_write(popd_out, mechlist, strlen(mechlist));
     }
 
-    if (starttls_enabled()) {
+    if (tls_enabled("pop3")) {
 	prot_printf(popd_out, "STLS\r\n");
     }
     if (expire < 0) {
@@ -1208,8 +1189,8 @@ int openinbox(void)
 
     popd_login_time = time(0);
 
-    /* Translate userid */
-    hier_sep_tointernal(popd_userid, &popd_namespace);
+    /* Translate any separators in userid */
+    mboxname_hiersep_tointernal(&popd_namespace, popd_userid);
 
     strcpy(inboxname, "user.");
     strcat(inboxname, popd_userid);

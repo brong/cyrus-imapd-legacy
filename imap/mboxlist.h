@@ -39,9 +39,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
-
  * 
- * $Id: mboxlist.h,v 1.13.2.1 2001/08/07 21:51:21 rjs3 Exp $
+ * $Id: mboxlist.h,v 1.13.2.2 2001/10/01 19:54:49 rjs3 Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -51,8 +50,7 @@
 #include "mailbox.h"
 #include "auth.h"
 #include "acap.h"
-#include "mailbox.h"
-#include "namespace.h"
+#include "mboxname.h"
 
 /* --- cut here --- */
 #define CONFIG_DB_SUBS (&cyrusdb_flat)
@@ -114,18 +112,28 @@ int mboxlist_setacl(char *name, char *identifier, char *rights, int isadmin,
 		    char *userid, struct auth_state *auth_state);
 
 /* Find all mailboxes that match 'pattern'. */
-int mboxlist_findall(char *pattern, int isadmin, char *userid, 
+int mboxlist_findall(struct namespace *namespace,
+		     char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock);
-int mboxlist_findall_alt(char *pattern, struct namespace *namespace,
+int mboxlist_findall_std(struct namespace *namespace,
+			 char *pattern, int isadmin, char *userid, 
+			 struct auth_state *auth_state, int (*proc)(),
+			 void *rock);
+int mboxlist_findall_alt(struct namespace *namespace, char *pattern,
 			 int isadmin, char *userid, 
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock);
 
 /* Find subscribed mailboxes that match 'pattern'. */
-int mboxlist_findsub(char *pattern, int isadmin, char *userid, 
+int mboxlist_findsub(struct namespace *namespace,
+		     char *pattern, int isadmin, char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock,
 		     int force);
-int mboxlist_findsub_alt(char *pattern, struct namespace *namespace,
+int mboxlist_findsub_std(struct namespace *namespace,
+			 char *pattern, int isadmin, char *userid, 
+			 struct auth_state *auth_state, int (*proc)(),
+			 void *rock, int force);
+int mboxlist_findsub_alt(struct namespace *namespace, char *pattern,
 			 int isadmin, char *userid, 
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock, int force);

@@ -1,5 +1,5 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.137.2.1 2001/08/07 21:51:17 rjs3 Exp $
+# $Id: Makefile.in,v 1.137.2.2 2001/10/01 19:54:41 rjs3 Exp $
 # 
 # @configure_input@
 #
@@ -102,10 +102,12 @@ cyrus_prefix = @cyrus_prefix@
 LOBJS= append.o mailbox.o mboxlist.o mboxname.o message.o \
 	config.o imap_err.o proc.o setproctitle.o convert_code.o \
 	duplicate.o saslclient.o acapmbox.o signals.o \
-	base64.o imapparse.o telemetry.o user.o namespace.o \
-	$(SEEN) $(NOTIFY) $(IDLE)
+	search_engines.o squat.o squat_internal.o \
+	base64.o imapparse.o telemetry.o user.o $(SEEN) $(NOTIFY) $(IDLE)
 
 IMAPDOBJS=pushstats.o imapd.o index.o tls.o
+
+LMTPOBJS=lmtpstats.o lmtpengine.o tls.o
 
 SERVICE=../master/service.o
 SERVICETHREAD=../master/service-thread.o
@@ -113,7 +115,8 @@ SERVICETHREAD=../master/service-thread.o
 PROGS = imapd lmtpd pop3d \
 	fud reconstruct quota \
 	mbpath ipurge cyrdump deliver \
-	ctl_mboxlist ctl_deliver @IMAP_PROGS@
+	ctl_mboxlist ctl_deliver ctl_cyrusdb squatter \
+	@IMAP_PROGS@
 
 BUILTSOURCES = imap_err.h pushstats.h lmtpstats.h
 
@@ -135,6 +138,10 @@ idled: idled.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o idled \
 	 idled.o libimap.a $(DEPLIBS) $(LIBS)
 
+tls_prune: tls_prune.o tls.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o \
+	 $@ tls_prune.o tls.o libimap.a $(DEPLIBS) $(LIBS)
+
 acappush: acappush.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o acappush \
 	 acappush.o libimap.a $(DEPLIBS) $(LIBS)
@@ -149,26 +156,26 @@ collectnews: collectnews.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o collectnews collectnews.o libimap.a $(DEPLIBS) \
 	 $(LIBS)
 
-deliver: deliver.o lmtpstats.o lmtpengine.o libimap.a $(DEPLIBS)
-	$(CC) $(LDFLAGS) -o deliver deliver.o lmtpengine.o lmtpstats.o \
+deliver: deliver.o $(LMTPOBJS) libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o deliver deliver.o $(LMTPOBJS) \
 	libimap.a $(DEPLIBS) $(LIBS)
 
-lmtpd: lmtpstats.o lmtpd.o lmtpengine.o \
+lmtpd: lmtpd.o $(LMTPOBJS) \
 	libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o lmtpd \
-	 $(SERVICE) lmtpd.o lmtpengine.o lmtpstats.o \
+	 $(SERVICE) lmtpd.o $(LMTPOBJS) \
 	 libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-lmtpd.pure: lmtpstats.o lmtpd.o lmtpengine.o \
+lmtpd.pure: lmtpd.o $(LMTPOBJS) \
 	libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(SERVICE)
 	$(PURIFY) $(PUREOPT) $(CC) $(LDFLAGS) -o lmtpd.pure \
-	 $(SERVICE) lmtpd.o lmtpengine.o lmtpstats.o \
+	 $(SERVICE) lmtpd.o $(LMTPDOBJS) \
 	 libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-lmtpproxyd: lmtpstats.o lmtpproxyd.o lmtpengine.o \
+lmtpproxyd: lmtpproxyd.o $(LMTPOBJS) \
 	libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o lmtpproxyd \
-	 $(SERVICE) lmtpproxyd.o lmtpengine.o lmtpstats.o \
+	 $(SERVICE) lmtpproxyd.o $(LMTPOBJS) \
 	 libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
 ctl_deliver: ctl_deliver.o libimap.a $(DEPLIBS)
@@ -178,6 +185,10 @@ ctl_deliver: ctl_deliver.o libimap.a $(DEPLIBS)
 ctl_mboxlist: ctl_mboxlist.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
 	 $@ ctl_mboxlist.o libimap.a $(DEPLIBS) $(LIBS)
+
+ctl_cyrusdb: ctl_cyrusdb.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o \
+	 $@ ctl_cyrusdb.o libimap.a $(DEPLIBS) $(LIBS)
 
 imapd: $(IMAPDOBJS) libimap.a $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o imapd \
@@ -223,6 +234,9 @@ populateacap: populateacap.o libimap.a $(DEPLIBS)
 
 fud: fud.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o fud fud.o libimap.a $(DEPLIBS) $(LIBS)
+
+squatter: squatter.o index.o squat_build.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o squatter squatter.o index.o squat_build.o libimap.a $(DEPLIBS) $(LIBS)
 
 mbpath: mbpath.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o mbpath mbpath.o libimap.a $(DEPLIBS) $(LIBS)

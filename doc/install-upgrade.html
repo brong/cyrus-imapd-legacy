@@ -1,4 +1,4 @@
-<!-- $Id: install-upgrade.html,v 1.15 2001/01/31 19:15:00 leg Exp $ -->
+<!-- $Id: install-upgrade.html,v 1.15.6.1 2001/10/01 19:54:35 rjs3 Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Upgrading From Previous Versions
@@ -8,6 +8,41 @@
 </h1>
 
 <body>
+
+<h3>Upgrading from 2.0.16 or earlier</h3>
+
+<ul>
+<li> If you use <tt>timsieved</tt> to manage Sieve scripts, and have
+enabled the alternate namespace and/or the Unix hierarchy separator,
+run the script "<tt>tools/translatesieve</tt>".  This script will
+translate the folder names in <tt>fileinto</tt> actions.
+
+<li> If you have enabled the improved directory hashing scheme, run
+the script "<tt>tools/rehash full</tt>".  This script will rehash your
+existing directories.
+
+<li> The hashed deliver databases (used for duplicate delivery suppression
+and Sieve) have been merged into a single <tt>deliver.db</tt> database.
+You can remove the entire <tt>/var/imap/deliverdb</tt> directory structure 
+after shutting down the server.
+
+<li>All of the Cyrus databases have been unified under a single DB3 
+environment.  A new <tt>ctl_cyrusdb</tt> tool is now used for database 
+recovery and checkpointing instead of <tt>ctl_mboxlist</tt> and 
+<tt>ctl_deliver</tt>.  You should replace the appropriate <tt>START</tt> and 
+<tt>EVENTS</tt> entries in <tt>cyrus.conf</tt> with those in the 
+sample configurations in the <tt>master/conf</tt> directory.
+
+<li> Cyrus now caches SSL/TLS sessions in an external database. If you
+have support for SSL/TLS, and haven't disabled session caching (see
+<tt>imapd.conf(5)</tt>), you should add a line like the following to
+the <tt>EVENTS</tt> section of <tt>cyrus.conf</tt> to prune expired
+sessions from the database:
+
+<pre><kdb>   # this is only necessary if caching TLS sessions
+   tlsprune      cmd="tls_prune" period=1440
+</kbd></pre>
+</ul>
 
 <h3>Upgrading from 2.0.6, 2.0.7, 2.0.8, or 2.0.9 or earlier</h3>
 
@@ -166,7 +201,7 @@ worry about it.)
 </ul>
 
 <P><HR><P>
-last modified: $Date: 2001/01/31 19:15:00 $
+last modified: $Date: 2001/10/01 19:54:35 $
 </BODY></HTML>
 
 

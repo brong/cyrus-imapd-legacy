@@ -95,7 +95,7 @@ static int init(const char *dbdir, int myflags)
     int r, do_retry = 1;
     int flags = 0;
 
-    assert(!dbinit);
+    if (dbinit++) return 0;
 
     if (myflags & CYRUSDB_RECOVER) {
       flags |= DB_RECOVER | DB_CREATE;
@@ -185,7 +185,7 @@ static int done(void)
 {
     int r;
 
-    assert(dbinit);
+    if (--dbinit) return 0;
 
     r = dbenv->close(dbenv, 0);
     dbinit = 0;
@@ -528,7 +528,7 @@ static int foreach(struct db *mydb,
 static int mystore(struct db *mydb, 
 		   const char *key, int keylen,
 		   const char *data, int datalen,
-		   struct txn **mytid, int flag)
+		   struct txn **mytid, int putflags, int txnflags)
 {
     int r = 0;
     DBT k, d;
@@ -561,7 +561,7 @@ static int mystore(struct db *mydb,
 	if (CONFIG_DB_VERBOSE)
 	    syslog(LOG_DEBUG, "mystore: starting txn %lu", txn_id(tid));
     }
-    r = db->put(db, tid, &k, &d, 0);
+    r = db->put(db, tid, &k, &d, putflags);
     if (!mytid) {
 	/* finish once-off txn */
 	if (r) {
@@ -582,7 +582,7 @@ static int mystore(struct db *mydb,
 	} else {
 	    if (CONFIG_DB_VERBOSE)
 		syslog(LOG_DEBUG, "mystore: committing txn %lu", txn_id(tid));
-	    r = txn_commit(tid, 0);
+	    r = txn_commit(tid, txnflags);
 	}
     }
 
@@ -608,7 +608,7 @@ static int create(struct db *db,
 		  const char *data, int datalen,
 		  struct txn **tid)
 {
-    return mystore(db, key, keylen, data, datalen, tid, DB_NOOVERWRITE);
+    return mystore(db, key, keylen, data, datalen, tid, DB_NOOVERWRITE, 0);
 }
 
 static int store(struct db *db, 
@@ -616,12 +616,29 @@ static int store(struct db *db,
 		 const char *data, int datalen,
 		 struct txn **tid)
 {
-    return mystore(db, key, keylen, data, datalen, tid, 0);
+    return mystore(db, key, keylen, data, datalen, tid, 0, 0);
 }
 
-static int delete(struct db *mydb, 
-		  const char *key, int keylen,
-		  struct txn **mytid)
+static int create_nosync(struct db *db, 
+			 const char *key, int keylen,
+			 const char *data, int datalen,
+			 struct txn **tid)
+{
+    return mystore(db, key, keylen, data, datalen, tid, DB_NOOVERWRITE,
+		   DB_TXN_NOSYNC);
+}
+
+static int store_nosync(struct db *db, 
+			const char *key, int keylen,
+			const char *data, int datalen,
+			struct txn **tid)
+{
+    return mystore(db, key, keylen, data, datalen, tid, 0, DB_TXN_NOSYNC);
+}
+
+static int mydelete(struct db *mydb, 
+		    const char *key, int keylen,
+		    struct txn **mytid, int txnflags)
 {
     int r = 0;
     DBT k;
@@ -644,12 +661,12 @@ static int delete(struct db *mydb,
 	/* start txn for the write */
 	r = txn_begin(dbenv, NULL, &tid, 0);
 	if (r != 0) {
-	    syslog(LOG_ERR, "DBERROR: delete: error beginning txn: %s", 
+	    syslog(LOG_ERR, "DBERROR: mydelete: error beginning txn: %s", 
 		   db_strerror(r));
 	    return CYRUSDB_IOERROR;
 	}
 	if (CONFIG_DB_VERBOSE)
-	    syslog(LOG_DEBUG, "delete: starting txn %lu", txn_id(tid));
+	    syslog(LOG_DEBUG, "mydelete: starting txn %lu", txn_id(tid));
     }
     r = db->del(db, tid, &k, 0);
     if (!mytid) {
@@ -657,10 +674,10 @@ static int delete(struct db *mydb,
 	if (r) {
 	    int r2;
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "delete: aborting txn %lu", txn_id(tid));
+		syslog(LOG_DEBUG, "mydelete: aborting txn %lu", txn_id(tid));
 	    r2 = txn_abort(tid);
 	    if (r2) {
-		syslog(LOG_ERR, "DBERROR: delete: error aborting txn: %s", 
+		syslog(LOG_ERR, "DBERROR: mydelete: error aborting txn: %s", 
 		       db_strerror(r));
 		return CYRUSDB_IOERROR;
 	    }
@@ -670,8 +687,8 @@ static int delete(struct db *mydb,
 	    }
 	} else {
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "delete: committing txn %lu", txn_id(tid));
-	    r = txn_commit(tid, 0);
+		syslog(LOG_DEBUG, "mydelete: committing txn %lu", txn_id(tid));
+	    r = txn_commit(tid, txnflags);
 	}
     }
 
@@ -683,7 +700,7 @@ static int delete(struct db *mydb,
 	if (r == DB_LOCK_DEADLOCK) {
 	    r = CYRUSDB_AGAIN;
 	} else {
-	    syslog(LOG_ERR, "DBERROR: delete: error deleting %s: %s",
+	    syslog(LOG_ERR, "DBERROR: mydelete: error deleting %s: %s",
 		   key, db_strerror(r));
 	    r = CYRUSDB_IOERROR;
 	}
@@ -692,7 +709,21 @@ static int delete(struct db *mydb,
     return r;
 }
 
-static int commit_txn(struct db *db, struct txn *tid)
+static int delete(struct db *db, 
+		  const char *key, int keylen,
+		  struct txn **tid)
+{
+    return mydelete(db, key, keylen, tid, 0);
+}
+
+static int delete_nosync(struct db *db, 
+			 const char *key, int keylen,
+			 struct txn **tid)
+{
+    return mydelete(db, key, keylen, tid, DB_TXN_NOSYNC);
+}
+
+static int mycommit(struct db *db, struct txn *tid, int txnflags)
 {
     int r;
     DB_TXN *t = (DB_TXN *) tid;
@@ -700,23 +731,33 @@ static int commit_txn(struct db *db, struct txn *tid)
     assert(dbinit && tid);
 
     if (CONFIG_DB_VERBOSE)
-	syslog(LOG_DEBUG, "commit_txn: committing txn %lu", txn_id(t));
-    r = txn_commit(t, 0);
+	syslog(LOG_DEBUG, "mycommit: committing txn %lu", txn_id(t));
+    r = txn_commit(t, txnflags);
     switch (r) {
     case 0:
 	break;
     case EINVAL:
-	syslog(LOG_WARNING, "commit_txn: tried to commit an already aborted transaction");
+	syslog(LOG_WARNING, "mycommit: tried to commit an already aborted transaction");
 	r = CYRUSDB_IOERROR;
 	break;
     default:
-	syslog(LOG_ERR, "DBERROR: commit_txn  failed on commit: %s",
+	syslog(LOG_ERR, "DBERROR: mycommit  failed on commit: %s",
 	       db_strerror(r));
 	r = CYRUSDB_IOERROR;
 	break;
     }
 
     return r;
+}
+
+static int commit_txn(struct db *db, struct txn *tid)
+{
+    return mycommit(db, tid, 0);
+}
+
+static int commit_nosync(struct db *db, struct txn *tid)
+{
+    return mycommit(db, tid, DB_TXN_NOSYNC);
 }
 
 static int abort_txn(struct db *db, struct txn *tid)
@@ -756,5 +797,27 @@ struct cyrusdb_backend cyrusdb_db3 =
     &delete,
 
     &commit_txn,
+    &abort_txn
+};
+
+struct cyrusdb_backend cyrusdb_db3_nosync = 
+{
+    "db3-nosync",		/* name */
+
+    &init,
+    &done,
+    &sync,
+
+    &open,
+    &close,
+
+    &fetch,
+    &fetchlock,
+    &foreach,
+    &create_nosync,
+    &store_nosync,
+    &delete_nosync,
+
+    &commit_nosync,
     &abort_txn
 };

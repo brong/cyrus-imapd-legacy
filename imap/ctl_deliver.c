@@ -1,5 +1,5 @@
 /* ctl_deliver.c -- Program to perform operations on duplicate delivery db
- $Id: ctl_deliver.c,v 1.9 2001/02/22 19:27:16 ken3 Exp $
+ $Id: ctl_deliver.c,v 1.9.6.1 2001/10/01 19:54:42 rjs3 Exp $
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -54,79 +54,13 @@
 #include <syslog.h>
 #include <com_err.h>
 #include <errno.h>
-#include <db.h>
 #include <time.h>
 
 #include "util.h"
 #include "imapconf.h"
-#include "mailbox.h"
 #include "exitcodes.h"
-#include "mboxlist.h"
 #include "duplicate.h"
 
-int
-dump_deliver(fname)
-     char *fname;
-{
-    DB *db;
-    DB_TXN *tid = NULL;
-    DBC *c;
-    int ret;
-    DBT key, data;
-    int count = 0, r;
-    time_t mark;
-    char *to;
-
-    memset(&key, 0, sizeof(key));
-    memset(&data, 0, sizeof(data));
-
-    ret = db_create(&db, duplicate_dbenv, 0);
-    if (ret != 0) {
-	fprintf(stderr, "Unable to open db file: %s\n", fname);
-	return -1;
-    }
-    ret = db->open(db, fname, NULL, DB_UNKNOWN, DB_RDONLY, 0664);
-    if (ret != 0) {
-	fprintf(stderr, "Unable to open db file: %s\n", fname);
-	return -1;
-    }
-
-    if ((r = db->cursor(db, tid, &c, 0)) != 0) {
-	fprintf(stderr, "DBERROR: error creating cursor: %s", strerror(r));
-	return -2;
-    }
-
-    r = c->c_get(c, &key, &data, DB_FIRST);
-    while (r == 0) {
-	count++;
-	(void)memcpy(&mark, data.data, sizeof(time_t));
-	to = ((char *)key.data + (strlen(key.data) + 1));
-	printf("id: %-40s\tto: %-20s\tat: %d\n", 
-	       (char *) key.data, to, (int) mark);
-	r = c->c_get(c, &key, &data, DB_NEXT);
-    }
-    if (r != DB_NOTFOUND) {
-	fprintf(stderr, "error detected looking up entry: %s\n", strerror(r));
-    }
-    printf("got %d entries\n", count);
-
-    switch (r = c->c_close(c)) {
-    case 0:
-	break;
-    default:
-	fprintf(stderr, "error closing cursor: %s\n", strerror(r));
-	break;
-    }
-    switch (r = db->close(db, 0)) {
-    case 0:
-	break;
-    default:
-	fprintf(stderr, "error closing database: %s\n", strerror(r));
-	break;
-    }
-
-    return 0;
-}
 
 void fatal(const char *message, int code)
 {
@@ -137,8 +71,8 @@ void fatal(const char *message, int code)
 void usage(void)
 {
     fprintf(stderr,
-	    "ctl_deliver [-C <altconfig>] -d -f <dbfile>\n"
-	    "ctl_deliver [-C <altconfig>] [-r] -E <days>\n");
+	    "ctl_deliver [-C <altconfig>] -d [-f <dbfile>]\n"
+	    "ctl_deliver [-C <altconfig>] -E <days>\n");
     exit(-1);
 }
 
@@ -170,14 +104,17 @@ main(argc, argv)
 	    break;
 
 	case 'r':
+	    /* deprecated, but we still support it */
+	    fprintf(stderr, "ctl_deliver -r is deprecated: "
+		    "use ctl_cyrusdb -r instead\b");
 	    flag |= DUPLICATE_RECOVER;
 	    if (op == NONE) op = RECOVER;
 	    break;
 
-	case 'f':
-	    if (alt_file == NULL) alt_file = optarg;
-	    else usage ();
-	    break;
+        case 'f':
+            if (alt_file == NULL) alt_file = optarg;
+            else usage ();
+            break;
 
 	case 'E':
 	    if (op == NONE || op == RECOVER) op = PRUNE;
@@ -193,9 +130,9 @@ main(argc, argv)
 
     config_init(alt_config, "ctl_deliver");
 
-    if (duplicate_init(flag) != 0) {
+    if (duplicate_init(alt_file, flag) != 0) {
 	fprintf(stderr, 
-		"deliver: unable to init duplicate delivery database\n");
+		"ctl_deliver: unable to init duplicate delivery database\n");
 	exit(1);
     }
     switch (op) {
@@ -204,13 +141,9 @@ main(argc, argv)
 	break;
 
     case DUMP:
-	if (alt_file == NULL) {
-	    usage();
-	} else {
-	    printf("it is NOW: %d\n", (int) time(NULL));
-  
-	    dump_deliver(alt_file);
-	}
+	printf("it is NOW: %d\n", (int) time(NULL));
+	printf("got %d entries\n", duplicate_dump(stdout));
+
 	r = 0;
 	break;
 
@@ -227,4 +160,4 @@ main(argc, argv)
     return r;
 }
 
-/* $Header: /mnt/data/cyrus/cvsroot/src/cyrus/imap/ctl_deliver.c,v 1.9 2001/02/22 19:27:16 ken3 Exp $ */
+/* $Header: /mnt/data/cyrus/cvsroot/src/cyrus/imap/ctl_deliver.c,v 1.9.6.1 2001/10/01 19:54:42 rjs3 Exp $ */

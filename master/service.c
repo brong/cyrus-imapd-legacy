@@ -39,7 +39,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: service.c,v 1.23.2.1 2001/08/07 21:51:27 rjs3 Exp $ */
+/* $Id: service.c,v 1.23.2.2 2001/10/01 19:55:01 rjs3 Exp $ */
+
 #include <config.h>
 
 #include <stdio.h>
@@ -281,10 +282,14 @@ int main(int argc, char **argv, char **envp)
 
 	if (fd > 2) close(fd);
 	
+	notify_master(STATUS_FD, MASTER_SERVICE_CONNECTION);
 	use_count++;
 	service_main(argc, argv, envp);
 	/* if we returned, we can service another client with this process */
-	if (use_count >= MAX_USE) break;
+
+	if (use_count >= MAX_USE) {
+	    break;
+	}
 
 	notify_master(STATUS_FD, MASTER_SERVICE_AVAILABLE);
     }

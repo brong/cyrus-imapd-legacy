@@ -1,6 +1,6 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.62.2.3 2001/08/07 21:51:19 rjs3 Exp $
+ * $Id: lmtpd.c,v 1.62.2.4 2001/10/01 19:54:46 rjs3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -80,7 +80,6 @@
 #include "util.h"
 #include "auth.h"
 #include "prot.h"
-#include "gmtoff.h"
 #include "imparse.h"
 #include "lock.h"
 #include "imapconf.h"
@@ -94,7 +93,7 @@
 #include "mboxlist.h"
 #include "notify.h"
 #include "idle.h"
-#include "namespace.h"
+#include "rfc822date.h"
 
 #include "lmtpengine.h"
 #include "lmtpstats.h"
@@ -136,7 +135,8 @@ int deliver_mailbox(struct protstream *msg,
 		    int acloverride);
 static int deliver(message_data_t *msgdata, char *authuser,
 		   struct auth_state *authstate);
-static int verify_user(const char *user);
+static int verify_user(const char *user, long quotacheck,
+		       struct auth_state *authstate);
 static char *generate_notify(message_data_t *m);
 
 void shut_down(int code);
@@ -304,7 +304,7 @@ int service_init(int argc, char **argv, char **envp)
 
     /* initialize duplicate delivery database */
     dupelim = 1;
-    if (duplicate_init(0) != 0) {
+    if (duplicate_init(NULL, 0) != 0) {
 	syslog(LOG_ERR, 
 	       "lmtpd: unable to init duplicate delivery database\n");
 	dupelim = 0;
@@ -318,9 +318,9 @@ int service_init(int argc, char **argv, char **envp)
     idle_enabled();
 
     /* Set namespace */
-    if (!namespace_init(&lmtpd_namespace, 0)) {
-	syslog(LOG_ERR, "invalid namespace prefix in configuration file");
-	fatal("invalid namespace prefix in configuration file", EC_CONFIG);
+    if ((r = mboxname_init_namespace(&lmtpd_namespace, 0)) != 0) {
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     /* create connection to the SNMP listener, if available. */
@@ -374,6 +374,8 @@ int service_main(int argc, char **argv, char **envp)
 /* called if 'service_init()' was called but not 'service_main()' */
 void service_abort(void)
 {
+    duplicate_done();
+
     mboxlist_close();
     mboxlist_done();
 }
@@ -448,11 +450,6 @@ int getenvelope(void *mc, const char *field, const char ***contents)
 #define SENDMAIL (config_getstring("sendmail", DEFAULT_SENDMAIL))
 #define POSTMASTER (config_getstring("postmaster", DEFAULT_POSTMASTER))
 
-static char *month[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
-static char *wday[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
-
 static int global_outgoing_count = 0;
 
 pid_t open_sendmail(const char *argv[], FILE **sm)
@@ -520,21 +517,20 @@ int send_rejection(const char *origid,
 		   struct protstream *file)
 {
     FILE *sm;
-    const char *smbuf[6];
+    const char *smbuf[10];
     char buf[8192], *namebuf;
     int i, sm_stat;
     time_t t;
-    struct tm *tm;
-    long gmtoff;
-    int gmtnegative = 0;
+    char datestr[80];
     pid_t sm_pid, p;
 
     smbuf[0] = "sendmail";
-    smbuf[1] = "-f";
-    smbuf[2] = "<>";
-    smbuf[3] = "--";
-    smbuf[4] = rejto;
-    smbuf[5] = NULL;
+    smbuf[1] = "-i";		/* ignore dots */
+    smbuf[2] = "-f";
+    smbuf[3] = "<>";
+    smbuf[4] = "--";
+    smbuf[5] = rejto;
+    smbuf[6] = NULL;
     sm_pid = open_sendmail(smbuf, &sm);
     if (sm == NULL) {
 	return -1;
@@ -549,18 +545,8 @@ int send_rejection(const char *origid,
     duplicate_mark(buf, strlen(buf), namebuf, strlen(namebuf), t);
     fprintf(sm, "Message-ID: %s\r\n", buf);
 
-    tm = localtime(&t);
-    gmtoff = gmtoff_of(tm, t);
-    if (gmtoff < 0) {
-	gmtoff = -gmtoff;
-	gmtnegative = 1;
-    }
-    gmtoff /= 60;
-    fprintf(sm, "Date: %s, %02d %s %4d %02d:%02d:%02d %c%.2lu%.2lu\r\n",
-	    wday[tm->tm_wday], 
-	    tm->tm_mday, month[tm->tm_mon], tm->tm_year + 1900,
-	    tm->tm_hour, tm->tm_min, tm->tm_sec,
-            gmtnegative ? '-' : '+', gmtoff / 60, gmtoff % 60);
+    rfc822date_gen(datestr, sizeof(datestr), t);
+    fprintf(sm, "Date: %s\r\n", datestr);
 
     fprintf(sm, "X-Sieve: %s\r\n", sieve_version);
     fprintf(sm, "From: Mail Sieve Subsystem <%s>\r\n", POSTMASTER);
@@ -612,22 +598,23 @@ int send_rejection(const char *origid,
 int send_forward(char *forwardto, char *return_path, struct protstream *file)
 {
     FILE *sm;
-    const char *smbuf[6];
+    const char *smbuf[10];
     int i, sm_stat;
     char buf[1024];
     pid_t sm_pid;
 
     smbuf[0] = "sendmail";
+    smbuf[1] = "-i";		/* ignore dots */
     if (return_path != NULL) {
-	smbuf[1] = "-f";
-	smbuf[2] = return_path;
+	smbuf[2] = "-f";
+	smbuf[3] = return_path;
     } else {
-	smbuf[1] = "-f";
-	smbuf[2] = "<>";
+	smbuf[2] = "-f";
+	smbuf[3] = "<>";
     }
-    smbuf[3] = "--";
-    smbuf[4] = forwardto;
-    smbuf[5] = NULL;
+    smbuf[4] = "--";
+    smbuf[5] = forwardto;
+    smbuf[6] = NULL;
     sm_pid = open_sendmail(smbuf, &sm);
 	
     if (sm == NULL) {
@@ -858,24 +845,23 @@ int autorespond(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 int send_response(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
 {
     FILE *sm;
-    const char *smbuf[6];
+    const char *smbuf[10];
     char outmsgid[8192], *sievedb;
     int i, sl, sm_stat;
-    struct tm *tm;
-    long tz;
-    int tznegative = 0;
     time_t t;
+    char datestr[80];
     pid_t sm_pid, p;
     sieve_send_response_context_t *src = (sieve_send_response_context_t *) ac;
     message_data_t *md = ((mydata_t *) mc)->m;
     script_data_t *sdata = (script_data_t *) sc;
 
     smbuf[0] = "sendmail";
-    smbuf[1] = "-f";
-    smbuf[2] = "<>";
-    smbuf[3] = "--";
-    smbuf[4] = src->addr;
-    smbuf[5] = NULL;
+    smbuf[1] = "-i";		/* ignore dots */
+    smbuf[2] = "-f";
+    smbuf[3] = "<>";
+    smbuf[4] = "--";
+    smbuf[5] = src->addr;
+    smbuf[6] = NULL;
     sm_pid = open_sendmail(smbuf, &sm);
     if (sm == NULL) {
 	*errmsg = "Could not spawn sendmail process";
@@ -889,18 +875,8 @@ int send_response(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
     
     fprintf(sm, "Message-ID: %s\r\n", outmsgid);
 
-    tm = localtime(&t);
-    tz = gmtoff_of(tm, t);
-    if (tz < 0) {
-	tz = -tz;
-	tznegative = 1;
-    }
-    tz /= 60;
-    fprintf(sm, "Date: %s, %02d %s %4d %02d:%02d:%02d %c%.2lu%.2lu\r\n",
-	    wday[tm->tm_wday], 
-	    tm->tm_mday, month[tm->tm_mon], tm->tm_year + 1900,
-	    tm->tm_hour, tm->tm_min, tm->tm_sec,
-            tznegative ? '-' : '+', tz / 60, tz % 60);
+    rfc822date_gen(datestr, sizeof(datestr), t);
+    fprintf(sm, "Date: %s\r\n", datestr);
     
     fprintf(sm, "X-Sieve: %s\r\n", sieve_version);
     fprintf(sm, "From: <%s>\r\n", src->fromaddr);
@@ -1089,8 +1065,7 @@ static FILE *sieve_find_script(const char *user)
     } else { /* look in sieve_dir */
 	char hash;
 
-	hash = (char) tolower((int) *user);
-	if (!islower((int) hash)) { hash = 'q'; }
+	hash = (char) dir_hash_c(user);
 
 	snprintf(buf, sizeof(buf), "%s/%c/%s/default", sieve_dir, hash, user);
     }
@@ -1138,10 +1113,10 @@ int deliver_mailbox(struct protstream *msg,
     char namebuf[MAX_MAILBOX_PATH];
     time_t now = time(NULL);
 
-    /* Translate user */
-    if (user) hier_sep_tointernal(user, &lmtpd_namespace);
+    /* Translate any separators in user */
+    if (user) mboxname_hiersep_tointernal(&lmtpd_namespace, user);
 
-    r = (*lmtpd_namespace.mboxname_tointernal)(mailboxname, &lmtpd_namespace,
+    r = (*lmtpd_namespace.mboxname_tointernal)(&lmtpd_namespace, mailboxname,
 					       user, namebuf);
 
     if (dupelim && id && 
@@ -1223,8 +1198,7 @@ int deliver(message_data_t *msgdata, char *authuser,
 	}
 
 	/* case 2: ordinary user, might have Sieve script */
-	else if (!(lmtpd_namespace.hier_sep == '.' && strchr(rcpt, '.')) &&
-		 /* '.' isn't allowed if '.' is the hierarchy separator */
+	else if (!strchr(rcpt, lmtpd_namespace.hier_sep) &&
 	         strlen(rcpt) + 30 <= MAX_MAILBOX_PATH) {
 	    FILE *f = sieve_find_script(rcpt);
 
@@ -1359,8 +1333,13 @@ void fatal(const char* s, int code)
 void shut_down(int code) __attribute__((noreturn));
 void shut_down(int code)
 {
+    duplicate_done();
+
     mboxlist_close();
     mboxlist_done();
+#ifdef HAVE_SSL
+    tls_shutdown_serverengine();
+#endif
     prot_flush(deliver_out);
 
     snmp_increment(ACTIVE_CONNECTIONS, -1);
@@ -1368,20 +1347,24 @@ void shut_down(int code)
     exit(code);
 }
 
-static int verify_user(const char *user)
+static int verify_user(const char *user, long quotacheck,
+		       struct auth_state *authstate)
 {
     char buf[MAX_MAILBOX_NAME];
     char *plus;
     int r;
     int sl = strlen(BB);
 
-    /* check to see if mailbox exists */
+    /* check to see if mailbox exists and we can append to it */
     if (!strncmp(user, BB, sl) && user[sl] == '+') {
 	/* special shared folder address */
 	strcpy(buf, user + sl + 1);
-	/* Translate user */
-	hier_sep_tointernal(buf, &lmtpd_namespace);
-	r = mboxlist_lookup(buf, NULL, NULL, NULL);
+	/* Translate any separators in user */
+	mboxname_hiersep_tointernal(&lmtpd_namespace, buf);
+	/* - must have posting privileges on shared folders
+	   - don't care about message size (1 msg over quota allowed) */
+	r = append_check(buf, MAILBOX_FORMAT_NORMAL, authstate,
+			 ACL_POST, quotacheck > 0 ? 0 : quotacheck);
     } else {
 	/* ordinary user */
 	if (strlen(user) > sizeof(buf)-10) {
@@ -1391,9 +1374,12 @@ static int verify_user(const char *user)
 	    strcat(buf, user);
 	    plus = strchr(buf, '+');
 	    if (plus) *plus = '\0';
-	    /* Translate user */
-	    hier_sep_tointernal(buf+5, &lmtpd_namespace);
-	    r = mboxlist_lookup(buf, NULL, NULL, NULL);
+	    /* Translate any separators in user */
+	    mboxname_hiersep_tointernal(&lmtpd_namespace, buf+5);
+	    /* - don't care about ACL on INBOX (always allow post)
+	       - don't care about message size (1 msg over quota allowed) */
+	    r = append_check(buf, MAILBOX_FORMAT_NORMAL, authstate,
+			     0, quotacheck > 0 ? 0 : quotacheck);
 	}
     }
 

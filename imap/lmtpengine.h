@@ -1,5 +1,5 @@
 /* lmtpengine.h: lmtp protocol engine interface
- * $Id: lmtpengine.h,v 1.5 2001/01/31 00:59:58 ken3 Exp $
+ * $Id: lmtpengine.h,v 1.5.6.1 2001/10/01 19:54:46 rjs3 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -62,6 +62,11 @@ struct message_data {
     char *return_path;		/* where to return message */
     address_data_t **rcpt;	/* to recipients of this message */
     int rcpt_num;		/* number of recipients */
+
+    /* auth state */
+    char *authuser;
+    struct auth_state *authstate;
+
     header_t *cache[HEADERCACHESIZE];
 };
 
@@ -90,7 +95,10 @@ void msg_setrcpt_status(message_data_t *m, int rcpt_num, int r);
 struct lmtp_func {
     int (*deliver)(message_data_t *m, 
 		   char *authuser, struct auth_state *authstate);
-    int (*verify_user)(const char *user);
+    int (*verify_user)(const char *user,
+		       long quotacheck, /* user must have this much quota left
+					   (-1 means don't care about quota) */
+		       struct auth_state *authstate);
     char *addheaders;		/* add these headers to all messages */
     int preauth;		/* preauth connection? */
 };

@@ -13,12 +13,13 @@ struct service {
 
     int ready_workers;
     int desired_workers;
-    unsigned int max_workers;
+    int max_workers;
     int stat[2];
 
     /* stats */
     int nforks;
     int nactive;
+    int nconnections;
 };
 
 extern struct service *Services;

@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.17.6.2 2001/09/05 19:47:38 rjs3 Exp $ */
+/* $Id: acconfig.h,v 1.17.6.3 2001/10/01 19:54:28 rjs3 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -84,11 +84,17 @@
 /* do we have OpenSSL? */
 #undef HAVE_SSL
 
+/* alternative to /dev/urandom? */
+#undef EGD_SOCKET
+
 /* where should we put state information? */
 #undef STATEDIR
 
 /* is Sieve enabled? */
 #undef USE_SIEVE
+
+/* use full directory hashing? */
+#undef USE_DIR_FULL
 
 /* do we have the UCD SNMP libraries? */
 #undef HAVE_UCDSNMP
@@ -167,5 +173,11 @@ enum {
     CONFIG_TIMING_VERBOSE = 0,
 
     /* should we be pedantic about namespace or sleezy? */
-    SLEEZY_NAMESPACE = 1
+    SLEEZY_NAMESPACE = 1,
+
+    /* should we do a fast TLS session shutdown? */
+    TLS_FAST_SHUTDOWN = 1,
+
+    /* should we use the SQUAT engine to accelerate SEARCH? */
+    SQUAT_ENGINE = 1
 };

@@ -1,7 +1,7 @@
-/* namespace.h -- Namespace manipulation routines
- * $Id: namespace.h,v 1.2.2.1 2001/08/07 21:51:22 rjs3 Exp $
- *
- * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
+/* rfc822date.h -- Generate an 822 date
+ $Id: rfc822date.h,v 1.2.2.1 2001/10/01 19:54:57 rjs3 Exp $
+ 
+ * Copyright (c) 1998-2001 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,30 +41,12 @@
  *
  */
 
-#ifndef INCLUDED_NAMESPACE_H
-#define INCLUDED_NAMESPACE_H
+#ifndef INCLUDED_RFC822DATE_H
+#define INCLUDED_RFC822DATE_H
 
-#define MAX_NAMESPACE_PREFIX 40
+#include <time.h>
 
-#define DOTCHAR '^'
-
-enum { NAMESPACE_INBOX, NAMESPACE_USER, NAMESPACE_SHARED };
-
-struct namespace {
-    int isalt;
-    char prefix[3][MAX_NAMESPACE_PREFIX+1];
-    char hier_sep;
-    int (*mboxname_tointernal)(const char *name, struct namespace *namespace,
-			       const char *userid, char *result);
-    int (*mboxname_toexternal)(const char *name, struct namespace *namespace,
-			       const char *userid, char *result);
-};
-
-/* Initialize namespace (prefixes & hierarchy separator from imapd.conf) */
-int namespace_init(struct namespace *namespace, int force_std);
-
-char *hier_sep_tointernal(char *name, struct namespace *namespace);
-
-char *hier_sep_toexternal(char *name, struct namespace *namespace);
+/* 'buf' must be at least 80 characters */
+void rfc822date_gen(char *buf, size_t len, time_t t);
 
 #endif
