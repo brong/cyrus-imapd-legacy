@@ -39,6 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
+.\" $Id: imtest.1,v 1.6.2.1 2002/06/06 21:08:45 jsmith2 Exp $
 .SH NAME
 imtest \- interactive IMAP test program
 .SH SYNOPSIS
@@ -82,16 +83,23 @@ imtest \- interactive IMAP test program
 .I file
 ]
 [
+.B \-n
+.I num
+]
+[
+.B \-s
+]-n
+[
 .B \-c
+]
+.br
+       [
+.B \-z
 ]
 [
 .B \-v
 ]
-[
-.B \-z
-]
-.br
-       \fIhostname\fR
+\fIhostname\fR
 .SH DESCRIPTION
 .I imtest
 is a utility that allows you to authenticate to a IMAP or IMSP server
@@ -141,10 +149,18 @@ Specify the \fIrealm\fR to use. Certain authentication mechanisms
 .BI -f " file"
 Pipe \fIfile\fR into connection after authentication.
 .TP
+.BI -n " num"
+Number of authentication attempts; default = 1.  The client will
+attempt to do SSL/TLS session reuse and/or fast reauth
+(e.g. DIGEST-MD5), if possible.
+.TP
+.B -s
+Enable IMAP over SSL (imaps).
+.TP
 .B -c
-Disable challenge prompt callbacks.  This will cause the OTP mechanism
-to ask for the secret pass-phrase (library generates the correct
-response) instead of the one-time password.
+Enable challenge prompt callbacks.  This will cause the OTP mechanism
+to ask for the the one-time password instead of the secret pass-phrase
+(library generates the correct response).
 .TP
 .B -v
 Verbose. Print out more information than usual.

@@ -1,3 +1,5 @@
+$Id: README,v 1.1.12.1 2002/06/06 21:09:00 jsmith2 Exp $
+
 This is a Perl interface to the Cyrus imclient library, and an administrative
 library, and a replacement for the "cyradm" shell.  The imclient library is
 used (instead of using existing IMAP modules) because it supports SASL, which

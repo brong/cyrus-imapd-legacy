@@ -1,4 +1,5 @@
-/*  $Revision: 1.3 $
+/*  $Revision: 1.3.12.1 $
+ *  $Id: macros.h,v 1.3.12.1 2002/06/06 21:08:57 jsmith2 Exp $
 **
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *

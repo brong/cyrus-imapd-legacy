@@ -1,8 +1,7 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.148 2001/12/12 22:22:29 rjs3 Exp $
+# $Id: Makefile.in,v 1.148.2.1 2002/06/06 21:07:55 jsmith2 Exp $
 # 
 # @configure_input@
-#
 # 
 # Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
 #
@@ -48,9 +47,6 @@ DEFINES=-DSETPROCTITLE
 # 'local' (legacy flat file).
 SEEN=seen_db.o
 
-# New mail notification mechanism
-NOTIFY=notify_@WITH_NOTIFY@.o
-
 # IMAP IDLE mechanism
 IDLE=idle_@WITH_IDLE@.o
 
@@ -66,12 +62,12 @@ CYRUS_USER=@cyrus_user@
 CYRUS_GROUP=@cyrus_group@
 
 DEFS = @DEFS@ @LOCALDEFS@
-CPPFLAGS = -I. -I.. -I../sieve -I$(srcdir) -I$(srcdir)/../lib -I$(srcdir)/../acap -I../acap @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @ZEPHYR_CPPFLAGS@ @SASLFLAGS@
+CPPFLAGS = -I. -I.. -I../sieve -I$(srcdir) -I$(srcdir)/../lib -I$(srcdir)/../acap -I../acap @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@
 IMAP_LIBS = @IMAP_LIBS@
 SIEVE_LIBS = @SIEVE_LIBS@
 IMAP_COM_ERR_LIBS = @IMAP_COM_ERR_LIBS@
 LIB_WRAP = @LIB_WRAP@
-LIBS = @ZEPHYR_LIBS@ $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
+LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
 DEPLIBS = ../acap/libacap.a ../lib/libcyrus.a @DEPLIBS@
 
 CFLAGS = @CFLAGS@
@@ -100,13 +96,15 @@ prefix = @prefix@
 exec_prefix = @exec_prefix@
 cyrus_prefix = @cyrus_prefix@
 
-LOBJS= append.o mailbox.o mboxlist.o mboxname.o message.o \
-	config.o imap_err.o proc.o setproctitle.o convert_code.o \
-	duplicate.o saslclient.o acapmbox.o signals.o \
-	search_engines.o squat.o squat_internal.o \
-	base64.o imapparse.o telemetry.o user.o $(SEEN) $(NOTIFY) $(IDLE)
+LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
+	config.o imap_err.o mupdate_err.o proc.o setproctitle.o convert_code.o \
+	duplicate.o saslclient.o acapmbox.o signals.o annotate.o \
+	search_engines.o squat.o squat_internal.o mbdump.o \
+	base64.o imapparse.o telemetry.o user.o notify.o $(SEEN) $(IDLE)
 
-IMAPDOBJS=pushstats.o imapd.o index.o tls.o version.o
+IMAPDOBJS=pushstats.o backend.o imapd.o index.o tls.o version.o
+
+PROXYDOBJS=backend.o pushstats.o proxyd.o tls.o version.o 
 
 LMTPOBJS=lmtpstats.o lmtpengine.o tls.o
 
@@ -114,13 +112,13 @@ SERVICE=../master/service.o
 SERVICETHREAD=../master/service-thread.o
 
 PROGS = imapd lmtpd pop3d \
-	fud reconstruct quota \
-	mbpath ipurge cyrdump deliver \
+	fud reconstruct quota mbpath ipurge \
+	cyrdump chk_cyrus cvt_cyrusdb deliver \
 	ctl_mboxlist ctl_deliver ctl_cyrusdb squatter \
 	@IMAP_PROGS@
 
 BUILTSOURCES = imap_err.c imap_err.h pushstats.c pushstats.h \
-	lmtpstats.c lmtpstats.h xversion.h
+	lmtpstats.c lmtpstats.h xversion.h mupdate_err.c mupdate_err.h
 
 all: $(BUILTSOURCES) $(PROGS) $(SUIDPROGS)
 
@@ -164,6 +162,12 @@ collectnews: collectnews.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o collectnews collectnews.o libimap.a $(DEPLIBS) \
 	 $(LIBS)
 
+cvt_cyrusdb: cvt_cyrusdb.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o cvt_cyrusdb cvt_cyrusdb.o libimap.a $(DEPLIBS) $(LIBS)
+
+chk_cyrus: chk_cyrus.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o chk_cyrus chk_cyrus.o libimap.a $(DEPLIBS) $(LIBS)
+
 deliver: deliver.o $(LMTPOBJS) libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o deliver deliver.o $(LMTPOBJS) \
 	libimap.a $(DEPLIBS) $(LIBS)
@@ -177,7 +181,7 @@ lmtpd: lmtpd.o $(LMTPOBJS) \
 lmtpd.pure: lmtpd.o $(LMTPOBJS) \
 	libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(SERVICE)
 	$(PURIFY) $(PUREOPT) $(CC) $(LDFLAGS) -o lmtpd.pure \
-	 $(SERVICE) lmtpd.o $(LMTPDOBJS) \
+	 $(SERVICE) lmtpd.o $(LMTPOBJS) \
 	 libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
 lmtpproxyd: lmtpproxyd.o $(LMTPOBJS) \
@@ -190,9 +194,9 @@ ctl_deliver: ctl_deliver.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
 	 $@ ctl_deliver.o libimap.a $(DEPLIBS) $(LIBS)
 
-ctl_mboxlist: ctl_mboxlist.o libimap.a $(DEPLIBS)
+ctl_mboxlist: ctl_mboxlist.o mupdate-client.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
-	 $@ ctl_mboxlist.o libimap.a $(DEPLIBS) $(LIBS)
+	 $@ ctl_mboxlist.o mupdate-client.o libimap.a $(DEPLIBS) $(LIBS)
 
 ctl_cyrusdb: ctl_cyrusdb.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
@@ -210,9 +214,9 @@ imapd.quant: $(IMAPDOBJS) libimap.a $(DEPLIBS) $(SERVICE)
 	$(QUANTIFY) $(QUANTOPT) $(CC) $(LDFLAGS) -o imapd.quant \
 	 $(SERVICE) $(IMAPDOBJS) libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-proxyd: pushstats.o proxyd.o tls.o version.o libimap.a $(DEPLIBS) $(SERVICE)
+proxyd: $(PROXYDOBJS) libimap.a $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o proxyd \
-	 $(SERVICE) pushstats.o proxyd.o tls.o version.o libimap.a \
+	 $(SERVICE) $(PROXYDOBJS) libimap.a \
 	 $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
 target-acap: target-acap.o libimap.a $(DEPLIBS)
@@ -223,9 +227,10 @@ sendmail-map: sendmail-map.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o sendmail-map \
 	 sendmail-map.o libimap.a $(DEPLIBS) $(LIBS)
 
-mupdate: mupdate.o libimap.a $(DEPLIBS)
+mupdate: mupdate.o mupdate-slave.o mupdate-client.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o mupdate \
-	 $(SERVICETHREAD) mupdate.o libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP) -lpthread
+	 $(SERVICETHREAD) mupdate.o mupdate-slave.o mupdate-client.o \
+	 libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP) -lpthread
 
 pop3d: pop3d.o tls.o libimap.a $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o pop3d pop3d.o tls.o $(SERVICE) \
@@ -241,8 +246,9 @@ arbitron: arbitron.o libimap.a $(DEPLIBS)
 populateacap: populateacap.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o populateacap populateacap.o libimap.a $(DEPLIBS) $(LIBS)
 
-fud: fud.o libimap.a $(DEPLIBS)
-	$(CC) $(LDFLAGS) -o fud fud.o libimap.a $(DEPLIBS) $(LIBS)
+fud: fud.o libimap.a $(DEPLIBS) $(SERVICE)
+	$(CC) $(LDFLAGS) -o fud $(SERVICE) fud.o libimap.a \
+	$(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
 squatter: squatter.o index.o squat_build.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o squatter squatter.o index.o squat_build.o libimap.a $(DEPLIBS) $(LIBS)
@@ -273,6 +279,9 @@ libimap.a: $(LOBJS)
 
 imap_err.h imap_err.c: imap_err.et
 	$(COMPILE_ET) $(srcdir)/imap_err.et
+
+mupdate_err.h mupdate_err.c: mupdate_err.et
+	$(COMPILE_ET) $(srcdir)/mupdate_err.et
 
 clean:
 	rm -f *.o *.a Makefile.bak makedepend.log \

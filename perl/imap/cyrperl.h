@@ -38,6 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+/* $Id: cyrperl.h,v 1.3.12.1 2002/06/06 21:09:01 jsmith2 Exp $ */
 /*
  * Internal callback rock, used to invoke arbitrary Perl code via a CODE
  * reference ( \&sub ).  Allocate with Perl's New(), free with Safefree().
@@ -74,12 +75,20 @@ struct xscb {
   struct xscb *next;
 };
 
+#define NUM_SUPPORTED_CALLBACKS 4
+
 struct xscyrus {
   struct imclient *imclient;
   char *class;
   struct xscb *cb;
   int flags;
+  int authenticated;
   int cnt;			/* hack */
+  /* For holding per-connection information during authentication */
+  /* We need to initialize this when we create a new connection */  
+  sasl_callback_t callbacks[NUM_SUPPORTED_CALLBACKS];
+  const char *username, *authname;
+  sasl_secret_t *password;
 };
 
 /* C callback to invoke a Perl callback on behalf of imclient */

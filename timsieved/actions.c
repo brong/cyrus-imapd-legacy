@@ -1,7 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.29.2.1 2001/12/18 23:09:59 rjs3 Exp $
- * 
+ * $Id: actions.c,v 1.29.2.2 2002/06/06 21:09:21 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -291,7 +290,10 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
       return result;
   }
 
-  if (!verify_only) {
+  if (verify_only)
+      stream = tmpfile();
+
+  else {
       /* see if this would put the user over quota */
       maxscripts = config_getint("sieve_maxscripts",5);
 
@@ -304,11 +306,10 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
       }
 
       snprintf(path, 1023, "%s.script.NEW", string_DATAPTR(name));
-  }
-  else
-      tmpnam(path);
 
-  stream = fopen(path, "w+");
+      stream = fopen(path, "w+");
+  }
+
   if (stream == NULL) {
       prot_printf(conn, "NO \"Unable to open script for writing (%s)\"\r\n",
 		  path);

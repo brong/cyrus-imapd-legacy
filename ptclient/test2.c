@@ -38,6 +38,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: test2.c,v 1.2.12.1 2002/06/06 21:09:16 jsmith2 Exp $ */
+
 #include <stdio.h>
 #include <sys/syslog.h>
 

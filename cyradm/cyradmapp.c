@@ -39,6 +39,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: cyradmapp.c,v 1.8.12.1 2002/06/06 21:07:41 jsmith2 Exp $ */
+
 #include "tcl.h"
 
 extern int main();

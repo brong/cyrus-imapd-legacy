@@ -1,4 +1,5 @@
 /* +++Date last modified: 05-Jul-1997 */
+/* $Id: hash.c,v 1.4.12.1 2002/06/06 21:08:34 jsmith2 Exp $ */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>

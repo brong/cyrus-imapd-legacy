@@ -39,6 +39,8 @@
  *
  */
 
+/* $Id: ptextract.c,v 1.2.12.1 2002/06/06 21:09:15 jsmith2 Exp $ */
+
 #include <sys/types.h>
 #include <krb.h>
 #include <sysexits.h>

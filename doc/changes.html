@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<!-- $Id: changes.html,v 1.24 2001/11/27 02:24:56 ken3 Exp $ -->
+<!-- $Id: changes.html,v 1.24.2.1 2002/06/06 21:07:43 jsmith2 Exp $ -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
@@ -8,6 +8,143 @@
 </head>
 <body>
 <h1>Changes to the Cyrus IMAP Server</h1>
+
+<h2>Changes to the Cyrus IMAP Server since 2.1.4</h2>
+
+<ul>
+<li> Sieve is no longer dependent on duplicate delivery suppression
+(it still uses the duplicate delivery database however). </li>
+
+</ul>
+
+<h2>Changes to the Cyrus IMAP Server since 2.1.3</h2>
+
+<ul>
+<li> All "MAIL" and "SIEVE" notifications are now handled by
+<tt>notifyd</tt> which is a daemon that supports multiple notification
+methods.  The <tt>mailnotifier</tt> and <tt>sievenotifier</tt> options
+have been added to <tt>/etc/imapd.conf</tt> to configure
+notifications. (Ken Murchison) </li>
+
+<li> Many feature enhancements and bugfixes for the Cyrus Murder.  The
+code now supports live (but not transparent) moving of mailboxes from
+one server to another. </li>
+
+<li> Some warning fixes. </li>
+
+<li> <tt>fdatasync()</tt> is no longer required. </li>
+
+<li> Fixed a bug in <tt>imap/append.c</tt> that would show itself if a
+message was being delivered to five or more different
+partitions. </li>
+
+<li> Deliveries now don't create a redudant temporary file using
+<tt>tmpfile()</tt>; the staging directory is used instead. (Ken
+Murchison) </li>
+
+<li> Fix a possible crashing bug in <tt>squatter</tt>.  (Ken
+Murchison) </li>
+
+<li> Deleting a user now also removes their Sieve scripts. </li>
+
+<li> <tt>cyrusdb_skiplist</tt>: release locks during iteration.
+Should prevent denial of service attacks and possibly increase
+performance. </li>
+
+<li> <tt>cyrusdb_skiplist</tt>: introduce a new mode using
+<tt>O_DSYNC</tt> writes which is possibly faster on Solaris.
+Currently off (it seems to hurt performance on Linux). </li>
+
+<li> <tt>master</tt> has preliminary code to avoid forking
+storms. </li> 
+
+<li> <tt>sieveshell</tt> should now loop through all available SASL
+mechanisms before conceding defeat. </li>
+
+<li> <tt>sieveshell</tt> can now upload a file to a different name. </li>
+
+</ul>
+
+<h2>Changes to the Cyrus IMAP Server since 2.1.2</h2>
+
+<ul>
+<li> fud now runs from the Cyrus master process; more generally, the
+Cyrus master process can deal with UDP services. (Amos Gouaux, 
+<tt>amos@utdallas.edu</tt>)</li>
+
+<li> Sieve has been updated to be compliant with RFC 3028 and
+draft-martin-sieve-notify-01.  All <tt>notify</tt> actions and any
+<tt>fileinto</tt> and/or <tt>redirect</tt> actions using stringlists
+will have to be updated/changed. </li>
+
+<li> added <tt>cvt_cyrusdb</tt> for quick conversions between
+different cyrusdb backends. </li>
+
+<li> fixed a bug in the Sieve header cache, where legal header names
+were being rejected. </li>
+
+<li> many Murder-related fixes </li>
+
+<li> suppress a bogus TLS session reuse DBERROR message </li>
+
+<li> make the list of acceptable TLS ciphers configurable in
+<tt>/etc/imapd.conf</tt> </li>
+
+<li> <tt>cyrusdb_skiplist</tt> fixes; it's now suitable for using in
+production environments though there are still performance problems
+outstanding </li>
+
+</ul>
+
+<h2>Changes to the Cyrus IMAP Server since 2.1.1</h2>
+
+<ul>
+<li> now compatible with Berkeley DB4 (Larry M. Rosenbaum,
+<tt>lmr@ornl.gov</tt>) </li>
+
+<li> timsieved now supports proxying via <tt>loginuseacl</tt> (Amos
+Gouaux, <tt>amos@utdallas.edu</tt>) </li>
+
+<li> Sieve <tt>vacation</tt> now does a case-insensitive comparison of
+<tt>:addresses</tt> </li>
+
+<li> Warning-related bug fixes from Henrique de Moras Holschuh
+<tt>hmh@debian.org</tt></li>
+
+<li> automatic archival of db3 files so that filesystem backups are
+always consistent (Ken Murchison, <tt>ken@oceana.com</tt>)</li>
+
+<li> added a skiplist database backend, still needs more testing </li>
+
+<li> further work on the Cyrus Murder </li>
+
+<li> fixed bug in <tt>remotepurge</tt> dealing with mailboxes with
+characters that need to be escaped inside quoted-strings </li>
+
+<li> Cyrus::IMAP::Admin now supports referrals </li>
+
+<li> <tt>cyradm</tt>, via Cyrus::IMAP::Shell, now can remove
+quotaroots </li>
+
+<li> <tt>timsieved</tt>, <tt>sieveshell</tt>, and the MANAGESIEVE
+protocol extended with referrals </li>
+</ul>
+
+<h2>Changes to the Cyrus IMAP Server since 2.1.0</h2>
+
+<ul>
+<li> now compatible with Cyrus SASL 2.1.0 </li>
+
+<li> fixed a problem with LMTP AUTH and unix domain sockets </li>
+
+<li> make deleting users faster </li>
+
+<li> add a "-n" switch to <tt>remotepurge</tt></li>
+
+<li> cyradm now does implicit SASL authorization </li>
+
+<li> fix for Sieve <tt>:matches</tt> comparator </li>
+</ul>
 
 <h2>Changes to the Cyrus IMAP Server since 2.0.16</h2>
 
@@ -1451,7 +1588,7 @@ message for this common configuration error.</li>
 </ul>
 
 <hr />
-last modified: $Date: 2001/11/27 02:24:56 $ <br />
+last modified: $Date: 2002/06/06 21:07:43 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

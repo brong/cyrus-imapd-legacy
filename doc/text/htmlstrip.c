@@ -12,7 +12,9 @@
  * without specific, additional permission by the owner of the code.
  *
  */
-
+  
+/* $Id: htmlstrip.c,v 1.4.2.1 2002/06/06 21:07:48 jsmith2 Exp $ */
+  
 #include <stdio.h>
 #include <string.h>
 

@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: prot.c,v 1.62 2001/11/27 02:25:03 ken3 Exp $
+ * $Id: prot.c,v 1.62.2.1 2002/06/06 21:08:37 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -80,7 +80,7 @@ int write;
 
     newstream = (struct protstream *) xmalloc(sizeof(struct protstream));
     newstream->buf = (unsigned char *) 
-	xmalloc(sizeof(char) * (PROT_BUFSIZE + 4));
+	xmalloc(sizeof(char) * (PROT_BUFSIZE));
     newstream->buf_size = PROT_BUFSIZE;
     newstream->ptr = newstream->buf;
     newstream->cnt = write ? PROT_BUFSIZE : 0;
@@ -111,6 +111,7 @@ int write;
  */
 int prot_free(struct protstream *s)
 {
+    if (s->error) free(s->error);
     free(s->buf);
     free((char*)s);
     return 0;
@@ -119,9 +120,7 @@ int prot_free(struct protstream *s)
 /*
  * Set the logging file descriptor for stream 's' to be 'fd'.
  */
-int prot_setlog(s, fd)
-struct protstream *s;
-int fd;
+int prot_setlog(struct protstream *s, int fd)
 {
     s->logfd = fd;
     return 0;
@@ -135,9 +134,9 @@ int fd;
 
 int prot_settls(struct protstream *s, SSL *tlsconn)
 {
-  s->tls_conn = tlsconn;
+    s->tls_conn = tlsconn;
 
-  return 0;
+    return 0;
 }
 
 #endif /* HAVE_SSL */
@@ -150,46 +149,48 @@ int prot_setsasl(s, conn)
 struct protstream *s;
 sasl_conn_t *conn;
 {
-  const int *ssfp;
-  int result;
-
-  /* flush first if need be */
-  if (s->write && s->ptr != s->buf) prot_flush(s);
-
-  s->conn=conn;
-
-  result = sasl_getprop(conn, SASL_SSF, (const void **) &ssfp);
-  if (result != SASL_OK)
-    return 1;
-
-  s->saslssf = *ssfp;
-
-  if (s->write) {
+    const int *ssfp;
     int result;
-    const int *maxp;
-    int max;
 
-    /* ask SASL for layer max */
-    result = sasl_getprop(conn, SASL_MAXOUTBUF, (const void **) &maxp);
-    max = *maxp;
-    if (result != SASL_OK)
-      return 1;
-
-    if (max == 0 || max > PROT_BUFSIZE) {
-	/* max = 0 means unlimited, and we can't go bigger */
-	max = PROT_BUFSIZE;
+    if (s->write && s->ptr != s->buf) {
+	/* flush any pending output */
+	prot_flush(s);
     }
+   
+    s->conn = conn;
+
+    result = sasl_getprop(conn, SASL_SSF, (const void **) &ssfp);
+    if (result != SASL_OK) {
+	return -1;
+    }
+    s->saslssf = *ssfp;
+
+    if (s->write) {
+	int result;
+	const int *maxp;
+	int max;
+
+	/* ask SASL for layer max */
+	result = sasl_getprop(conn, SASL_MAXOUTBUF, (const void **) &maxp);
+	max = *maxp;
+	if (result != SASL_OK) {
+	    return -1;
+	}
+
+	if (max == 0 || max > PROT_BUFSIZE) {
+	    /* max = 0 means unlimited, and we can't go bigger */
+	    max = PROT_BUFSIZE;
+	}
     
-    max-=50; /* account for extra foo incurred from layers */
+	s->maxplain = max;
+	s->cnt = max;
+    }
+    else if (s->cnt) {  
+	/* flush any pending input */
+	s->cnt = 0;
+    }
 
-    s->maxplain=max;
-    s->cnt=max;
-  }
-  else if (s->cnt) {  /* XXX what does this do? */
-    s->cnt = 0;
-  }
-
-  return 0;
+    return 0;
 }
 
 /*
@@ -307,7 +308,7 @@ int prot_rewind(struct protstream *s)
     assert(!s->write);
 
     if (lseek(s->fd, 0L, 0) == -1) {
-	s->error = strerror(errno);
+	s->error = xstrdup(strerror(errno));
 	return EOF;
     }
     s->cnt = 0;
@@ -334,18 +335,33 @@ int prot_fill(struct protstream *s)
    
     assert(!s->write);
 
+    /* Zero errno just in case */
+    errno = 0;
+
     if (s->eof || s->error) return EOF;
 
     do {
 	/* wait until get input */
 	haveinput = 0;
+
+#ifdef HAVE_SSL
+	/* maybe there's data stuck in the SSL buffer? */
+	if (s->tls_conn != NULL) {
+	    haveinput = SSL_pending(s->tls_conn);
+	}
+#endif
+
+	/* if we've promised to call something before blocking or
+	   flush an output stream, check to see if we're going to block */
 	if (s->readcallback_proc ||
 	    (s->flushonread && s->flushonread->ptr != s->flushonread->buf)) {
 	    timeout.tv_sec = timeout.tv_usec = 0;
 	    FD_ZERO(&rfds);
 	    FD_SET(s->fd, &rfds);
-	    if (select(s->fd + 1, &rfds, (fd_set *)0, (fd_set *)0,
-		       &timeout) <= 0) {
+
+	    if (!haveinput &&
+		(select(s->fd + 1, &rfds, (fd_set *)0, (fd_set *)0,
+			&timeout) <= 0)) {
 		if (s->readcallback_proc) {
 		    (*s->readcallback_proc)(s, s->readcallback_rock);
 		    s->readcallback_proc = 0;
@@ -390,7 +406,7 @@ int prot_fill(struct protstream *s)
 		     (now < read_timeout));
 	    if (r == 0) {
 		if (!s->dontblock) {
-		    s->error = "idle for too long";
+		    s->error = xstrdup("idle for too long");
 		    return EOF;
 		} else {
 		    errno = EAGAIN;
@@ -413,7 +429,7 @@ int prot_fill(struct protstream *s)
 	} while (n == -1 && errno == EINTR);
 		
 	if (n <= 0) {
-	    if (n) s->error = strerror(errno);
+	    if (n) s->error = xstrdup(strerror(errno));
 	    else s->eof = 1;
 	    return EOF;
 	}
@@ -422,20 +438,25 @@ int prot_fill(struct protstream *s)
 	    int result;
 	    const char *out;
 	    unsigned outlen;
-	    static char errbuf[256];
 	    
 	    /* Decode the input token */
 	    result = sasl_decode(s->conn, (const char *) s->buf, n, 
 				 &out, &outlen);
 	    
 	    if (result != SASL_OK) {
-		snprintf(errbuf, 256, "Decoding error: %s (%i)",
-			 sasl_errstring(result, NULL, NULL), result);
-		s->error = errbuf;
+		char errbuf[256];
+		const char *ed = sasl_errdetail(s->conn);
+
+		snprintf(errbuf, 256, "decoding error: %s; %s",
+			 sasl_errstring(result, NULL, NULL),
+			 ed ? ed : "no detail");
+		s->error = xstrdup(errbuf);
 		return EOF;
 	    }
 	    
 	    if (outlen > 0) {
+		/* XXX can we just serve data from 'out' without copying
+		   it to s->buf ? */
 		if (outlen > s->buf_size) {
 		    s->buf = (unsigned char *) 
 			xrealloc(s->buf, sizeof(char) * (outlen + 4));
@@ -526,14 +547,20 @@ int prot_flush(struct protstream *s)
     }
 
     if (s->saslssf != 0) {
-	/* Encode the data */  /* xxx handle left */
+	/* encode the data */
 	unsigned int outlen;
 	int result;
 	
 	result = sasl_encode(s->conn, (char *) ptr, left, 
 			     &encoded_output, &outlen);
 	if (result != SASL_OK) {
-	    s->error = "Encoding error";
+	    char errbuf[256];
+	    const char *ed = sasl_errdetail(s->conn);
+	    
+	    snprintf(errbuf, 256, "encoding error: %s; %s",
+		     sasl_errstring(result, NULL, NULL),
+		     ed ? ed : "no detail");
+	    s->error = xstrdup(errbuf);
 	    return EOF;
 	}
 	
@@ -553,7 +580,7 @@ int prot_flush(struct protstream *s)
 	n = write(s->fd, ptr, left);
 #endif /* HAVE_SSL */
 	if (n == -1 && errno != EINTR) {
-	    s->error = strerror(errno);
+	    s->error = xstrdup(strerror(errno));
 	    return EOF;
 	}
 
@@ -575,10 +602,11 @@ int prot_flush(struct protstream *s)
  */
 int prot_write(struct protstream *s, const char *buf, unsigned len)
 {
-    assert(len >= 0);
     assert(s->write);
 
     while (len >= s->cnt) {
+	/* XXX can we manage to write data from 'buf' without copying it
+	   to s->ptr ? */
 	memcpy(s->ptr, buf, s->cnt);
 	s->ptr += s->cnt;
 	buf += s->cnt;
@@ -597,12 +625,15 @@ int prot_write(struct protstream *s, const char *buf, unsigned len)
 
 /*
  * Stripped-down version of printf() that works on protection streams
- * Only understands '%d', '%s', '%c', and '%%' in the format string.
+ * Only understands '%ld', '%lu', '%d', %u', '%s', '%c', and '%%'
+ * in the format string.
  */
 int prot_printf(struct protstream *s, const char *fmt, ...)
 {
     va_list pvar;
     char *percent, *p;
+    long l;
+    unsigned long ul;
     int i;
     unsigned u;
     char buf[30];
@@ -615,6 +646,25 @@ int prot_printf(struct protstream *s, const char *fmt, ...)
 	switch (*++percent) {
 	case '%':
 	    prot_putc('%', s);
+	    break;
+
+	case 'l':
+	    switch (*++percent) {
+	    case 'd':
+		l = va_arg(pvar, long);
+		sprintf(buf, "%ld", l);
+		prot_write(s, buf, strlen(buf));
+		break;
+
+	    case 'u':
+		ul = va_arg(pvar, long);
+		sprintf(buf, "%lu", ul);
+		prot_write(s, buf, strlen(buf));
+		break;
+
+	    default:
+		abort();
+	    }
 	    break;
 
 	case 'd':

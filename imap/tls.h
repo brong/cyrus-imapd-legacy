@@ -43,11 +43,16 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: tls.h,v 1.10.2.1 2002/06/06 21:08:20 jsmith2 Exp $ */
+
 #ifndef INCLUDED_TLS_H
 #define INCLUDED_TLS_H
 
 /* is tls enabled? */
 int tls_enabled(const char *ident);
+
+/* name of the SSL/TLS sessions database */
+#define FNAME_TLSSESSIONS "/tls_sessions.db"
 
 #ifdef HAVE_SSL
 

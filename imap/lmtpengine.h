@@ -1,5 +1,5 @@
 /* lmtpengine.h: lmtp protocol engine interface
- * $Id: lmtpengine.h,v 1.7 2001/08/31 18:42:48 ken3 Exp $
+ * $Id: lmtpengine.h,v 1.7.2.1 2002/06/06 21:08:07 jsmith2 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -43,6 +43,13 @@
 #ifndef LMTPENGINE_H
 #define LMTPENGINE_H
 
+/* configuration parameters */
+#define DEFAULT_SENDMAIL ("/usr/lib/sendmail")
+#define DEFAULT_POSTMASTER ("postmaster")
+
+#define SENDMAIL (config_getstring("sendmail", DEFAULT_SENDMAIL))
+#define POSTMASTER (config_getstring("postmaster", DEFAULT_POSTMASTER))
+
 /***************** server-side LMTP *******************/
 
 #define HEADERCACHESIZE 4009
@@ -66,6 +73,8 @@ struct message_data {
     /* auth state */
     char *authuser;
     struct auth_state *authstate;
+
+    void *rock;
 
     header_t *cache[HEADERCACHESIZE];
 };
@@ -92,6 +101,9 @@ int msg_getrcpt_ignorequota(message_data_t *m, int rcpt_num);
    translated into an LMTP status code */
 void msg_setrcpt_status(message_data_t *m, int rcpt_num, int r);
 
+void *msg_getrock(message_data_t *m);
+void msg_setrock(message_data_t *m, void *rock);
+
 struct lmtp_func {
     int (*deliver)(message_data_t *m, 
 		   char *authuser, struct auth_state *authstate);
@@ -99,7 +111,11 @@ struct lmtp_func {
 		       long quotacheck, /* user must have this much quota left
 					   (-1 means don't care about quota) */
 		       struct auth_state *authstate);
+    void (*shutdown)(int code);
+    FILE *(*spoolfile)(message_data_t *m);
+    void (*removespool)(message_data_t *m);
     char *addheaders;		/* add these headers to all messages */
+    int addretpath;		/* should i add a return-path header? */
     int preauth;		/* preauth connection? */
 };
 

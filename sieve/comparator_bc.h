@@ -1,5 +1,6 @@
 /* comparator.h
  * Larry Greenfield
+ * $Id: comparator_bc.h,v 1.1.2.2 2002/06/06 21:09:18 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -24,8 +25,8 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
 OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ******************************************************************/
 
-#ifndef COMPARATOR_BC_H
-#define COMPARATOR_BC_H
+#ifndef COMPARATOR_H
+#define COMPARATOR_H
 
 #ifdef ENABLE_REGEX
 #ifdef HAVE_RX
@@ -37,10 +38,11 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #endif
 
 /* compares pat to text; returns 1 if it's true, 0 otherwise 
-   first arg is pat, second arg is text */
-typedef int comparator_bc_t(const char *, const char *);
+   first arg is text, second arg is pat, third arg is rock */
+typedef int comparator_t(const char *, const char *, void *);
 
 /* returns a pointer to a comparator function given it's name */
-comparator_bc_t *lookup_comp_bc(const char *comp, int mode);
+comparator_t *lookup_comp(const char *comp, int mode,
+			  const char *relation, void **rock);
 
 #endif

@@ -45,10 +45,11 @@
  *
  */
 
+/* $Id: readconfig.c,v 1.3.12.1 2002/06/06 21:08:57 jsmith2 Exp $ */
 
 /*     Copyright 1991 Rich Salz.
  *   All rights reserved.
- *   $Revision: 1.3 $
+ *   $Revision: 1.3.12.1 $
  *
  *    Redistribution and use in any form are permitted provided that the
  *    following restrictions are are met:

@@ -1,13 +1,17 @@
 #ifndef HAVE_MASTER_H
 #define HAVE_MASTER_H
 
+/* $Id: master.h,v 1.4.2.1 2002/06/06 21:08:52 jsmith2 Exp $ */
+
 /* needed for possible SNMP monitoring */
 struct service {
     char *name;
     char *listen;
     char *proto;
     char *const *exec;
-
+    int babysit;
+    unsigned int maxforkrate;
+    
     int socket;
     struct sockaddr *saddr;
 
@@ -16,10 +20,16 @@ struct service {
     int max_workers;
     int stat[2];
 
+    /* fork rate computation */
+    time_t last_interval_start;
+    unsigned int interval_forks;
+
     /* stats */
     int nforks;
     int nactive;
     int nconnections;
+
+    unsigned int forkrate;
 };
 
 extern struct service *Services;

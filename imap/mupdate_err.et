@@ -1,5 +1,5 @@
 # mupdate_err.et -- Error codes for the mupdate API
-# $Id: mupdate_err.et,v 1.1 2001/10/23 20:17:21 leg Exp $
+# $Id: mupdate_err.et,v 1.1.4.1 2002/06/06 21:08:14 jsmith2 Exp $
 #
 # Copyright 2001 Carnegie Mellon University
 # 
@@ -27,6 +27,12 @@
 # 
 error_table mupd
 
+ec MUPDATE_FAIL,
+   "the mupdate operation failed"
+
+ec MUPDATE_FAIL_RESERVE,
+   "unable to reserve mailbox on mupdate server"
+
 ec MUPDATE_NOCONN,
    "no connection to server"
 
@@ -38,5 +44,11 @@ ec MUPDATE_TIMEOUT,
 
 ec MUPDATE_BADPARAM,
    "bad parameters to function"
+
+ec MUPDATE_PROTOCOL_ERROR,
+   "Remote mupdate server sent bad protocol"
+
+ec MUPDATE_MAILBOX_UNKNOWN,
+   "Mailbox not in mupdate database"
 
 end

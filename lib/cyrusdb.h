@@ -38,6 +38,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: cyrusdb.h,v 1.10.2.1 2002/06/06 21:08:33 jsmith2 Exp $ */
+
 #ifndef INCLUDED_CYRUSDB_H
 #define INCLUDED_CYRUSDB_H
 
@@ -49,7 +51,8 @@ enum cyrusdb_ret {
     CYRUSDB_DONE = 1,
     CYRUSDB_IOERROR = -1,
     CYRUSDB_AGAIN = -2,
-    CYRUSDB_EXISTS = -3
+    CYRUSDB_EXISTS = -3,
+    CYRUSDB_INTERNAL = -4
 };
 
 #define cyrusdb_strerror(c) ("cyrusdb error")
@@ -85,6 +88,10 @@ struct cyrusdb_backend {
     /* checkpoints this database environment */
     int (*sync)(void);
 
+    /* archives this database environment, and specified databases
+     * into the specified directory */
+    int (*archive)(const char **fnames, const char *dirname);
+
     /* open the specified database in the global environment */
     int (*open)(const char *fname, struct db **ret);
 
@@ -117,6 +124,15 @@ struct cyrusdb_backend {
 		     const char *key, int keylen,
  		     const char **data, int *datalen,
 		     struct txn **mytid);
+
+    /* foreach: iterate through entries that start with 'prefix'
+       if 'p' returns true, call 'cb'
+
+       'p' should be fast and should avoid blocking it should be safe
+       to call other db routines inside of 'cb'.  however, the "flat"
+       backend is currently are not reentrant in this way
+       unless you're using transactions and pass the same transaction
+       to all db calls during the life of foreach() */
     int (*foreach)(struct db *mydb,
 		   char *prefix, int prefixlen,
 		   foreach_p *p,
@@ -132,14 +148,23 @@ struct cyrusdb_backend {
 		 struct txn **tid);
     int (*delete)(struct db *db, 
 		  const char *key, int keylen,
-		  struct txn **tid);
+		  struct txn **tid,
+		  int force); /* 1 = ignore not found errors */
     
     int (*commit)(struct db *db, struct txn *tid);
     int (*abort)(struct db *db, struct txn *tid);
+
+    int (*dump)(struct db *db, int detail);
+    int (*consistent)(struct db *db);
 };
+
+extern struct cyrusdb_backend *cyrusdb_backends[];
 
 extern struct cyrusdb_backend cyrusdb_db3;
 extern struct cyrusdb_backend cyrusdb_db3_nosync;
 extern struct cyrusdb_backend cyrusdb_flat;
+extern struct cyrusdb_backend cyrusdb_skiplist;
+
+extern int cyrusdb_copyfile(const char *srcname, const char *dstname);
 
 #endif /* INCLUDED_CYRUSDB_H */

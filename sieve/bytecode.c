@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.7 2002/06/05 16:44:26 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.8 2002/06/06 21:09:17 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -112,31 +112,20 @@ static int bc_stringlist_generate(int codep, bytecode_info_t *retval,
 }
 
 
-
-/*WERT.  this is icky and ugly and gross.  i should change the implementation to get rid of this*/
-stringlist_t * bc_stringlist_undo(int len, int i, bytecode_t *bc) 
-{  
-  stringlist_t *head=NULL;
-  stringlist_t *new;
-  stringlist_t * cur= head;
+/*this is used by notify to pass the options list*/
+char ** bc_makeArray(int len, int i, bytecode_t *bc) 
+{ 
   int x;
+  char** array;
+  array=(char**)xmalloc(len);
   for (x=0; x<len; x++)
     {
-      new=(stringlist_t*)malloc(sizeof(stringlist_t)); 
-      new->next=NULL;
-      new->s=(char*)&(bc[i+1].str);
-      if (head)
-	{cur->next=new;}
-      else
-	{head=new;}
-      cur=new;
+      array[x]=(char*)xmalloc(bc[i].len);
+      strncpy(array[x], (char*)&(bc[i+1].str), bc[i].len); 
+    }
   
-      i+=1+((ROUNDUP(bc[i].len+1))/sizeof(bytecode_t));
-   }
-  return head;
+  return array;
 }
-
-
 
 
 static int stringlist_len(int codep, bytecode_info_t *bc)
@@ -364,10 +353,34 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->curlen++;
 	    break;
 	case DENOTIFY:
-	    /* DENOTIFY (no arguments) */
+	    /* DENOTIFY  */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_DENOTIFY;
-	    retval->curlen++;
+	    switch(c->u.d.comptag) {
+	    case IS:
+	      retval->data[codep++].value = B_IS;
+	      break;
+	    case CONTAINS:
+	      retval->data[codep++].value = B_CONTAINS;
+	      break;
+	    case MATCHES:
+	      retval->data[codep++].value = B_MATCHES;
+	      break;
+#ifdef ENABLE_REGEX
+	    case REGEX:
+	      retval->data[codep++].value = B_REGEX;
+	      break;
+#endif
+	    default:
+	      return -1;
+	    }
+	    retval->data[codep++].len = strlen(c->u.d.pattern);
+	    retval->data[codep++].str = c->u.d.pattern;
+
+	    retval->data[codep++].len = strlen(c->u.d.priority);
+	    retval->data[codep++].str = c->u.d.priority;
+
+	    retval->curlen+=6;
 	    break;
         case REJCT:
 	    /* REJECT (STRING: len + dataptr) */
@@ -833,7 +846,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	
 		break;
 	    }
-	    case B_IFELSE:
+	case B_IFELSE:
 	    {
 		int teststart, testend, thenend, realend,
 		               testdist, thendist, enddist;
@@ -966,7 +979,31 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		}
 	        break;
 
-	    case B_VACATION:
+		
+	case B_DENOTIFY:
+	  /*comptype  num, comp string,priority string*/ 
+	  if(write(fd, &bc->data[codep].value,
+		   sizeof(bc->data[codep].value)) == -1)
+	    return -1;
+	  filelen += sizeof(int);
+	  codep++;
+	  for(i=0; i<2; i++) 
+	    {
+	      len = bc->data[codep++].len;
+	      if(write(fd,&len,sizeof(len)) == -1)
+		return -1;
+	      filelen += sizeof(int);
+	      
+	      if(write(fd,bc->data[codep++].str,len) == -1)
+		return -1;
+	      
+	      ret = align_string(fd, len);
+	      if(ret == -1) return -1;
+	      
+	      filelen += len + ret;
+	    }
+	  break;
+	case B_VACATION:
 		/* Address list, Subject String, Message String, Days (word), Mime (word) */
 	   
 	        /*new code-this might be broken*/
@@ -1016,7 +1053,6 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    case B_KEEP:
 	    case B_MARK:
 	    case B_UNMARK:
-	    case B_DENOTIFY:
 		/* No Parameters! */
 		break;
 
@@ -1214,32 +1250,26 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
       l = SIEVE_DONE;
     }
   }
-       printf("wert-ok %d",l); 
-  if (l == SIEVE_OK) {
+    if (l == SIEVE_OK) {
     /* ok, we're willing to respond to the sender.
        but is this message to me?  that is, is my address
        in the TO, CC or BCC fields? */
     if (strcpy(buf, "to"), 
 	interp->getheader(m, buf, &body) == SIEVE_OK)
       found = look_for_me(myaddr, numaddresses ,bc, i, body);
-     printf("wert %d",l); 
-    if (!found && (strcpy(buf, "cc"),
+      if (!found && (strcpy(buf, "cc"),
 		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
       found = look_for_me(myaddr, numaddresses, bc, i, body);
-     printf("wert %d",l); 
-    if (!found && (strcpy(buf, "bcc"),
+      if (!found && (strcpy(buf, "bcc"),
 		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
       found = look_for_me(myaddr, numaddresses, bc, i, body);
-     printf("wert %s",found); 
-    if (!found)
+      if (!found)
       l = SIEVE_DONE;
   }
-  printf("wert %d",l); 
-  /* ok, ok, if we got here maybe we should reply */
+    /* ok, ok, if we got here maybe we should reply */
   if (myaddr) free(myaddr);
   *from=found;
   *to=reply_to;
-  printf("\n\n\n\n\n\n%s %s", found, reply_to);
   return l;
 }
 
@@ -1251,7 +1281,8 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
   int x,y,z;/*loop variable*/
   int l;/*for allof/anyof*/
   int address=0;/*to differentiate between address and envelope*/
-  comparator_bc_t * comp;
+  comparator_t * comp=NULL;
+  void * comprock=NULL;
 
   printf("\n%d ",bc[i].value); 
   switch(bc[i].value)
@@ -1297,9 +1328,8 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	l=bc[i+1].len;
 	i+=2;
 	/*return 0 unless you find one, then return 1*/
-	for (x=0;x<l && !res; x++) {
-	  res |= eval_bc_test(interp,m,bc,&i);
-	}
+	for (x=0;x<l && !res; x++) 
+	  {res|= eval_bc_test(interp,m,bc,&i);}
 	break;
     case BC_ALLOF:/*6*/
         res=1;     
@@ -1330,7 +1360,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	res=0;
 
       /*find the correct comparator*/
-      comp=lookup_comp_bc("i;ascii-casemap",bc[i+1].value);
+       comp=lookup_comp("i;ascii-casemap",bc[i+1].value, "", &comprock);
      
       /*find the part of the address that we want*/
       switch(bc[i+2].value)
@@ -1363,7 +1393,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      for (z=0; z<numdata && !res; z++)
 		{
 		  printf("%s,  %s \n",addr, &(bc[currd+1].str));
-		  res|= comp((char*)&(bc[currd+1].str), addr);
+		  res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		}
 	    }
@@ -1385,9 +1415,9 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	int currh, currd; /*current header, current data*/
 	int blah;
 
-
 	/*find the correct comparator*/
-	comp=lookup_comp_bc("i;ascii-casemap" ,bc[i+1].value);
+	/*the empty string is a placeholder for a value needed for count and value*/
+	comp=lookup_comp("i;ascii-casemap" ,bc[i+1].value, "", &comprock );
 
 	/*i+=4;*/
 	/*search through all the flags for the header*/
@@ -1405,9 +1435,9 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		/*search through all the data*/ 
 		currd=datai+2;
 		for (z=0; z<numdata && !res; z++)
-		  {/*printf("numdata %d %d\n,",numdata,z );*/
+		  {
 		    printf("%s,  %s \n",val[y], &(bc[currd+1].str));
-		    res|= comp((char *)&(bc[currd+1].str), val[y]);
+		    res|= comp(val[y],(char *)&(bc[currd+1].str), comprock);
 
 
 		    currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
@@ -1603,41 +1633,57 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	{
 	  char * id;
 	  char * method;
-	  stringlist_t *options;
+	  char **options=NULL;
 	  const char * priority;
 	  char * message;
 	  
 	  ip++;
 	  method= (char*)&(bc[ip+1].str); 
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  printf("%s\n", method);
+	  /*	  printf("%s\n", method);*/
 	  
 	  id=(char*)&(bc[ip+1].str);
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  printf("%s\n", id);
+	  /*	  printf("%s\n", id);*/
 	  
-	  
-	  options=bc_stringlist_undo(bc[ip].len, ip+2,bc); 
+	  options=bc_makeArray(bc[ip].len, ip+2,bc); 
 	  ip=(bc[ip+1].value/4);
   
 	  priority= (const char*)&(bc[ip+1].str); 
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  printf("priority %s\n", priority);
+	  /*printf("priority %s\n", priority);*/
 
 	  message=(char*)&(bc[ip+1].str);
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  printf("%s\n", message);
+	  /*	  printf("%s\n", message);*/
 
 	  res = do_notify(notify_list, id, method, &options, priority, message);
 	  
 	  break;
 	}
       case B_DENOTIFY:
-	/*res = do_denotify(notify_list, c->u.d.comp, c->u.d.pattern,
-	  c->u.d.comprock, c->u.d.priority);
-	*/
-	printf("(de)notify not yet implemented");
-	break;
+	{
+	  comparator_t * comp=NULL;
+	  char * pattern;
+	  char * priority;
+	  void * comprock=NULL;
+	  
+	  comp=lookup_comp("i;ascii-casemap",bc[ip+1].value, "", comprock);
+	  
+	  ip+=2;
+	  pattern= (char*)&(bc[ip+1].str); 
+	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	  /*printf("priority %s\n", priority);*/
+	  
+	  priority= (char*)&(bc[ip+1].str); 
+	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	  /*printf("priority %s\n", priority);*/
+	  
+	  res = do_denotify(notify_list, comp, pattern, comprock, priority);
+	  
+	  printf("(de)notify not yet implemented");
+	  break;
+	}
       case B_VACATION:
 	  {
 	    int respond;
@@ -1892,7 +1938,8 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_DENOTIFY:
-	    printf("%d: DENOTIFY\n",i);
+	    printf("%d: DENOTIFY comp,%d %s  %s\n",i, d->data[i+1].value,d->data[i+3].str,d->data[i+5].str);
+	    i+=5;
 	    break;
 
 	case B_NOTIFY: 

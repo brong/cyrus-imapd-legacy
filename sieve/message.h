@@ -1,6 +1,6 @@
 /* message.h
  * Larry Greenfield
- * $Id: message.h,v 1.11.12.2 2002/06/05 16:44:26 jsmith2 Exp $
+ * $Id: message.h,v 1.11.12.3 2002/06/06 21:09:18 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -127,7 +127,7 @@ int do_removeflag(action_list_t *m, char *flag);
 int do_mark(action_list_t *m);
 int do_unmark(action_list_t *m);
 int do_notify(notify_list_t *n, char *id,
-	      char *method, stringlist_t **options,
+	      char *method, char **options,
 	      const char *priority, char *message);
 int do_denotify(notify_list_t *n, comparator_t *comp, void *pat,
 		void *comprock, const char *priority);

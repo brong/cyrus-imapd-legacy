@@ -61,6 +61,8 @@
  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  */
 
+/* $Id: cyrmain.c,v 1.10.12.1 2002/06/06 21:07:41 jsmith2 Exp $ */
+
 #include <stdio.h>
 #include <tcl.h>
 #include <errno.h>

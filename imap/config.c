@@ -37,8 +37,10 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- *
  */
+
+/* $Id: config.c,v 1.44.2.1 2002/06/06 21:07:58 jsmith2 Exp $ */
+
 #include <config.h>
 
 #include <stdio.h>
@@ -60,6 +62,8 @@
 #include "mboxlist.h"
 #include "util.h"
 #include "imap_err.h"
+#include "mupdate_err.h"
+#include "prot.h" /* for PROT_BUFSIZE */
 
 extern int errno;
 
@@ -75,12 +79,15 @@ static int nconfiglist;
 
 
 /* variables accessible to the external world */
-const char *config_dir;		 /* ie /var/imap */
-const char *config_defpartition; /* /var/spool/imap */
-const char *config_newsspool;	 /* /var/spool/news */
-const char *config_servername;	 /* gethostname() */
-int config_hashimapspool;	 /* f */
+const char *config_filename;     /* filename of configuration file */
 
+const char *config_dir;		           /* ie /var/imap */
+const char *config_defpartition;           /* /var/spool/imap */
+const char *config_newsspool;	           /* /var/spool/news */
+const char *config_servername;	           /* gethostname() */
+const char *config_mupdate_server = NULL;  /* NULL */
+
+int config_hashimapspool;	           /* f */
 
 static void config_read(const char *alt_config);
 
@@ -92,6 +99,7 @@ int config_init(const char *alt_config, const char *ident)
     int umaskval = 0;
 
     initialize_imap_error_table();
+    initialize_mupd_error_table();
 
     openlog(ident, LOG_PID, LOG_LOCAL6);
 
@@ -138,6 +146,8 @@ int config_init(const char *alt_config, const char *ident)
 	config_servername = xmalloc(sizeof(char) * 256);
 	gethostname((char *) config_servername, 256);
     }
+
+    config_mupdate_server = config_getstring("mupdate_server", NULL);
 
     return 0;
 }
@@ -207,6 +217,9 @@ static void config_read(const char *alt_config)
     int alloced = 0;
     char buf[4096];
     char *p, *q, *key;
+
+    if(alt_config) config_filename = xstrdup(alt_config);
+    else config_filename = xstrdup(CONFIG_FILENAME);
 
     infile = fopen(alt_config ? alt_config : CONFIG_FILENAME, "r");
     if (!infile) {
@@ -332,7 +345,7 @@ sasl_security_properties_t *mysasl_secprops(int flags)
 {
     static sasl_security_properties_t ret;
 
-    ret.maxbufsize = 4000;
+    ret.maxbufsize = PROT_BUFSIZE;
     ret.min_ssf = config_getint("sasl_minimum_layer", 0);	
 				/* minimum allowable security strength */
     ret.max_ssf = config_getint("sasl_maximum_layer", 256);

@@ -38,10 +38,12 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: iptostring.c,v 1.2 2001/11/27 02:25:03 ken3 Exp $ */
+/* $Id: iptostring.c,v 1.2.2.1 2002/06/06 21:08:36 jsmith2 Exp $ */
 
 #include <config.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>

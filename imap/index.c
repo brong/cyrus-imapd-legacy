@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.170 2001/11/13 18:29:35 leg Exp $
+ * $Id: index.c,v 1.170.2.1 2002/06/06 21:08:04 jsmith2 Exp $
  */
 #include <config.h>
 
@@ -78,6 +78,8 @@
 #include "stristr.h"
 #include "search_engines.h"
 
+#include "index.h"
+
 extern int errno;
 
 extern void printastring (const char *s);
@@ -108,91 +110,6 @@ static int keepingseen;		/* Nonzero if /Seen is meaningful */
 static unsigned allseen;	/* Last UID if all msgs /Seen last checkpoint */
 struct seen *seendb;		/* Seen state database object */
 static char *seenuids;		/* Sequence of UID's from last seen checkpoint */
-
-/* Access macros for the memory-mapped index file data */
-#define INDEC_OFFSET(msgno) (index_base+start_offset+(((msgno)-1)*record_size))
-#define UID(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_UID)))
-#define INTERNALDATE(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_INTERNALDATE)))
-#define SENTDATE(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_SENTDATE)))
-#define SIZE(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_SIZE)))
-#define HEADER_SIZE(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_HEADER_SIZE)))
-#define CONTENT_OFFSET(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_CONTENT_OFFSET)))
-#define CACHE_OFFSET(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_CACHE_OFFSET)))
-#define LAST_UPDATED(msgno) ((time_t)ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_LAST_UPDATED))))
-#define SYSTEM_FLAGS(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_SYSTEM_FLAGS)))
-#define USER_FLAGS(msgno,i) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_USER_FLAGS+((i)*4))))
-
-/* Access assistance macros for memory-mapped cache file data */
-#define CACHE_ITEM_BIT32(ptr) (ntohl(*((bit32 *)(ptr))))
-#define CACHE_ITEM_LEN(ptr) CACHE_ITEM_BIT32(ptr)
-#define CACHE_ITEM_NEXT(ptr) ((ptr)+4+((3+CACHE_ITEM_LEN(ptr))&~3))
-
-/* Cached envelope token positions */
-enum {
-    ENV_DATE = 0,
-    ENV_SUBJECT,
-    ENV_FROM,
-    ENV_SENDER,
-    ENV_REPLYTO,
-    ENV_TO,
-    ENV_CC,
-    ENV_BCC,
-    ENV_INREPLYTO,
-    ENV_MSGID
-};
-#define NUMENVTOKENS (10)
-
-/* Special "sort criteria" to load message-id and references/in-reply-to
- * into msgdata array for threaders that need them.
- */
-#define LOAD_IDS	256
-
-struct copyargs {
-    struct copymsg *copymsg;
-    int nummsg;
-    int msgalloc;
-};
-
-struct mapfile {
-    const char *base;
-    unsigned long size;
-};
-
-typedef struct msgdata {
-    unsigned msgno;		/* message number */
-    char *msgid;		/* message ID */
-    char **ref;			/* array of references */
-    int nref;			/* number of references */
-    time_t date;		/* sent date & time of message
-				   from Date: header (adjusted by time zone) */
-    char *cc;			/* local-part of first "cc" address */
-    char *from;			/* local-part of first "from" address */
-    char *to;			/* local-part of first "to" address */
-    char *xsubj;		/* extracted subject text */
-    unsigned xsubj_hash;	/* hash of extracted subject text */
-    int is_refwd;		/* is message a reply or forward? */
-    char **annot;		/* array of annotation attribute values
-				   (stored in order of sortcrit) */
-    int nannot;			/* number of annotation values */
-    struct msgdata *next;
-} MsgData;
-
-typedef struct thread {
-    MsgData *msgdata;		/* message data */
-    struct thread *parent;	/* parent message */
-    struct thread *child;	/* first child message */
-    struct thread *next;	/* next sibling message */
-} Thread;
-
-struct rootset {
-    Thread *root;
-    unsigned nroot;
-};
-
-struct thread_algorithm {
-    char *alg_name;
-    void (*threader)(unsigned *msgno_list, int nmsg, int usinguid);
-};
 
 /* Forward declarations */
 typedef int index_sequenceproc_t(struct mailbox *mailbox, unsigned msgno,
@@ -248,7 +165,7 @@ static int _index_search(unsigned **msgno_list, struct mailbox *mailbox,
 			 struct searchargs *searchargs);
 
 static void parse_cached_envelope(char *env, char *tokens[]);
-static char *find_msgid(char *str, int *len);
+static char *find_msgid(char *str, char **rem);
 static char *get_localpart_addr(const char *header);
 static char *index_extract_subject(const char *subj, int *is_refwd);
 static char *_index_extract_subject(char *s, int *is_refwd);
@@ -443,8 +360,10 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 	}
 	if (r) {
 	    seendb = 0;
-	    prot_printf(imapd_out, "* OK %s: %s\r\n",
+	    prot_printf(imapd_out, "* OK (seen state failure) %s: %s\r\n",
 		   error_message(IMAP_NO_CHECKPRESERVE), error_message(r));
+	    syslog(LOG_ERR, "Could not open seen state for %s (%s)",
+		   imapd_userid, error_message(r));
 	}
 	else {
 	    /*
@@ -493,9 +412,9 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 	if (imapd_exists && i <= imapd_exists) {
 	    prot_printf(imapd_out, "* OK [UNSEEN %u]  \r\n", i);
 	}
-        prot_printf(imapd_out, "* OK [UIDVALIDITY %u]  \r\n",
+        prot_printf(imapd_out, "* OK [UIDVALIDITY %lu]  \r\n",
 		    mailbox->uidvalidity);
-	prot_printf(imapd_out, "* OK [UIDNEXT %u]  \r\n",
+	prot_printf(imapd_out, "* OK [UIDNEXT %lu]  \r\n",
 		    mailbox->last_uid + 1);
     }
 
@@ -514,6 +433,14 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 
 /*
  * Checkpoint the user's \Seen state
+ *
+ * Format of the seenuids string:
+ *
+ * no whitespace, n:m indicates an inclusive range (n to m), otherwise
+ * list is comma separated of single messages, e.g.:
+ *
+ * 1:16239,16241:17015,17019:17096,17098,17100
+ *
  */
 #define SAVEGROW 200
 void
@@ -1346,7 +1273,7 @@ int statusitems;
     sepchar = '(';
 
     if (statusitems & STATUS_MESSAGES) {
-	prot_printf(imapd_out, "%cMESSAGES %u", sepchar, mailbox->exists);
+	prot_printf(imapd_out, "%cMESSAGES %lu", sepchar, mailbox->exists);
 	sepchar = ' ';
     }
     if (statusitems & STATUS_RECENT) {
@@ -1354,11 +1281,11 @@ int statusitems;
 	sepchar = ' ';
     }
     if (statusitems & STATUS_UIDNEXT) {
-	prot_printf(imapd_out, "%cUIDNEXT %u", sepchar, mailbox->last_uid+1);
+	prot_printf(imapd_out, "%cUIDNEXT %lu", sepchar, mailbox->last_uid+1);
 	sepchar = ' ';
     }
     if (statusitems & STATUS_UIDVALIDITY) {
-	prot_printf(imapd_out, "%cUIDVALIDITY %u", sepchar,
+	prot_printf(imapd_out, "%cUIDVALIDITY %lu", sepchar,
 		    mailbox->uidvalidity);
 	sepchar = ' ';
     }
@@ -1417,7 +1344,7 @@ index_getstate(mailbox)
 struct mailbox *mailbox;
 {    
 
-    prot_printf(imapd_out, "* XSTATE %u %u\r\n", mailbox->index_mtime,
+    prot_printf(imapd_out, "* XSTATE %lu %lu\r\n", mailbox->index_mtime,
 		seen_last_change);
 
     return 0;
@@ -3545,29 +3472,82 @@ static char *_index_extract_subject(char *s, int *is_refwd)
 }
 
 /* Find a message-id looking thingy in a string.  Returns a pointer to the
- * id and the length is returned in the *len parameter.
+ * alloc'd id and the remaining string is returned in the **loc parameter.
  *
  * This is a poor-man's way of finding the message-id.  We simply look for
  * any string having the format "< ... @ ... >" and assume that the mail
  * client created a properly formatted message-id.
  */
-static char *find_msgid(char *str, int *len)
-{
-    char *s, *p;
+#define MSGID_SPECIALS "<> @\\"
 
-    *len = 0;
-    p = str;
-    while (p && (s = strchr(p, '<'))) {
-	p = s + 1;
-	while (*p && *p != '@' && *p != '<' && *p != '>') p++;
-	if (*p != '@') continue;
-	while (*p && *p != '<' && *p != '>') p++;
-	if (*p == '>') {
-	    *len = p - s + 1;
-	    return s;
-	}	    
+static char *find_msgid(char *str, char **rem)
+{
+    char *msgid, *src, *dst, *cp;
+
+    if (!str) return NULL;
+
+    msgid = NULL;
+    src = str;
+
+    /* find the start of a msgid */
+    while ((cp = src = strchr(src, '<')) != NULL) {
+
+	/* see if we have (and skip) a quoted localpart */
+	if (*++cp == '\"') {
+	    /* find the endquote, making sure it isn't escaped */
+	    do {
+		cp = strchr(++cp, '\"');
+	    } while (cp && *(cp-1) == '\\');
+
+	    /* no endquote, so bail */
+	    if (!cp) {
+		src++;
+		continue;
+	    }
+	}
+
+	/* find the end of the msgid */
+	if ((cp = strchr(cp, '>')) == NULL)
+	    return NULL;
+
+	/* alloc space for the msgid */
+	dst = msgid = (char*) xrealloc(msgid, cp - src + 2);
+
+	*dst++ = *src++;
+
+	/* quoted string */
+	if (*src == '\"') {
+	    src++;
+	    while (*src != '\"') {
+		if (*src == '\\') {
+		    src++;
+		}
+		*dst++ = *src++;
+	    }
+	    src++;
+	}
+	/* atom */
+	else {
+	    while (!strchr(MSGID_SPECIALS, *src))
+		*dst++ = *src++;
+	}
+
+	if (*src != '@' || *(dst-1) == '<') continue;
+	*dst++ = *src++;
+
+	/* domain atom */
+	while (!strchr(MSGID_SPECIALS, *src))
+	    *dst++ = *src++;
+
+	if (*src != '>' || *(dst-1) == '@') continue;
+	*dst++ = *src++;
+	*dst = '\0';
+
+	if (rem) *rem = src;
+	return msgid;
     }
 
+    if (msgid) free(msgid);
     return NULL;
 }
 
@@ -3576,17 +3556,14 @@ static char *find_msgid(char *str, int *len)
 
 void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers)
 {
-    char *msgid, *refstr, *ref, *in_reply_to;
-    int len, refsize = REFGROWSIZE;
+    char *refstr, *ref, *in_reply_to;
+    int refsize = REFGROWSIZE;
     char buf[100];
 
     /* get msgid */
-    msgid = find_msgid(envtokens[ENV_MSGID], &len);
-    /* if we have one, make a copy of it */
-    if (msgid)
-	msgdata->msgid = xstrndup(msgid, len);
-    /* otherwise, create one */
-    else {
+    msgdata->msgid = find_msgid(envtokens[ENV_MSGID], NULL);
+     /* if we don't have one, create one */
+    if (!msgdata->msgid) {
 	sprintf(buf, "<Empty-ID: %u>", msgdata->msgno);
 	msgdata->msgid = xstrdup(buf);
     }
@@ -3596,7 +3573,7 @@ void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers)
 	/* allocate some space for refs */
 	msgdata->ref = (char **) xmalloc(refsize * sizeof(char *));
 	/* find references */
-	while ((ref = find_msgid(refstr, &len)) != NULL) {
+	while ((ref = find_msgid(refstr, &refstr)) != NULL) {
 	    /* reallocate space for this msgid if necessary */
 	    if (msgdata->nref == refsize) {
 		refsize += REFGROWSIZE;
@@ -3604,20 +3581,18 @@ void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers)
 		    xrealloc(msgdata->ref, refsize * sizeof(char *));
 	    }
 	    /* store this msgid in the array */
-	    msgdata->ref[msgdata->nref++] = xstrndup(ref, len);
-	    /* skip past this msgid */
-	    refstr = ref + len;
+	    msgdata->ref[msgdata->nref++] = ref;
 	}
     }
 
     /* if we have no references, try in-reply-to */
     if (!msgdata->nref) {
 	/* get in-reply-to id */
-	in_reply_to = find_msgid(envtokens[ENV_INREPLYTO], &len);
+	in_reply_to = find_msgid(envtokens[ENV_INREPLYTO], NULL);
 	/* if we have an in-reply-to id, make it the ref */
 	if (in_reply_to) {
 	    msgdata->ref = (char **) xmalloc(sizeof(char *));
-	    msgdata->ref[msgdata->nref++] = xstrndup(in_reply_to, len);
+	    msgdata->ref[msgdata->nref++] = in_reply_to;
 	}
     }
 }
@@ -3778,9 +3753,9 @@ static void index_thread_orderedsubj(unsigned *msgno_list, int nmsg,
 				     int usinguid)
 {
     MsgData *msgdata, *freeme;
-    struct sortcrit sortcrit[] = {{ SORT_SUBJECT,  0 },
-				  { SORT_DATE,     0 },
-				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit sortcrit[] = {{ SORT_SUBJECT,  0, {{NULL, NULL}} },
+				  { SORT_DATE,     0, {{NULL, NULL}} },
+				  { SORT_SEQUENCE, 0, {{NULL, NULL}} }};
     unsigned psubj_hash = 0;
     char *psubj;
     Thread *head, *newnode, *cur, *parent;
@@ -4094,7 +4069,9 @@ static void ref_link_messages(MsgData *msgdata, Thread **newnode,
 /*
  * Gather orphan messages under the root node.
  */
-static void ref_gather_orphans(char *key, Thread *node, struct rootset *rootset)
+static void ref_gather_orphans(char *key __attribute__((unused)),
+			       Thread *node,
+			       struct rootset *rootset)
 {
     /* we only care about nodes without parents */
     if (!node->parent) {
@@ -4188,8 +4165,8 @@ static void ref_prune_tree(Thread *parent)
 static void ref_sort_root(Thread *root)
 {
     Thread *cur;
-    struct sortcrit sortcrit[] = {{ SORT_DATE,     0 },
-				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit sortcrit[] = {{ SORT_DATE,     0, {{NULL, NULL}} },
+				  { SORT_SEQUENCE, 0, {{NULL, NULL}} }};
 
     cur = root->child;
     while (cur) {
@@ -4528,12 +4505,12 @@ static void _index_thread_ref(unsigned *msgno_list, int nmsg,
  */
 static void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
 {
-    struct sortcrit loadcrit[] = {{ LOAD_IDS,      0 },
-				  { SORT_SUBJECT,  0 },
-				  { SORT_DATE,     0 },
-				  { SORT_SEQUENCE, 0 }};
-    struct sortcrit sortcrit[] = {{ SORT_DATE,     0 },
-				  { SORT_SEQUENCE, 0 }};
+    struct sortcrit loadcrit[] = {{ LOAD_IDS,      0, {{NULL,NULL}} },
+				  { SORT_SUBJECT,  0, {{NULL,NULL}} },
+				  { SORT_DATE,     0, {{NULL,NULL}} },
+				  { SORT_SEQUENCE, 0, {{NULL,NULL}} }};
+    struct sortcrit sortcrit[] = {{ SORT_DATE,     0, {{NULL,NULL}} },
+				  { SORT_SEQUENCE, 0, {{NULL,NULL}} }};
 
     _index_thread_ref(msgno_list, nmsg, loadcrit, NULL, sortcrit, usinguid);
 }

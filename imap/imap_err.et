@@ -24,10 +24,17 @@
 #  (412) 268-4387, fax: (412) 268-7395
 #  tech-transfer@andrew.cmu.edu
 # 
+# $Id: imap_err.et,v 1.35.2.1 2002/06/06 21:08:01 jsmith2 Exp $
 error_table imap
+
+ec IMAP_INTERNAL,
+   "Internal Error"
 
 ec IMAP_IOERROR,
    "System I/O error"
+
+ec IMAP_SYS_ERROR,
+   "Operating System Error"
 
 ec IMAP_NOSPACE,
    "mail system storage has been exceeded"
@@ -58,6 +65,12 @@ ec IMAP_MAILBOX_EXISTS,
 
 ec IMAP_MAILBOX_BADNAME,
    "Invalid mailbox name"
+
+ec IMAP_MAILBOX_MOVED,
+   "Mailbox has been moved to another server"
+
+ec IMAP_MAILBOX_RESERVED,
+   "Mailbox is currently reserved"
 
 ec IMAP_MAILBOX_POPLOCKED,
    "Mailbox is locked by POP server"
@@ -92,13 +105,27 @@ ec IMAP_PROTOCOL_ERROR,
 ec IMAP_PROTOCOL_BAD_PARAMETERS,
    "Syntax error in parameters"
 
+ec IMAP_ANNOTATION_BADENTRY,
+   "Invalid annotation entry"
+
+ec IMAP_ANNOTATION_BADATTRIB,
+   "Invalid annotation attribute"
+
 # following used only proxy/db operations
+ec IMAP_BAD_SERVER,
+   "Invalid server requested"
 
 ec IMAP_SERVER_UNAVAILABLE,
    "Server(s) unavailable to complete operation"
 
+ec IMAP_REMOTE_DENIED,
+   "The remote Server(s) denied the operation"
+
 ec IMAP_AGAIN,
    "Retry operation"
+
+ec IMAP_NOT_SINGULAR_ROOT,
+   "This mailbox hierarchy does not exist on a single backend server."
 
 # Following only used for internationalization of error messages
 
@@ -136,6 +163,9 @@ ec IMAP_NO_CHECKPRESERVE,
 
 ec IMAP_NO_NOSUCHMSG,
    "No matching messages"
+
+ec IMAP_NO_NOSUCHANNOTATION,
+   "No matching annotations"
 
 # Following used for internationalization of untagged BYE response
 

@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: user.c,v 1.5 2001/11/19 21:32:45 leg Exp $
+ * $Id: user.c,v 1.5.2.1 2002/06/06 21:08:20 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -51,6 +51,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <syslog.h>
@@ -77,9 +78,13 @@
 #include "mboxlist.h"
 #include "mailbox.h"
 #include "util.h"
+#include "seen.h"
 
 static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 {
+#if 0
+    /* deleting all references to the user is too slow right now */
+
     char *ident = (char *) rock;
     int r;
     char *acl;
@@ -104,16 +109,54 @@ static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 
 	acl = nextid;
     }
+#endif
     return 0;
 }
 
-int user_delete(char *user, char *userid, struct auth_state *authstate)
+int user_deletesieve(char *user) 
+{
+    char sieve_path[2048];
+    char filename[2048];
+    DIR *mbdir;
+    struct dirent *next = NULL;
+    
+    /* oh well */
+    if(config_getswitch("sieveusehomedir", 0)) return 0;
+    
+    snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
+	     config_getstring("sievedir", "/usr/sieve"),
+	     user[0], user);
+    mbdir=opendir(sieve_path);
+
+    if(mbdir) {
+	while((next = readdir(mbdir)) != NULL) {
+	    if(!strcmp(next->d_name, ".")
+	       || !strcmp(next->d_name, "..")) continue;
+
+	    snprintf(filename, sizeof(filename), "%s/%s",
+		     sieve_path, next->d_name);
+
+	    unlink(filename);
+	}
+	
+	closedir(mbdir);
+
+	/* remove mbdir */
+	rmdir(sieve_path);
+    }
+
+    return 0;
+}
+
+int user_delete(char *user, char *userid, struct auth_state *authstate,
+		int wipe_user)
 {
     char *fname;
     char pat[] = "*";
 
     /* delete seen state */
-    seen_delete_user(user);
+    if(wipe_user)
+	seen_delete_user(user);
 
     /* delete subscriptions */
     fname = mboxlist_hash_usersubs(user);
@@ -124,8 +167,13 @@ int user_delete(char *user, char *userid, struct auth_state *authstate)
     user_deletequotas(user);
 
     /* delete ACLs - we're using the internal names here */
-    mboxlist_findall(NULL, pat, 1, userid, authstate, user_deleteacl, user);
+    if(wipe_user)
+	mboxlist_findall(NULL, pat, 1, userid, authstate, user_deleteacl,
+			 user);
 
+    /* delete sieve scripts */
+    user_deletesieve(user);
+    
     return 0;
 }
 #if 0
@@ -222,7 +270,7 @@ int user_copyquota(char *oldname, char *newname)
     quota.fd = open(buf, O_RDWR, 0);
     if (quota.fd > 0) {
 	r = mailbox_read_quota(&quota);
-	if (!r) mboxlist_setquota(newname, quota.limit);
+	if (!r) mboxlist_setquota(newname, quota.limit, 0);
     }
 }
 #endif

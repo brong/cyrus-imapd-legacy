@@ -39,6 +39,8 @@
  *
  */
 
+/* $Id: readconfig.h,v 1.2.12.1 2002/06/06 21:08:57 jsmith2 Exp $ */
+
 #ifndef READCONFIG_H
 #define READCONFIG_H
 

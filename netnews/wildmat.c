@@ -40,7 +40,8 @@
  */
 
 
-/*  $Revision: 1.2 $
+/*  $Revision: 1.2.12.1 $
+ *  $Id: wildmat.c,v 1.2.12.1 2002/06/06 21:08:58 jsmith2 Exp $
 **
 **  Do shell-style pattern matching for ?, \, [], and * characters.
 **  Might not be robust in face of malformed patterns; e.g., "foo[a-"

@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.5 2002/06/05 16:44:27 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.6 2002/06/06 21:09:18 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -673,9 +673,10 @@ static int eval(sieve_interp_t *i, commandlist_t *c,
 		*errmsg = "Unmark can not be used with Reject";
 	    break;
 	case NOTIFY:
-	    res = do_notify(notify_list, c->u.n.id, c->u.n.method,
+	  /*this is broken, cause i changed options form a string list to a char** list*/
+	  /*  res = do_notify(notify_list, c->u.n.id, c->u.n.method,
 			    &c->u.n.options, c->u.n.priority, c->u.n.message);
-			    
+	  */	    
 	    break;
 	case DENOTIFY:
 	    res = do_denotify(notify_list, c->u.d.comp, c->u.d.pattern,
@@ -866,10 +867,12 @@ static int send_notify_callback(sieve_interp_t *interp, void *message_context,
 	char **opts = nc.options;
 	while (opts && *opts) {
 	  free(*opts);
-	    opts++;
+	  opts++;
 	}
 	free(nc.options);
+	
       }
+
     free(nc.message);
 
     return ret;
@@ -1275,7 +1278,7 @@ static int do_sieve_error(int ret,
 			  const char *errmsg
 			  ) 
 {
-  if (ret != SIEVE_OK) {
+   if (ret != SIEVE_OK) {
 	if (lastaction == -1) /* we never executed an action */
 	    snprintf(actions_string+strlen(actions_string),
 		     ACTIONS_STRING_LEN-strlen(actions_string),
@@ -1308,7 +1311,6 @@ static int do_sieve_error(int ret,
 	      }
 	    n = n->next;
 	  }
-	
 	
 	if (notify_list) free_notify_list(notify_list);
 	notify_list = NULL;	/* don't try any notifications again */
@@ -1385,7 +1387,7 @@ static int do_action_list(sieve_interp_t *interp,
     while (a != NULL) {
 	lastaction = a->a;
 	errmsg = NULL;
-	printf("%d\n",a->a);
+	printf("Action:%d\n",a->a);
 	switch (a->a) {
 	case ACTION_REJECT:
 	    implicit_keep = 0;
@@ -1582,13 +1584,14 @@ int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context)
 	  return SIEVE_NOMEM;
       }
     actions = new_action_list();
-    if (actions == NULL) {
-      ret = SIEVE_NOMEM;
-      return do_sieve_error(ret, bc->interp, bc->script_context,
-			    message_context, imapflags,
-			    actions, notify_list, lastaction, 0,
-			    actions_string, errmsg);
-    }
+    if (actions == NULL) 
+      {
+	ret = SIEVE_NOMEM;
+	return do_sieve_error(ret, bc->interp, bc->script_context,
+			      message_context, imapflags,
+			      actions, notify_list, lastaction, 0,
+			      actions_string, errmsg);
+      }
     
     if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, 
 		      imapflags, actions, notify_list, &errmsg) < 0)

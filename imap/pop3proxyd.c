@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.27 2001/12/01 04:03:16 ken3 Exp $
+ * $Id: pop3proxyd.c,v 1.27.2.1 2002/06/06 21:08:15 jsmith2 Exp $
  */
 #include <config.h>
 
@@ -111,7 +111,8 @@ char *popd_userid = 0;
 struct sockaddr_in popd_localaddr, popd_remoteaddr;
 int popd_haveaddr = 0;
 char popd_clienthost[250] = "[local]";
-struct protstream *popd_out, *popd_in;
+struct protstream *popd_out = NULL;
+struct protstream *popd_in = NULL;
 int popd_starttls_done = 0;
 int popd_auth_done = 0;
 
@@ -205,7 +206,7 @@ int service_init(int argc, char **argv, char **envp)
 /*
  * run for each accepted connection
  */
-int service_main(int argc, char **argv, char **envp)
+int service_main(int argc, char **argv, char **envp __attribute__((unused)))
 {
     int pop3s = 0;
     int opt;
@@ -306,14 +307,15 @@ int service_main(int argc, char **argv, char **envp)
 		apop_enabled() ? popd_apop_chal : "");
     cmdloop();
     
-    return 0;
+    /* xxx no process reuse for you */
+    shut_down(0);
+    /* return 0; */
 }
 
 /* called if 'service_init()' was called but not 'service_main()' */
 void service_abort(int error)
 {
-    mboxlist_close();
-    mboxlist_done();
+    shut_down(error);
 }
 
 void usage(void)
@@ -331,10 +333,26 @@ void usage(void)
 void shut_down(int code)
 {
     proc_cleanup();
+    mboxlist_close();
+    mboxlist_done();
+
+    if (popd_in) {
+	prot_NONBLOCK(popd_in);
+	prot_fill(popd_in);
+	
+	prot_free(popd_in);
+    }
+
+    if (popd_out) {
+	prot_flush(popd_out);
+
+	prot_free(popd_out);
+    }
+
 #ifdef HAVE_SSL
     tls_shutdown_serverengine();
 #endif
-    prot_flush(popd_out);
+
     exit(code);
 }
 
@@ -348,8 +366,10 @@ void fatal(const char* s, int code)
 	exit(recurse_code);
     }
     recurse_code = code;
-    prot_printf(popd_out, "-ERR [SYS/PERM] Fatal error: %s\r\n", s);
-    prot_flush(popd_out);
+    if (popd_out) {
+	prot_printf(popd_out, "-ERR [SYS/PERM] Fatal error: %s\r\n", s);
+	prot_flush(popd_out);
+    }
     shut_down(code);
 }
 
@@ -811,8 +831,10 @@ void cmd_pass(char *pass)
 	return;
     }
     else {
-	syslog(LOG_NOTICE, "login: %s %s plaintext %s",
-	       popd_clienthost, popd_userid, reply ? reply : "");
+	syslog(LOG_NOTICE, "login: %s %s plaintext%s %s", popd_clienthost,
+	       popd_userid, popd_starttls_done ? "+TLS" : "", 
+	       reply ? reply : "");
+
 	plaintextloginpause = config_getint("plaintextloginpause", 0);
 	if (plaintextloginpause) sleep(plaintextloginpause);
     }
@@ -879,7 +901,7 @@ void cmd_auth(char *arg)
 {
     int sasl_result;
     static struct buf clientin;
-    unsigned clientinlen=0;
+    int clientinlen=0;
     char *authtype;
     const char *serverout;
     unsigned int serveroutlen;
@@ -967,9 +989,7 @@ void cmd_auth(char *arg)
 				       clientin.s,
 				       clientinlen,
 				       &serverout, &serveroutlen);
-    syslog(LOG_NOTICE, "pop3d step - through it again");
     }
-    syslog(LOG_NOTICE, "pop3d step- done");
 
     /* failed authentication */
     if (sasl_result != SASL_OK)
@@ -1012,10 +1032,11 @@ void cmd_auth(char *arg)
     syslog(LOG_NOTICE, "login: %s %s %s %s", popd_clienthost, popd_userid,
 	   authtype, "User logged in");
     
+    openproxy();
+
     prot_setsasl(popd_in,  popd_saslconn);
     prot_setsasl(popd_out, popd_saslconn);
 
-    openproxy();
     popd_auth_done = 1;
 }
 
@@ -1119,9 +1140,9 @@ static int proxy_authenticate(const char *hostname)
 		   sizeof(struct sockaddr_in), localip, 60) != 0)
 	return SASL_FAIL;
 
-    r = sasl_setprop(popd_saslconn, SASL_IPLOCALPORT, localip);
+    r = sasl_setprop(backend_saslconn, SASL_IPLOCALPORT, localip);
     if (r != SASL_OK) return r;
-    r = sasl_setprop(popd_saslconn, SASL_IPREMOTEPORT, remoteip);
+    r = sasl_setprop(backend_saslconn, SASL_IPREMOTEPORT, remoteip);
     if (r != SASL_OK) return r;
 
     /* read the initial greeting */
@@ -1192,7 +1213,7 @@ static void openproxy(void)
     struct sockaddr_in sin;
     char inboxname[MAX_MAILBOX_PATH];
     int r;
-    char *server;
+    char *server = NULL;
 
     /* have to figure out what server to connect to */
     strcpy(inboxname, "user.");
@@ -1203,7 +1224,14 @@ static void openproxy(void)
     mboxname_hiersep_tointernal(&popd_namespace, inboxname+5);
 
     r = mboxlist_lookup(inboxname, &server, NULL, NULL);
-    if (!r) fatal("couldn't find backend server", EC_CONFIG);
+    if (r) fatal("couldn't find backend server", EC_CONFIG);
+
+    /* xxx hide the fact that we are storing partitions */
+    if(server) {
+	char *c;
+	c = strchr(server, '!');
+	if(c) *c = '\0';
+    }
 
     hp = gethostbyname(server);
     if (!hp) fatal("gethostbyname failed", EC_CONFIG);
@@ -1225,11 +1253,12 @@ static void openproxy(void)
     prot_setflushonread(backend_in, backend_out);
 
     if (proxy_authenticate(server) != SASL_OK) {
-	syslog(LOG_ERR, "couldn't authenticate to backend server", EC_CONFIG);
+	syslog(LOG_ERR, "couldn't authenticate to backend server");
 	fatal("couldn't authenticate to backend server", 1);
     }
 
     prot_printf(popd_out, "+OK Maildrop locked and ready\r\n");
+    prot_flush(popd_out);
     return;
 }
 

@@ -39,6 +39,8 @@
  *
  */
 
+/* $Id: duplicate.c,v 1.25.2.1 2002/06/06 21:08:00 jsmith2 Exp $ */
+
 #include <config.h>
 
 #include <stdio.h>
@@ -81,9 +83,7 @@
 
 #include "duplicate.h"
 
- /* we have binary data and \0 -> MUST use DB3 */
-#define DB (&cyrusdb_db3_nosync)
-#define FNAME_DELIVERDB "/deliver.db"
+#define DB (CONFIG_DB_DUPLICATE)
 
 static struct db *dupdb = NULL;
 static int duplicate_dbopen = 0;
@@ -157,13 +157,13 @@ time_t duplicate_check(char *id, int idlen, char *to, int tolen)
 	/* found the record */
 	memcpy(&mark, data, sizeof(time_t));
     } else if (r != CYRUSDB_OK) {
-	syslog(LOG_ERR, "duplicate_check: error looking up %s/%d: %s",
+	syslog(LOG_ERR, "duplicate_check: error looking up %s/%s: %s",
 	       id, to,
 	       cyrusdb_strerror(r));
 	mark = 0;
     }
 
-    syslog(LOG_DEBUG, "duplicate_check: %-40s %-20s %d",
+    syslog(LOG_DEBUG, "duplicate_check: %-40s %-20s %ld",
 	   buf, buf+idlen+1, mark);
 
     return mark;
@@ -189,7 +189,7 @@ void duplicate_mark(char *id, int idlen, char *to, int tolen, time_t mark)
 		      (char *) &mark, sizeof(mark), NULL);
     } while (r == CYRUSDB_AGAIN);
 
-    syslog(LOG_DEBUG, "duplicate_mark: %-40s %-20s %d",
+    syslog(LOG_DEBUG, "duplicate_mark: %-40s %-20s %ld",
 	   buf, buf+idlen+1, mark);
 
     return;
@@ -226,7 +226,7 @@ static int prune_cb(void *rock, const char *id, int idlen,
     prock->deletions++;
 
     do {
-	r = DB->delete(prock->db, id, idlen, NULL);
+	r = DB->delete(prock->db, id, idlen, NULL, 0);
     } while (r == CYRUSDB_AGAIN);
 
 

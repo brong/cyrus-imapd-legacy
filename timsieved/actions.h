@@ -1,7 +1,8 @@
 /* actions.h -- executes the commands (creating, deleting scripts etc..) for timsieved
  * Tim Martin
  * 9/21/99
- */
+ * $Id: actions.h,v 1.8.2.1 2002/06/06 21:09:22 jsmith2 Exp $
+*/
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *

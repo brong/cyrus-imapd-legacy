@@ -39,6 +39,8 @@
  *
  */
 
+/* $Id: IMAP.xs,v 1.9.6.1 2002/06/06 21:09:00 jsmith2 Exp $ */
+
 /*
  * Perl interface to the Cyrus imclient routines.  This enables the
  * use of Perl to implement Cyrus utilities, in particular imtest and cyradm.
@@ -50,6 +52,7 @@
 #include <pwd.h>
 #include "imclient.h"
 #include "cyrperl.h"
+#include "imapurl.h"
 
 typedef struct xscyrus *Cyrus_IMAP;
 
@@ -164,7 +167,49 @@ void imclient_xs_fcmdcb(struct imclient *client, struct xsccb *rock,
   if (rock->autofree) imclient_xs_callback_free(rock);
 }
 
+static int get_username(void *context, int id,
+			const char **result, unsigned *len) {
+  Cyrus_IMAP text = (Cyrus_IMAP)context;
+  if(id == SASL_CB_AUTHNAME) {
+	if(len) *len = strlen(text->authname);
+	*result = text->authname;
+	return SASL_OK;
+  } else if (id == SASL_CB_USER) {
+	if(text->username) {
+	    if(len) *len = strlen(text->username);
+	    *result = text->username;
+	} else {
+	    if(len) *len = 0;
+	    *result = "";
+	}
+	return SASL_OK;
+  } 
+  return SASL_FAIL;
+}
 
+static int get_password(sasl_conn_t *conn, void *context, int id,
+			sasl_secret_t **psecret) {
+  Cyrus_IMAP text = (Cyrus_IMAP)context;
+  if(id != SASL_CB_PASS) return SASL_FAIL;
+  if(!text->password) {
+	char *ptr;
+	printf("Password: ");
+	ptr = getpass("");
+	text->password = safemalloc(sizeof(sasl_secret_t) + strlen(ptr));
+	text->password->len = strlen(ptr);
+	strncpy(text->password->data, ptr, text->password->len);
+  }
+  *psecret = text->password;
+  return SASL_OK;  
+}
+
+/* callbacks we support */
+static const sasl_callback_t sample_callbacks[NUM_SUPPORTED_CALLBACKS] = {
+  { SASL_CB_USER, get_username, NULL }, 
+  { SASL_CB_AUTHNAME, get_username, NULL }, 
+  { SASL_CB_PASS, get_password, NULL },
+  { SASL_CB_LIST_END, NULL, NULL }
+};
 
 MODULE = Cyrus::IMAP	PACKAGE = Cyrus::IMAP
 PROTOTYPES: ENABLE
@@ -203,24 +248,41 @@ PREINIT:
 	int rc;
 	SV *bang;
 	Cyrus_IMAP rv;
+	int i;
 CODE:
-	rc = imclient_connect(&client, host, port, NULL);
+	/* Allocate and setup the return value */
+	rv = safemalloc(sizeof *rv);
+
+	rv->authenticated = 0;
+
+	memcpy(rv->callbacks, sample_callbacks, sizeof(sample_callbacks));
+
+	/* Setup respective contexts */
+	for(i=0; i < NUM_SUPPORTED_CALLBACKS; i++) {
+	    rv->callbacks[i].context = rv;
+	}
+
+	/* Connect */
+	rc = imclient_connect(&client, host, port, rv->callbacks);
 	switch (rc) {
 	case -1:
 	  Perl_croak(aTHX_ "imclient_connect: unknown host \"%s\"", host);
+	  safefree(rv);
 	  break;
 	case -2:
 	  Perl_croak(aTHX_ "imclient_connect: unknown service \"%s\"", port);
+	  safefree(rv);
 	  break;
 	case 0:
 	  if (client) {
-	    rv = safemalloc(sizeof *rv);
-	    rv->imclient = client;
 	    rv->class = safemalloc(strlen(class) + 1);
 	    strcpy(rv->class, class);
-	    rv->cb = 0;
+	    rv->username = rv->authname = NULL;
+	    rv->password = NULL;
+	    rv->imclient = client;
 	    imclient_setflags(client, flags);
 	    rv->flags = flags;
+	    rv->cb = 0;
 	    rv->cnt = 1;
 	    break;
 	  }
@@ -251,6 +313,7 @@ CODE:
 	    safefree(client->cb->rock);
 	    client->cb = nx;
 	  }
+	  safefree(client->password);
 	  safefree(client->class);
 	  safefree(client);
 	}
@@ -296,23 +359,48 @@ PPCODE:
 	imclient_processoneevent(client->imclient);
 
 SV *
-imclient__authenticate(client, mechlist, service, user, minssf, maxssf)
+imclient__authenticate(client, mechlist, service, user, auth, password, minssf, maxssf)
 	Cyrus_IMAP client
 	char* mechlist
 	char* service
 	char* user
+	char* auth
+	char* password
 	int minssf
 	int maxssf
 PREINIT:
 	int rc;
 CODE:
+	ST(0) = sv_newmortal();
+
+	if(client->authenticated) {
+	  ST(0) = &sv_no;
+	  return;
+	}
+
+	/* If the user parameter is undef, set user to be NULL */
+	if(!SvOK(ST(3))) user = NULL;
+	if(!SvOK(ST(5))) password = NULL;
+
+	client->username = user; /* AuthZid */
+	client->authname = auth; /* Authid */
+
+	if(password) {
+	    if(client->password) safefree(client->password);
+	    client->password =
+		safemalloc(sizeof(sasl_secret_t) + strlen(password));
+	    client->password->len = strlen(password);
+	    strncpy(client->password->data, password, client->password->len);
+	}
+
 	rc = imclient_authenticate(client->imclient, mechlist, service, user,
 				   minssf, maxssf);
-	ST(0) = sv_newmortal();
 	if (rc)
 	  ST(0) = &sv_no;
-	else
+	else {
+	  client->authenticated = 1;
 	  ST(0) = &sv_yes;
+	}
 
 void
 imclient_addcallback(client, ...)
@@ -544,3 +632,63 @@ PPCODE:
 	  PUSHs(&sv_yes);
 	else
 	  PUSHs(&sv_no);
+
+void
+imclient_fromURL(client,url)
+	Cyrus_IMAP client
+	char *url
+PREINIT:
+	SV *out_server, *out_box;
+	char *server_buf, *box_buf;
+	int len;
+PPCODE:
+	len = strlen(url);
+	server_buf = safemalloc(len);
+	box_buf = safemalloc(2*len);
+
+	server_buf[0] = '\0';
+	box_buf[0] = '\0';
+	imapurl_fromURL(server_buf, box_buf, url);
+
+	if(!server_buf[0] || !box_buf[0]) {
+		safefree(server_buf);
+		safefree(box_buf);
+		XSRETURN_UNDEF;
+	}
+
+	XPUSHs(sv_2mortal(newSVpv(server_buf, 0)));
+	XPUSHs(sv_2mortal(newSVpv(box_buf, 0)));
+
+	/* newSVpv copies these */
+	safefree(server_buf);
+	safefree(box_buf);
+	
+	XSRETURN(2);
+
+void
+imclient_toURL(client,server,box)
+	Cyrus_IMAP client
+	char *server
+	char *box
+PREINIT:
+	SV *out;
+	char *out_buf;
+	int len;
+PPCODE:
+	len = strlen(server)+strlen(box);
+	out_buf = safemalloc(4*len);
+
+	out_buf[0] = '\0';
+	imapurl_toURL(out_buf, server, box, NULL);
+
+	if(!out_buf[0]) {
+		safefree(out_buf);
+		XSRETURN_UNDEF;
+	}
+
+	XPUSHs(sv_2mortal(newSVpv(out_buf, 0)));
+
+	/* newSVpv copies this */
+	safefree(out_buf);
+	
+	XSRETURN(1);

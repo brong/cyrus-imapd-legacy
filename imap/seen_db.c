@@ -1,5 +1,5 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
-   $Id: seen_db.c,v 1.24 2001/11/19 21:32:45 leg Exp $
+   $Id: seen_db.c,v 1.24.2.1 2002/06/06 21:08:18 jsmith2 Exp $
  
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -66,6 +66,7 @@
 #include "xmalloc.h"
 #include "mailbox.h"
 #include "imap_err.h"
+#include "seen.h"
 
 #define FNAME_SEENSUFFIX ".seen" /* per user seen state extension */
 #define FNAME_SEEN "/cyrus.seen" /* for legacy seen state */
@@ -87,7 +88,7 @@ struct seen {
 static struct seen *lastseen = NULL;
 
 /* choose "flat" or "db3" here */
-#define DB (&cyrusdb_flat)
+#define DB (CONFIG_DB_SEEN)
 
 static void abortcurrent(struct seen *s)
 {
@@ -101,7 +102,7 @@ static void abortcurrent(struct seen *s)
     }
 }
 
-static char *getpath(const char *userid)
+char *seen_getpath(const char *userid)
 {
     char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_USERDIR) +
 		    strlen(userid) + sizeof(FNAME_SEENSUFFIX) + 10);
@@ -155,7 +156,7 @@ int seen_open(struct mailbox *mailbox,
     }
 
     /* open the seendb corresponding to user */
-    fname = getpath(user);
+    fname = seen_getpath(user);
     r = DB->open(fname, &seendb->db);
     if (r != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname, 
@@ -260,7 +261,7 @@ static int seen_readit(struct seen *seendb,
     int uidlen;
 
     assert(seendb && seendb->uniqueid);
-    if (rw) {
+    if (rw || seendb->tid) {
 	r = DB->fetchlock(seendb->db, 
 			  seendb->uniqueid, strlen(seendb->uniqueid),
 			  &data, &datalen, &seendb->tid);
@@ -278,7 +279,8 @@ static int seen_readit(struct seen *seendb,
 	return IMAP_AGAIN;
 	break;
     case CYRUSDB_IOERROR:
-	syslog(LOG_ERR, "DBERROR: error fetching txn", cyrusdb_strerror(r));
+	syslog(LOG_ERR, "DBERROR: error fetching txn %s",
+	       cyrusdb_strerror(r));
 	return IMAP_IOERROR;
 	break;
     }
@@ -286,7 +288,7 @@ static int seen_readit(struct seen *seendb,
 	r = seen_readold(seendb, lastreadptr, lastuidptr,
 			 lastchangeptr, seenuidsptr);
 	if (r) {
-	    DB->abort(seendb->db, seendb->tid);
+	    abortcurrent(seendb);
 	}
 	return r;
     }
@@ -451,7 +453,7 @@ int seen_create_user(const char *user)
 
 int seen_delete_user(const char *user)
 {
-    char *fname = getpath(user);
+    char *fname = seen_getpath(user);
     int r = 0;
 
     if (SEEN_DEBUG) {
@@ -542,3 +544,102 @@ int seen_reconstruct(struct mailbox *mailbox,
     return 0;
 }
 
+struct seen_merge_rock 
+{
+    struct db *db;
+    struct txn *tid;
+};
+
+/* Look up the unique id in the tgt file, if it is there, compare the
+ * last change times, and ensure that the tgt database uses the newer of
+ * the two */
+static int seen_merge_cb(void *rockp,
+			 const char *key, int keylen,
+			 const char *tmpdata, int tmpdatalen) 
+{
+    int r;
+    struct seen_merge_rock *rockdata = (struct seen_merge_rock *)rockp;
+    struct db *tgtdb = rockdata->db;
+    const char *tgtdata;
+    int tgtdatalen, dirty = 0;
+
+    if(!tgtdb) return IMAP_INTERNAL;
+
+    r = DB->fetchlock(tgtdb, key, keylen, &tgtdata, &tgtdatalen,
+		      &(rockdata->tid));
+    if(!r && tgtdata) {
+	/* compare timestamps */
+	int version, tmplast, tgtlast;
+	char *p;
+	const char *tmp = tmpdata, *tgt = tgtdata;
+	
+	/* get version */
+	version = strtol(tgt, &p, 10); tgt = p;
+	assert(version == SEEN_VERSION);
+       	/* skip lastread */
+	strtol(tgt, &p, 10); tgt = p;
+	/* skip lastuid */
+	strtol(tgt, &p, 10); tgt = p;
+	/* get lastchange */
+	tgtlast = strtol(tgt, &p, 10);
+
+	/* get version */
+	version = strtol(tmp, &p, 10); tmp = p;
+	assert(version == SEEN_VERSION);
+       	/* skip lastread */
+	strtol(tmp, &p, 10); tmp = p;
+	/* skip lastuid */
+	strtol(tmp, &p, 10); tmp = p;
+	/* get lastchange */
+	tmplast = strtol(tmp, &p, 10);
+
+	if(tmplast > tgtlast) dirty = 1;
+    } else {
+	dirty = 1;
+    }
+    
+    if(dirty) {
+	/* write back data from new entry */
+	return DB->store(tgtdb, key, keylen, tmpdata, tmpdatalen,
+			 &(rockdata->tid));
+    } else {
+	return 0;
+    }
+}
+
+static int seen_merge_p(void *rockp __attribute__((unused)),
+			const char *key __attribute__((unused)),
+			int keylen __attribute__((unused)),
+			const char *data __attribute__((unused)),
+			int datalen __attribute__((unused)))
+{
+    return 1;
+}
+
+int seen_merge(const char *tmpfile, const char *tgtfile) 
+{
+    int r = 0;
+    struct db *tmp = NULL, *tgt = NULL;
+    struct seen_merge_rock rock;
+
+    r = DB->open(tmpfile, &tmp);
+    if(r) goto done;
+	    
+    r = DB->open(tgtfile, &tgt);
+    if(r) goto done;
+
+    rock.db = tgt;
+    rock.tid = NULL;
+    
+    r = DB->foreach(tmp, "", 0, seen_merge_p, seen_merge_cb, &rock, &rock.tid);
+
+    if(r) DB->abort(rock.db, rock.tid);
+    else DB->commit(rock.db, rock.tid);
+
+ done:
+
+    if(tgt) DB->close(tgt);
+    if(tmp) DB->close(tmp);
+    
+    return r;
+}

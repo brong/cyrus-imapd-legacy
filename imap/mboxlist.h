@@ -1,4 +1,4 @@
-/* mboxlist.c -- Mailbox list manipulation routines
+/* mboxlist.h -- Mailbox list manipulation routines
  * 
  * 
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -40,27 +40,18 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * 
- * $Id: mboxlist.h,v 1.17 2001/11/27 02:24:59 ken3 Exp $
+ * $Id: mboxlist.h,v 1.17.2.1 2002/06/06 21:08:12 jsmith2 Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
 #define INCLUDED_MBOXLIST_H
 
+#include "config.h"
 #include "cyrusdb.h"
 #include "mailbox.h"
 #include "auth.h"
-#include "acap.h"
 #include "mboxname.h"
 
-/* --- cut here --- */
-#ifndef CONFIG_DB_SUBS
-#define CONFIG_DB_SUBS (&cyrusdb_flat)
-#endif
-
-#ifndef CONFIG_DB_MBOX
-#define CONFIG_DB_MBOX (&cyrusdb_db3)
-#endif
-/* -- cut here -- */
 extern struct db *mbdb;
 
 /*
@@ -69,12 +60,18 @@ extern struct db *mbdb;
 #define MAX_PARTITION_LEN 64
 
 /* flags for types of mailboxes */
-#define MBTYPE_REMOTE 0x01
-#define MBTYPE_CONFLICT 0x02
-#define MBTYPE_NETNEWS 0x04
+#define MBTYPE_REMOTE 0x01 /* Not on this server (part is remote host) */
+#define MBTYPE_RESERVE 0x02 /* Reserved [mupdate/imapd] /
+			       Rename Target [imapd] (part is normal, but
+			       you are not allowed to create this mailbox,
+			       even though it doesn't actually exist */
+#define MBTYPE_NETNEWS 0x04 /* Netnews Mailbox */
+#define MBTYPE_MOVING 0x08 /* Mailbox in mid-transfer (part is remotehost!localpart) */
 
 /* master name of the mailboxes file */
 #define FNAME_MBOXLIST "/mailboxes.db"
+
+#define HOSTNAME_SIZE 512
 
 /* each mailbox has the following data */
 struct mbox_entry {
@@ -88,9 +85,16 @@ struct mbox_entry {
 /* Lookup 'name' in the mailbox list. */
 int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid);
 
+/* Lookup 'name' and get more detail */
+int mboxlist_detail(const char *name, int *typep, char **pathp, char **partp,
+		    char **aclp, struct txn *tid);
+
 /* insert a stub entry */
-int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
-			  void **rettid);
+int mboxlist_insertremote(const char *name, int mbtype, const char *host,
+			  const char *acl, void **rettid);
+
+/* Update a mailbox's entry */
+int mboxlist_update(char *name, int flags, const char *part, const char *acl);
 
 /* check user's ability to create mailbox */
 int mboxlist_createmailboxcheck(char *name, int mbtype, char *partition, 
@@ -99,13 +103,22 @@ int mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
 				char **newacl, char **newpartition);
 
 /* create mailbox */
+/* localonly creates the local mailbox without touching mupdate */
+/* forceuser allows the creation of user.x.<name> without a user.x */
 int mboxlist_createmailbox(char *name, int mbtype, char *partition, 
 			   int isadmin, char *userid, 
-			   struct auth_state *auth_state);
+			   struct auth_state *auth_state,
+			   int localonly, int forceuser);
 
 /* Delete a mailbox. */
-int mboxlist_deletemailbox(char *name, int isadmin, char *userid, 
-			   struct auth_state *auth_state, int checkacl);
+/* setting local_only disables any communication with the mupdate server
+ * and deletes the mailbox from the filesystem regardless of if it is
+ * MBTYPE_REMOTE or not */
+/* force ignores errors and just tries to wipe the mailbox off the face of
+ * the planet */
+int mboxlist_deletemailbox(const char *name, int isadmin, char *userid, 
+			   struct auth_state *auth_state, int checkacl,
+			   int local_only, int force);
 
 /* Rename/move a mailbox (hierarchical) */
 int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
@@ -155,11 +168,12 @@ int mboxlist_changesub(const char *name, const char *userid,
 char *mboxlist_hash_usersubs(const char *userid);
 
 /* set or create quota root */
-int mboxlist_setquota(const char *root, int newquota);
+int mboxlist_setquota(const char *root, int newquota, int force);
+int mboxlist_unsetquota(const char *root);
 
 /* returns a malloc() string that is the representation in the mailboxes 
    file.  for ctl_mboxlist */
-char *mboxlist_makeentry(int mbtype, char *part, char *acl);
+char *mboxlist_makeentry(int mbtype, const char *part, const char *acl);
 
 /* open the mailboxes db */
 void mboxlist_open(char *name);

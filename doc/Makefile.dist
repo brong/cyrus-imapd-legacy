@@ -1,3 +1,4 @@
+# $Id: Makefile.dist,v 1.6.2.1 2002/06/06 21:07:43 jsmith2 Exp $
 dist:
 	mkdir -p man
 	for man in ../man/*.[1-9]; \
@@ -6,10 +7,12 @@ dist:
 		groff -man -Thtml $$man > man/`basename $$man`.html; \
 	done
 
-	pod2html ../perl/imap/cyradm > man/cyradm.1.html
+	pod2html ../perl/imap/cyradm.sh > man/cyradm.1.html
 	pod2man ../perl/sieve/scripts/sieveshell.pl > ../man/sieveshell.1
 	pod2html ../perl/sieve/scripts/sieveshell.pl > man/sieveshell.1.html
 
 	rm -f groff-html-*.png pod2htm*
+
+	fig2dev -L png murder.fig murder.png
 
 	(cd text; make)

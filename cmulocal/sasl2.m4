@@ -1,8 +1,9 @@
 dnl sasl2.m4--sasl2 libraries and includes
 dnl Rob Siemborski
+dnl $Id: sasl2.m4,v 1.6.2.1 2002/06/06 21:07:38 jsmith2 Exp $
 
 AC_DEFUN(SASL_GSSAPI_CHK,[
- AC_ARG_ENABLE(gssapi, [  --with-gssapi=<DIR>	  enable GSSAPI authentication [yes] ],
+ AC_ARG_ENABLE(gssapi, [  --enable-gssapi=<DIR>   enable GSSAPI authentication [yes] ],
     gssapi=$enableval,
     gssapi=yes)
 
@@ -31,20 +32,19 @@ AC_DEFUN(SASL_GSSAPI_CHK,[
      LDFLAGS="$LDFLAGS -L$gssapi/lib"
   fi
 
-  # the base64_decode check fails because libroken has dependencies
-  # FIXME: this is probabally non-optimal as well
-  AC_CHECK_LIB(krb5,krb5_vlog,gss_impl="heimdal",,)
-  #  AC_CHECK_LIB(roken,base64_decode,gss_impl="heimdal",, $LIB_CRYPT)
-
   if test -d ${gssapi}; then
-     gssapi_dir=$gssapi
-     GSSAPIBASE_LIBS="-L$gssapi_dir/lib"
+     gssapi_dir="${gssapi}/lib"
+     GSSAPIBASE_LIBS="-L$gssapi_dir"
      GSSAPIBASE_STATIC_LIBS="-L$gssapi_dir"
   else
      dnl FIXME: This is only used for building cyrus, and then only as
      dnl a real hack.  it needs to be fixed.
      gssapi_dir="/usr/local/lib"
   fi
+
+  # Check a full link against the heimdal libraries.  If this fails, assume
+  # MIT.
+  AC_CHECK_LIB(gssapi,gss_unwrap,gss_impl="heimdal",,$GSSAPIBASE_LIBS -lgssapi -lkrb5 -ldes -lasn1 -lroken ${LIB_CRYPT} -lcom_err)
 
   if test "$gss_impl" = "mit"; then
      GSSAPIBASE_LIBS="$GSSAPIBASE_LIBS -lgssapi_krb5 -lkrb5 -lk5crypto -lcom_err"
@@ -101,7 +101,7 @@ AC_ARG_WITH(sasl,
             with_sasl="yes")
 
 AC_ARG_WITH(staticsasl,
-	    [  --with-staticsasl=DIR  Compile with staticly linked libsasl2 in <DIR>],
+	    [  --with-staticsasl=DIR   Compile with staticly linked libsasl2 in <DIR>],
 	    with_staticsasl="$withval";
 	    if test $with_staticsasl != "no"; then
 		using_static_sasl="static"
@@ -152,7 +152,10 @@ AC_ARG_WITH(staticsasl,
             ac_cv_sasl_where_inc=${with_sasl}/include
 
 	    DYNSASLFLAGS="-I$ac_cv_sasl_where_inc"
-	    LIB_DYN_SASL="-L$ac_cv_sasl_where_lib"
+	    if test "$ac_cv_sasl_where_lib" != ""; then
+		CMU_ADD_LIBPATH_TO($ac_cv_sasl_where_lib, LIB_DYN_SASL)
+	    fi
+	    LIB_DYN_SASL="$LIB_DYN_SASL -lsasl2"
 	    CPPFLAGS="${cmu_saved_CPPFLAGS} -I${ac_cv_sasl_where_inc}"
 	    LDFLAGS="${cmu_saved_LDFLAGS} -L${ac_cv_sasl_where_lib}"
 	fi
@@ -166,7 +169,10 @@ AC_ARG_WITH(staticsasl,
 	                   ac_cv_found_sasl=no), ac_cv_found_sasl=no)
 
 	if test "$ac_cv_found_sasl" = "yes"; then
-	    DYNLIB_SASL="$LIB_SASL -lsasl2"
+	    if test "$ac_cv_sasl_where_lib" != ""; then
+	        CMU_ADD_LIBPATH_TO($ac_cv_sasl_where_lib, DYNLIB_SASL)
+	    fi
+	    DYNLIB_SASL="$DYNLIB_SASL -lsasl2"
 	    if test "$using_static_sasl" != "static"; then
 		LIB_SASL=$DYNLIB_SASL
 		SASLFLAGS=$DYNSASLFLAGS
@@ -193,3 +199,16 @@ if test "$ac_cv_found_sasl" != "yes"; then
         AC_ERROR([Cannot continue without libsasl2.
 Get it from ftp://ftp.andrew.cmu.edu/pub/cyrus-mail/.])
 fi])
+
+AC_DEFUN(CMU_SASL2_CHECKAPOP_REQUIRED, [
+	AC_REQUIRE([CMU_SASL2_REQUIRED])
+
+	cmu_saved_LDFLAGS=$LDFLAGS
+
+	LDFLAGS="$LIB_SASL $LDFLAGS"
+
+	AC_CHECK_LIB(sasl2, sasl_checkapop, AC_DEFINE(HAVE_APOP),
+		AC_MSG_ERROR([libsasl2 without working sasl_checkapop.  Cannot continue.]))
+
+	LDFLAGS=$cmu_saved_LDFLAGS
+])

@@ -1,5 +1,5 @@
 /* config.h -- Configuration routines
- * $Id: imapconf.h,v 1.11 2001/12/09 16:52:57 rjs3 Exp $
+ * $Id: imapconf.h,v 1.11.2.1 2002/06/06 21:08:01 jsmith2 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -90,31 +90,35 @@ extern int authisa(struct auth_state *authstate,
 		   const char *service, const char *class);
 
 /* Values of mandatory options */
+extern const char *config_filename;
+
 extern const char *config_dir;
 extern const char *config_defpartition;
 extern const char *config_newsspool;
 
 extern const char *config_servername;
+extern const char *config_mupdate_server;
 
 extern int config_hashimapspool;
 
 void config_scanpartition( void (*proc)() );
 
 /* signal handling (signals.c) */
-
 typedef void shutdownfn(int);
 
 void signals_add_handlers(void);
 void signals_set_shutdown(shutdownfn *s);
 void signals_poll(void);
 
-/* base64 authentication functions (base64.c) */
+/* useful types */
 struct protstream;
 struct buf {
     char *s;
+    int len;
     int alloc;
 };
 
+/* base64 authentication functions (base64.c) */
 void printauthready(struct protstream *out, int len, unsigned char *data);
 int getbase64string(struct protstream *in, struct buf *buf);
 int parsebase64string(char **ptr, const char *s);
@@ -122,11 +126,20 @@ int parsebase64string(char **ptr, const char *s);
 /* imap parsing functions (imapparse.c) */
 int getword(struct protstream *in, struct buf *buf);
 
-enum string_types { IMAP_ASTRING, IMAP_NSTRING, IMAP_STRING };
+/* IMAP_BIN_ASTRING is an IMAP_ASTRING that does not perform the
+ * does-not-contain-a-NULL check (in the case of a literal) */
+enum string_types { IMAP_ASTRING,
+		    IMAP_BIN_ASTRING,
+		    IMAP_NSTRING,
+		    IMAP_QSTRING,
+		    IMAP_STRING };
+
 int getxstring(struct protstream *pin, struct protstream *pout,
 	       struct buf *buf, int type);
 #define getastring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_ASTRING)
+#define getbastring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_BIN_ASTRING)
 #define getnstring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_NSTRING)
+#define getqstring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_QSTRING)
 #define getstring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_STRING)
 void freebuf(struct buf *buf);
 

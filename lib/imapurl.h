@@ -39,6 +39,8 @@
  *
  */
 
+/* $Id: imapurl.h,v 1.2.12.1 2002/06/06 21:08:35 jsmith2 Exp $ */
+
 #ifndef IMAPURL_H
 #define IMAPURL_H
 
@@ -53,7 +55,10 @@ void imapurl_fromURL(char *server, char *mailbox, const char *src);
  *    Hex encoding can triple the size of the input
  *    UTF-7 can be slightly denser than UTF-8
  *     (worst case: 8 octets UTF-7 becomes 9 octets UTF-8)
+ *
+ *  it is valid for mechname to be NULL (implies anonymous mech)
  */
-void imapurl_toURL(char *dst, const char *server, const char *mailbox);
+void imapurl_toURL(char *dst, const char *server, const char *mailbox,
+		   const char *mechname);
 
 #endif

@@ -38,6 +38,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: managesieve.h,v 1.3.12.1 2002/06/06 21:09:12 jsmith2 Exp $ */
+
 #include "isieve.h"
 
 

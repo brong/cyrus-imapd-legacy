@@ -41,6 +41,8 @@
  *
  */
 
+/* $Id: chartable.h,v 1.2.12.1 2002/06/06 21:08:33 jsmith2 Exp $ */
+
 #define XLT 'N'			/* Long translation */
 #define U7F 'O'			/* UTF-7 first base64 character */
 #define U7N 'P'			/* UTF-7 subsquent base64 character */

@@ -38,6 +38,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: fud-client.c,v 1.3.12.1 2002/06/06 21:07:39 jsmith2 Exp $ */
+
 /*  This is an example client for the experimental fud service. 
     For this to work, the mailbox must have the local ACL bit 0 enabled
     for user 'anonymous' ('anyone' will also work)

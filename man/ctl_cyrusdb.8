@@ -39,6 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
+.\" $Id: ctl_cyrusdb.8,v 1.1.4.1 2002/06/06 21:08:44 jsmith2 Exp $
 .SH NAME
 ctl_cyrusdb \- perform operations common to all Cyrus databases
 .SH SYNOPSIS
@@ -48,6 +49,9 @@ ctl_cyrusdb \- perform operations common to all Cyrus databases
 .I config-file
 ]
 .B \-r
+[
+.B \-x
+]
 .br
 .B ctl_cyrusdb
 [
@@ -73,11 +77,18 @@ option is used to determine the default location of the Cyrus databases.
 Read configuration options from \fIconfig-file\fR.
 .TP
 .B \-r
-Recover the databases after an application or system failure.
+Recover the databases after an application or system failure.  Also performs
+database cleanup like removing mailbox reservations (and any assoiciated
+mailbox files).
+.TP
+.B \-x
+Used with -r to recover the database only.  (Prevents database cleanup).
 .TP
 .B \-c
-Checkpoint the databases.  Changes to the database which are part of
-committed transactions are written to disk. 
+Checkpoint and archive the databases.  Changes to the database which
+are part of committed transactions are written to disk.  Also, a
+\fIhot\fR backup of the databases is made and inactive log files are
+removed.
 .SH FILES
 .TP
 .B /etc/imapd.conf

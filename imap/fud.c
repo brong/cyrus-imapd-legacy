@@ -42,7 +42,7 @@
 
 #include <config.h>
 
-/* $Id: fud.c,v 1.24 2001/08/16 20:52:05 ken3 Exp $ */
+/* $Id: fud.c,v 1.24.2.1 2002/06/06 21:08:01 jsmith2 Exp $ */
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -80,12 +80,13 @@
 
 extern int errno;
 extern int optind;
-extern char *optarg;
 
 /* current namespace */
 static struct namespace fud_namespace;
 
 /* forward decls */
+extern void setproctitle_init(int argc, char **argv, char **envp);
+
 int handle_request(const char *who, const char *name, 
 		   struct sockaddr_in sfrom);
 
@@ -93,15 +94,9 @@ void send_reply(struct sockaddr_in sfrom, int status,
 		const char *user, const char *mbox, 
 		int numrecent, time_t lastread, time_t lastarrived);
 
-int soc;
+int soc = 0; /* inetd (master) has handed us the port as stdin */
 
 char who[16];
-
-int init_network(int port)
-{
-    soc = 0;	/* inetd has handed us the port as stdin */
-    return(0);
-}
 
 #define MAXLOGNAME 16		/* should find out for real */
 
@@ -115,7 +110,7 @@ int begin_handling(void)
         char    mbox[MAX_MAILBOX_NAME+1];
         char    *q;
         int     off;
-        
+
         while(1) {
             /* For safety */
             memset(username,'\0',MAXLOGNAME);	
@@ -140,6 +135,8 @@ int begin_handling(void)
 
             handle_request(username,mbox,sfrom);
         }
+
+	/* never reached */
 }
 
 void shut_down(int code) __attribute__((noreturn));
@@ -148,33 +145,33 @@ void shut_down(int code)
     seen_done();
     mboxlist_close();
     mboxlist_done();
+    closelog();
     exit(code);
 }
 
 
-int main(int argc, char **argv)
+/*
+ * run once when process is forked;
+ * MUST NOT exit directly; must return with non-zero error code
+ */
+int service_init(int argc, char **argv, char **envp)
 {
-    int port = 0;
-    int r;
     int opt;
-    char *alt_config = NULL;
    
-    r = 0; /* to shut up lint/gcc */
+    config_changeident("fud");
 
-    if(geteuid() == 0)
-        fatal("must run as the Cyrus user", EC_USAGE);
+    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+
+    setproctitle_init(argc, argv, envp);
 
     while ((opt = getopt(argc, argv, "C:")) != EOF) {
 	switch (opt) {
-	case 'C': /* alt config file */
-	    alt_config = optarg;
+	case 'C': /* alt config file - handled by service::main() */
 	    break;
 	default:
 	    break;
 	}
     }
-
-    config_init(alt_config, "fud");
 
     signals_set_shutdown(&shut_down);
     signals_add_handlers();
@@ -183,20 +180,94 @@ int main(int argc, char **argv)
     mboxlist_open(NULL);
     mailbox_initialize();
 
+    return 0;
+}
+
+void service_abort(int error)
+{
+    shut_down(error);
+}
+
+int service_main(int argc, char **argv, char **envp)
+{
+    int r = 0; 
+
     /* Set namespace */
     if ((r = mboxname_init_namespace(&fud_namespace, 1)) != 0) {
 	syslog(LOG_ERR, error_message(r));
 	fatal(error_message(r), EC_CONFIG);
     }
 
-    r = init_network(port);
-    if (r) {
-        fatal("unable to configure network port", EC_OSERR);
-    }
-    
-    begin_handling();
+    r = begin_handling();
 
-    shut_down(0);
+    shut_down(r);
+}
+
+static void cyrus_timeout(int signo)
+{
+  signo = 0;
+  return;
+}
+
+/* Send a proxy request to the backend, send their reply to sfrom */
+int do_proxy_request(const char *who, const char *name,
+		     const char *backend_host,
+		     struct sockaddr_in sfrom) 
+{
+    char tmpbuf[1024];
+    int x, rc;
+    int csoc = -1;
+    struct sockaddr_in cin, cout;
+    struct hostent *hp;
+    int backend_port = 4201; /* default fud udp port */
+    static struct servent *sp = NULL;
+
+    /* Open a UDP socket to the Cyrus mail server */
+    if(!sp) {
+	sp = getservbyname("fud", "udp");
+	if(sp) backend_port = sp->s_port;
+    }
+
+    hp = gethostbyname (backend_host);
+    if (!hp) {
+	send_reply(sfrom, REQ_UNK, who, name, 0, 0, 0);
+	rc = IMAP_SERVER_UNAVAILABLE;
+	goto done;
+    }
+
+    csoc = socket (PF_INET, SOCK_DGRAM, 0);
+    memcpy (&cin.sin_addr.s_addr, hp->h_addr, hp->h_length);
+    cin.sin_family = AF_INET;
+    cin.sin_port = backend_port;
+
+    /* Write a Cyrus query into *tmpbuf */
+    memset (tmpbuf, '\0', sizeof(tmpbuf));
+    sprintf (tmpbuf, "%s|%s", who, name);
+    x = sizeof (cin);
+
+    /* Send the query and wait for a reply */
+    sendto (csoc, tmpbuf, strlen (tmpbuf), 0, (struct sockaddr *) &cin, x);
+    memset (tmpbuf, '\0', strlen (tmpbuf));
+    signal (SIGALRM, cyrus_timeout);
+    rc = 0;
+    alarm (1);
+    rc = recvfrom (csoc, tmpbuf, sizeof(tmpbuf), 0,
+		   (struct sockaddr *) &cout, &x);
+    alarm (0);
+    if (rc < 1) {
+	rc = IMAP_SERVER_UNAVAILABLE;
+	send_reply(sfrom, REQ_UNK, who, name, 0, 0, 0);
+	goto done;
+    }
+
+    /* Send reply back */
+    /* rc is size */
+    sendto(soc,tmpbuf,rc,0,(struct sockaddr *) &sfrom, sizeof(sfrom));
+    rc = 0;
+
+ done:
+    if(csoc != -1) close(csoc);
+    return rc;
 }
 
 int handle_request(const char *who, const char *name,
@@ -211,6 +282,8 @@ int handle_request(const char *who, const char *name,
     char *seenuids;
     unsigned numrecent;
     char mboxname[MAX_MAILBOX_NAME+1];
+    char *location, *acl;
+    int mbflag;
 
     numrecent = 0;
     lastread = 0;
@@ -218,6 +291,34 @@ int handle_request(const char *who, const char *name,
 
     r = (*fud_namespace.mboxname_tointernal)(&fud_namespace,name,who,mboxname);
     if (r) return r; 
+
+    r = mboxlist_detail(mboxname, &mbflag, &location, NULL, &acl, NULL);
+    if(r || mbflag & MBTYPE_RESERVE) {
+	send_reply(sfrom, REQ_UNK, who, name, 0, 0, 0);
+	return r;
+    }
+
+    if(mbflag & MBTYPE_REMOTE) {
+	struct auth_state *mystate;
+	char *p = NULL;
+
+	/* xxx hide that we are storing partitions */
+	p = strchr(location, '!');
+	if(p) *p = '\0';
+
+	/* Check the ACL */
+	mystate = auth_newstate("anonymous", NULL);
+	if(cyrus_acl_myrights(mystate, acl) & ACL_USER0) {
+	    /* We want to proxy this one */
+	    auth_freestate(mystate);
+	    return do_proxy_request(who, name, location, sfrom);
+	} else {
+	    /* Permission Denied */
+	    auth_freestate(mystate);
+	    send_reply(sfrom, REQ_DENY, who, name, 0, 0, 0);
+	    return 0;
+	}
+    }
 
     /*
      * Open/lock header 
@@ -262,7 +363,7 @@ int handle_request(const char *who, const char *name,
     {
 	const char *base;
 	unsigned long len = 0;
-	int msg;
+	unsigned int msg;
 	unsigned uid;
 	
 	map_refresh(mailbox.index_fd, 0, &base, &len,
@@ -309,6 +410,13 @@ send_reply(struct sockaddr_in sfrom, int status,
 
 void fatal(const char* s, int code)
 {
-    fprintf(stderr, "fud: %s\n", s);
-    exit(code);
+    static int recurse_code = 0;
+    if (recurse_code) {
+        /* We were called recursively. Just give up */
+	syslog(LOG_ERR, "fatal error: %s", s);
+	exit(code);
+    }
+    recurse_code = code;
+
+    shut_down(code);
 }

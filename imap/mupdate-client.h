@@ -1,6 +1,6 @@
-/* mupdate-client.c -- cyrus murder database clients
+/* mupdate-client.h -- cyrus murder database clients
  *
- * $Id: mupdate-client.h,v 1.1 2001/10/23 20:17:21 leg Exp $
+ * $Id: mupdate-client.h,v 1.1.4.1 2002/06/06 21:08:13 jsmith2 Exp $
  * Copyright (c) 2001 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,13 +43,19 @@
 #ifndef INCLUDED_MUPDATE_CLIENT_H
 #define INCLUDED_MUPDATE_CLIENT_H
 
+#include <sasl/sasl.h>
+#include "mupdate_err.h"
+
+#define FNAME_MUPDATE_TARGET_SOCK "/socket/mupdate.target"
+
 typedef struct mupdate_handle_s mupdate_handle;
 
-/* connect to a mupdate server */
-int mupdate_connect(const char *server, mupdate_handle **handle);
+/* connect & authenticate to an mupdate server */
+int mupdate_connect(const char *server, const char *port,
+		    mupdate_handle **handle, sasl_callback_t *cbs);
 
-/* authenticate to the server */
-int mupdate_authenticate(mupdate_handle *handle);
+/* disconnect from mupdate server */
+void mupdate_disconnect(mupdate_handle **h);
 
 /* activate a mailbox */
 int mupdate_activate(mupdate_handle *handle, 
@@ -60,22 +66,47 @@ int mupdate_activate(mupdate_handle *handle,
 int mupdate_reserve(mupdate_handle *handle,
 		    const char *mailbox, const char *server);
 
+/* deactivate a mailbox (ACTIVE->RESERVE) */
+int mupdate_deactivate(mupdate_handle *handle,
+		       const char *mailbox, const char *server);
+
 /* delete a mailbox */
 int mupdate_delete(mupdate_handle *handle,
 		   const char *mailbox);
 
+enum mbtype {
+    ACTIVE, RESERVE 
+};
+
+/* mailbox data structure */
 struct mupdate_mailboxdata {
     const char *mailbox;
     const char *server;
     const char *acl;
+    enum mbtype t;
 };
-typedef int (*mupdate_callback)(struct mupdate_mailboxdata *mdata, 
-				const char *rock);
-int mupdate_listen(mupdate_handle *handle,
-		   mupdate_callback *create,
-		   mupdate_callback *reserve,
-		   mupdate_callback *delete,
-		   mupdate_callback *noop,
-		   int pingtime);
 
+/* does a given mailbox exist?  1 if false, 0 if true, -1 if error,
+ * "target" gets pointed at a struct mudate_mailboxdata that is only valid
+ * until the next mupdate_* call on this mupdate_handle.
+ */
+int mupdate_find(mupdate_handle *handle, const char *mailbox,
+		 struct mupdate_mailboxdata **target);
+
+/* Callbacks for mupdate_scarf and mupdate_list */
+/* cmd is one of DELETE, MAILBOX, RESERVE */
+/* context is as provided to mupdate_scarf */
+/* FIXME/xxx: "cmd" can probabally go away and instead
+ * we just use the t in mdata */
+typedef int (*mupdate_callback)(struct mupdate_mailboxdata *mdata,
+                                const char *cmd, void *context);
+
+/* perform an MUPDATE LIST operation (callback is called for
+ * each remote mailbox) */
+int mupdate_list(mupdate_handle *handle, mupdate_callback callback,
+		 const char *prefix, void *context);
+
+/* ping the mupdate server with a NOOP. */
+int mupdate_noop(mupdate_handle *handle, mupdate_callback callback,
+		 void *context);
 #endif

@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.12 2001/11/27 02:25:06 ken3 Exp $
+ * $Id: parser.c,v 1.12.2.1 2002/06/06 21:09:23 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -56,6 +56,7 @@
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
 
+#include "mboxlist.h"
 #include "xmalloc.h"
 #include "prot.h"
 #include "tls.h"
@@ -63,8 +64,13 @@
 #include "actions.h"
 #include "exitcodes.h"
 
-extern sasl_conn_t *sieved_saslconn; /* the sasl connection context */
 extern char sieved_clienthost[250];
+
+/* xxx these are both leaked, but we only handle one connection at a
+ * time... */
+extern sasl_conn_t *sieved_saslconn; /* the sasl connection context */
+const char *referral_host = NULL;
+
 int authenticated = 0;
 int verify_only = 0;
 int starttls_done = 0;
@@ -73,18 +79,20 @@ int starttls_done = 0;
 static SSL *tls_conn = NULL;
 #endif /* HAVE_SSL */
 
+/* from elsewhere */
+void fatal(const char *s, int code);
 
 /* forward declarations */
-static int cmd_logout(struct protstream *sieved_out, struct protstream *sieved_in);
+static void cmd_logout(struct protstream *sieved_out,
+		       struct protstream *sieved_in);
 static int cmd_authenticate(struct protstream *sieved_out, struct protstream *sieved_in,
 			    mystring_t *mechanism_name, mystring_t *initial_challenge, const char **errmsg);
 static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved_in);
 
-
-
+/* Returns TRUE if we are done */
 int parser(struct protstream *sieved_out, struct protstream *sieved_in)
 {
-  int token;
+  int token = EOL;
   const char *error_msg = "Generic Error";
 
   mystring_t *mechanism_name = NULL;
@@ -92,9 +100,29 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
   mystring_t *sieve_name = NULL;
   mystring_t *sieve_data = NULL;
   unsigned long num;
+  int ret = FALSE;
 
   /* get one token from the lexer */
-  token = timlex(NULL, NULL, sieved_in);
+  while(token == EOL) 
+      token = timlex(NULL, NULL, sieved_in);
+
+  /* If we have a referral host, no matter what the command is, we want
+   * to send them there */
+  /* note that referral_host is only non-NULL if we are authenticated */
+  if(referral_host && token != LOGOUT) {
+      char buf[4096];
+      char *c;
+
+      /* Truncate the hostname if necessary */
+      strcpy(buf, referral_host);
+      c = strchr(buf, '!');
+      if(c) *c = '\0';
+      
+      prot_printf(sieved_out, "BYE (REFERRAL \"%s\") \"Try Remote.\"\r\n",
+		  buf);
+      ret = TRUE;
+      goto done;
+  }
 
   if (!authenticated && (token > 255) && (token!=AUTHENTICATE) &&
       (token!=LOGOUT) && (token!=CAPABILITY) &&
@@ -159,18 +187,12 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
 
     if (authenticated)
 	prot_printf(sieved_out, "NO \"Already authenticated\"\r\n");
-    else if (cmd_authenticate(sieved_out, sieved_in, mechanism_name, initial_challenge, &error_msg)==FALSE)
+    else if (cmd_authenticate(sieved_out, sieved_in, mechanism_name,
+			      initial_challenge, &error_msg)==FALSE)
     {
-	/* free memory */
-	free(mechanism_name);
-	free(initial_challenge);
-	
-	prot_printf(sieved_out, "NO (\"SASL\" \"%s\") \"Authentication error\"\r\n",error_msg);
-	prot_flush(sieved_out);
-
-	return -1;
+	error_msg = "Authentication Error";
+	goto error;
     }
-    
     break;
 
   case CAPABILITY:
@@ -219,16 +241,20 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
       break;
 
   case LOGOUT:
-    if (timlex(NULL, NULL, sieved_in)!=EOL)
-    {
-      error_msg = "Garbage after logout command";
-      goto error;
-    }
+      token = timlex(NULL, NULL, sieved_in);
+      
+      /* timlex() will return LOGOUT when the remote disconnects badly */
+      if (token!=EOL && token!=EOF && token!=LOGOUT)
+      {
+	  error_msg = "Garbage after logout command";
+	  goto error;
+      }
 
-    cmd_logout(sieved_out, sieved_in);
-
-    return TRUE;			/* *do* close the connection */   
-    break;
+      cmd_logout(sieved_out, sieved_in);
+      
+      ret = TRUE;
+      goto done;
+      break;
 
   case GETSCRIPT:
     if (timlex(NULL, NULL, sieved_in)!=SPACE)
@@ -365,7 +391,8 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
     break;
 
   }
- 
+
+ done: 
   /* free memory */
   free(mechanism_name);
   free(initial_challenge);
@@ -374,7 +401,7 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
  
   prot_flush(sieved_out);
 
-  return 0;
+  return ret;
 
  error:
 
@@ -384,26 +411,29 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
   free(sieve_name);
   free(sieve_data);
 
-
   prot_printf(sieved_out, "NO \"%s\"\r\n",error_msg);
   prot_flush(sieved_out);
 
-  return -1;
+  return FALSE;
 }
 
 
-static int cmd_logout(struct protstream *sieved_out, struct protstream *sieved_in)
+void cmd_logout(struct protstream *sieved_out,
+		struct protstream *sieved_in __attribute__((unused)))
 {
-    prot_printf(sieved_out, "Ok \"Logout Complete\"\r\n");
+    prot_printf(sieved_out, "OK \"Logout Complete\"\r\n");
     prot_flush(sieved_out);
-    
-    prot_free(sieved_out);
-    
-    exit(0);    
 }
 
-static int cmd_authenticate(struct protstream *sieved_out, struct protstream *sieved_in,
-			    mystring_t *mechanism_name, mystring_t *initial_challenge, 
+static sasl_ssf_t ssf = 0;
+static char *authid = NULL;
+
+extern int reset_saslconn(sasl_conn_t **conn, sasl_ssf_t ssf, char *authid);
+
+static int cmd_authenticate(struct protstream *sieved_out,
+			    struct protstream *sieved_in,
+			    mystring_t *mechanism_name,
+			    mystring_t *initial_challenge, 
 			    const char **errmsg)
 {
 
@@ -440,6 +470,11 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
 	*errmsg="error base64 decoding string";
 	syslog(LOG_NOTICE, "badlogin: %s %s %s",
 	       sieved_clienthost, mech, "error base64 decoding string");
+
+      if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	  fatal("could not reset the sasl_conn_t after failure",
+		EC_TEMPFAIL);
+
 	return FALSE;
       }
   }
@@ -457,7 +492,7 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
     unsigned int inbase64len;
 
     /* convert to base64 */
-    inbase64 = malloc( serveroutlen*2+1);
+    inbase64 = xmalloc(serveroutlen*2+1);
     sasl_encode64(serverout, serveroutlen,
 		  inbase64, serveroutlen*2+1, &inbase64len);
 
@@ -480,11 +515,21 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
 	*errmsg="error base64 decoding string";
 	syslog(LOG_NOTICE, "badlogin: %s %s %s",
 	       sieved_clienthost, mech, "error base64 decoding string");
+
+      if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	  fatal("could not reset the sasl_conn_t after failure",
+		EC_TEMPFAIL);
+
 	return FALSE;
       }      
       
     } else {
       *errmsg="Expected STRING-xxx1";
+
+      if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	  fatal("could not reset the sasl_conn_t after failure",
+		EC_TEMPFAIL);
+
       return FALSE;
     }
 
@@ -501,6 +546,11 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
       *errmsg = "expected a STRING followed by an EOL";
       syslog(LOG_NOTICE, "badlogin: %s %s %s",
 	     sieved_clienthost, mech, "expected string");
+
+      if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	  fatal("could not reset the sasl_conn_t after failure",
+		EC_TEMPFAIL);
+
       return FALSE;
     }
 
@@ -520,6 +570,11 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
 		 sieved_clienthost, mech, 
 		 sasl_errstring(sasl_result, NULL, NULL));
       }
+
+      if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	  fatal("could not reset the sasl_conn_t after failure",
+		EC_TEMPFAIL);
+
       return FALSE;
   }
 
@@ -531,26 +586,65 @@ static int cmd_authenticate(struct protstream *sieved_out, struct protstream *si
     *errmsg = "Internal SASL error";
     syslog(LOG_ERR, "SASL: sasl_getprop SASL_USERNAME: %s",
 	   sasl_errstring(sasl_result, NULL, NULL));
+
+    if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	fatal("could not reset the sasl_conn_t after failure",
+	      EC_TEMPFAIL);
+
     return FALSE;
   }
 
   verify_only = !strcmp(username, "anonymous");
 
   if (!verify_only) {
-      if (actions_setuser(username) != TIMSIEVE_OK)
-      {
+      /* Check for a remote mailbox (should we setup a redirect?) */
+      char inboxname[1024];
+      char *server;
+      int type;
+      
+      strcpy(inboxname, "user.");
+      strcat(inboxname, username);
+
+      mboxlist_detail(inboxname, &type, &server, NULL, NULL, NULL);
+      
+      if(type & MBTYPE_REMOTE) {
+	  /* It's a remote mailbox, we want to set up a referral */
+	  referral_host = xstrdup(server);
+      } else if (actions_setuser(username) != TIMSIEVE_OK) {
 	  *errmsg = "internal error";
 	  syslog(LOG_ERR, "error in actions_setuser()");
+
+	  if(reset_saslconn(&sieved_saslconn, ssf, authid) != SASL_OK)
+	      fatal("could not reset the sasl_conn_t after failure",
+		    EC_TEMPFAIL);
+
 	  return FALSE;
       }
   }
 
   /* Yay! authenticated */
-  prot_printf(sieved_out, "OK\r\n");
+  if(serverout) {
+      char *inbase64;
+      unsigned int inbase64len;
+
+      /* convert to base64 */
+      inbase64 = xmalloc(serveroutlen*2+1);
+      sasl_encode64(serverout, serveroutlen,
+		    inbase64, serveroutlen*2+1, &inbase64len);
+
+      prot_printf(sieved_out, "OK (SASL \"%s\")\r\n", inbase64);
+      free(inbase64);
+  } else {
+      prot_printf(sieved_out, "OK\r\n");
+  }
+  
   syslog(LOG_NOTICE, "login: %s %s %s%s %s", sieved_clienthost, username,
 	 mech, starttls_done ? "+TLS" : "", "User logged in");
 
   authenticated = 1;
+
+  prot_setsasl(sieved_in, sieved_saslconn);
+  prot_setsasl(sieved_out, sieved_saslconn);
 
   /* free memory */
 
@@ -562,8 +656,6 @@ static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved
 {
     int result;
     int *layerp;
-    char *auth_id;
-    sasl_ssf_t ssf;
 
     /* SASL and openssl have different ideas about whether ssf is signed */
     layerp = (int *) &ssf;
@@ -596,7 +688,7 @@ static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved
     result=tls_start_servertls(0, /* read */
 			       1, /* write */
 			       layerp,
-			       &auth_id,
+			       &authid,
 			       &tls_conn);
 
     /* if error */
@@ -613,7 +705,7 @@ static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved
         fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
             
-    result = sasl_setprop(sieved_saslconn, SASL_AUTH_EXTERNAL, auth_id);
+    result = sasl_setprop(sieved_saslconn, SASL_AUTH_EXTERNAL, authid);
 
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);

@@ -37,6 +37,8 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
+# $Id: Shell.pm,v 1.7.2.1 2002/06/06 21:09:03 jsmith2 Exp $
+#
 # A shell framework for IMAP::Cyrus::Admin
 #
 # run(*FH|'FH')
@@ -120,6 +122,11 @@ my %builtins = (exit =>
 		  [\&_sc_delete, 'mailbox [host]', 'delete mailbox'],
 		delete => 'deletemailbox',
 		dm => 'deletemailbox',
+		info =>
+		  [\&_sc_info, '[mailbox]',
+		   'display mailbox/server metadata'],
+		reconstruct =>
+		  [\&_sc_reconstruct, 'mailbox', 'reconstruct mailbox (if supported'],
 		renamemailbox =>
 		  [\&_sc_rename,
 		   '[--partition partition] oldname newname [partition]',
@@ -131,6 +138,9 @@ my %builtins = (exit =>
 		   'set ACLs on mailbox'],
 		setacl => 'setaclmailbox',
 		sam => 'setaclmailbox',
+		setinfo =>
+		  [\&_sc_setinfo, '[motd|comment] text',
+		   'set server metadata'],
 		setquota =>
 		  [\&_sc_setquota,
 		   'mailbox resource value [resource value ...]',
@@ -140,7 +150,6 @@ my %builtins = (exit =>
 		  [\&_sc_version, '',
 		   'display version info of current server'],
 		ver => 'version',
-		info => 'version',
 		#? alias
 		#? unalias
 		#? load
@@ -406,16 +415,18 @@ sub run {
 # (It's not as trivial as run() because it does things expected of standalone
 # programs, as opposed to things expected from within a program.)
 sub shell {
-  my ($server, $port, $user, $systemrc, $userrc, $dorc, $mech) =
-    ('', 143, $ENV{USER} || $ENV{LOGNAME}, '/usr/local/etc/cyradmrc.pl',
-     "$ENV{HOME}/.cyradmrc.pl", 1, undef);
-  GetOptions('user|u=s' => \$user,
+  my ($server, $port, $authz, $auth, $systemrc, $userrc, $dorc, $mech, $pw) =
+    ('', 143, undef, $ENV{USER} || $ENV{LOGNAME}, '/usr/local/etc/cyradmrc.pl',
+     "$ENV{HOME}/.cyradmrc.pl", 1, undef, undef);
+  GetOptions('user|u=s' => \$auth,
+	     'authz|u=s' => \$authz,
 	     'rc|r!' => \$dorc,
 	     'systemrc|S=s' => \$systemrc,
 	     'userrc=s' => \$userrc,
 	     'server|s=s' => \$server,
 	     'port|p=i' => \$port,
 	     'auth|a=s' => \$mech,
+	     'password|u=s' => \$pw,
 	    );
   if ($server ne '' && @ARGV) {
     die "cyradm: may not specify server both with --server and bare arg\n";
@@ -432,9 +443,9 @@ sub shell {
     $cyradm->addcallback({-trigger => 'EOF',
 			  -callback => \&_cb_eof,
 			  -rock => \$cyradm});
-#    print "trying to auth as [$user].\n";
-    $cyradm->authenticate(-user => $user, -mechanism => $mech)
-      or die "cyradm: cannot authenticate to server with $mech as $user\n";
+    $cyradm->authenticate(-authz => $authz, -user => $auth,
+			  -mechanism => $mech, -password => $pw)
+      or die "cyradm: cannot authenticate to server with $mech as $auth\n";
   }
   my $fstk = [*STDIN, *STDOUT, *STDERR];
   if ($dorc && $systemrc ne '' && -f $systemrc) {
@@ -910,6 +921,36 @@ sub _sc_delete {
   0;
 }
 
+sub _sc_reconstruct {
+  my ($cyrref, $name, $fh, $lfh, @argv) = @_;
+  my (@nargv, $opt);
+  my $recurse = 0;
+  shift(@argv);
+  while (defined ($opt = shift(@argv))) {
+    last if $opt eq '--';
+    if ($opt =~ /^-/) {
+      if($opt eq "-r") {
+	$recurse = 1;
+      } else {
+	die "usage: reconstruct [-r] mailbox\n";
+      }
+    }
+    else {
+      push(@nargv, $opt);
+      last;
+    }
+  }
+  push(@nargv, @argv);
+  if (!@nargv || @nargv > 1) {
+    die "usage: reconstruct [-r] mailbox\n";
+  }
+  if (!$cyrref || !$$cyrref) {
+    die "reconstruct: no connection to server\n";
+  }
+  $$cyrref->reconstruct(@nargv) || die "reconstruct: " .$$cyrref->error. "\n";
+  0;
+}
+
 sub _sc_rename {
   my ($cyrref, $name, $fh, $lfh, @argv) = @_;
   my (@nargv, $opt, $want, $part);
@@ -1017,9 +1058,15 @@ sub _sc_setquota {
   push(@nargv, @argv);
   if (@nargv == 2) {
       my ($mbox, $limit) = @nargv;
-      @nargv = ($mbox, "STORAGE", $limit);
+      if ($limit eq 'none') {
+	  @nargv = ($mbox);
+	  print "remove quota\n";
+      } else {
+	  @nargv = ($mbox, "STORAGE", $limit);
+	  print "quota:", $limit, "\n";
+      }
   }
-  if (@nargv < 3 || (@nargv - 1) % 2) {
+  if ((@nargv - 1) % 2) {
     die ("usage: setquota mailbox limit num [limit num ...]\n" .
 	 "       setquota mailbox num\n");
   }
@@ -1079,6 +1126,62 @@ sub _sc_version {
     $value = '' if $value eq 'NIL';	# convert NIL to empty string
     $lfh->[1]->printf("%-11s: %s\n", $field, $value);
   }
+  0;
+}
+
+sub _sc_info {
+  my ($cyrref, $name, $fh, $lfh, @argv) = @_;
+  my (@nargv, $opt);
+  shift(@argv);
+  while (defined ($opt = shift(@argv))) {
+    # gack.  bloody tcl.
+    last if $opt eq '--';
+    if ($opt =~ /^-/) {
+      die "usage: info [mailbox]\n";
+    }
+    else {
+      push(@nargv, $opt);
+      last;
+    }
+  }
+  push(@nargv, @argv);
+  if (!$cyrref || !$$cyrref) {
+    die "info: no connection to server\n";
+  }
+  my %info = $$cyrref->getinfo(@nargv);
+  if (defined $$cyrref->error) {
+    $lfh->[2]->print($$cyrref->error, "\n");
+    return 1;
+  }
+  foreach my $attrib (keys %info) {
+    $attrib =~ /([^\/]*)$/;
+    $lfh->[1]->print($1, ": ", $info{$attrib}, "\n");
+  }
+  0;
+}
+
+sub _sc_setinfo {
+  my ($cyrref, $name, $fh, $lfh, @argv) = @_;
+  my (@nargv, $opt);
+  shift(@argv);
+  while (defined ($opt = shift(@argv))) {
+    last if $opt eq '--';
+    if ($opt =~ /^-/) {
+      die "usage: setinfo [motd|comment] text\n";
+    }
+    else {
+      push(@nargv, $opt);
+      last;
+    }
+  }
+  push(@nargv, @argv);
+  if (@nargv < 2) {
+    die "usage: setinfo [motd|comment] text\n";
+  }
+  if (!$cyrref || !$$cyrref) {
+    die "setinfo: no connection to server\n";
+  }
+  $$cyrref->setinfoserver(@nargv) || die "setinfo: " . $$cyrref->error . "\n";
   0;
 }
 
@@ -1214,6 +1317,10 @@ last command will be used if one is not specified.
 
 Show help for C<command> or all commands.
 
+=item C<info> [I<mailbox>]
+
+Display the mailbox/server metadata.
+
 =item listaclmailbox I<mailbox>
 
 =item listacl I<mailbox>
@@ -1343,13 +1450,12 @@ Administer (SETACL)
 =item C<sq> I<root> I<resource> I<value> [I<resource> I<value> ...]
 
 Set a quota on the specified root, which may or may not be an actual mailbox.
-The only I<resource> understood by B<Cyrus> is C<STORAGE>.
+The only I<resource> understood by B<Cyrus> is C<STORAGE>.  The I<value> may
+be the special string C<none> which will remove the quota.
 
 =item C<version>
 
 =item C<ver>
-
-=item C<info>
 
 Display the version info of the current server.
 

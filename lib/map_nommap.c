@@ -1,5 +1,5 @@
 /* map_nommap.c -- dummy memory-mapping routines.
- $Id: map_nommap.c,v 1.17 2000/09/20 23:00:23 leg Exp $
+ $Id: map_nommap.c,v 1.17.12.1 2002/06/06 21:08:36 jsmith2 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -44,6 +44,7 @@
 #include <config.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <syslog.h>
 
@@ -90,7 +91,7 @@ const char *mboxname;
 
     lseek(fd, 0L, 0);
     left = newlen;
-    p = *base;
+    p = (char*) *base;
 
     while (left) {
 	n = read(fd, p, left);

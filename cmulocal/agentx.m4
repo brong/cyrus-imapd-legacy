@@ -1,6 +1,7 @@
 dnl agentx.m4--detect agentx libraries
 dnl copied from x-unixrc
 dnl Tim Martin
+dnl $Id: agentx.m4,v 1.3.2.1 2002/06/06 21:07:33 jsmith2 Exp $
 
 AC_DEFUN(CMU_AGENTX, [
 

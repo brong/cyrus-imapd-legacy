@@ -38,6 +38,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: cyradm.c,v 1.27.2.1 2002/06/06 21:07:41 jsmith2 Exp $ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>

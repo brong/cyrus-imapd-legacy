@@ -1,6 +1,5 @@
 /* auth_krb_pts.c -- Kerberos authorization with AFS PTServer groups
- $Id: auth_krb_pts.c,v 1.40 2001/11/27 02:25:02 ken3 Exp $
- 
+ * $Id: auth_krb_pts.c,v 1.40.2.1 2002/06/06 21:08:32 jsmith2 Exp $
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -357,6 +356,7 @@ struct auth_state *auth_newstate(const char *identifier,
     newstate->userid.hash = hash(identifier);
 
     if (!strcmp(identifier, "anyone")) return newstate;
+    if (!strcmp(identifier, "anonymous")) return newstate;
 
     memset(&key, 0, sizeof(key));
     memset(&data, 0, sizeof(data));
@@ -385,7 +385,7 @@ struct auth_state *auth_newstate(const char *identifier,
 
     strcpy(fnamebuf, STATEDIR);
     strcat(fnamebuf, PTS_DBLOCK);
-    fd = open(fnamebuf, O_CREAT|O_TRUNC|O_RDWR, 0664);
+    fd = open(fnamebuf, O_RDWR, 0664);
     if (fd == -1) {
         syslog(LOG_ERR, "IOERROR: creating lock file %s: %m", fnamebuf);
         return newstate;
@@ -399,12 +399,18 @@ struct auth_state *auth_newstate(const char *identifier,
 
     /* open PTS database */
     r = db_create(&ptdb, NULL, 0);
+
     if (r != 0) {
 	syslog(LOG_ERR, "auth_newstate: db_create: %s", db_strerror(r));
 	return newstate;
     }
     
-    r = ptdb->open(ptdb, fnamebuf, NULL, DB_HASH, DB_CREATE, 0664);
+    r = ptdb->open(ptdb, fnamebuf, NULL, DB_HASH, DB_RDONLY, 0664);
+
+    /* no database. load it */
+    if (r == ENOENT) 
+      goto load;
+
     if (r != 0) {
 	syslog(LOG_ERR, "auth_newstate: opening %s: %s", fnamebuf, 
 	       db_strerror(r));
@@ -424,6 +430,7 @@ struct auth_state *auth_newstate(const char *identifier,
 	return newstate;
     }
 
+ load:
     /* if it's expired, ask the ptloader to reload it and reread it */
     if (!r) {
 	fetched = (struct auth_state *) data.data;
@@ -433,8 +440,8 @@ struct auth_state *auth_newstate(const char *identifier,
 	    newstate = (struct auth_state *) xrealloc(newstate, data.size);
 	    memcpy(newstate, fetched, data.size);
 
-	    /* close and unlock the database */
-	    ptdb->close(ptdb, 0);
+	    /* Close the database before we return */
+	    ptdb->close(ptdb,0);
 	    close(fd);
 
 	    return newstate;
@@ -446,7 +453,10 @@ struct auth_state *auth_newstate(const char *identifier,
     close(fd);
 
     s = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (s == -1) return newstate;
+    if (s == -1) {
+      syslog(LOG_ERR, "auth_newstate: unable to create socket for ptloader: %m");
+      return newstate;
+    }
         
     strcpy(fnamebuf, STATEDIR);
     strcat(fnamebuf, PTS_DBSOCKET);
@@ -457,6 +467,7 @@ struct auth_state *auth_newstate(const char *identifier,
     r = connect(s, (struct sockaddr *)&srvaddr, sizeof(srvaddr));
     if (r == -1) {
 	syslog(LOG_ERR, "auth_newstate: can't connect to ptloader server: %m");
+	close(s);
 	return newstate;
     }
         
@@ -501,7 +512,7 @@ struct auth_state *auth_newstate(const char *identifier,
 	return newstate;
     }
     
-    r = ptdb->open(ptdb, fnamebuf, NULL, DB_HASH, DB_CREATE, 0664);
+    r = ptdb->open(ptdb, fnamebuf, NULL, DB_HASH, DB_RDONLY, 0664);
     if (r != 0) {
 	syslog(LOG_ERR, "auth_newstate: opening %s: %s", fnamebuf, 
 	       db_strerror(r));
@@ -514,12 +525,14 @@ struct auth_state *auth_newstate(const char *identifier,
     if (r != 0) {
         /* The record still isn't there, even though the child claimed success
          */ 
-	/* close and unlock the database */
-	ptdb->close(ptdb, 0);
-	close(fd);
 	syslog(LOG_ERR, "auth_newstate: error fetching record: %s "
 	       "(did ptloader add the record?)", 
 	       db_strerror(r));
+
+	/* close and unlock the database */
+	ptdb->close(ptdb, 0);
+	close(fd);
+
 	return newstate;
     }
 

@@ -52,10 +52,9 @@
 * DESCRIPTION
 *	This module is the interface between Cyrus Imapd and the OpenSSL library.
 *	As of now only one filedescriptor can be handled, so only one
-*	TLS channel can be open at a time. This can be accpted, as smtpd
-*	and smtp are seperate services run by seperate programs.
+*       TLS channel can be open at a time.
 *
-*	tls_init_serverengine() is called once when smtpd is started
+*       tls_init_serverengine() is called once when the client is started
 *	in order to initialize as much of the TLS stuff as possible.
 *	The certificate handling is also decided during the setup phase,
 *	so that a peer specific handling is not possible.
@@ -94,7 +93,7 @@
 *
 */
 
-/* $Id: tls.c,v 1.29 2001/11/13 17:34:27 leg Exp $ */
+/* $Id: tls.c,v 1.29.2.1 2002/06/06 21:08:19 jsmith2 Exp $ */
 
 #include <config.h>
 
@@ -127,8 +126,7 @@
 #include "time.h"
 #include "cyrusdb.h"
 
-#define DB (&cyrusdb_db3_nosync) /* sessions are binary -> MUST use DB3 */
-#define FNAME_SESSIONS "/tls_sessions.db"
+#define DB (CONFIG_DB_TLS) /* sessions are binary -> MUST use DB3 */
 
 static struct db *sessdb = NULL;
 static int sess_dbopen = 0;
@@ -353,7 +351,8 @@ static int tls_dump(const char *s, int len)
   * This function is taken from OpenSSL apps/s_cb.c
   */
 
-static int set_cert_stuff(SSL_CTX * ctx, char *cert_file, char *key_file)
+static int set_cert_stuff(SSL_CTX * ctx,
+			  const char *cert_file, const char *key_file)
 {
     if (cert_file != NULL) {
 	if (SSL_CTX_use_certificate_file(ctx, cert_file,
@@ -371,7 +370,8 @@ static int set_cert_stuff(SSL_CTX * ctx, char *cert_file, char *key_file)
 	/* Now we know that a key and cert have been set against
          * the SSL context */
 	if (!SSL_CTX_check_private_key(ctx)) {
-	    syslog(LOG_ERR, "Private key does not match the certificate public key");
+	    syslog(LOG_ERR,
+		   "Private key does not match the certificate public key");
 	    return (0);
 	}
     }
@@ -440,7 +440,7 @@ static int new_session_cb(SSL *ssl, SSL_SESSION *sess)
 }
 
 /*
- * Function for removing session from our database.
+ * Function for removing a session from our database.
  */
 static void remove_session(unsigned char *id, int idlen)
 {
@@ -451,7 +451,7 @@ static void remove_session(unsigned char *id, int idlen)
     if (!sess_dbopen) return;
 
     do {
-	ret = DB->delete(sessdb, id, idlen, NULL);
+	ret = DB->delete(sessdb, id, idlen, NULL, 1);
     } while (ret == CYRUSDB_AGAIN);
 
     /* log this transaction */
@@ -484,7 +484,8 @@ static void remove_session_cb(SSL_CTX *ctx, SSL_SESSION *sess)
  * called, also when session caching was disabled.  We lookup the
  * session in our database in case it was stored by another process.
  */
-static SSL_SESSION *get_session_cb(SSL *ssl, unsigned char *id, int idlen, int *copy)
+static SSL_SESSION *get_session_cb(SSL *ssl, unsigned char *id, int idlen,
+				   int *copy)
 {
     int ret;
     const char *data = NULL;
@@ -567,10 +568,11 @@ int     tls_init_serverengine(const char *ident,
     int     off = 0;
     int     verify_flags = SSL_VERIFY_NONE;
     char    buf[50];
-    char   *CApath;
-    char   *CAfile;
-    char   *s_cert_file;
-    char   *s_key_file;
+    const char   *cipher_list;
+    const char   *CApath;
+    const char   *CAfile;
+    const char   *s_cert_file;
+    const char   *s_key_file;
     int    timeout;
 
     if (tls_serverengine)
@@ -579,8 +581,8 @@ int     tls_init_serverengine(const char *ident,
     if (var_imapd_tls_loglevel >= 2)
 	syslog(LOG_DEBUG, "starting TLS engine");
 
+    SSL_library_init();
     SSL_load_error_strings();
-    SSLeay_add_ssl_algorithms();
     if (tls_rand_init() == -1) {
 	syslog(LOG_ERR,"TLS engine: cannot seed PRNG");
 	return -1;
@@ -608,7 +610,12 @@ int     tls_init_serverengine(const char *ident,
     }
     SSL_CTX_set_options(ctx, off);
     SSL_CTX_set_info_callback(ctx, apps_ssl_info_callback);
-    SSL_CTX_sess_set_cache_size(ctx, 128);
+
+    /* Don't use an internal session cache */
+    SSL_CTX_sess_set_cache_size(ctx, 1);  /* 0 is unlimited, so use 1 */
+    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER |
+				   SSL_SESS_CACHE_NO_AUTO_CLEAR |
+				   SSL_SESS_CACHE_NO_INTERNAL_LOOKUP);
 
     /* Get the session timeout from the config file (in minutes) */
     timeout = config_getint("tls_session_timeout", 1440); /* 24 hours */
@@ -617,13 +624,11 @@ int     tls_init_serverengine(const char *ident,
 
     /* A timeout of zero disables session caching */
     if (timeout) {
-	char *session_id_context = "cyrus"; /* anything will do */
 	char dbdir[1024];
 	int r;
 
-	/* Set the context for session reuse */
-	SSL_CTX_set_session_id_context(ctx, (void*) &session_id_context,
-				       sizeof(session_id_context));
+	/* Set the context for session reuse -- use the service ident */
+	SSL_CTX_set_session_id_context(ctx, (void*) ident, strlen(ident));
 
 	/* Set the timeout for the internal/external cache (in seconds) */
 	SSL_CTX_set_timeout(ctx, timeout*60);
@@ -644,7 +649,7 @@ int     tls_init_serverengine(const char *ident,
 	else {
 	    /* create the name of the db file */
 	    strcpy(dbdir, config_dir);
-	    strcat(dbdir, FNAME_SESSIONS);
+	    strcat(dbdir, FNAME_TLSSESSIONS);
 
 	    r = DB->open(dbdir, &sessdb);
 	    if (r != 0) {
@@ -656,8 +661,15 @@ int     tls_init_serverengine(const char *ident,
 	}
     }
 
-    CAfile = (char *) config_getstring("tls_ca_file", NULL);
-    CApath = (char *) config_getstring("tls_ca_path", NULL);
+    cipher_list = config_getstring("tls_cipher_list", "DEFAULT");
+    if (!SSL_CTX_set_cipher_list(ctx, cipher_list)) {
+	syslog(LOG_ERR,"TLS engine: cannot load cipher list '%s'",
+	       cipher_list);
+	return (-1);
+    }
+
+    CAfile = config_getstring("tls_ca_file", NULL);
+    CApath = config_getstring("tls_ca_path", NULL);
 
     if ((!SSL_CTX_load_verify_locations(ctx, CAfile, CApath)) ||
 	(!SSL_CTX_set_default_verify_paths(ctx))) {
@@ -666,12 +678,12 @@ int     tls_init_serverengine(const char *ident,
     }
 
     sprintf(buf, "tls_%s_cert_file", ident);
-    s_cert_file = (char *) config_getstring(buf,
-					    config_getstring("tls_cert_file", NULL));
+    s_cert_file = config_getstring(buf,
+				   config_getstring("tls_cert_file", NULL));
 
     sprintf(buf, "tls_%s_key_file", ident);
-    s_key_file = (char *) config_getstring(buf,
-					   config_getstring("tls_key_file", NULL));
+    s_key_file = config_getstring(buf,
+				  config_getstring("tls_key_file", NULL));
 
     if (!set_cert_stuff(ctx, s_cert_file, s_key_file)) {
 	syslog(LOG_ERR,"TLS engine: cannot load cert/key data");
@@ -711,13 +723,15 @@ static long bio_dump_cb(BIO * bio, int cmd, const char *argp, int argi,
 	return (ret);
 
     if (cmd == (BIO_CB_READ | BIO_CB_RETURN)) {
-	printf("read from %08X [%08lX] (%d bytes => %ld (0x%X))", (unsigned int) bio, (long unsigned int) argp,
-		 argi, ret, (unsigned int) ret);
+	printf("read from %08X [%08lX] (%d bytes => %ld (0x%X))",
+	       (unsigned int) bio, (long unsigned int) argp,
+	       argi, ret, (unsigned int) ret);
 	tls_dump(argp, (int) ret);
 	return (ret);
     } else if (cmd == (BIO_CB_WRITE | BIO_CB_RETURN)) {
-	printf("write to %08X [%08lX] (%d bytes => %ld (0x%X))", (unsigned int) bio, (long unsigned int)argp,
-		 argi, ret, (unsigned int) ret);
+	printf("write to %08X [%08lX] (%d bytes => %ld (0x%X))",
+	       (unsigned int) bio, (long unsigned int)argp,
+	       argi, ret, (unsigned int) ret);
 	tls_dump(argp, (int) ret);
     }
     return (ret);
@@ -742,7 +756,6 @@ int tls_start_servertls(int readfd, int writefd,
     int     sts;
     int     j;
     unsigned int n;
-    SSL_SESSION *session;
     SSL_CIPHER *cipher;
     X509   *peer;
     const char *tls_protocol = NULL;
@@ -792,8 +805,8 @@ int tls_start_servertls(int readfd, int writefd,
     if (var_imapd_tls_loglevel >= 3)
 	do_dump = 1;
 
-    if ((sts = SSL_accept(tls_conn)) < 0) { /* xxx <= 0 */
-	session = SSL_get_session(tls_conn);
+    if ((sts = SSL_accept(tls_conn)) <= 0) {
+	SSL_SESSION *session = SSL_get_session(tls_conn);
 	if (session) {
 	    SSL_CTX_remove_session(ctx, session);
 	}
@@ -867,18 +880,18 @@ int tls_start_servertls(int readfd, int writefd,
     }
 
     if (authid && *authid) {
-	syslog(LOG_NOTICE, "starttls: %s, %s with cipher %s (%d/%d bits)"
+	syslog(LOG_NOTICE, "starttls: %s with cipher %s (%d/%d bits %s)"
 	                   " authenticated as %s", 
-	       SSL_session_reused(tls_conn) ? "Reused" : "New",
 	       tls_protocol, tls_cipher_name,
 	       tls_cipher_usebits, tls_cipher_algbits, 
+	       SSL_session_reused(tls_conn) ? "reused" : "new",
 	       *authid);
     } else {
-	syslog(LOG_NOTICE, "starttls: %s, %s with cipher %s (%d/%d bits)"
+	syslog(LOG_NOTICE, "starttls: %s with cipher %s (%d/%d bits %s)"
 	                   " no authentication", 
-	       SSL_session_reused(tls_conn) ? "Reused" : "New",
 	       tls_protocol, tls_cipher_name,
-	       tls_cipher_usebits, tls_cipher_algbits);
+	       tls_cipher_usebits, tls_cipher_algbits,
+	       SSL_session_reused(tls_conn) ? "reused" : "new");
     }
 
  done:
@@ -946,7 +959,6 @@ int tls_shutdown_serverengine(void)
  * Delete expired sessions.
  */
 struct prunerock {
-    struct db *db;
     int count;
     int deletions;
 };
@@ -967,7 +979,7 @@ static int prune_p(void *rock, const char *id, int idlen,
 	int i;
 	char idstr[SSL_MAX_SSL_SESSION_ID_LENGTH*2 + 1];
 	for (i = 0; i < idlen; i++)
-	    sprintf(idstr+i*2, "%02X", id[i]);
+	    sprintf(idstr+i*2, "%02X", (unsigned char) id[i]);
 
 	syslog(LOG_DEBUG, "found TLS session: id=%s, expire=%s",
 	       idstr, ctime(&expire));
@@ -981,23 +993,10 @@ static int prune_cb(void *rock, const char *id, int idlen,
 		    const char *data, int datalen)
 {
     struct prunerock *prock = (struct prunerock *) rock;
-    int ret;
 
     prock->deletions++;
 
-    do {
-	ret = DB->delete(prock->db, id, idlen, NULL);
-    } while (ret == CYRUSDB_AGAIN);
-
-    /* log this transaction */
-    if (var_imapd_tls_loglevel > 0) {
-	int i;
-	char idstr[SSL_MAX_SSL_SESSION_ID_LENGTH*2 + 1];
-	for (i = 0; i < idlen; i++)
-	    sprintf(idstr+i*2, "%02X", id[i]);
-
-	syslog(LOG_DEBUG, "expiring TLS session: id=%s", idstr);
-    }
+    remove_session((unsigned char*) id, idlen);
 
     return 0;
 }
@@ -1015,7 +1014,7 @@ int tls_prune_sessions(void)
 
    /* create the name of the db file */
     strcpy(dbdir, config_dir);
-    strcat(dbdir, FNAME_SESSIONS);
+    strcat(dbdir, FNAME_TLSSESSIONS);
 
     ret = DB->open(dbdir, &sessdb);
     if (ret != CYRUSDB_OK) {
@@ -1025,11 +1024,12 @@ int tls_prune_sessions(void)
     }
     else {
 	/* check each session in our database */
-	prock.db = sessdb;
+	sess_dbopen = 1;
 	prock.count = prock.deletions = 0;
 	DB->foreach(sessdb, "", 0, &prune_p, &prune_cb, &prock, NULL);
 	DB->close(sessdb);
 	sessdb = NULL;
+	sess_dbopen = 0;
 
 	syslog(LOG_NOTICE, "tls_prune: purged %d out of %d entries",
 	       prock.deletions, prock.count);

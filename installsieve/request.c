@@ -42,6 +42,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: request.c,v 1.17.12.1 2002/06/06 21:08:30 jsmith2 Exp $ */
 
 #include <sys/stat.h>
 #include <sys/types.h>

@@ -37,6 +37,7 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
+# $Id: IMAP.pm,v 1.7.6.1 2002/06/06 21:09:00 jsmith2 Exp $
 
 package Cyrus::IMAP;
 
@@ -173,15 +174,16 @@ sub _stringize {
 sub authenticate {
   my ($self, $first) = @_;
   my (%opts, $rc);
+
   if (defined $first &&
-      $first =~ /^-\w+|Mechanism|Service|User|Minssf|Maxssf|Password$/) {
+      $first =~ /^-\w+|Mechanism|Service|Authz|User|Minssf|Maxssf|Password$/) {
     (undef, %opts) = @_;
-    foreach (qw(mechanism service user minssf maxssf password)) {
+    foreach (qw(mechanism service authz user minssf maxssf password)) {
       $opts{'-' . $_} = $opts{ucfirst($_)} if !defined($opts{'-' . $_});
     }
   } else {
-    (undef, $opts{-mechanism}, $opts{-service}, $opts{-user}, $opts{-minssf},
-     $opts{-maxssf}, $opts{-password}) = @_;
+    (undef, $opts{-mechanism}, $opts{-service}, $opts{-authz}, $opts{-user},
+     $opts{-minssf}, $opts{-maxssf}, $opts{-password}) = @_;
   }
   if (!defined($opts{-mechanism})) {
     $opts{-mechanism} = '';
@@ -201,7 +203,8 @@ sub authenticate {
   $rc = 0;
   if (defined($opts{-mechanism}) && lc($opts{-mechanism}) ne 'login') {
     $rc = $self->_authenticate($opts{-mechanism}, $opts{-service},
-			       $opts{-user}, $opts{-minssf}, $opts{-maxssf});
+			       $opts{-authz}, $opts{-user}, $opts{-password},
+			       $opts{-minssf}, $opts{-maxssf});
   }
   $opts{-mechanism} ||= 'plain';
   if (!$rc && $opts{-mechanism} =~ /(\b|^)(plain|login)($|\b)/i) {
@@ -251,6 +254,10 @@ Cyrus::IMAP - Interface to Cyrus imclient library
 
   my $client = Cyrus::IMAP->new('mailhost'[, $flags]);
   $flags = Cyrus::IMAP::CONN_NONSYNCLITERAL;
+
+  ($server, $mailbox) = Cyrus::IMAP->fromURL($url);
+  $url = Cyrus::IMAP->toURL($server, $mailbox);
+
   $client->setflags($flags);
   $client->clearflags(Cyrus::IMAP::CONN_INITIALRESPONSE);
   $flags = $client->flags;
@@ -315,6 +322,10 @@ anything other than C<select()>.  In particular, I/O on the file descriptor
 will almost certainly cause more problems than whatever problem you think
 you are trying to solve.
 
+The B<toURL> and B<fromURL> routines are to ease conversion between URLs and
+IMAP mailbox and server combinations, and are a simple frontend for the
+libcyrus functions of the same name.
+
 The B<imparse> library routines are not implemented, because they are little
 more than a (failed) attempt to make parsing as simple in C as it is in Perl.
 
@@ -323,9 +334,9 @@ our Perl-based account management system, and secondarily so that we can
 rewrite B<cyradm> in a sensible language instead of Tcl.  Usability for other
 purposes is not guaranteed.
 
-=head1 AUTHOR
+=head1 AUTHORs
 
-Brandon S. Allbery, allbery@ece.cmu.edu
+Brandon S. Allbery <allbery@ece.cmu.edu>, Rob Siemborski <rjs3+@andrew.cmu.edu>
 
 =head1 SEE ALSO
 

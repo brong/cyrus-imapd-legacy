@@ -39,6 +39,7 @@
  *
  */
 
+/* $Id: acap.xs,v 1.5.6.1 2002/06/06 21:09:08 jsmith2 Exp $ */
 
 #ifdef __cplusplus
 extern "C" {

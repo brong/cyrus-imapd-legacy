@@ -38,6 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+/* $Id: xsutil.c,v 1.3.12.1 2002/06/06 21:09:01 jsmith2 Exp $ */
 /*
  * Various C functions in support of the Cyrus Perl interface.
  */

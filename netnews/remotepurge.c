@@ -42,6 +42,8 @@
  *
  */
 
+/* $Id: remotepurge.c,v 1.12.2.1 2002/06/06 21:08:57 jsmith2 Exp $ */
+
 #include <config.h>
 
 #include <sys/types.h>
@@ -114,6 +116,7 @@ int pattern = -1;
 int current_mbox_exists = 0;
 
 int verbose = 0;
+static int noop = 0;
 char *username = NULL;
 char *authname = NULL;
 char *realm = NULL;
@@ -426,9 +429,22 @@ int purge_me(char *name, time_t when)
     mbox_stats_t   stats;
     char search_string[200];
     static uid_list_t uidlist;
-    unsigned long       my_time;
-
+    struct tm *my_tm;
+    
     if (when == 0) return 0;
+
+    my_tm = gmtime(&when);
+    
+    snprintf(search_string,sizeof(search_string),
+	     "BEFORE %d-%s-%d",
+	     my_tm->tm_mday,
+	     month_string(my_tm->tm_mon),
+	     1900+my_tm->tm_year);
+
+    if (noop) {
+	printf("%s: %s\n", name, search_string);
+	return 0;
+    }
 
     memset(&stats, '\0', sizeof(mbox_stats_t));
     
@@ -439,7 +455,7 @@ int purge_me(char *name, time_t when)
 			 "EXISTS", CALLBACK_NUMBERED, callback_exists,
 			 (void *)0, (char *)0);
     imclient_send(imclient_conn, callback_finish, (void *)imclient_conn,
-		  "%a \"%s\"", "SELECT", name);		 
+		  "%a %s", "SELECT", name);		 
 
     cmd_done = NOTFINISHED;
 
@@ -449,8 +465,7 @@ int purge_me(char *name, time_t when)
 
     spew(2, "%s selecting", name);
 
-    if (cmd_done == IMAP_NO)
-    {
+    if (cmd_done == IMAP_NO) {
 	syslog(LOG_ERR, "unable to select %s: %s", name, cmd_resp);
 	return 0;
     } else if (cmd_done != IMAP_OK) {
@@ -463,20 +478,6 @@ int purge_me(char *name, time_t when)
 
     /* make out list of uids */
     uidlist.size = 0;		/* reset to 0 */
-
-    {
-	struct tm *my_tm;
-	
-	my_time = time(NULL);
-	my_time = my_time + when;
-	my_tm = gmtime(&when);
-	
-	snprintf(search_string,sizeof(search_string),
-		 "BEFORE %d-%s-%d",
-		 my_tm->tm_mday,
-		 month_string(my_tm->tm_mon),
-		 1900+my_tm->tm_year);
-    }	
 
     spew(3, "%s searching for messages %s", name, search_string);
 
@@ -623,6 +624,7 @@ void usage(void)
   printf("  -l #     : max protection layer (0=none; 1=integrity; etc)\n");
   printf("  -u user  : authorization name to use\n");
   printf("  -v       : verbose\n");
+  printf("  -n       : don't actually purge\n");
   printf("  -m mech  : SASL mechanism to use (\"login\" for LOGIN)\n");
   printf("  -r realm : realm\n");
 
@@ -650,7 +652,7 @@ int main(int argc, char **argv)
     capabilities_t *capabilitylist;
 
     /* look at all the extra args */
-    while ((c = getopt(argc, argv, "d:ve:k:l:p:u:a:m:t:")) != EOF)
+    while ((c = getopt(argc, argv, "d:vne:k:l:p:u:a:m:t:")) != EOF)
 	switch (c) {
 	case 'd':
 	    days = atoi(optarg);
@@ -682,6 +684,9 @@ int main(int argc, char **argv)
 	case 't':
 	    dotls=1;
 	    tls_keyfile=optarg;
+	    break;
+	case 'n':
+	    noop = 1;
 	    break;
 	case '?':
 	default:

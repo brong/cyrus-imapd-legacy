@@ -2,6 +2,7 @@ dnl damnit, i don't want to figure out if I need to build an integral com_err
 dnl library with the collection, I just want to know where it's installed,
 dnl so don't bitch, Rob...
 dnl Derrick Brashear
+dnl $Id: com_err_link.m4,v 1.4.2.1 2002/06/06 21:07:35 jsmith2 Exp $
 
 
 AC_DEFUN(CMU_COMERR_INC_WHERE1, [

@@ -40,14 +40,19 @@ exec perl -x -S $0 ${1+"$@"} # -*-perl-*-
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
+# $Id: sieveshell.pl,v 1.12.2.1 2002/06/06 21:09:14 jsmith2 Exp $
+#
 
 use Cyrus::SIEVE::managesieve;
 use Getopt::Long;
 use strict;
 use File::Temp qw/ tempfile /;
 use Pod::Usage;
+use Term::ReadLine;
+use POSIX qw(:sys_wait_h);
 
-my $puthelp =        "put <filename>   - upload script to server\n";
+my $puthelp =        "put <filename> [<target name>]\n" .
+                     "                 - upload script to server\n";
 my $gethelp =        "get <name> [<filename>]\n" .
                      "                 - get script. if no filename display to stdout\n";
 my $activatehelp =   "activate <name>  - set a script as the active script\n";
@@ -154,7 +159,7 @@ sub show_help {
   print $deactivatehelp;
   print "quit             - quit\n";
 }
-
+#no longer used, replaced by readline module
 sub getline {
     print "> " if ($interactive);
     return <$filehandle>;
@@ -172,24 +177,32 @@ if (!defined $obj) {
     die "unable to connect to server: $err";
 }
 
-while($_ = getline()) {
-    my @words = split ' ',$_;
-    my $str;
+my $term = Term::ReadLine->new("sieveshell");
+
+while(defined($_  = $term->readline('> '))){
+  
+  $term->addhistory($_);
+
+  my @words = split ' ',$_;
+  my $str;
     if ($#words < 0) {
 	next;
     }
 
     if (($words[0] eq "put") || 
 	($words[0] eq "p")) {
-	if ($#words != 1) {
-	    print $puthelp;
-	    next;
-	}
+      if($#words == 1) {
 	$ret = sieve_put_file($obj, $words[1]);
-	if ($ret != 0) { 
-	    my $errstr = sieve_get_error($obj);
-	    print "upload failed: $errstr\n"; 
-	}
+      } elsif ($#words == 2) {
+	$ret = sieve_put_file_withdest($obj, $words[1], $words[2]);
+      } else {
+	print $puthelp;
+	next;
+      }
+      if ($ret != 0) { 
+	my $errstr = sieve_get_error($obj);
+	print "upload failed: $errstr\n"; 
+      }
     } elsif (($words[0] eq "list") || 
 	     ($words[0] eq "l") || 
 	     ($words[0] eq "ls")) {
@@ -252,6 +265,7 @@ while($_ = getline()) {
 	    }
 	}
     } elsif (($words[0] eq "quit") || ($words[0] eq "q")) {
+        sieve_logout($obj);
 	exit 0;
     } elsif (($words[0] eq "help") || ($words[0] eq "?")) {
 	show_help();

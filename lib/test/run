@@ -3,10 +3,18 @@
 use strict;
 
 my $verbose = 0;
+my $clean = 0;
 while (defined $ARGV[0] && ("-v" eq $ARGV[0])) {
     $verbose++;
     shift @ARGV;
 }
+
+while (defined $ARGV[0] && ("-c" eq $ARGV[0])) {
+    $clean++;
+    shift @ARGV;
+}
+
+my $libs = $ENV{"LIBS"} || "";
 
 sub mysys {
     my $cmd = shift;
@@ -18,18 +26,27 @@ sub mysys {
 }
 
 sub runone {
-    my ($t, $p, $d, $tname) = @_;
+    my ($t, $p, $d, $tname, $input) = @_;
     my $res;
+    my $output;
 
     $p = "" if (!defined $p);
     $d = "" if (!defined $d);
     $tname = $t if (!defined $tname);
+    $input = $t if (!defined $input);
+    $output = "$input.OUTPUT";
+    $input =  "$input.INPUT";
+
+    if ($clean) {
+	system "rm -rf $tname";
+    }
+
     mkdir $tname, 0755;
     chdir $tname;
-    $res = mysys("gcc $d -g -o $t ../$t.c -lcyrus");
+    $res = mysys("gcc $d -g -o $t ../$t.c -L../.. -lcyrus");
     if (!$res) {
-	$res = mysys("./$t $p < ../$t.INPUT > $t.TEMP");
-	$res = mysys("cmp -s $t.TEMP ../$t.OUTPUT");
+	$res = mysys("./$t $p < ../$input > $t.TEMP");
+	$res = mysys("cmp -s $t.TEMP ../$output");
     }
     if ($res) {
 	print "$tname FAILED\n";
@@ -39,5 +56,23 @@ sub runone {
     chdir "..";
 }
 
-runone("cyrusdb", undef, "-DBACKEND=cyrusdb_flat");
-runone("cyrusdb", undef, "-DBACKEND=cyrusdb_db3 -ldb", "cyrusdb_db3");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_flat -ldb ${libs}");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_skiplist -ldb ${libs}", "cyrusdb_skiplist");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_db3 -ldb ${libs}", "cyrusdb_db3");
+
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_flat -ldb ${libs}", 
+       "cyrusdbtxn_flat", "cyrusdbtxn");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_skiplist -ldb ${libs}", 
+       "cyrusdbtxn_skiplist", "cyrusdbtxn");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_db3 -ldb ${libs}", 
+       "cyrusdbtxn_db3", "cyrusdbtxn");
+
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_flat -ldb ${libs}", 
+       "cyrusdblong_flat", "cyrusdblong");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_skiplist -ldb ${libs}", 
+       "cyrusdblong_skiplist", "cyrusdblong");
+runone("cyrusdb", undef, "-DBACKEND=cyrusdb_db3 -ldb ${libs}", 
+       "cyrusdblong_db3", "cyrusdblong");
+
+runone("rnddb", undef, "-DBACKEND=cyrusdb_skiplist -ldb ${libs}",
+       "rndskip", "rnddb");

@@ -39,6 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
+.\" $Id: ctl_mboxlist.8,v 1.3.2.1 2002/06/06 21:08:44 jsmith2 Exp $
 .SH NAME
 ctl_mboxlist \- perform operations on the mailbox list database
 .SH SYNOPSIS
@@ -59,6 +60,23 @@ ctl_mboxlist \- perform operations on the mailbox list database
 ]
 .B \-u
 [
+\fB\-f \fIfilename\fR
+]
+.br
+.B ctl_mboxlist
+[
+.B \-C
+.I config-file
+]
+.B \-m
+[
+\fB\-a \fR
+]
+[
+\fB\-w \fR
+]
+.br
+             [
 \fB\-f \fIfilename\fR
 ]
 .SH DESCRIPTION
@@ -85,6 +103,19 @@ flat-text format.
 .B \-u
 Load the contents of the database from standard input.  The input MUST
 be in the format output using the \fB\-d\fR option.
+.TP
+.B \-m
+For backend servers in the Cyrus Murder, synchronize the local mailbox list
+file with the MUPDATE server.
+.TP
+.B \-a
+When used with -m, assume the local mailboxes file is authoritiative, 
+that is, only change the mupdate server, do not delete any local mailboxes.
+USE THIS OPTION WITH CARE, as it allows namespace collisions into the murder.
+.TP
+.B \-w
+When used with -m, print out what would be done but do not perform the
+operations.
 .TP
 \fB\-f \fIfilename\fR
 Use the database specified by \fIfilename\fR instead of the default

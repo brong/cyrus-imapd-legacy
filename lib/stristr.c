@@ -1,4 +1,5 @@
 /* +++Date last modified: 05-Jul-1997 */
+/* $Id: stristr.c,v 1.2.12.1 2002/06/06 21:08:38 jsmith2 Exp $ */
 
 /*
 ** Designation:  StriStr

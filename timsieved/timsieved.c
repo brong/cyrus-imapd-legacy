@@ -1,6 +1,7 @@
 /* timsieved.c -- main file for timsieved (sieve script accepting program)
  * Tim Martin
  * 9/21/99
+ * $Id: timsieved.c,v 1.31.2.1 2002/06/06 21:09:23 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -80,7 +81,14 @@
 #include "mystring.h"
 
 #include "auth.h"
+#include "acl.h"
+#include "mboxlist.h"
 
+static struct 
+{
+    char *ipremoteport;
+    char *iplocalport;
+} saslprops = {NULL,NULL};
 
 sasl_conn_t *sieved_saslconn; /* the sasl connection context */
 
@@ -97,19 +105,45 @@ char sieved_clienthost[250] = "[local]";
 
 int sieved_userisadmin;
 
+/*
+ * Cleanly shut down and exit
+ */
+void shut_down(int code) __attribute__ ((noreturn));
+void shut_down(int code)
+{
+    /* close mailboxes */
+    mboxlist_close();
+    mboxlist_done();
+
+    /* cleanup */
+    if (sieved_out) {
+	prot_flush(sieved_out);
+	prot_free(sieved_out);
+    }
+    if (sieved_in) prot_free(sieved_in);
+    
+    /* done */
+    exit(code);
+}
+
 void cmdloop()
 {
-  chdir("/tmp/");
+    int ret = FALSE;
+    
+    chdir("/tmp/");
 
-  capabilities(sieved_out, sieved_saslconn);
+    capabilities(sieved_out, sieved_saslconn);
 
-  /* initialize lexer */
-  lex_init();
+    /* initialize lexer */
+    lex_init();
 
-  while (1)
-  {
-    parser(sieved_out, sieved_in);
-  }
+    while (ret != TRUE)
+    {
+	ret = parser(sieved_out, sieved_in);
+    }
+
+    /* done */
+    shut_down(0);
 }
 
 
@@ -122,12 +156,40 @@ void fatal(const char *s, int code)
 	exit(recurse_code);
     }
     recurse_code = code;
+
     prot_printf(sieved_out, "NO Fatal error: %s\r\n", s);
     prot_flush(sieved_out);
 
-    exit(EC_TEMPFAIL);
+    shut_down(EC_TEMPFAIL);
 }
 
+/*
+ * acl_ok() checks to see if the the inbox for 'user' grants the 'a'
+ * right to the principal 'auth_identity'. Returns 1 if so, 0 if not.
+ */
+static int acl_ok(const char *user, 
+                  const char *auth_identity,
+                  struct auth_state *authstate)
+{
+    char *acl;
+    char inboxname[1024];
+    int r;
+
+    if (strchr(user, '.') || strlen(user)+6 >= sizeof(inboxname)) return 0;
+
+    strcpy(inboxname, "user.");
+    strcat(inboxname, user);
+
+    if (!authstate ||
+        mboxlist_lookup(inboxname, (char **)0, &acl, NULL)) {
+        r = 0;  /* Failed so assume no proxy access */
+    }
+    else {
+        r = (cyrus_acl_myrights(authstate, acl) & ACL_ADMIN) != 0;
+    }
+
+    return r;
+}
 
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
@@ -166,19 +228,23 @@ static int mysasl_authproc(sasl_conn_t *conn,
     /* ok, is auth_identity an admin? */
     sieved_userisadmin = authisa(sieved_authstate, "sieve", "admins");
 
-    /* we want to authenticate as a different user; we'll allow this
-       if we're an admin or if we're a proxy server */
     if (strcmp(auth_identity, requested_user)) {
-	if (sieved_userisadmin
-	    || authisa(sieved_authstate, "sieve", "proxyservers")) {
-	    /* proxy ok! */
+        /* we want to authenticate as a different user; we'll allow this
+           if we're an admin or if we've allowed ACL proxy logins */
+        int use_acl = config_getswitch("loginuseacl", 0);
+
+        if (sieved_userisadmin ||
+            (use_acl && acl_ok(requested_user, auth_identity, sieved_authstate)) ||
+            authisa(sieved_authstate, "sieve", "proxyservers")) {
+            /* proxy ok! */
 
 	    sieved_userisadmin = 0; /* no longer admin */
 	    auth_freestate(sieved_authstate);
 	    
 	    sieved_authstate = auth_newstate(requested_user, NULL);
 	} else {
-	    sasl_seterror(conn, 0, "user is not allowed to proxy");
+          sasl_seterror(conn, 0, "user %s is not allowed to proxy",
+                          auth_identity);
 	    
 	    auth_freestate(sieved_authstate);
 	    
@@ -198,12 +264,16 @@ static struct sasl_callback mysasl_cb[] = {
 
 int service_init(int argc, char **argv, char **envp)
 {
+    /* open mailboxes */
+    mboxlist_init(0);
+    mboxlist_open(NULL);
+
     return 0;
 }
 
-void service_abort(void)
+void service_abort(int error)
 {
-    return;
+    shut_down(error);
 }
 
 int service_main(int argc, char **argv, char **envp)
@@ -263,15 +333,20 @@ int service_main(int argc, char **argv, char **envp)
 
     /* other params should be filled in */
     if (sasl_server_new(SIEVE_SERVICE_NAME, config_servername, NULL,
-			NULL, NULL, NULL, 0, &sieved_saslconn) != SASL_OK)
+			NULL, NULL, NULL, SASL_SUCCESS_DATA,
+			&sieved_saslconn) != SASL_OK)
 	fatal("SASL failed initializing: sasl_server_new()", -1); 
 
     if(iptostring((struct sockaddr *)&sieved_remoteaddr,
-		  sizeof(struct sockaddr_in), remoteip, 60) == 0)
-	sasl_setprop(sieved_saslconn, SASL_IPREMOTEPORT, remoteip);  
-    if(iptostring((struct sockaddr *)&sieved_remoteaddr,
-		  sizeof(struct sockaddr_in), localip, 60) == 0)
+		  sizeof(struct sockaddr_in), remoteip, 60) == 0) {
+	sasl_setprop(sieved_saslconn, SASL_IPREMOTEPORT, remoteip);
+	saslprops.ipremoteport = xstrdup(remoteip);
+    }
+    if(iptostring((struct sockaddr *)&sieved_localaddr,
+		  sizeof(struct sockaddr_in), localip, 60) == 0) {
 	sasl_setprop(sieved_saslconn, SASL_IPLOCALPORT, localip);
+	saslprops.iplocalport = xstrdup(localip);
+    }
 
     /* will always return something valid */
     /* should be configurable! */
@@ -290,4 +365,50 @@ int service_main(int argc, char **argv, char **envp)
     exit(EC_SOFTWARE);
 }
 
+/* Reset the given sasl_conn_t to a sane state */
+int reset_saslconn(sasl_conn_t **conn, sasl_ssf_t ssf, char *authid)
+{
+    int ret = 0;
+    int secflags = 0;
+    sasl_security_properties_t *secprops = NULL;
 
+    sasl_dispose(conn);
+    /* do initialization typical of service_main */
+    ret = sasl_server_new(SIEVE_SERVICE_NAME, config_servername,
+		          NULL, NULL, NULL,
+			  NULL, SASL_SUCCESS_DATA, conn);
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.ipremoteport)
+	ret = sasl_setprop(*conn, SASL_IPREMOTEPORT,
+			   saslprops.ipremoteport);
+    if(ret != SASL_OK) return ret;
+    
+    if(saslprops.iplocalport)
+	ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+			   saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    
+    if (!config_getswitch("allowplaintext", 1)) {
+	secflags |= SASL_SEC_NOPLAINTEXT;
+    }
+    secprops = mysasl_secprops(secflags);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+    if(ssf) {
+	ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &ssf);
+	if(ret != SASL_OK) return ret;
+    }
+    
+    if(authid) {
+	ret = sasl_setprop(*conn, SASL_AUTH_EXTERNAL, authid);
+	if(ret != SASL_OK) return ret;
+    }
+    /* End TLS/SSL Info */
+
+    return SASL_OK;
+}

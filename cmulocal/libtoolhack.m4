@@ -1,5 +1,6 @@
 dnl libtoolhack.m4--hack to make libtool behave better
 dnl Rob Earhart
+dnl $Id: libtoolhack.m4,v 1.2.8.1 2002/06/06 21:07:37 jsmith2 Exp $
 
 dnl Libtool tries to compile an empty file to see whether it can build
 dnl shared libraries, and treats *any* warning as a problem.

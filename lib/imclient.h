@@ -1,5 +1,5 @@
 /* imclient.h -- Streaming IMxP client library
- $Id: imclient.h,v 1.21 2001/11/27 02:25:03 ken3 Exp $
+ $Id: imclient.h,v 1.21.2.1 2002/06/06 21:08:35 jsmith2 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -44,14 +44,6 @@
 
 #ifndef INCLUDED_IMCLIENT_H
 #define INCLUDED_IMCLIENT_H
-
-#ifndef P
-#ifdef __STDC__
-#define P(x) x
-#else
-#define P(x) ()
-#endif
-#endif
 
 #include <sasl/sasl.h>
 
@@ -106,6 +98,6 @@ extern int imclient_starttls(struct imclient *imclient,
 #endif /* HAVE_SSL */
 
 extern void imclient_write (struct imclient *imclient,
-			    const char *s, unsigned len);
+			    const char *s, size_t len);
 
 #endif /* INCLUDED_IMCLIENT_H */

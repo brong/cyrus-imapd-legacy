@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: service.c,v 1.26 2001/11/27 02:25:04 ken3 Exp $ */
+/* $Id: service.c,v 1.26.2.1 2002/06/06 21:08:52 jsmith2 Exp $ */
 
 #include <config.h>
 
@@ -64,6 +64,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sysexits.h>
+#include <string.h>
 
 #include "service.h"
 
@@ -73,6 +74,8 @@ extern char *optarg;
 /* number of times this service has been used */
 static int use_count = 0;
 static int verbose = 0;
+static int gotalrm = 0;
+static int lockfd = -1;
 
 void notify_master(int fd, int msg)
 {
@@ -135,16 +138,127 @@ static int libwrap_ask(struct request_info *r, int fd)
 #endif
 
 extern void config_init(const char *, const char *);
+extern const char *config_dir;
+
+static int getlockfd(char *service)
+{
+    char lockfile[1024];
+    int fd;
+
+    snprintf(lockfile, sizeof(lockfile), "%s/socket/%s.lock", 
+	     config_dir, service);
+    fd = open(lockfile, O_CREAT | O_RDWR, 0600);
+    if (fd < 0) {
+	syslog(LOG_ERR, 
+	       "locking disabled: couldn't open socket lockfile %s: %m",
+	       lockfile);
+	lockfd = -1;
+	return -1;
+    }
+
+    lockfd = fd;
+    return 0;
+}
+
+static int lockaccept(void)
+{
+    struct flock alockinfo;
+    int rc;
+
+    /* setup the alockinfo structure */
+    alockinfo.l_start = 0;
+    alockinfo.l_len = 0;
+    alockinfo.l_whence = SEEK_SET;
+
+    if (lockfd != -1) {
+	alockinfo.l_type = F_WRLCK;
+	while ((rc = fcntl(lockfd, F_SETLKW, &alockinfo)) < 0 && 
+	       errno == EINTR &&
+	       !gotalrm)
+	    /* noop */;
+	
+	if (rc < 0 && gotalrm) {
+	    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	    service_abort(0);
+	    return -1;
+	}
+
+	if (rc < 0) {
+	    syslog(LOG_ERR, "fcntl: F_SETLKW: error getting accept lock: %m");
+	    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	    service_abort(EX_OSERR);
+	    return -1;
+	}
+    }
+
+    return 0;
+}
+
+static int unlockaccept(void)
+{
+    struct flock alockinfo;
+    int rc;
+
+    /* setup the alockinfo structure */
+    alockinfo.l_start = 0;
+    alockinfo.l_len = 0;
+    alockinfo.l_whence = SEEK_SET;
+
+    if (lockfd != -1) {
+	alockinfo.l_type = F_UNLCK;
+	while ((rc = fcntl(lockfd, F_SETLKW, &alockinfo)) < 0 && 
+	       errno == EINTR)
+	    /* noop */;
+
+	if (rc < 0) {
+	    syslog(LOG_ERR, 
+		   "fcntl: F_SETLKW: error releasing accept lock: %m");
+	    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	    service_abort(EX_OSERR);
+	    return -1;
+	}
+    }
+
+    return 0;
+}
+
+static void sigalrm(int sig)
+{
+    /* syslog(LOG_DEBUG, "got signal %d", sig); */
+    if (sig == SIGALRM) {
+	gotalrm = 1;
+    }
+}
+
+int setsigalrm(void)
+{
+    struct sigaction action;
+    
+    sigemptyset(&action.sa_mask);
+
+    action.sa_flags = 0;
+#ifdef SA_RESETHAND
+    action.sa_flags |= SA_RESETHAND;
+#endif
+    action.sa_handler = sigalrm;
+    if (sigaction(SIGALRM, &action, NULL) < 0) {
+	syslog(LOG_ERR, "installing SIGALRM handler: sigaction: %m");
+	return -1;
+    }
+
+    return 0;
+}
 
 int main(int argc, char **argv, char **envp)
 {
-    char name[64];
     int fdflags;
     int fd;
-    char *p = NULL;
+    char *p = NULL, *service;
     struct request_info request;
     int opt;
     char *alt_config = NULL;
+    int soctype;
+    int typelen = sizeof(soctype);
 
     while ((opt = getopt(argc, argv, "C:")) != EOF) {
 	switch (opt) {
@@ -170,9 +284,12 @@ int main(int argc, char **argv, char **envp)
 	syslog(LOG_ERR, "could not getenv(CYRUS_SERVICE); exiting");
 	exit(EX_SOFTWARE);
     }
-    
-    snprintf(name, sizeof(name) - 1, "service-%s", p);
-    config_init(alt_config, name);
+    service = strdup(p);
+    if (service == NULL) {
+	syslog(LOG_ERR, "couldn't strdup() service: %m");
+	exit(EX_OSERR);
+    }
+    config_init(alt_config, service);
 
     syslog(LOG_DEBUG, "executed");
 
@@ -194,71 +311,111 @@ int main(int argc, char **argv, char **envp)
 	return 1;
     }
 
+    /* figure out what sort of socket this is */
+    if (getsockopt(LISTEN_FD, SOL_SOCKET, SO_TYPE,
+		   (char *) &soctype, &typelen) < 0) {
+	syslog(LOG_ERR, "getsockopt: SOL_SOCKET: failed to get type: %m");
+	notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	return 1;
+    }
+
     if (service_init(argc, argv, envp) != 0) {
 	notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
 	return 1;
     }
 
+    getlockfd(service);
     for (;;) {
 	/* ok, listen to this socket until someone talks to us */
+
+	if (use_count > 0) {
+	    /* we want to time out after 60 seconds, set an alarm */
+	    if (setsigalrm() < 0) {
+		notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+		service_abort(EX_OSERR);
+	    }
+	    gotalrm = 0;
+	    alarm(REUSE_TIMEOUT);
+	}
+
+	/* lock */
+	lockaccept();
+
 	fd = -1;
-	while (fd < 0) { /* loop until we succeed */
-	    /* we should probably do a select() here and time out */
-	    if (use_count > 0) {
-		fd_set rfds;
-		struct timeval tv;
-		int r;
-
-		FD_ZERO(&rfds);
-		FD_SET(LISTEN_FD, &rfds);
-		tv.tv_sec = REUSE_TIMEOUT;
-		tv.tv_usec = 0;
-		r = select(LISTEN_FD + 1, &rfds, NULL, NULL, &tv);
-		if (!FD_ISSET(LISTEN_FD, &rfds)) {
-		    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
-		    service_abort();
-		    exit(0);
-		}
-	    }
-
-	    fd = accept(LISTEN_FD, NULL, NULL);
-	    if (fd < 0) {
-		switch (errno) {
-		case ENETDOWN:
+	while (fd < 0 && !gotalrm) { /* loop until we succeed */
+	    if (soctype == SOCK_STREAM) {
+		fd = accept(LISTEN_FD, NULL, NULL);
+		if (fd < 0) {
+		    switch (errno) {
+		    case ENETDOWN:
 #ifdef EPROTO
-		case EPROTO:
+		    case EPROTO:
 #endif
-		case ENOPROTOOPT:
-		case EHOSTDOWN:
+		    case ENOPROTOOPT:
+		    case EHOSTDOWN:
 #ifdef ENONET
-		case ENONET:
+		    case ENONET:
 #endif
-		case EHOSTUNREACH:
-		case EOPNOTSUPP:
-		case ENETUNREACH:
-		case EAGAIN:
-		    break;
-		default:
-		    syslog(LOG_ERR, "accept failed: %m");
-		    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
-		    service_abort();
-		    exit(EX_OSERR);
+		    case EHOSTUNREACH:
+		    case EOPNOTSUPP:
+		    case ENETUNREACH:
+		    case EAGAIN:
+		    case EINTR:
+			break;
+			
+		    default:
+			syslog(LOG_ERR, "accept failed: %m");
+			notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+			service_abort(EX_OSERR);
+		    }
 		}
+	    } else {
+		/* udp */
+		struct sockaddr_in from;
+		socklen_t fromlen;
+		char ch;
+		int r;
+ 
+		fromlen = sizeof(from);
+		r = recvfrom(LISTEN_FD, (void *) &ch, 1, MSG_PEEK,
+			     (struct sockaddr *) &from, &fromlen);
+		if (r == -1) {
+		    syslog(LOG_ERR, "recvfrom failed: %m");
+		    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+		    service_abort(EX_OSERR);
+		}
+		fd = LISTEN_FD;
 	    }
 	}
 
-	p = getenv("CYRUS_SERVICE");
-	if (p == NULL) {
-	    syslog(LOG_ERR, "could not getenv(CYRUS_SERVICE) (2); exiting");
-	    exit(EX_SOFTWARE);
+	/* unlock */
+	unlockaccept();
+
+	if (fd < 0 && gotalrm) {
+	    /* timed out */
+	    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	    service_abort(0);
+	}
+	if (fd < 0) {
+	    /* how did this happen? */
+	    syslog(LOG_ERR, "accept() failed but we didn't catch it?");
+	    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
+	    service_abort(EX_SOFTWARE);
 	}
 
-	libwrap_init(&request, p);
+	/* cancel the alarm */
+	alarm(0);
+	gotalrm = 0;
 
-	if (!libwrap_ask(&request, fd)) {
-	    /* connection denied! */
-	    close(fd);
-	    continue;
+	/* tcp only */
+	if(soctype == SOCK_STREAM) {
+	    libwrap_init(&request, service);
+
+	    if (!libwrap_ask(&request, fd)) {
+		/* connection denied! */
+		close(fd);
+		continue;
+	    }
 	}
 	
 	notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
@@ -266,21 +423,21 @@ int main(int argc, char **argv, char **envp)
 
 	if (fd != 0 && dup2(fd, 0) < 0) {
 	    syslog(LOG_ERR, "can't duplicate accepted socket: %m");
-	    service_abort();
-	    exit(EX_OSERR);
+	    service_abort(EX_OSERR);
 	}
 	if (fd != 1 && dup2(fd, 1) < 0) {
 	    syslog(LOG_ERR, "can't duplicate accepted socket: %m");
-	    service_abort();
-	    exit(EX_OSERR);
+	    service_abort(EX_OSERR);
 	}
 	if (fd != 2 && dup2(fd, 2) < 0) {
 	    syslog(LOG_ERR, "can't duplicate accepted socket: %m");
-	    service_abort();
-	    exit(EX_OSERR);
+	    service_abort(EX_OSERR);
 	}
 
-	if (fd > 2) close(fd);
+	/* tcp only */
+	if(soctype == SOCK_STREAM) {
+	    if (fd > 2) close(fd);
+	}
 	
 	notify_master(STATUS_FD, MASTER_SERVICE_CONNECTION);
 	use_count++;

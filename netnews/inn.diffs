@@ -1,3 +1,5 @@
+$Id: inn.diffs,v 1.2.12.1 2002/06/06 21:08:56 jsmith2 Exp $
+
 This is a patch against INN 2.2.1 for allowing INN to deliver directly
 to an IMAP server using LMTP and IMAP (to handle control messages)
 

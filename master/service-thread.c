@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: service-thread.c,v 1.2 2001/08/14 16:11:26 leg Exp $ */
+/* $Id: service-thread.c,v 1.2.2.1 2002/06/06 21:08:52 jsmith2 Exp $ */
 #include <config.h>
 
 #include <stdio.h>
@@ -216,8 +216,7 @@ int main(int argc, char **argv, char **envp)
 		default:
 		    syslog(LOG_ERR, "accept failed: %m");
 		    notify_master(STATUS_FD, MASTER_SERVICE_UNAVAILABLE);
-		    service_abort();
-		    exit(EX_OSERR);
+		    service_abort(EX_OSERR);
 		}
 	    }
 	}

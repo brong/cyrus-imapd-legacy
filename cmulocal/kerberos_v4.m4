@@ -1,6 +1,7 @@
 dnl kerberos_v4.m4--Kerberos 4 libraries and includes
 dnl Derrick Brashear
 dnl from KTH krb and Arla
+dnl $Id: kerberos_v4.m4,v 1.19.12.1 2002/06/06 21:07:36 jsmith2 Exp $
 
 AC_DEFUN(CMU_KRB_SENDAUTH_PROTO, [
 AC_MSG_CHECKING(for krb_sendauth prototype)
@@ -203,7 +204,7 @@ AC_ARG_WITH(krb4-include,
           AC_SUBST(KRB_INC_FLAGS)
           AC_SUBST(KRB_LIB_FLAGS)
 	  LIBS="${cmu_save_LIBS}"
-	  AC_DEFINE(KERBEROS)
+	  AC_DEFINE(KERBEROS,,[Use kerberos 4. find out what needs this symbol])
 	  if test "X$RPATH" = "X"; then
 		RPATH=""
 	  fi

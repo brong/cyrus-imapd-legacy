@@ -38,6 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: service.h,v 1.9.2.1 2002/06/06 21:08:52 jsmith2 Exp $ */
 
 #ifndef SERVICE_H
 #define SERVICE_H
@@ -56,7 +57,7 @@ enum {
 extern int service_init(int argc, char **argv, char **envp);
 extern int service_main(int argc, char **argv, char **envp);
 extern int service_main_fd(int fd, int argc, char **argv, char **envp);
-extern int service_abort(void);
+extern int service_abort(int error);
 
 enum {
     MAX_USE = 250,

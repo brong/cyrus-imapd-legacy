@@ -39,6 +39,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: cyrusdb_flat.c,v 1.11.6.1 2002/06/06 21:08:34 jsmith2 Exp $ */
+
 #include <config.h>
 
 #ifdef HAVE_UNISTD_H
@@ -69,10 +71,11 @@ struct db {
     char *fname;
 
     int fd;			/* current file open */
-    long ino;
+    unsigned long ino;
 
     const char *base;		/* contents of file */
-    unsigned long size;
+    unsigned long size;		/* actual size */
+    unsigned long len;		/* mapped size */
 };
 
 struct txn {
@@ -110,9 +113,10 @@ static int abort_txn(struct db *db, struct txn *tid)
 	    r = CYRUSDB_IOERROR;
 	}
 	if (!r) {
-	    map_free(&db->base, &db->size);
-	    map_refresh(db->fd, 1, &db->base, &db->size, sbuf.st_size,
+	    map_free(&db->base, &db->len);
+	    map_refresh(db->fd, 0, &db->base, &db->len, sbuf.st_size,
 			db->fname, 0);
+	    db->size = sbuf.st_size;
 	}
     }
 
@@ -137,7 +141,8 @@ static struct txn *new_txn(void)
     return ret;
 }
 
-static int init(const char *dbdir, int myflags)
+static int init(const char *dbdir __attribute__((unused)),
+		int myflags __attribute__((unused)))
 {
     return 0;
 }
@@ -149,6 +154,30 @@ static int done(void)
 
 static int mysync(void)
 {
+    return 0;
+}
+
+static int myarchive(const char **fnames, const char *dirname)
+{
+    int r;
+    const char **fname;
+    char dstname[1024], *dp;
+
+    strcpy(dstname, dirname);
+    dp = dstname + strlen(dstname);
+
+    /* archive those files specified by the app */
+    for (fname = fnames; *fname != NULL; ++fname) {
+	syslog(LOG_DEBUG, "archiving database file: %s", *fname);
+	strcpy(dp, strrchr(*fname, '/'));
+	r = cyrusdb_copyfile(*fname, dstname);
+	if (r) {
+	    syslog(LOG_ERR,
+		   "DBERROR: error archiving database file: %s", *fname);
+	    return CYRUSDB_IOERROR;
+	}
+    }
+
     return 0;
 }
 
@@ -175,9 +204,10 @@ static int myopen(const char *fname, struct db **ret)
     db->ino = sbuf.st_ino;
 
     db->base = 0;
-    db->size = 0;
-    map_refresh(db->fd, 1, &db->base, &db->size, sbuf.st_size,
+    db->len = 0;
+    map_refresh(db->fd, 0, &db->base, &db->len, sbuf.st_size,
 		fname, 0);
+    db->size = sbuf.st_size;
 
     db->fname = xstrdup(fname);
 
@@ -189,7 +219,7 @@ static int myclose(struct db *db)
 {
     assert(db);
 
-    map_free(&db->base, &db->size);
+    map_free(&db->base, &db->len);
     close(db->fd);
     free_db(db);
 
@@ -216,10 +246,11 @@ static int starttxn_or_refetch(struct db *db, struct txn **mytid)
 	*mytid = new_txn();
 
 	if (db->ino != sbuf.st_ino) {
-	    map_free(&db->base, &db->size);
+	    map_free(&db->base, &db->len);
 	}
-	map_refresh(db->fd, 1, &db->base, &db->size, sbuf.st_size,
+	map_refresh(db->fd, 0, &db->base, &db->len, sbuf.st_size,
 		    db->fname, 0);
+	db->size = sbuf.st_size;
     }
 
     if (!mytid) {
@@ -247,10 +278,11 @@ static int starttxn_or_refetch(struct db *db, struct txn **mytid)
 	    }
 	    
 	    db->ino = sbuf.st_ino;
-	    map_free(&db->base, &db->size);
+	    map_free(&db->base, &db->len);
 	}
-	map_refresh(db->fd, 1, &db->base, &db->size,
+	map_refresh(db->fd, 0, &db->base, &db->len,
 		    sbuf.st_size, db->fname, 0);
+	db->size = sbuf.st_size;
     }
 
     return 0;
@@ -313,8 +345,12 @@ static int foreach(struct db *db,
 
     r = starttxn_or_refetch(db, mytid);
     if (r) return r;
-
-    offset = bsearch_mem(prefix, 1, db->base, db->size, 0, &len);
+    
+    if (prefix) {
+	offset = bsearch_mem(prefix, 1, db->base, db->size, 0, &len);
+    } else {
+	offset = 0;
+    }
     p = db->base + offset;
     pend = db->base + db->size;
     while (p < pend) {
@@ -380,9 +416,10 @@ static int mystore(struct db *db,
 
 	if (sbuf.st_ino != db->ino) {
 	    db->ino = sbuf.st_ino;
-	    map_free(&db->base, &db->size);
-	    map_refresh(db->fd, 1, &db->base, &db->size,
+	    map_free(&db->base, &db->len);
+	    map_refresh(db->fd, 0, &db->base, &db->len,
 			sbuf.st_size, db->fname, 0);
+	    db->size = sbuf.st_size;
 	}
 
 	if (mytid) {
@@ -416,26 +453,22 @@ static int mystore(struct db *db,
     }
 
     niov = 0;
-    iov[niov].iov_base = (char *) db->base;
-    iov[niov++].iov_len = offset;
+    if (offset) {
+	WRITEV_ADD_TO_IOVEC(iov, niov, (char *) db->base, offset);
+    }
 
     if (data) {
 	/* new entry */
-	iov[niov].iov_base = (char *) key;
-	iov[niov++].iov_len = keylen;
-	
-	iov[niov].iov_base = "\t";
-	iov[niov++].iov_len = 1;
-	
-	iov[niov].iov_base = (char *) data;
-	iov[niov++].iov_len = datalen;
-	
-	iov[niov].iov_base = "\n";
-	iov[niov++].iov_len = 1;
+	WRITEV_ADD_TO_IOVEC(iov, niov, (char *) key, keylen);
+	WRITEV_ADD_TO_IOVEC(iov, niov, "\t", 1);
+	WRITEV_ADD_TO_IOVEC(iov, niov, (char *) data, datalen);
+	WRITEV_ADD_TO_IOVEC(iov, niov, "\n", 1);
     }
 
-    iov[niov].iov_base = (char *) db->base + offset + len;
-    iov[niov++].iov_len = db->size - (offset + len);
+    if (db->size - (offset + len) > 0) {
+	WRITEV_ADD_TO_IOVEC(iov, niov, (char *) db->base + offset + len,
+			    db->size - (offset + len));
+    }
 
     /* do the write */
     r = retry_writev(writefd, iov, niov);
@@ -455,9 +488,10 @@ static int mystore(struct db *db,
 	if (!(*mytid)->fnamenew) (*mytid)->fnamenew = xstrdup(fnamebuf);
 	if ((*mytid)->fd) close((*mytid)->fd);
 	(*mytid)->fd = writefd;
-	map_free(&db->base, &db->size);
-	map_refresh(writefd, 1, &db->base, &db->size, sbuf.st_size,
+	map_free(&db->base, &db->len);
+	map_refresh(writefd, 0, &db->base, &db->len, sbuf.st_size,
 		    fnamebuf, 0);
+	db->size = sbuf.st_size;
     } else {
 	/* commit immediately */
 	if (fsync(writefd) ||
@@ -479,9 +513,10 @@ static int mystore(struct db *db,
 	}
 
 	db->ino = sbuf.st_ino;
-	map_free(&db->base, &db->size);
-	map_refresh(writefd, 1, &db->base, &db->size, sbuf.st_size,
+	map_free(&db->base, &db->len);
+	map_refresh(writefd, 0, &db->base, &db->len, sbuf.st_size,
 	    db->fname, 0);
+	db->size = sbuf.st_size;
     }
 
     return r;
@@ -505,7 +540,7 @@ static int store(struct db *db,
 
 static int delete(struct db *db, 
 		  const char *key, int keylen,
-		  struct txn **mytid)
+		  struct txn **mytid, int force __attribute__((unused)))
 {
     return mystore(db, key, keylen, NULL, 0, mytid, 1);
 }
@@ -557,6 +592,7 @@ struct cyrusdb_backend cyrusdb_flat =
     &init,
     &done,
     &mysync,
+    &myarchive,
 
     &myopen,
     &myclose,
@@ -569,5 +605,8 @@ struct cyrusdb_backend cyrusdb_flat =
     &delete,
 
     &commit_txn,
-    &abort_txn
+    &abort_txn,
+
+    NULL,
+    NULL
 };

@@ -1,3 +1,4 @@
+$Id: README,v 1.2.10.1 2002/06/06 21:07:39 jsmith2 Exp $
 
 This directory contains various patches to the distribution that were
 either couldn't be wedged into the configure script due to system

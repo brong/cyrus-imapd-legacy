@@ -8,7 +8,7 @@ START {
 #  idled		cmd="idled"
 }
 
-# UNIX sockets start with a slash and are put into /var/imap/sockets
+# UNIX sockets start with a slash and are absolute paths
 SERVICES {
   # add or remove based on preferences
   imap		cmd="imapd" listen="imap" prefork=1
@@ -18,6 +18,9 @@ SERVICES {
   # at least one LMTP is required for delivery
   lmtp		cmd="lmtpd" listen="lmtp" prefork=0
 #  lmtpunix	cmd="lmtpd" listen="/lmtp" prefork=0
+
+  # this is only necessary if using notifications
+#  notify	cmd="notifyd" listen="/notify" proto="udp" prefork=1
 }
 
 EVENTS {

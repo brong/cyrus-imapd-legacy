@@ -38,6 +38,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: managesieve.xs,v 1.9.2.1 2002/06/06 21:09:12 jsmith2 Exp $ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -218,15 +221,19 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
 
   PREINIT:
   Sieveobj ret = NULL;
-  sasl_callback_t callbacks[10];
-  int sock;
+  sasl_callback_t *callbacks;
+  int sock,port;
   sasl_conn_t *saslconn;
-  int port;
+  int r;
   struct servent *serv;
-  char *mechlist=NULL;
+  char *mechlist=NULL,*mlist=NULL;
+  const char *mtried;
   isieve_t *obj;
 
   CODE:
+
+  /* xxx this gets leaked! */
+  callbacks = safemalloc(5 * sizeof(sasl_callback_t));
 
   callbacks[0].id = SASL_CB_USER;
   callbacks[0].proc = &perlsieve_simple;
@@ -239,7 +246,7 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
   callbacks[2].context = realm_cb;
   callbacks[3].id = SASL_CB_PASS;
   callbacks[3].proc = &perlsieve_getpass;
-  callbacks[3].context = username_cb;
+  callbacks[3].context = password_cb;
   callbacks[4].id = SASL_CB_LIST_END;
 
   /* map port -> num */
@@ -267,8 +274,48 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
   ret->errstr = NULL;
   
   mechlist=read_capability(obj);
+  if(!mechlist) {
+	globalerr = "sasl mech list empty";
+	XSRETURN_UNDEF;
+  }
 
-  if (auth_sasl(mechlist, obj, &globalerr)) {
+  mlist = (char*) xstrdup(mechlist);
+  if(!mlist) {
+	globalerr = "could not allocate memory for mech list";
+	XSRETURN_UNDEF;
+  }
+
+  /* loop through all the mechanisms */
+  do {
+    mtried = NULL;
+    r = auth_sasl(mlist, obj, &mtried, &globalerr);
+
+    if(r) init_sasl(obj, 128, callbacks);
+
+    if(mtried) {
+	char *newlist = (char*) xmalloc(strlen(mlist)+1);
+	char *mtr = (char*) xstrdup(mtried);
+	char *tmp;
+
+	ucase(mtr);
+	tmp = strstr(mlist,mtr);
+	*tmp ='\0';
+	strcpy(newlist, mlist);
+	tmp++;
+
+	tmp = strchr(tmp,' ');
+        if (tmp) {
+	    strcat(newlist,tmp);
+	}
+
+	free(mtr);
+	free(mlist);
+	mlist = newlist;
+    }
+  } while (r && mtried);
+
+  if(r) {
+	/* we failed */
 	free(ret->class);
 	free(ret);
 	XSRETURN_UNDEF;
@@ -292,11 +339,29 @@ sieve_get_global_error()
     RETVAL
 
 int
+sieve_logout(obj)
+  Sieveobj obj
+  CODE:
+	/* xxx this leaves the object unusable */
+	isieve_logout(&(obj->isieve));
+	XSRETURN_UNDEF;
+
+int
 sieve_put_file(obj, filename)
   Sieveobj obj
   char *filename
   CODE:
-    RETVAL = isieve_put_file(obj->isieve, filename, &obj->errstr);
+    RETVAL = isieve_put_file(obj->isieve, filename, NULL, &obj->errstr);
+  OUTPUT:
+    RETVAL
+
+int
+sieve_put_file_withdest(obj, filename, destname)
+  Sieveobj obj
+  char *filename
+  char *destname
+  CODE:
+    RETVAL = isieve_put_file(obj->isieve, filename, destname, &obj->errstr);
   OUTPUT:
     RETVAL
 

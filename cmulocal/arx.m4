@@ -1,4 +1,4 @@
-
+dnl $Id: arx.m4,v 1.2.4.1 2002/06/06 21:07:34 jsmith2 Exp $
 
 AC_DEFUN(CMU_ARX_INC_WHERE1, [
 AC_REQUIRE([AC_PROG_CC_GNU])

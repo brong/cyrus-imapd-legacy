@@ -1,4 +1,3 @@
-
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -39,6 +38,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: acapmbox.h,v 1.16.12.1 2002/06/06 21:07:56 jsmith2 Exp $ */
 
 #ifndef ACAPMBOX_H_
 #define ACAPMBOX_H_
@@ -120,7 +121,7 @@ int acapmbox_markactive(acapmbox_handle_t *AC,
  * Remove an entry
  */
 int acapmbox_delete(acapmbox_handle_t *AC,
-		    char *mailbox_name);
+		    const char *mailbox_name);
 
 
 /*

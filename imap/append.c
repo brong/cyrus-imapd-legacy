@@ -1,5 +1,5 @@
 /* append.c -- Routines for appending messages to a mailbox
- * $Id: append.c,v 1.82 2001/09/30 12:39:55 ken3 Exp $
+ * $Id: append.c,v 1.82.2.1 2002/06/06 21:07:57 jsmith2 Exp $
  *
  * Copyright (c)1998, 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -66,12 +66,18 @@
 #include "retry.h"
 
 struct stagemsg {
-    unsigned long size;
-    time_t internaldate;
     char fname[1024];
 
-    int num_parts;
-    char parts[1][MAX_MAILBOX_PATH];
+    /* the parts buffer consists of
+       /part1/stage./file \0
+       /part2/stage./file \0
+       ... \0
+       \0
+       
+       the main invariant is double \0 at the end
+    */
+    char *parts; /* buffer of current stage parts */
+    char *partend; /* end of buffer */
 };
 
 static int append_addseen(struct mailbox *mailbox, const char *userid,
@@ -97,6 +103,16 @@ int append_check(const char *name, int format,
 {
     struct mailbox m;
     int r;
+    int mbflags;
+    
+    /* Is mailbox moved? */
+    r = mboxlist_detail(name, &mbflags, NULL, NULL, NULL, NULL);
+
+    if (!r) {
+	if(mbflags & MBTYPE_MOVING) return IMAP_MAILBOX_MOVED;
+    } else {
+	return r;
+    }
 
     r = mailbox_open_header(name, auth_state, &m);
     if (r) return r;
@@ -126,7 +142,8 @@ int append_check(const char *name, int format,
     }
 
     if (m.quota.limit >= 0 && quotacheck >= 0 &&
-	m.quota.used + quotacheck > m.quota.limit * QUOTA_UNITS) {
+	m.quota.used + quotacheck > 
+	    ((unsigned) m.quota.limit * QUOTA_UNITS)) {
 	mailbox_close(&m);
 	return IMAP_QUOTA_EXCEEDED;
     }
@@ -196,7 +213,7 @@ int append_setup(struct appendstate *as, const char *name,
 
     if (as->m.quota.limit >= 0 && quotacheck >= 0 &&
 	as->m.quota.used + quotacheck > 
-	         as->m.quota.limit * QUOTA_UNITS) {
+	    ((unsigned) as->m.quota.limit * QUOTA_UNITS)) {
 	mailbox_close(&as->m);
 	return IMAP_QUOTA_EXCEEDED;
     }
@@ -353,7 +370,61 @@ int append_stageparts(struct stagemsg *stagep)
 {
     if (!stagep) return 0;
 
-    return stagep->num_parts;
+    /* xxx count number of active parts */
+    return -1;
+}
+
+/*
+ * staging, to allow for single-instance store.  initializes the stage
+ * with the file for the given mailboxname and returns the open file
+ * so it can double as the spool file
+ */
+FILE *append_newstage(const char *mailboxname, time_t internaldate,
+		      struct stagemsg **stagep)
+{
+    struct stagemsg *stage;
+    char stagedir[1024], stagefile[1024];
+    FILE *f;
+
+    assert(mailboxname != NULL);
+    assert(stagep != NULL);
+
+    stage = xmalloc(sizeof(struct stagemsg));
+    stage->parts = xzmalloc(5 * MAX_MAILBOX_PATH * sizeof(char));
+    stage->partend = stage->parts + 5 * MAX_MAILBOX_PATH * sizeof(char);
+
+    sprintf(stage->fname, "%d-%d",(int) getpid(), (int) internaldate);
+
+    /* xxx check errors */
+    mboxlist_findstage(mailboxname, stagedir);
+    strcpy(stagefile, stagedir);
+    strcat(stagefile, stage->fname);
+
+    /* create this file and put it into stage->parts[0] */
+    f = fopen(stagefile, "w+");
+    if (!f) {
+	if (mkdir(stagedir, 0755) != 0) {
+	    syslog(LOG_ERR, "couldn't create stage directory: %s: %m",
+		   stagedir);
+	} else {
+	    syslog(LOG_NOTICE, "created stage directory %s",
+		   stagedir);
+	    f = fopen(stagefile, "w+");
+	}
+    } 
+    if (!f) {
+	syslog(LOG_ERR, "IOERROR: creating message file %s: %m", 
+	       stagefile);
+	*stagep = NULL;
+	return NULL;
+    }
+
+    strcpy(stage->parts, stagefile);
+    /* make sure there's a NUL NUL at the end */
+    stage->parts[strlen(stagefile) + 1] = '\0';
+
+    *stagep = stage;
+    return f;
 }
 
 /*
@@ -364,7 +435,7 @@ int append_fromstage(struct appendstate *as,
 		     struct protstream *messagefile,
 		     unsigned long size, time_t internaldate,
 		     const char **flag, int nflags,
-		     struct stagemsg **stagep)
+		     struct stagemsg *stage)
 {
     struct mailbox *mailbox = &as->m;
     struct index_record message_index;
@@ -374,44 +445,48 @@ int append_fromstage(struct appendstate *as,
     int userflag, emptyflag;
 
     /* for staging */
-    struct stagemsg *stage;
-    char stagefile[1024];
-    FILE *f;
-    int sp;
+    char stagefile[MAX_MAILBOX_PATH];
+    int sflen;
+    char *p;
 
-    assert(stagep != NULL);
+    assert(stage != NULL && stage->parts[0] != '\0');
     assert(mailbox->format == MAILBOX_FORMAT_NORMAL);
     assert(size != 0);
 
     zero_index(message_index);
-    if (!*stagep) { /* create a new stage */
-	stage = xmalloc(sizeof(struct stagemsg) +
-			5 * MAX_MAILBOX_PATH * sizeof(char));
 
-	stage->size = size;
-	stage->internaldate = internaldate;
-	sprintf(stage->fname, "%d-%d",(int) getpid(), (int) internaldate);
-	stage->num_parts = 5; /* room for 5 paths */
-	stage->parts[0][0] = '\0';
-    } else {
-	stage = *stagep; /* reuse existing stage */
-    }
-
+    /* xxx check errors */
     mboxlist_findstage(mailbox->name, stagefile);
     strcat(stagefile, stage->fname);
+    sflen = strlen(stagefile);
 
-    sp = 0;
-    while (stage->parts[sp][0] != '\0') {
-	if (!strcmp(stagefile, stage->parts[sp]))
+    p = stage->parts;
+    while (p < stage->partend) {
+	int sl = strlen(p);
+
+	if (sl == 0) {
+	    /* our partition isn't here */
 	    break;
-	sp++;
+	}
+	if (!strcmp(stagefile, p)) {
+	    /* aha, this is us */
+	    break;
+	}
+	
+	p += sl + 1;
     }
-    if (stage->parts[sp][0] == '\0') {
-	/* ok, create this file and add put it into stage->parts[sp] */
-	f = fopen(stagefile, "w+");
-	if (!f) {
+
+    if (*p == '\0') {
+	/* ok, create this file, and copy the name of it into 'p'.
+	   make sure not to overwrite stage->partend */
+
+	/* create the new staging file from the first stage part */
+	r = mailbox_copyfile(stage->parts, stagefile);
+	if (r) {
+	    /* maybe the directory doesn't exist? */
 	    char stagedir[1024];
 
+	    /* xxx check errors */
 	    mboxlist_findstage(mailbox->name, stagedir);
 	    if (mkdir(stagedir, 0755) != 0) {
 		syslog(LOG_ERR, "couldn't create stage directory: %s: %m",
@@ -419,34 +494,33 @@ int append_fromstage(struct appendstate *as,
 	    } else {
 		syslog(LOG_NOTICE, "created stage directory %s",
 		       stagedir);
-		f = fopen(stagefile, "w+");
+		r = mailbox_copyfile(stage->parts, stagefile);
 	    }
-	} 
-	if (!f) {
+	}
+	if (r) {
+	    /* oh well, we tried */
+
 	    syslog(LOG_ERR, "IOERROR: creating message file %s: %m", 
 		   stagefile);
-	    return IMAP_IOERROR;
-	}
-	
-	r = message_copy_strict(messagefile, f, size);
-	fclose(f);
-	if (r) {
 	    unlink(stagefile);
 	    return r;
 	}
 	
-	if (sp == stage->num_parts) {
-	    /* need more room */
-	    stage->num_parts += 5;
-	    stage = xrealloc(stage, sizeof(struct stagemsg) +
-			     stage->num_parts * MAX_MAILBOX_PATH * 
-			     sizeof(char));
+	if (p + sflen > stage->partend - 5) {
+	    int cursize = stage->partend - stage->parts;
+	    int curp = p - stage->parts;
+
+	    /* need more room; double the buffer */
+	    stage->parts = xrealloc(stage->parts, 2 * cursize);
+	    stage->partend = stage->parts + 2 * cursize;
+	    p = stage->parts + curp;
 	}
-	strcpy(stage->parts[sp], stagefile);
-	stage->parts[sp+1][0] = '\0';
+	strcpy(p, stagefile);
+	/* make sure there's a NUL NUL at the end */
+	p[sflen + 1] = '\0';
     }
 
-    /* stage->parts[sp] contains the message and is on the same partition
+    /* 'p' contains the message and is on the same partition
        as the mailbox we're looking at */
 
     /* Setup */
@@ -462,15 +536,16 @@ int append_fromstage(struct appendstate *as,
     mailbox_message_get_fname(mailbox, message_index.uid, 
 			      fname + strlen(fname));
 
-    r = mailbox_copyfile(stage->parts[sp], fname);
+    r = mailbox_copyfile(p, fname);
     destfile = fopen(fname, "r");
     if (!r && destfile) {
 	/* ok, we've successfully created the file */
 	r = message_parse_file(destfile, mailbox, &message_index);
     }
     if (destfile) {
-	/* this will hopefully ensure that the link() actually happened */
-	if (APPEND_ULTRA_PARANOID) fsync(fileno(destfile));
+	/* this will hopefully ensure that the link() actually happened
+	   and makes sure that the file actually hits disk */
+	fsync(fileno(destfile));
 	fclose(destfile);
     }
     if (r) {
@@ -541,26 +616,25 @@ int append_fromstage(struct appendstate *as,
     /* ok, we've successfully added a message */
     as->quota_used += message_index.size;
 
-    *stagep = stage;
     return 0;
 }
 
 int append_removestage(struct stagemsg *stage)
 {
-    int i;
+    char *p;
 
     if (stage == NULL) return 0;
 
-    i = 0;
-    while (stage->parts[i][0] != '\0') {
+    p = stage->parts;
+    while (*p != '\0' && p < stage->partend) {
 	/* unlink the staging file */
-	if (unlink(stage->parts[i]) != 0) {
-	    syslog(LOG_ERR, "IOERROR: error unlinking file %s: %m",
-		   stage->parts[i]);
+	if (unlink(p) != 0) {
+	    syslog(LOG_ERR, "IOERROR: error unlinking file %s: %m", p);
 	}
-	i++;
+	p += strlen(p) + 1;
     }
-
+    
+    free(stage->parts);
     free(stage);
     return 0;
 }
@@ -783,7 +857,7 @@ int append_copy(struct mailbox *mailbox,
 	    if (mailbox_map_message(mailbox, 0, copymsg[msg].uid,
 				    &src_base, &src_size) != 0) {
 		fclose(destfile);
-		syslog(LOG_ERR, "IOERROR: opening message file %u of %s: %m",
+		syslog(LOG_ERR, "IOERROR: opening message file %lu of %s: %m",
 		       copymsg[msg].uid, mailbox->name);
 		r = IMAP_IOERROR;
 		goto fail;

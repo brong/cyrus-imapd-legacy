@@ -1,4 +1,5 @@
 dnl libwrap.m4 --- do we have libwrap, the access control library?
+dnl $Id: libwrap.m4,v 1.3.2.1 2002/06/06 21:07:37 jsmith2 Exp $
 
 AC_DEFUN(CMU_LIBWRAP, [
   AC_REQUIRE([CMU_SOCKETS])

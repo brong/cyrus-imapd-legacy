@@ -4,7 +4,7 @@
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
 <title>Cyrus IMAP Server FAQ</title>
-<!-- $Id: faq.html,v 1.17 2001/12/06 18:01:35 leg Exp $ -->
+<!-- $Id: faq.html,v 1.17.2.1 2002/06/06 21:07:44 jsmith2 Exp $ -->
 </head>
 <body>
 <h1>Cyrus IMAP Server FAQ</h1>
@@ -12,6 +12,14 @@
 <ul>
 <li><b>Using PAM</b> Under Linux when using PAM and shadow
 passwords, /etc/shadow needs to be readable by the Cyrus user.</li>
+
+<li><b>POP-Before-SMTP</b> It is not included in the default distribution
+because there is already a standard way of doing this with SMTP AUTH.
+Any good MTA and/or MUA should support SMTP AUTH, so we shouldn't have
+to create a hack in an unrelated service.  However, if you would like
+to install it anyway, we recommend using
+<a href="http://mail.cc.umanitoba.ca/drac/">DRAC</a>,
+along with the patch available in <tt>contrib/drac_auth.patch</tt>.</li>
 
 <li><b>Using NFS</b> We don't recommend it. If you want to do it,
 it may possibly work but you may also lose your email or have
@@ -50,11 +58,11 @@ to Berkeley DB</a> available from <a
 href="http://www.sleepycat.com/update/3.0.55/patch.3.0.55.html">http://www.sleepycat.com/update/3.0.55/patch.3.0.55.html</a>.</p>
 </dd>
 
-<dt><b>Q:</b> I've used <tt>saslpasswd</tt> to create CRAM-MD5
+<dt><b>Q:</b> I've used <tt>saslpasswd2</tt> to create CRAM-MD5
 secrets, but imapd doesn't say <tt>AUTH=CRAM-MD5</tt>. Why?</dt>
 
 <dd>
-<p><b>A:</b> Make sure <tt>/etc/sasldb</tt> is readable by the
+<p><b>A:</b> Make sure <tt>/etc/sasldb2</tt> is readable by the
 Cyrus user.</p>
 </dd>
 
@@ -152,7 +160,7 @@ tls.c:</p>
 </dl>
 
 <hr />
-last modified: $Date: 2001/12/06 18:01:35 $ <br />
+last modified: $Date: 2002/06/06 21:07:44 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

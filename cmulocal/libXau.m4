@@ -1,3 +1,5 @@
+dnl $Id: libXau.m4,v 1.1.6.1 2002/06/06 21:07:36 jsmith2 Exp $
+
 AC_DEFUN(CMU_XAU_INC_WHERE1, [
 AC_REQUIRE([AC_PROG_CC_GNU])
 saved_CPPFLAGS=$CPPFLAGS

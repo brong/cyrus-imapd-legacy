@@ -39,6 +39,7 @@
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 #
+# $Id: cyradm.sh,v 1.6.2.1 2002/06/06 21:09:00 jsmith2 Exp $
 case "x$BASH_VERSION" in
 x) exec perl -MCyrus::IMAP::Shell -e shell -- ${1+"$@"} ;;
 *) exec perl -MCyrus::IMAP::Shell -e shell -- "$@" ;;
@@ -150,11 +151,15 @@ last command will be used if one is not specified.
 
 Show help for C<command> or all commands.
 
-=item listaclmailbox I<mailbox>
+=item C<info> [I<mailbox>]
 
-=item listacl I<mailbox>
+Display the mailbox/server metadata.
 
-=item lam I<mailbox>
+=item C<listaclmailbox> I<mailbox>
+
+=item C<listacl> I<mailbox>
+
+=item C<lam> I<mailbox>
 
 List ACLs on the specified mailbox.
 
@@ -279,7 +284,14 @@ Administer (SETACL)
 =item C<sq> I<root> I<resource> I<value> [I<resource> I<value> ...]
 
 Set a quota on the specified root, which may or may not be an actual mailbox.
-The only I<resource> understood by B<Cyrus> is C<STORAGE>.
+The only I<resource> understood by B<Cyrus> is C<STORAGE>.  The I<value> may
+be the special string C<none> which will remove the quota.
+
+=item C<version>
+
+=item C<ver>
+
+Display the version info of the current server.
 
 =back
 

@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.44 2001/12/12 04:20:21 rjs3 Exp $
+ * $Id: lmtpengine.c,v 1.44.2.1 2002/06/06 21:08:06 jsmith2 Exp $
  *
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -81,12 +81,14 @@
 #include "iptostring.h"
 #include "exitcodes.h"
 #include "imap_err.h"
+#include "mupdate_err.h"
 #include "xmalloc.h"
 #include "version.h"
 
 #include "lmtpengine.h"
 #include "lmtpstats.h"
 #include "tls.h"
+#include "telemetry.h"
 
 #define RCPT_GROW 30
 
@@ -119,6 +121,9 @@ struct clientdata {
 #endif /* HAVE_SSL */
     int starttls_done;
 };
+
+/* defined in lmtpd.c or lmtpproxyd.c */
+extern int deliver_logfd;
 
 /* Enable the resetting of a sasl_conn_t */
 static int reset_saslconn(sasl_conn_t **conn);
@@ -171,7 +176,11 @@ static void send_lmtp_error(struct protstream *pout, int r)
 	break;
 
     case IMAP_SERVER_UNAVAILABLE:
-	prot_printf(pout, "451 4.4.0 Remote server unavailable\r\n");
+    case MUPDATE_NOCONN:
+    case MUPDATE_NOAUTH:
+    case MUPDATE_TIMEOUT:
+    case MUPDATE_PROTOCOL_ERROR:
+	prot_printf(pout, "451 4.4.3 Remote server unavailable\r\n");
 	break;
 
     case IMAP_NOSPACE:
@@ -187,21 +196,32 @@ static void send_lmtp_error(struct protstream *pout, int r)
 	    prot_printf(pout, 
 "550-You do not have permission to post a message to this mailbox.\r\n"
 "550-Please contact the owner of this mailbox in order to submit\r\n"
-"550-your message, or postmaster@andrew.cmu.edu if you believe you\r\n"
+"550-your message, or %s if you believe you\r\n"
 "550-received this message in error.\r\n"
-"550 5.7.1 Permission denied");
+"550 5.7.1 Permission denied\r\n", 
+			POSTMASTER);
 	} else {
 	    prot_printf(pout, "550 5.7.1 Permission denied\r\n");
 	}
 	break;
 
     case IMAP_QUOTA_EXCEEDED:
-	prot_printf(pout, "452 4.2.2 Over quota\r\n");
+	if(config_getswitch("lmtp_overquota_perm_failure",0)) {
+	    /* Not Default - Perm Failure */
+	    prot_printf(pout, "552 5.2.2 Over quota\r\n");
+	} else {
+	    /* Default - Temp Failure */
+	    prot_printf(pout, "452 4.2.2 Over quota\r\n");
+	}
 	break;
 
     case IMAP_MAILBOX_BADFORMAT:
     case IMAP_MAILBOX_NOTSUPPORTED:
 	prot_printf(pout, "451 4.2.0 Mailbox has an invalid format\r\n");
+	break;
+
+    case IMAP_MAILBOX_MOVED:
+	prot_printf(pout, "451 4.2.1 Mailbox Moved\r\n");
 	break;
 
     case IMAP_MESSAGE_CONTAINSNULL:
@@ -227,13 +247,21 @@ static void send_lmtp_error(struct protstream *pout, int r)
 
     case IMAP_MAILBOX_NONEXISTENT:
 	/* XXX Might have been moved to other server */
-	prot_printf(pout, "550 5.1.1 User unknown\r\n");
+	if (LMTP_LONG_ERROR_MSGS) {
+	    prot_printf(pout, 
+"550-Mailbox unknown.  Either there is no mailbox associated with this\r\n"
+"550-name or you do not have authorization to see it.\r\n"
+"550 5.1.1 User unknown\r\n");
+	} else {
+	    prot_printf(pout, "550 5.1.1 User unknown\r\n");
+	}
 	break;
 
     case IMAP_PROTOCOL_BAD_PARAMETERS:
 	prot_printf(pout, "501 5.5.4 Syntax error in parameters\r\n");
 	break;
 
+    case MUPDATE_BADPARAM:
     default:
 	/* Some error we're not expecting. */
 	prot_printf(pout, "554 5.0.0 Unexpected internal error\r\n");
@@ -260,6 +288,8 @@ int msg_new(message_data_t **m)
 
     ret->authuser = NULL;
     ret->authstate = NULL;
+
+    ret->rock = NULL;
 
     for (i = 0; i < HEADERCACHESIZE; i++)
 	ret->cache[i] = NULL;
@@ -391,6 +421,16 @@ void msg_setrcpt_status(message_data_t *m, int rcpt_num, int r)
 {
     assert(0 <= rcpt_num && rcpt_num < m->rcpt_num);
     m->rcpt[rcpt_num]->status = r;
+}
+
+void *msg_getrock(message_data_t *m)
+{
+    return m->rock;
+}
+
+void msg_setrock(message_data_t *m, void *rock)
+{
+    m->rock = rock;
 }
 
 /* return a malloc'd string representing the authorized user.
@@ -598,33 +638,49 @@ char *buf;
     }
 }
 
-/* copies the message from fin to fout, massaging accordingly: mostly
- * newlines are fiddled. "." terminates */
+/* copies the message from fin to fout, massaging accordingly: 
+   . newlines are fiddled to \r\n
+   . "." terminates 
+   . embedded NULs are rejected
+   . bare \r are removed
+*/
 static int copy_msg(struct protstream *fin, FILE *fout)
 {
     char buf[8192], *p;
+    int r = 0;
 
     while (prot_fgets(buf, sizeof(buf)-1, fin)) {
 	p = buf + strlen(buf) - 1;
-	if (p <= buf || (p[0] == '\n' && p[-1] != '\r')) {
-	    /* either a \0 by itself or a \n without a \r */
+	if (p < buf) {
+	    /* buffer start with a \0 */
+	    r = IMAP_MESSAGE_CONTAINSNULL;
+	    continue; /* need to eat the rest of the message */
+	}
+	else if (buf[0] == '\r' && buf[1] == '\0') {
+	    /* The message contained \r\0, and fgets is confusing us. */
+	    r = IMAP_MESSAGE_CONTAINSNULL;
+	    continue; /* need to eat the rest of the message */
+	}
+	else if (p[0] == '\r') {
+	    /*
+	     * We were unlucky enough to get a CR just before we ran
+	     * out of buffer--put it back.
+	     */
+	    prot_ungetc('\r', fin);
+	    *p = '\0';
+	}
+	else if (p[0] == '\n' && p[-1] != '\r') {
+	    /* found an \n without a \r */
 	    p[0] = '\r';
 	    p[1] = '\n';
 	    p[2] = '\0';
-	} else if (*p == '\r') {
-	    if (buf[0] == '\r' && buf[1] == '\0') {
-		/* The message contained \r\0, and fgets is confusing us.
-		   XXX ignored
-		   */
-	    } else {
-		/*
-		 * We were unlucky enough to get a CR just before we ran
-		 * out of buffer--put it back.
-		 */
-		prot_ungetc('\r', fin);
-		*p = '\0';
-	    }
 	}
+	else if (p[0] != '\n') {
+	    /* line contained a \0 not at the end */
+	    r = IMAP_MESSAGE_CONTAINSNULL;
+	    continue;
+	}
+
 	/* Remove any lone CR characters */
 	while ((p = strchr(buf, '\r')) && p[1] != '\n') {
 	    strcpy(p, p+1);
@@ -646,7 +702,7 @@ static int copy_msg(struct protstream *fin, FILE *fout)
     return IMAP_IOERROR;
 
  lmtpdot:
-    return 0;
+    return r;
 }
 
 /* take a list of headers, pull the first one out and return it in
@@ -669,7 +725,14 @@ enum {
 };
 
 /* we don't have to worry about dotstuffing here, since it's illegal
-   for a header to begin with a dot! */
+   for a header to begin with a dot!
+
+   returns 0 on success, filling in 'headname' and 'contents' with a static
+   pointer (blech).
+   on end of headers, returns 0 with NULL 'headname' and NULL 'contents'
+
+   on error, returns < 0
+*/
 static int parseheader(struct protstream *fin, FILE *fout, 
 		       char **headname, char **contents) {
     int c;
@@ -677,6 +740,8 @@ static int parseheader(struct protstream *fin, FILE *fout,
     static int namelen = 0, bodylen = 0;
     int off = 0;
     state s = NAME_START;
+    int r = 0;
+    int reject8bit = config_getswitch("reject8bit", 0);
 
     if (namelen == 0) {
 	namelen += NAMEINC;
@@ -688,17 +753,36 @@ static int parseheader(struct protstream *fin, FILE *fout,
     }
 
     /* there are two ways out of this loop, both via gotos:
-       either we successfully read a character (got_header)
+       either we successfully read a header (got_header)
        or we hit an error (ph_error) */
     while ((c = prot_getc(fin)) != EOF) { /* examine each character */
 	switch (s) {
 	case NAME_START:
+	    if (c == '.') {
+		int peek;
+
+		peek = prot_getc(fin);
+		prot_ungetc(peek, fin);
+		
+		if (peek == '\r' || peek == '\n') {
+		    /* just reached the end of message */
+		    r = IMAP_MESSAGE_NOBLANKLINE;
+		    goto ph_error;
+		}
+	    }
 	    if (c == '\r' || c == '\n') {
-		/* no header here! */
+		/* just reached the end of headers */
+		r = 0;
 		goto ph_error;
 	    }
-	    if (!isalpha(c)) {
+	    /* field-name      =       1*ftext
+	       ftext           =       %d33-57 / %d59-126         
+	                               ; Any character except
+				       ;  controls, SP, and
+				       ;  ":". */
+	    if (!((c >= 33 && c <= 57) || (c >= 59 && c <= 126))) {
 		/* invalid header name */
+		r = IMAP_MESSAGE_BADHEADER;
 		goto ph_error;
 	    }
 	    name[0] = tolower(c);
@@ -712,7 +796,8 @@ static int parseheader(struct protstream *fin, FILE *fout,
 		s = (c == ':' ? BODY_START : COLON);
 		break;
 	    }
-	    if (iscntrl(c)) {
+	    if (!((c >= 33 && c <= 57) || (c >= 59 && c <= 126))) {
+		r = IMAP_MESSAGE_BADHEADER;
 		goto ph_error;
 	    }
 	    name[off++] = tolower(c);
@@ -731,6 +816,7 @@ static int parseheader(struct protstream *fin, FILE *fout,
 		    fputc(c, fout);
 		    c = prot_getc(fin);
 		}
+		r = IMAP_MESSAGE_BADHEADER;
 		goto ph_error;
 	    }
 	    break;
@@ -765,6 +851,18 @@ static int parseheader(struct protstream *fin, FILE *fout,
 		/* ignore this whitespace, but we'll copy all the rest in */
 		break;
 	    } else {
+		if (c >= 0x80) {
+		    if (reject8bit) {
+			/* We have been configured to reject all mail of this
+			   form. */
+			r = IMAP_MESSAGE_CONTAINS8BIT;
+			goto ph_error;
+		    } else {
+			/* We have been configured to munge all mail of this
+			   form. */
+			c = 'X';
+		    }
+		}
 		/* just an ordinary character */
 		body[off++] = c;
 		if (off >= bodylen - 3) {
@@ -788,7 +886,7 @@ static int parseheader(struct protstream *fin, FILE *fout,
     /* and we didn't get a header */
     if (headname != NULL) *headname = NULL;
     if (contents != NULL) *contents = NULL;
-    return -1;
+    return r;
 
  got_header:
     if (headname != NULL) *headname = xstrdup(name);
@@ -799,12 +897,18 @@ static int parseheader(struct protstream *fin, FILE *fout,
 
 static int fill_cache(struct protstream *fin, FILE *fout, message_data_t *m)
 {
+    int r = 0;
+
     /* let's fill that header cache */
     for (;;) {
 	char *name, *body;
 	int cl, clinit;
 
-	if (parseheader(fin, fout, &name, &body) < 0) {
+	if ((r = parseheader(fin, fout, &name, &body)) < 0) {
+	    break;
+	}
+	if (!name) {
+	    /* reached the end of headers */
 	    break;
 	}
 
@@ -844,7 +948,16 @@ static int fill_cache(struct protstream *fin, FILE *fout, message_data_t *m)
 	m->cache[cl]->contents[m->cache[cl]->ncontents] = NULL;
     }
 
-    return copy_msg(fin, fout);
+    if (r) {
+	/* got a bad header */
+
+	/* flush the remaining output */
+	copy_msg(fin, fout);
+	/* and return the error */
+	return r;
+    } else {
+	return copy_msg(fin, fout);
+    }
 }
 
 /*
@@ -854,7 +967,7 @@ static int fill_cache(struct protstream *fin, FILE *fout, message_data_t *m)
  * returns 0 on success, imap error code on failure
  */
 static int savemsg(struct clientdata *cd,
-		   const char *addheaders,
+		   const struct lmtp_func *func,
 		   message_data_t *m)
 {
     FILE *f;
@@ -865,8 +978,8 @@ static int savemsg(struct clientdata *cd,
     time_t t;
     char datestr[80];
 
-    /* Copy to temp file */
-    f = tmpfile();
+    /* Copy to spool file */
+    f = func->spoolfile(m);
     if (!f) {
 	prot_printf(cd->pout, 
 		    "451 4.3.%c cannot create temporary file: %s\r\n",
@@ -881,7 +994,7 @@ static int savemsg(struct clientdata *cd,
 
     prot_printf(cd->pout, "354 go ahead\r\n");
 
-    if (m->return_path) { /* add the return path */
+    if (m->return_path && func->addretpath) { /* add the return path */
 	char *rpath = m->return_path;
 	const char *hostname = 0;
 
@@ -923,14 +1036,18 @@ static int savemsg(struct clientdata *cd,
     fprintf(f, "; %s\r\n", datestr);
 
     /* add any requested headers */
-    if (addheaders) {
-	fputs(addheaders, f);
+    if (func->addheaders) {
+	fputs(func->addheaders, f);
     }
 
     /* fill the cache */
     r = fill_cache(cd->pin, f, m);
     if (r) {
 	fclose(f);
+	if (func->removespool) {
+	    /* remove the spool'd message */
+	    func->removespool(m);
+	}
 	while (nrcpts--) {
 	    send_lmtp_error(cd->pout, r);
 	}
@@ -969,6 +1086,7 @@ static int savemsg(struct clientdata *cd,
 		   error_message(errno));
 	}
 	fclose(f);
+	func->removespool(m);
 	return IMAP_IOERROR;
     }
 
@@ -979,6 +1097,7 @@ static int savemsg(struct clientdata *cd,
 			error_message(errno));
 	}
 	fclose(f);
+	func->removespool(m);
 	return IMAP_IOERROR;
     }
     m->size = sbuf.st_size;
@@ -1089,6 +1208,8 @@ void lmtpmode(struct lmtp_func *func,
 	      int fd)
 {
     message_data_t *msg = NULL;
+    char shutdownfilename[1024];
+    int shutdown_fd = -1;
     int max_msgsize;
     char buf[4096];
     char *p;
@@ -1124,9 +1245,20 @@ void lmtpmode(struct lmtp_func *func,
 #endif
     cd.starttls_done = 0;
 
+    sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
     max_msgsize = config_getint("maxmessagesize", INT_MAX);
 
     msg_new(&msg);
+
+    /* don't leak old connections */
+    if(saslprops.iplocalport) {
+	free(saslprops.iplocalport);
+	saslprops.iplocalport = NULL;
+    }
+    if(saslprops.ipremoteport) {
+	free(saslprops.ipremoteport);
+	saslprops.ipremoteport = NULL;
+    }
 
     /* determine who we're talking to */
     salen = sizeof(remoteaddr);
@@ -1208,6 +1340,7 @@ void lmtpmode(struct lmtp_func *func,
     prot_printf(pout, "220 %s LMTP Cyrus %s ready\r\n", 
 		config_servername,
 		CYRUS_VERSION);
+
     for (;;) {
     nextcmd:
       signals_poll();
@@ -1224,6 +1357,21 @@ void lmtpmode(struct lmtp_func *func,
       p = buf + strlen(buf) - 1;
       if (p >= buf && *p == '\n') *p-- = '\0';
       if (p >= buf && *p == '\r') *p-- = '\0';
+
+      /* Only allow LHLO/NOOP/QUIT when there is a shutdown file */
+      if (!strchr("LlNnQq", buf[0]) &&
+	  (shutdown_fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
+	  struct protstream *shutdown_in = prot_new(shutdown_fd, 0);
+
+	  prot_fgets(buf, sizeof(buf), shutdown_in);
+	  if ((p = strchr(buf, '\r'))!=NULL) *p = 0;
+	  if ((p = strchr(buf, '\n'))!=NULL) *p = 0;
+
+	  prot_printf(pout, "421 4.3.2 %s\r\n", buf);
+	  prot_flush(pout);
+
+	  func->shutdown(0);
+      }
 
       switch (buf[0]) {
       case 'a':
@@ -1267,7 +1415,7 @@ void lmtpmode(struct lmtp_func *func,
 		  inlen = 0;
 	      } else {
 		  unsigned len = strlen(p);
-		  in = xmalloc(len);
+		  in = xmalloc(len+1);
 		  r = sasl_decode64(p, len, in, len, &inlen);
 		  if (r != SASL_OK) {
 		      prot_printf(pout,
@@ -1316,7 +1464,7 @@ void lmtpmode(struct lmtp_func *func,
 		  }
 		  
 		  len = strlen(buf);
-		  in = xmalloc(len);
+		  in = xmalloc(len+1);
 		  r = sasl_decode64(buf, len, in, len, &inlen);
 		  if (r != SASL_OK) {
 		      prot_printf(pout,
@@ -1360,6 +1508,9 @@ void lmtpmode(struct lmtp_func *func,
 		  goto nextcmd;
 	      }
 
+	      /* Create telemetry log */
+	      deliver_logfd = telemetry_log(user, pin, pout);
+
 	      /* authenticated successfully! */
 	      snmp_increment_args(AUTHENTICATION_YES,1,
 				  VARIABLE_AUTH, hash_simple(mech), 
@@ -1389,8 +1540,10 @@ void lmtpmode(struct lmtp_func *func,
 		    continue;
 		}
 		/* copy message from input to msg structure */
-		r = savemsg(&cd, func->addheaders, msg);
-		if (r) continue;
+		r = savemsg(&cd, func, msg);
+		if (r) {
+		    goto rset;
+		}
 
 		if (msg->size > max_msgsize) {
 		    prot_printf(pout, 
@@ -1452,8 +1605,11 @@ void lmtpmode(struct lmtp_func *func,
       case 'm':
       case 'M':
 	    if (!authenticated) {
-		prot_printf(pout, 
-			    "530 Authentication required\r\n");
+		if (config_getswitch("soft_noauth", 1)) {
+		    prot_printf(pout, "430 Authentication required\r\n");
+		} else {
+		    prot_printf(pout, "530 Authentication required\r\n");
+		}
 		continue;
 	    }
 
@@ -1922,6 +2078,7 @@ static int getlastresp(char *buf, int len, int *code, struct protstream *pin)
 static int do_auth(struct lmtp_conn *conn)
 {
     int r;
+    const int AUTH_ERROR = 420, AUTH_OK = 250;
     sasl_security_properties_t *secprops = NULL;
     struct sockaddr_in saddr_l;
     struct sockaddr_in saddr_r;
@@ -1937,43 +2094,43 @@ static int do_auth(struct lmtp_conn *conn)
     secprops = mysasl_secprops(0);
     r = sasl_setprop(conn->saslconn, SASL_SEC_PROPS, secprops);
     if (r != SASL_OK) {
-	return r;
+	return AUTH_ERROR;
     }
 
     /* set the IP addresses */
     addrsize=sizeof(struct sockaddr_in);
     if (getpeername(conn->sock, (struct sockaddr *)&saddr_r, &addrsize) != 0)
-	return SASL_FAIL;
+	return AUTH_ERROR;
     addrsize=sizeof(struct sockaddr_in);
     if (getsockname(conn->sock, (struct sockaddr *)&saddr_l,&addrsize)!=0)
-	return SASL_FAIL;
+	return AUTH_ERROR;
 
     if (iptostring((struct sockaddr *)&saddr_r,
 		   sizeof(struct sockaddr_in), remoteip, 60) != 0)
-	return SASL_FAIL;
+	return AUTH_ERROR;
     if (iptostring((struct sockaddr *)&saddr_l,
 		   sizeof(struct sockaddr_in), localip, 60) != 0)
-	return SASL_FAIL;
+	return AUTH_ERROR;
 
     r = sasl_setprop(conn->saslconn, SASL_IPLOCALPORT, localip);
-    if (r != SASL_OK) return r;
+    if (r != SASL_OK) return AUTH_ERROR;
     r = sasl_setprop(conn->saslconn, SASL_IPREMOTEPORT, remoteip);
-    if (r != SASL_OK) return r;
+    if (r != SASL_OK) return AUTH_ERROR;
 
     /* we now do the actual SASL exchange */
     r = sasl_client_start(conn->saslconn, 
 			  conn->mechs,
 			  NULL, &out, &outlen, &mechusing);
-    if ((r != SASL_OK) && (r != SASL_CONTINUE)) {
-	return r;
-    }
-    if (out == NULL || outlen == 0) {
+    if ((r != SASL_OK) && (r != SASL_CONTINUE))
+	return AUTH_ERROR;
+
+    if (out == NULL) {
 	prot_printf(conn->pout, "AUTH %s\r\n", mechusing);
     } else {
 	/* send initial challenge */
 	r = sasl_encode64(out, outlen, buf, sizeof(buf), &b64len);
 	if (r != SASL_OK)
-	    return r;
+	    return AUTH_ERROR;
 	prot_printf(conn->pout, "AUTH %s %s\r\n", mechusing, buf);
     }
 
@@ -1986,12 +2143,12 @@ static int do_auth(struct lmtp_conn *conn)
 	    free(in);
 	}
 	if (r != SASL_OK && r != SASL_CONTINUE) {
-	    return r;
+	    return AUTH_ERROR;
 	}
 
 	r = sasl_encode64(out, outlen, buf, sizeof(buf), &b64len);
 	if (r != SASL_OK) {
-	    return r;
+	    return AUTH_ERROR;
 	}
 
 	prot_write(conn->pout, buf, b64len);
@@ -2003,10 +2160,13 @@ static int do_auth(struct lmtp_conn *conn)
     if (r == SASL_OK) {
 	prot_setsasl(conn->pin, conn->saslconn);
 	prot_setsasl(conn->pout, conn->saslconn);
-    }
 
-    /* success */
-    return 250;
+	/* success */
+	return AUTH_OK;
+    } else {
+	/* don't bounce the message just because *we* can't authenticate */
+	return AUTH_ERROR;
+    }
 }
 
 /* establish connection, LHLO, and AUTH if possible */
@@ -2243,9 +2403,16 @@ int lmtp_runtxn(struct lmtp_conn *conn, struct lmtp_txn *txn)
     }
 
     /* mail from */
-    prot_printf(conn->pout, "MAIL FROM:<%s>", txn->from ? txn->from : "<>");
+    if (!txn->from) {
+	prot_printf(conn->pout, "MAIL FROM:<>");
+    } else if (txn->from[0] == '<') {
+	prot_printf(conn->pout, "MAIL FROM:%s", txn->from);
+    } else {
+	prot_printf(conn->pout, "MAIL FROM:<%s>", txn->from);
+    }
     if (conn->capability & CAPA_AUTH) {
-	prot_printf(conn->pout, " AUTH=%s", txn->auth ? txn->auth : "<>");
+	prot_printf(conn->pout, " AUTH=%s", 
+		    txn->auth && txn->auth[0] ? txn->auth : "<>");
     }
     prot_printf(conn->pout, "\r\n");
     r = getlastresp(buf, sizeof(buf)-1, &code, conn->pin);
@@ -2391,12 +2558,12 @@ int lmtp_disconnect(struct lmtp_conn *conn)
 /* Reset the given sasl_conn_t to a sane state */
 static int reset_saslconn(sasl_conn_t **conn) 
 {
-    int ret, secflags;
+    int ret, secflags, plaintext_result;
     sasl_security_properties_t *secprops = NULL;
 
     sasl_dispose(conn);
     /* do initialization typical of service_main */
-    ret = sasl_server_new("imap", config_servername,
+    ret = sasl_server_new("lmtp", config_servername,
                          NULL, NULL, NULL,
                          NULL, 0, conn);
     if(ret != SASL_OK) return ret;
@@ -2412,7 +2579,9 @@ static int reset_saslconn(sasl_conn_t **conn)
     if(ret != SASL_OK) return ret;
     
     secflags = SASL_SEC_NOANONYMOUS;
-    if (!config_getswitch("allowplaintext", 1)) {
+
+    plaintext_result = config_getswitch("allowplaintext", 1);
+    if (!config_getswitch("lmtp_allowplaintext", plaintext_result)) {
 	secflags |= SASL_SEC_NOPLAINTEXT;
     }
     secprops = mysasl_secprops(secflags);

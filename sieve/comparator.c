@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.2 2002/05/29 22:20:25 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.3 2002/06/06 21:09:18 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -36,6 +36,10 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "comparator.h"
 #include "tree.h"
 #include "sieve.h"
+#include "bytecode.h"
+
+
+/*!!! uses B_CONTAINS not CONTAINS, etc, only works with bytecode*/
 
 /* --- relational comparators --- */
 
@@ -290,61 +294,68 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
     *comprock = NULL;
     if (!strcmp(comp, "i;octet")) {
  	switch (mode) {
-	case IS:
+	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &octet_cmp;
 	    break;
-	case CONTAINS:
+	case B_CONTAINS:
 	    ret = &octet_contains;
 	    break;
-	case MATCHES:
+	case B_MATCHES:
 	    ret = &octet_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
+	case B_REGEX:
 	    ret = &octet_regex;
 	    break;
 #endif
-	case VALUE:
+#ifdef ENABLE_VALUE
+	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &octet_cmp;
 	    break;
+#endif
 	}
     }else if (!strcmp(comp, "i;ascii-casemap")) {
-	switch (mode) {
-	case IS:
+     	switch (mode) {
+	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &strcasecmp;
 	    break;
-	case CONTAINS:
+	case B_CONTAINS:
 	    ret = &ascii_casemap_contains;
 	    break;
-	case MATCHES:
+	case B_MATCHES:
 	    ret = &ascii_casemap_matches;
 	    break;
 #ifdef ENABLE_REGEX
-	case REGEX:
+	case B_REGEX:
 	    /* the ascii-casemap destinction is made during
 	       the compilation of the regex in verify_regex() */
 	    ret = &octet_regex;
 	    break;
 #endif
-	case VALUE:
+#ifdef ENABLE_VALUE
+
+	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &strcasecmp;
 	    break;
+#endif
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {
-	case IS:
+	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &ascii_numeric_cmp;
 	    break;
-	case COUNT:
-	case VALUE:
+#ifdef ENABLE_VALUE
+	case B_COUNT:
+	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &ascii_numeric_cmp;
 	    break;
+#endif
 	}
     }
     return ret;

@@ -39,6 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
+.\" $Id: pop3test.1,v 1.2.2.1 2002/06/06 21:08:46 jsmith2 Exp $
 .SH NAME
 pop3test \- interactive POP3 test program
 .SH SYNOPSIS
@@ -82,13 +83,20 @@ pop3test \- interactive POP3 test program
 .I file
 ]
 [
-.B \-c
+.B \-n
+.I num
 ]
 [
-.B \-v
+.B \-s
+]
+[
+.B \-c
 ]
 .br
-         \fIhostname\fR
+         [
+.B \-v
+]
+\fIhostname\fR
 .SH DESCRIPTION
 .I pop3test
 is a utility that allows you to authenticate to a POP3 server
@@ -107,7 +115,7 @@ Specify \fB""\fR to negotiate a TLS encryption layer but not use TLS
 authentication.
 .TP
 .BI \-p " port"
-Port to connect to. If left off this defaults to \fBimap\fR as defined in
+Port to connect to. If left off this defaults to \fBpop3\fR as defined in
 /etc/services. 
 .TP
 .BI -m " mechanism"
@@ -139,10 +147,18 @@ Specify the \fIrealm\fR to use. Certain authentication mechanisms
 .BI -f " file"
 Pipe \fIfile\fR into connection after authentication.
 .TP
+.BI -n " num"
+Number of authentication attempts; default = 1.  The client will
+attempt to do SSL/TLS session reuse and/or fast reauth
+(e.g. DIGEST-MD5), if possible.
+.TP
+.B -s
+Enable POP3 over SSL (pop3s).
+.TP
 .B -c
-Disable challenge prompt callbacks.  This will cause the OTP mechanism
-to ask for the secret pass-phrase (library generates the correct
-response) instead of the one-time password.
+Enable challenge prompt callbacks.  This will cause the OTP mechanism
+to ask for the the one-time password instead of the secret pass-phrase
+(library generates the correct response).
 .TP
 .B -v
 Verbose. Print out more information than usual.

@@ -37,6 +37,8 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
+# $Id: managesieve.pm,v 1.5.12.1 2002/06/06 21:09:12 jsmith2 Exp $
+#
 package Cyrus::SIEVE::managesieve;
 
 use strict;
@@ -55,11 +57,13 @@ require DynaLoader;
   sieve_get_error
   sieve_get_global_error
   sieve_put_file
+  sieve_put_file_withdest
   sieve_put
   sieve_delete
   sieve_list
   sieve_activate
   sieve_get
+  sieve_logout
 );
 $VERSION = '0.01';
 

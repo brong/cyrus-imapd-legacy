@@ -1,6 +1,7 @@
 dnl libpcap.m4--PCAP libraries and includes
 dnl Derrick Brashear
 dnl from KTH krb and Arla
+dnl $Id: libpcap.m4,v 1.5.6.1 2002/06/06 21:07:36 jsmith2 Exp $
 
 AC_DEFUN(CMU_PCAP_INC_WHERE1, [
 ac_cv_found_pcap_inc=no

@@ -40,6 +40,8 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+# $Id: Makefile.in,v 1.49.2.1 2002/06/06 21:08:32 jsmith2 Exp $
+
 # Authorization namespace.
 AUTH=auth_@WITH_AUTH@.o
 
@@ -76,14 +78,15 @@ HDRS = $(srcdir)/acl.h $(srcdir)/assert.h $(srcdir)/auth.h \
 	$(srcdir)/retry.h $(srcdir)/sysexits.h \
 	$(srcdir)/lsort.h $(srcdir)/stristr.h $(srcdir)/hash.h \
 	$(srcdir)/util.h $(srcdir)/xmalloc.h $(srcdir)/imapurl.h \
-	$(srcdir)/cyrusdb.h $(srcdir)/iptostring.h $(srcdir)/rfc822date.h
+	$(srcdir)/cyrusdb.h $(srcdir)/iptostring.h $(srcdir)/rfc822date.h \
+	$(srcdir)/mpool.h
 
 OBJS = acl.o assert.o bsearch.o charset.o glob.o retry.o util.o \
 	mkgmtime.o prot.o parseaddr.o imclient.o imparse.o xmalloc.o \
-	lsort.o stristr.o hash.o rfc822date.o \
+	lsort.o stristr.o hash.o rfc822date.o mpool.o cyrusdb.o \
 	chartable.o imapurl.o nonblock_@WITH_NONBLOCK@.o lock_@WITH_LOCK@.o \
 	gmtoff_@WITH_GMTOFF@.o map_@WITH_MAP@.o $(ACL) $(AUTH) \
-	@LIBOBJS@ cyrusdb_db3.o cyrusdb_flat.o iptostring.o
+	@LIBOBJS@ cyrusdb_db3.o cyrusdb_flat.o cyrusdb_skiplist.o iptostring.o
 
 all: libcyrus.a
 

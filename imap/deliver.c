@@ -41,6 +41,8 @@
  *
  */
 
+/* $Id: deliver.c,v 1.162.2.1 2002/06/06 21:07:59 jsmith2 Exp $ */
+
 #include <config.h>
 
 #ifdef HAVE_UNISTD_H
@@ -82,6 +84,9 @@ static int logdebug = 0;
 static struct protstream *deliver_out, *deliver_in;
 
 static const char *sockaddr;
+
+/* unused for deliver.c, but needed to make lmtpengine.c happy */
+int deliver_logfd = -1;
 
 /* forward declarations */
 

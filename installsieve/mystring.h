@@ -42,6 +42,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: mystring.h,v 1.4.12.1 2002/06/06 21:08:30 jsmith2 Exp $ */
+
 #include "codes.h"
 
 

@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.22.2.1 2002/05/29 22:20:25 jsmith2 Exp $
+ * $Id: message.c,v 1.22.2.2 2002/06/06 21:09:18 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -365,7 +365,7 @@ int do_unmark(action_list_t *a)
  * incompatible with: none
  */
 int do_notify(notify_list_t *a, char *id,
-	      char *method, stringlist_t **options,
+	      char *method, char **options,
 	      const char *priority, char *message)
 {
     notify_list_t *b = NULL;

@@ -336,7 +336,13 @@ void dump2(bytecode_t *d, int len)
 	    
 	case B_DENOTIFY:/*14*/
 	    printf("%d: DENOTIFY\n",i);
-	    i++;
+	    i++; 
+	    printf("Comparison type %d ({%d}%s) ",d[i], d[i+1].len,(char*)&(d[i+2].str));
+      	    i+=2+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
+
+	    printf("PRIORITY({%d}%s)\n",d[i].len,(char*)&(d[i+1].str));
+      	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+
 	    break;
 	    
 	case B_NOTIFY: /*13*/

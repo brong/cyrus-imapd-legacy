@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.112 2001/12/01 04:03:16 ken3 Exp $
+ * $Id: pop3d.c,v 1.112.2.1 2002/06/06 21:08:14 jsmith2 Exp $
  */
 #include <config.h>
 
@@ -114,7 +114,8 @@ struct mailbox *popd_mailbox = 0;
 struct sockaddr_in popd_localaddr, popd_remoteaddr;
 int popd_haveaddr = 0;
 char popd_clienthost[250] = "[local]";
-struct protstream *popd_out, *popd_in;
+struct protstream *popd_out = NULL;
+struct protstream *popd_in = NULL;
 unsigned popd_exists = 0;
 unsigned popd_highest;
 unsigned popd_login_time;
@@ -169,8 +170,72 @@ static struct
     char *authid;
 } saslprops = {NULL,NULL,0,NULL};
 
+
+/* should we allow users to proxy?  return SASL_OK if yes,
+   SASL_BADAUTH otherwise */
+static int mysasl_authproc(sasl_conn_t *conn,
+			   void *context __attribute__((unused)),
+			   const char *requested_user, unsigned rlen,
+			   const char *auth_identity, unsigned alen,
+			   const char *def_realm __attribute__((unused)),
+			   unsigned urlen __attribute__((unused)),
+			   struct propctx *propctx __attribute__((unused)))
+{
+    const char *val;
+    struct auth_state *authstate;
+    int userisadmin = 0;
+    char *realm;
+
+    /* check if remote realm */
+    if ((realm = strchr(auth_identity, '@'))!=NULL) {
+	realm++;
+	val = config_getstring("loginrealms", "");
+	while (*val) {
+	    if (!strncasecmp(val, realm, strlen(realm)) &&
+		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
+		break;
+	    }
+	    /* not this realm, try next one */
+	    while (*val && !isspace((int) *val)) val++;
+	    while (*val && isspace((int) *val)) val++;
+	}
+	if (!*val) {
+	    sasl_seterror(conn, 0, "cross-realm login %s denied",
+			  auth_identity);
+	    return SASL_BADAUTH;
+	}
+    }
+
+    authstate = auth_newstate(auth_identity, NULL);
+
+    /* ok, is auth_identity an admin? */
+    userisadmin = authisa(authstate, "imap", "admins");
+
+    if (alen != rlen || strncmp(auth_identity, requested_user, alen)) {
+	/* we want to authenticate as a different user; we'll allow this
+	   if we're an admin or if we've allowed ACL proxy logins */
+	if (userisadmin ||
+	    authisa(authstate, "imap", "proxyservers")) {
+
+	    /* proxy ok! */
+	    auth_freestate(authstate);
+	    return SASL_OK;
+	} else {
+	    sasl_seterror(conn, 0, "user %s is not allowed to proxy",
+			  auth_identity);
+
+	    auth_freestate(authstate);
+
+	    return SASL_BADAUTH;
+	}
+    }
+
+    return SASL_OK;
+}
+
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
+    { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -183,9 +248,20 @@ static void popd_reset(void)
 	popd_mailbox = 0;
     }
 
-    prot_flush(popd_out);
-    if (popd_in) prot_free(popd_in);
-    if (popd_out) prot_free(popd_out);
+    if (popd_in) {
+	prot_NONBLOCK(popd_in);
+	prot_fill(popd_in);
+	
+	prot_free(popd_in);
+    }
+
+    if (popd_out) {
+	prot_flush(popd_out);
+	prot_free(popd_out);
+    }
+    
+    popd_in = popd_out = NULL;
+
     close(0);
     close(1);
     close(2);
@@ -229,7 +305,9 @@ static void popd_reset(void)
  * run once when process is forked;
  * MUST NOT exit directly; must return with non-zero error code
  */
-int service_init(int argc, char **argv, char **envp)
+int service_init(int argc __attribute__((unused)),
+		 char **argv __attribute__((unused)),
+		 char **envp __attribute__((unused)))
 {
     int r;
     int opt;
@@ -391,8 +469,7 @@ int service_main(int argc, char **argv, char **envp)
 /* called if 'service_init()' was called but not 'service_main()' */
 void service_abort(int error)
 {
-    mboxlist_close();
-    mboxlist_done();
+    shut_down(error);
 }
 
 void usage(void)
@@ -411,10 +488,24 @@ void shut_down(int code)
     if (popd_mailbox) {
 	mailbox_close(popd_mailbox);
     }
+    mboxlist_close();
+    mboxlist_done();
+
+    if (popd_in) {
+	prot_NONBLOCK(popd_in);
+	prot_fill(popd_in);
+	prot_free(popd_in);
+    }
+
+    if (popd_out) {
+	prot_flush(popd_out);
+	prot_free(popd_out);
+    }
+
 #ifdef HAVE_SSL
     tls_shutdown_serverengine();
 #endif
-    prot_flush(popd_out);
+
     exit(code);
 }
 
@@ -428,8 +519,10 @@ void fatal(const char* s, int code)
 	exit(recurse_code);
     }
     recurse_code = code;
-    prot_printf(popd_out, "-ERR [SYS/PERM] Fatal error: %s\r\n", s);
-    prot_flush(popd_out);
+    if (popd_out) {
+	prot_printf(popd_out, "-ERR [SYS/PERM] Fatal error: %s\r\n", s);
+	prot_flush(popd_out);
+    }
     shut_down(code);
 }
 
@@ -723,16 +816,29 @@ static void cmdloop(void)
 			 popd_msg[msg].deleted) {
 		    prot_printf(popd_out, "-ERR No such message\r\n");
 		}
+		else if (mboxstruct.pop3_new_uidl) {
+			    prot_printf(popd_out, "+OK %u %lu.%u\r\n", msg, 
+					mboxstruct.uidvalidity,
+					popd_msg[msg].uid);
+		}
 		else {
-		    prot_printf(popd_out, "+OK %u %u\r\n", msg, popd_msg[msg].uid);
+		    /* old uidl format */
+		    prot_printf(popd_out, "+OK %u %u\r\n", 
+				msg, popd_msg[msg].uid);
 		}
 	    }
 	    else {
 		prot_printf(popd_out, "+OK unique-id listing follows\r\n");
 		for (msg = 1; msg <= popd_exists; msg++) {
 		    if (!popd_msg[msg].deleted) {
-			prot_printf(popd_out, "%u %u\r\n", msg, 
-				    popd_msg[msg].uid);
+			if (mboxstruct.pop3_new_uidl) {
+			    prot_printf(popd_out, "%u %lu.%u\r\n", msg, 
+					mboxstruct.uidvalidity,
+					popd_msg[msg].uid);
+			} else {
+			    prot_printf(popd_out, "%u %u\r\n", msg, 
+					popd_msg[msg].uid);
+			}
 		    }
 		}
 		prot_printf(popd_out, ".\r\n");
@@ -1031,8 +1137,10 @@ char *pass;
 	return;
     }
     else {
-	syslog(LOG_NOTICE, "login: %s %s plaintext %s",
-	       popd_clienthost, popd_userid, reply ? reply : "");
+	syslog(LOG_NOTICE, "login: %s %s plaintext%s %s", popd_clienthost,
+	       popd_userid, popd_starttls_done ? "+TLS" : "", 
+	       reply ? reply : "");
+
 	if ((plaintextloginpause = config_getint("plaintextloginpause", 0))!=0) {
 	    sleep(plaintextloginpause);
 	}

@@ -1,5 +1,5 @@
 /* mailbox.h -- Mailbox format definitions
- $Id: mailbox.h,v 1.64 2001/10/16 16:58:59 ken3 Exp $
+ $Id: mailbox.h,v 1.64.2.1 2002/06/06 21:08:09 jsmith2 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -71,7 +71,7 @@ typedef unsigned short bit32;
 #define MAILBOX_FORMAT_NORMAL	0
 #define MAILBOX_FORMAT_NETNEWS	1
 
-#define MAILBOX_MINOR_VERSION	3
+#define MAILBOX_MINOR_VERSION	4
 
 #define FNAME_HEADER "/cyrus.header"
 #define FNAME_INDEX "/cyrus.index"
@@ -112,9 +112,9 @@ struct mailbox {
     int seen_lock_count;
     int pop_lock_count;
 
-    long header_ino;
+    unsigned long header_ino;
     time_t index_mtime;
-    long index_ino;
+    unsigned long index_ino;
     off_t index_size;
 
     /* Information in mailbox list */
@@ -145,6 +145,11 @@ struct mailbox {
     unsigned long answered;
     unsigned long flagged;
     int dirty;
+
+    int pop3_new_uidl;
+
+    /* future expansion -- won't need expand the header */
+    unsigned long spares[4];
 
     struct quota quota;
 };
@@ -177,6 +182,11 @@ struct index_record {
 #define OFFSET_DELETED 44	/* added for ACAP */
 #define OFFSET_ANSWERED 48
 #define OFFSET_FLAGGED 52
+#define OFFSET_POP3_NEW_UIDL 56	/* added for Outlook stupidity */
+#define OFFSET_SPARE0 60
+#define OFFSET_SPARE1 64
+#define OFFSET_SPARE2 68
+#define OFFSET_SPARE3 72
 
 /* Offsets of index_record fields in index file */
 #define OFFSET_UID 0
@@ -190,7 +200,7 @@ struct index_record {
 #define OFFSET_SYSTEM_FLAGS 32
 #define OFFSET_USER_FLAGS 36
 
-#define INDEX_HEADER_SIZE (OFFSET_FLAGGED+4)
+#define INDEX_HEADER_SIZE (OFFSET_SPARE3+4)
 #define INDEX_RECORD_SIZE (OFFSET_USER_FLAGS+MAX_USER_FLAGS/8)
 
 #define FLAG_ANSWERED (1<<0)
@@ -234,6 +244,12 @@ extern int mailbox_open_header_path(const char *name, const char *path,
 				    struct auth_state *auth_state,
 				    struct mailbox *mailbox,
 				    int suppresslog);
+extern int mailbox_open_locked(const char *mbname,
+			       const char *mbpath,
+			       const char *mbacl,
+			       struct auth_state *auth_state,
+			       struct mailbox *mb,
+			       int suppresslog);
 extern int mailbox_open_index(struct mailbox *mailbox);
 extern void mailbox_close(struct mailbox *mailbox);
 
@@ -284,12 +300,15 @@ extern int mailbox_create(const char *name, char *path,
 			  const char *acl, const char *uniqueid, int format,
 			  struct mailbox *mailboxp);
 extern int mailbox_delete(struct mailbox *mailbox, int delete_quota_root);
-extern int mailbox_rename(const char *oldname, const char *oldpath, 
-			  const char *oldacl, 
-			  const char *newname, char *newpath, 
-			  int isinbox,
-			  bit32 *olduidvalidityp, bit32 *newuidvalidtyp,
-			  struct mailbox *mailboxp);
+
+extern int mailbox_rename_copy(struct mailbox *oldmailbox, 
+			       const char *newname, char *newpath,
+			       bit32 *olduidvalidityp, bit32 *newuidvalidityp,
+			       struct mailbox *mailboxp);
+extern int mailbox_rename_finish(struct mailbox *oldmailbox,
+				 struct mailbox *newmailbox,
+				 int isinbox);
+
 extern int mailbox_sync(const char *oldname, const char *oldpath, 
 			const char *oldacl, 
 			const char *newname, char *newpath, 

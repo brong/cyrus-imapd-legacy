@@ -42,6 +42,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: request.h,v 1.11.12.1 2002/06/06 21:08:30 jsmith2 Exp $ */
+
 #ifndef _REQUEST_H_
 #define _REQUEST_H_
 

@@ -1,5 +1,5 @@
 /* retry.h -- Keep retrying write system calls
- $Id: retry.h,v 1.5 2001/10/23 20:21:03 leg Exp $
+ $Id: retry.h,v 1.5.2.1 2002/06/06 21:08:38 jsmith2 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -54,13 +54,14 @@
 
 #include <sys/uio.h>
 
-extern int retry_write P((int fd, const char *buf, unsigned nbyte));
+extern int retry_read P((int fd, void *buf, size_t nbyte));
+extern int retry_write P((int fd, const char *buf, size_t nbyte));
 extern int retry_writev P((int fd, struct iovec *iov, int iovcnt));
 
 /* add a buffer 's' of length 'len' to iovec 'iov' */
 #define WRITEV_ADD_TO_IOVEC(iov, num_iov, s, len) \
-    do { iov[num_iov].iov_base = s; \
-         iov[num_iov++].iov_len = len; } while (0)
+    do { (iov)[(num_iov)].iov_base = (s); \
+         (iov)[(num_iov)++].iov_len = (len); } while (0)
 
 /* add a string 's' to iovec 'iov' */
 #define WRITEV_ADDSTR_TO_IOVEC(iov, num_iov, s) WRITEV_ADD_TO_IOVEC(iov, num_iov, s, strlen(s))

@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: reconstruct.c,v 1.64 2001/11/12 16:55:02 ken3 Exp $ */
+/* $Id: reconstruct.c,v 1.64.2.1 2002/06/06 21:08:18 jsmith2 Exp $ */
 
 #include <config.h>
 
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
 
     /* Ensure we're up-to-date on the index file format */
-    assert(INDEX_HEADER_SIZE == (OFFSET_FLAGGED+4));
+    assert(INDEX_HEADER_SIZE == (OFFSET_SPARE3+4));
     assert(INDEX_RECORD_SIZE == (OFFSET_USER_FLAGS+MAX_USER_FLAGS/8));
 
     while ((opt = getopt(argc, argv, "C:rmf")) != EOF) {
@@ -214,7 +214,7 @@ int main(int argc, char **argv)
 	head.next = p->next;
 
 	/* create p and reconstruct it */
-	r = mboxlist_createmailbox(p->name, 0, NULL, 1, "cyrus", NULL);
+	r = mboxlist_createmailbox(p->name, 0, NULL, 1, "cyrus", NULL, 0, 0);
 	if (!r) {
 	    do_reconstruct(p->name, 0, 0, &head);
 	} else {
@@ -252,7 +252,10 @@ int compare_uid(const void *a, const void *b)
  * mboxlist_findall() callback function to reconstruct a mailbox
  */
 int
-do_reconstruct(char *name, int matchlen, int maycreate, void *rock)
+do_reconstruct(char *name,
+	       int matchlen __attribute__((unused)),
+	       int maycreate __attribute__((unused)),
+	       void *rock)
 {
     int r;
     char buf[MAX_MAILBOX_PATH];
@@ -353,6 +356,9 @@ int reconstruct(char *name, struct discovered *found)
 	mailbox.last_uid = 0;
 	mailbox.last_appenddate = 0;
 	mailbox.uidvalidity = time(0);
+	/* If we can't read the index, assume new UIDL so that stupid clients
+	   will retrieve all of the messages in the mailbox. */
+	mailbox.pop3_new_uidl = 1;
     }
     else {
 	(void) mailbox_lock_index(&mailbox);
@@ -466,6 +472,9 @@ int reconstruct(char *name, struct discovered *found)
 	else {
 	    /* Message file write time is good estimate of internaldate */
 	    message_index.internaldate = sbuf.st_mtime;
+	    /* If we are recovering a message, assume new UIDL
+	       so that stupid clients will retrieve this message */
+	    mailbox.pop3_new_uidl = 1;
 	}
 	message_index.last_updated = time(0);
 	
@@ -532,6 +541,7 @@ int reconstruct(char *name, struct discovered *found)
     *((bit32 *)(buf+OFFSET_DELETED)) = htonl(new_deleted);
     *((bit32 *)(buf+OFFSET_ANSWERED)) = htonl(new_answered);
     *((bit32 *)(buf+OFFSET_FLAGGED)) = htonl(new_flagged);
+    *((bit32 *)(buf+OFFSET_POP3_NEW_UIDL)) = htonl(mailbox.pop3_new_uidl);
 
     n = fwrite(buf, 1, INDEX_HEADER_SIZE, newindex);
     fflush(newindex);

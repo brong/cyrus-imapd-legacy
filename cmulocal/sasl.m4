@@ -1,6 +1,7 @@
 dnl sasl.m4--sasl libraries and includes
 dnl Derrick Brashear
 dnl from KTH sasl and Arla
+dnl $Id: sasl.m4,v 1.19.2.1 2002/06/06 21:07:38 jsmith2 Exp $
 
 AC_DEFUN(CMU_SASL_INC_WHERE1, [
 AC_REQUIRE([AC_PROG_CC_GNU])

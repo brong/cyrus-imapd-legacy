@@ -38,6 +38,9 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  */
+
+/* $Id: isieve.h,v 1.4.2.1 2002/06/06 21:09:10 jsmith2 Exp $ */
+
 #ifndef ISIEVE_H_
 #define ISIEVE_H_
 
@@ -47,7 +50,11 @@
 typedef struct iseive_s isieve_t;
 
 int init_net(char *serverFQDN, int port, isieve_t **obj);
+void sieve_free_net(isieve_t *obj);
 
+/* The callbacks that are passed to init_sasl need to persist until
+ * after sieve_free_net is called on the object, so that referrals can
+ * continue to work */
 int init_sasl(isieve_t *obj,
 	      int ssf,
 	      sasl_callback_t *callbacks);
@@ -60,9 +67,11 @@ typedef enum {
     STAT_OK = 2
 } imt_stat;
 
-int auth_sasl(char *mechlist, isieve_t *obj, char **errstr);
+int auth_sasl(char *mechlist, isieve_t *obj, const char **mechusing, char **errstr);
 
-int isieve_put_file(isieve_t *obj, char *filename, char **errstr);
+int isieve_logout(isieve_t **obj);
+int isieve_put_file(isieve_t *obj, char *filename, char *destname,
+		    char **errstr);
 int isieve_put(isieve_t *obj, char *name, char *data, int len, char **errstr);
 int isieve_delete(isieve_t *obj, char *name, char **errstr);
 typedef void *isieve_listcb_t(char *name, int isactive, void *rock);

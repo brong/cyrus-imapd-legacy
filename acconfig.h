@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.27 2001/12/05 15:23:22 ken3 Exp $ */
+/* $Id: acconfig.h,v 1.27.2.1 2002/06/06 21:07:25 jsmith2 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -39,6 +39,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#ifndef _CYRUS_IMAPD_CONFIG_H_
+#define _CYRUS_IMAPD_CONFIG_H_
 
 @TOP@
 
@@ -75,8 +77,14 @@
 /* do we support LISTEXT? */
 #undef ENABLE_LISTEXT
 
+/* do we support ANNOTATEMORE? */
+#undef ENABLE_ANNOTATEMORE
+
 /* do we support XNETSCAPE */
 #undef ENABLE_X_NETSCAPE_HACK
+
+/* define if your compile has __attribute__ */
+#undef HAVE___ATTRIBUTE__
 
 /* are we using the old sieve service name (imap) */
 #undef OLD_SIEVE_SERVICE_NAME
@@ -98,6 +106,9 @@
 
 /* alternative to /dev/urandom? */
 #undef EGD_SOCKET
+
+/* do we have zephyr? */
+#undef HAVE_ZEPHYR
 
 /* where should we put state information? */
 #undef STATEDIR
@@ -129,9 +140,39 @@
 /* do we have rlim_t? */
 #undef HAVE_RLIM_T
 
+/* do we have fdatasync */
+#undef HAVE_FDATASYNC
+
+/* This allows us to work even when we don't have an fdatasync */
+#ifndef HAVE_FDATASYNC
+#define fdatasync(fd) fsync(fd)
+#endif
+
+/* A similar setup for not having O_DSYNC */
+#include <fcntl.h>
+
+#ifndef O_DSYNC
+#  ifdef O_SYNC
+#    define O_DSYNC     O_SYNC          /* POSIX */
+#  else
+#    define O_DSYNC     O_FSYNC         /* BSD */
+#  endif
+#endif
+
+/* Database Backends that are configurable */
+#undef CONFIG_DB_DUPLICATE
+#undef CONFIG_DB_MBOX
+#undef CONFIG_DB_SEEN
+#undef CONFIG_DB_SUBS
+#undef CONFIG_DB_TLS
+
 @BOTTOM@
 
-#ifndef __GNUC__
+/* where are our binaries? */
+#define SERVICE_PATH (CYRUS_PATH "/bin")
+
+#ifndef HAVE___ATTRIBUTE__
+/* Can't use attributes... */
 #define __attribute__(foo)
 #endif
 
@@ -154,6 +195,7 @@ typedef int rlim_t;
 
 /* getaddrinfo things */
 #include <netdb.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 
 #ifndef HAVE_GETADDRINFO
@@ -201,3 +243,5 @@ enum {
     /* should we have long LMTP error messages? */
     LMTP_LONG_ERROR_MSGS = 1
 };
+
+#endif /* _CYRUS_IMAPD_CONFIG_H_ */

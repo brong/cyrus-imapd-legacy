@@ -1,5 +1,5 @@
 /* retry.c -- keep trying write system calls
- $Id: retry.c,v 1.12 2000/05/23 20:56:19 robeson Exp $
+ $Id: retry.c,v 1.12.12.1 2002/06/06 21:08:38 jsmith2 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -55,14 +55,42 @@
 extern int errno;
 
 /*
+ * Keep calling the read() system call with 'fd', 'buf', and 'nbyte'
+ * until all the data is read in or an error occurs.
+ */
+int retry_read(int fd, void *buf, size_t nbyte)
+{
+    int n;
+    int nread = 0;
+
+    if (nbyte == 0) return 0;
+
+    for (;;) {
+	n = read(fd, buf, nbyte);
+	if (n == 0) {
+	    /* end of file */
+	    return -1;
+	}
+
+	if (n == -1) {
+	    if (errno == EINTR || errno == EAGAIN) continue;
+	    return -1;
+	}
+
+	nread += n;
+
+	if (((size_t) nread) >= nbyte) return nread;
+
+	buf += n;
+	nbyte -= n;
+    }
+}
+
+/*
  * Keep calling the write() system call with 'fd', 'buf', and 'nbyte'
  * until all the data is written out or an error occurs.
  */
-int 
-retry_write(fd, buf, nbyte)
-int fd;
-const char *buf;
-unsigned nbyte;
+int retry_write(int fd, const char *buf, size_t nbyte)
 {
     int n;
     int written = 0;
@@ -78,7 +106,7 @@ unsigned nbyte;
 
 	written += n;
 
-	if (n >= nbyte) return written;
+	if (((size_t) n) >= nbyte) return written;
 
 	buf += n;
 	nbyte -= n;
@@ -132,7 +160,7 @@ int iovcnt;
 	written += n;
 
 	for (i = 0; i < iovcnt; i++) {
-	    if (iov[i].iov_len > n) {
+	    if (iov[i].iov_len > (size_t) n) {
 		iov[i].iov_base = (char *)iov[i].iov_base + n;
 		iov[i].iov_len -= n;
 		break;

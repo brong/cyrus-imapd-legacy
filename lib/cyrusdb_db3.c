@@ -39,6 +39,8 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: cyrusdb_db3.c,v 1.25.2.2 2002/06/06 21:08:33 jsmith2 Exp $ */
+
 #include <config.h>
 
 #include <db.h>
@@ -47,10 +49,12 @@
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "cyrusdb.h"
 #include "exitcodes.h"
-#include "xmalloc.h"
+
+extern void fatal(const char *, int);
 
 /* --- cut here --- */
 /*
@@ -71,6 +75,14 @@
 
 /* --- cut here --- */
 
+#if DB_VERSION_MAJOR >= 4
+#define txn_checkpoint(xx1,xx2,xx3,xx4) (xx1)->txn_checkpoint(xx1,xx2,xx3,xx4)
+#define txn_id(xx1) (xx1)->id(xx1)
+#define log_archive(xx1,xx2,xx3,xx4) (xx1)->log_archive(xx1,xx2,xx3)
+#elif DB_VERSION_MINOR == 3
+#define log_archive(xx1,xx2,xx3,xx4) log_archive(xx1,xx2,xx3)
+#endif
+
 static int dbinit = 0;
 static DB_ENV *dbenv;
 
@@ -78,7 +90,8 @@ static DB_ENV *dbenv;
 static int commit_txn(struct db *db, struct txn *tid);
 static int abort_txn(struct db *db, struct txn *tid);
 
-static void db_panic(DB_ENV *dbenv, int errno)
+static void db_panic(DB_ENV *dbenv __attribute__((unused)),
+		     int errno __attribute__((unused)))
 {
     syslog(LOG_CRIT, "DBERROR: critical database situation");
     /* but don't bounce mail */
@@ -94,8 +107,21 @@ static int init(const char *dbdir, int myflags)
 {
     int r, do_retry = 1;
     int flags = 0;
+    int maj, min, patch;
+    char *vstr;
+    static char errpfx[10]; /* needs to be static; bdb doesn't copy */
 
     if (dbinit++) return 0;
+
+    vstr = db_version(&maj, &min, &patch);
+    if (maj != DB_VERSION_MAJOR || min != DB_VERSION_MINOR ||
+	DB_VERSION_PATCH > patch) {
+	syslog(LOG_CRIT, "incorrect version of Berkeley db: "
+	       "compiled against %d.%d.%d, linked against %d.%d.%d",
+	       DB_VERSION_MAJOR, DB_VERSION_MINOR, DB_VERSION_PATCH,
+	       maj, min, patch);
+	fatal("wrong db version", EC_SOFTWARE);
+    }
 
     if (myflags & CYRUSDB_RECOVER) {
       flags |= DB_RECOVER | DB_CREATE;
@@ -130,9 +156,11 @@ static int init(const char *dbdir, int myflags)
     }
 
     dbenv->set_errcall(dbenv, db_err);
-    dbenv->set_errpfx(dbenv, "db3");
+    snprintf(errpfx, sizeof(errpfx), "db%d", DB_VERSION_MAJOR);
+    dbenv->set_errpfx(dbenv, errpfx);
 
 #if 0
+    /* XXX should make this value runtime configurable */
     if ((r = dbenv->set_cachesize(dbenv, 0, 64 * 1024, 0)) != 0) {
 	dbenv->err(dbenv, r, "set_cachesize");
 	dbenv->close(dbenv, 0);
@@ -145,7 +173,7 @@ static int init(const char *dbdir, int myflags)
  retry:
     flags |= DB_INIT_LOCK | DB_INIT_MPOOL | 
 	     DB_INIT_LOG | DB_INIT_TXN;
-#if (DB_VERSION_MAJOR > 3) || ((DB_VERSION_MAJOR==3) && (DB_VERSION_MINOR > 0))
+#if (DB_VERSION_MAJOR > 3) || ((DB_VERSION_MAJOR == 3) && (DB_VERSION_MINOR > 0))
     r = dbenv->open(dbenv, dbdir, flags, 0644); 
 #else
     r = dbenv->open(dbenv, dbdir, NULL, flags, 0644); 
@@ -198,14 +226,14 @@ static int done(void)
     return 0;
 }
 
-static int sync(void)
+static int mysync(void)
 {
     int r;
 
     assert(dbinit);
 
     do {
-#if DB_VERSION_MINOR > 0
+#if (DB_VERSION_MAJOR > 3) || ((DB_VERSION_MAJOR == 3) && (DB_VERSION_MINOR > 0))
 	r = txn_checkpoint(dbenv, 0, 0, 0);
 #else
 	r = txn_checkpoint(dbenv, 0, 0);
@@ -220,7 +248,90 @@ static int sync(void)
     return 0;
 }
 
-static int open(const char *fname, struct db **ret)
+static int myarchive(const char **fnames, const char *dirname)
+{
+    int r;
+    char **begin, **list;
+    const char **fname;
+    char dstname[1024], *dp;
+
+    strcpy(dstname, dirname);
+    dp = dstname + strlen(dstname);
+
+    /* Get the list of log files to remove. */
+    r = log_archive(dbenv, &list, DB_ARCH_ABS, NULL);
+    if (r) {
+	syslog(LOG_ERR, "DBERROR: error listing log files: %s",
+	       db_strerror(r));
+	return CYRUSDB_IOERROR;
+    }
+    if (list != NULL) {
+	for (begin = list; *list != NULL; ++list) {
+	    syslog(LOG_DEBUG, "removing log file: %s", *list);
+	    r = unlink(*list);
+	    if (r) {
+		syslog(LOG_ERR, "DBERROR: error removing log file: %s",
+		       *list);
+		return CYRUSDB_IOERROR;
+	    }
+	}
+	free (begin);
+    }
+
+    /* Get the list of database files to archive. */
+    /* XXX  Should we do this, or just use the list given to us? */
+    r = log_archive(dbenv, &list, DB_ARCH_ABS | DB_ARCH_DATA, NULL);
+    if (r) {
+	syslog(LOG_ERR, "DBERROR: error listing database files: %s",
+	       db_strerror(r));
+	return CYRUSDB_IOERROR;
+    }
+    if (list != NULL) {
+	for (begin = list; *list != NULL; ++list) {
+	    /* only archive those files specified by the app */
+	    for (fname = fnames; *fname != NULL; ++fname) {
+		if (!strcmp(*list, *fname)) break;
+	    }
+	    if (*fname) {
+		syslog(LOG_DEBUG, "archiving database file: %s", *fname);
+		strcpy(dp, strrchr(*fname, '/'));
+		r = cyrusdb_copyfile(*fname, dstname);
+		if (r) {
+		    syslog(LOG_ERR,
+			   "DBERROR: error archiving database file: %s",
+			   *fname);
+		    return CYRUSDB_IOERROR;
+		}
+	    }
+	}
+	free (begin);
+    }
+
+    /* Get the list of log files to archive. */
+    r = log_archive(dbenv, &list, DB_ARCH_ABS | DB_ARCH_LOG, NULL);
+    if (r) {
+	syslog(LOG_ERR, "DBERROR: error listing log files: %s",
+	       db_strerror(r));
+	return CYRUSDB_IOERROR;
+    }
+    if (list != NULL) {
+	for (begin = list; *list != NULL; ++list) {
+	    syslog(LOG_DEBUG, "archiving log file: %s", *list);
+	    strcpy(dp, strrchr(*list, '/'));
+	    r = cyrusdb_copyfile(*list, dstname);
+	    if (r) {
+		syslog(LOG_ERR, "DBERROR: error archiving log file: %s",
+		       *list);
+		return CYRUSDB_IOERROR;
+	    }
+	}
+	free (begin);
+    }
+
+    return 0;
+}
+
+static int myopen(const char *fname, struct db **ret)
 {
     DB *db;
     int r;
@@ -247,14 +358,15 @@ static int open(const char *fname, struct db **ret)
     return r;
 }
 
-static int close(struct db *db)
+static int myclose(struct db *db)
 {
     int r;
     DB *a = (DB *) db;
 
     assert(dbinit && db);
 
-    r = a->close(a, 0);
+    /* since we're using txns, we can supply DB_NOSYNC */
+    r = a->close(a, DB_NOSYNC);
     if (r != 0) {
 	syslog(LOG_ERR, "DBERROR: error closing: %s", db_strerror(r));
 	r = CYRUSDB_IOERROR;
@@ -272,7 +384,8 @@ static int gettid(struct txn **mytid, DB_TXN **tid, char *where)
   	    assert((txn_id((DB_TXN *)*mytid) != 0));
 	    *tid = (DB_TXN *) *mytid;
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "%s: reusing txn %lu", where, txn_id(*tid));
+		syslog(LOG_DEBUG, "%s: reusing txn %lu", where,
+		       (unsigned long) txn_id(*tid));
 	} else {
 	    r = txn_begin(dbenv, NULL, tid, 0);
 	    if (r != 0) {
@@ -281,7 +394,8 @@ static int gettid(struct txn **mytid, DB_TXN **tid, char *where)
 		return CYRUSDB_IOERROR;
 	    }
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "%s: starting txn %lu", where, txn_id(*tid));
+		syslog(LOG_DEBUG, "%s: starting txn %lu", where,
+		       (unsigned long) txn_id(*tid));
 	}
 	*mytid = (struct txn *) *tid;
     }
@@ -559,7 +673,8 @@ static int mystore(struct db *mydb,
 	    return CYRUSDB_IOERROR;
 	}
 	if (CONFIG_DB_VERBOSE)
-	    syslog(LOG_DEBUG, "mystore: starting txn %lu", txn_id(tid));
+	    syslog(LOG_DEBUG, "mystore: starting txn %lu",
+		   (unsigned long) txn_id(tid));
     }
     r = db->put(db, tid, &k, &d, putflags);
     if (!mytid) {
@@ -568,7 +683,8 @@ static int mystore(struct db *mydb,
 	    int r2;
 
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "mystore: aborting txn %lu", txn_id(tid));
+		syslog(LOG_DEBUG, "mystore: aborting txn %lu",
+		       (unsigned long) txn_id(tid));
 	    r2 = txn_abort(tid);
 	    if (r2) {
 		syslog(LOG_ERR, "DBERROR: mystore: error aborting txn: %s", 
@@ -581,7 +697,8 @@ static int mystore(struct db *mydb,
 	    }
 	} else {
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "mystore: committing txn %lu", txn_id(tid));
+		syslog(LOG_DEBUG, "mystore: committing txn %lu",
+		       (unsigned long) txn_id(tid));
 	    r = txn_commit(tid, txnflags);
 	}
     }
@@ -638,7 +755,7 @@ static int store_nosync(struct db *db,
 
 static int mydelete(struct db *mydb, 
 		    const char *key, int keylen,
-		    struct txn **mytid, int txnflags)
+		    struct txn **mytid, int txnflags, int force)
 {
     int r = 0;
     DBT k;
@@ -666,7 +783,8 @@ static int mydelete(struct db *mydb,
 	    return CYRUSDB_IOERROR;
 	}
 	if (CONFIG_DB_VERBOSE)
-	    syslog(LOG_DEBUG, "mydelete: starting txn %lu", txn_id(tid));
+	    syslog(LOG_DEBUG, "mydelete: starting txn %lu",
+		   (unsigned long) txn_id(tid));
     }
     r = db->del(db, tid, &k, 0);
     if (!mytid) {
@@ -674,7 +792,8 @@ static int mydelete(struct db *mydb,
 	if (r) {
 	    int r2;
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "mydelete: aborting txn %lu", txn_id(tid));
+		syslog(LOG_DEBUG, "mydelete: aborting txn %lu",
+		       (unsigned long) txn_id(tid));
 	    r2 = txn_abort(tid);
 	    if (r2) {
 		syslog(LOG_ERR, "DBERROR: mydelete: error aborting txn: %s", 
@@ -687,7 +806,8 @@ static int mydelete(struct db *mydb,
 	    }
 	} else {
 	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "mydelete: committing txn %lu", txn_id(tid));
+		syslog(LOG_DEBUG, "mydelete: committing txn %lu",
+		       (unsigned long) txn_id(tid));
 	    r = txn_commit(tid, txnflags);
 	}
     }
@@ -699,6 +819,8 @@ static int mydelete(struct db *mydb,
 	}
 	if (r == DB_LOCK_DEADLOCK) {
 	    r = CYRUSDB_AGAIN;
+	} else if (force && r == DB_NOTFOUND) {
+	    r = CYRUSDB_OK;  /* ignore not found errors */
 	} else {
 	    syslog(LOG_ERR, "DBERROR: mydelete: error deleting %s: %s",
 		   key, db_strerror(r));
@@ -711,19 +833,20 @@ static int mydelete(struct db *mydb,
 
 static int delete(struct db *db, 
 		  const char *key, int keylen,
-		  struct txn **tid)
+		  struct txn **tid, int force)
 {
-    return mydelete(db, key, keylen, tid, 0);
+    return mydelete(db, key, keylen, tid, 0, force);
 }
 
 static int delete_nosync(struct db *db, 
 			 const char *key, int keylen,
-			 struct txn **tid)
+			 struct txn **tid, int force)
 {
-    return mydelete(db, key, keylen, tid, DB_TXN_NOSYNC);
+    return mydelete(db, key, keylen, tid, DB_TXN_NOSYNC, force);
 }
 
-static int mycommit(struct db *db, struct txn *tid, int txnflags)
+static int mycommit(struct db *db __attribute__((unused)),
+		    struct txn *tid, int txnflags)
 {
     int r;
     DB_TXN *t = (DB_TXN *) tid;
@@ -731,7 +854,8 @@ static int mycommit(struct db *db, struct txn *tid, int txnflags)
     assert(dbinit && tid);
 
     if (CONFIG_DB_VERBOSE)
-	syslog(LOG_DEBUG, "mycommit: committing txn %lu", txn_id(t));
+	syslog(LOG_DEBUG, "mycommit: committing txn %lu",
+	       (unsigned long) txn_id(t));
     r = txn_commit(t, txnflags);
     switch (r) {
     case 0:
@@ -760,7 +884,8 @@ static int commit_nosync(struct db *db, struct txn *tid)
     return mycommit(db, tid, DB_TXN_NOSYNC);
 }
 
-static int abort_txn(struct db *db, struct txn *tid)
+static int abort_txn(struct db *db __attribute__((unused)),
+		     struct txn *tid)
 {
     int r;
     DB_TXN *t = (DB_TXN *) tid;
@@ -768,10 +893,12 @@ static int abort_txn(struct db *db, struct txn *tid)
     assert(dbinit && tid);
 
     if (CONFIG_DB_VERBOSE)
-	syslog(LOG_DEBUG, "abort_txn: aborting txn %lu", txn_id(t));
+	syslog(LOG_DEBUG, "abort_txn: aborting txn %lu",
+	       (unsigned long) txn_id(t));
     r = txn_abort(t);
     if (r != 0) {
-	syslog(LOG_ERR, "DBERROR: abort_txn: error aborting txn: %s", db_strerror(r));
+	syslog(LOG_ERR, "DBERROR: abort_txn: error aborting txn: %s",
+	       db_strerror(r));
 	return CYRUSDB_IOERROR;
     }
 
@@ -784,10 +911,11 @@ struct cyrusdb_backend cyrusdb_db3 =
 
     &init,
     &done,
-    &sync,
+    &mysync,
+    &myarchive,
 
-    &open,
-    &close,
+    &myopen,
+    &myclose,
 
     &fetch,
     &fetchlock,
@@ -797,7 +925,10 @@ struct cyrusdb_backend cyrusdb_db3 =
     &delete,
 
     &commit_txn,
-    &abort_txn
+    &abort_txn,
+    
+    NULL,
+    NULL
 };
 
 struct cyrusdb_backend cyrusdb_db3_nosync = 
@@ -806,10 +937,11 @@ struct cyrusdb_backend cyrusdb_db3_nosync =
 
     &init,
     &done,
-    &sync,
+    &mysync,
+    &myarchive,
 
-    &open,
-    &close,
+    &myopen,
+    &myclose,
 
     &fetch,
     &fetchlock,
@@ -819,5 +951,8 @@ struct cyrusdb_backend cyrusdb_db3_nosync =
     &delete_nosync,
 
     &commit_nosync,
-    &abort_txn
+    &abort_txn,
+
+    NULL,
+    NULL
 };

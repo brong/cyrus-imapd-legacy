@@ -38,6 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* $Id: acapmbox.c,v 1.28.2.1 2002/06/06 21:07:56 jsmith2 Exp $ */
 
 #include <config.h>
 
@@ -81,7 +82,7 @@ struct acapmbox_handle_s {
 static char *acapmbox_get_url(char *dst, const char *server, const char *name)
 {
     if (!server) server = config_servername;
-    imapurl_toURL(dst, server, name);
+    imapurl_toURL(dst, server, name, NULL);
 
     return dst;
 }
@@ -747,7 +748,7 @@ acapmbox_status mboxdata_convert_status(acap_value_t *v)
 }
 
 int acapmbox_delete(acapmbox_handle_t *AC,
-		    char *mailbox_name)
+		    const char *mailbox_name)
 {
     acap_cmd_t *cmd;
     int r;

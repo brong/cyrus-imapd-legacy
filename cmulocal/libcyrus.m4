@@ -1,6 +1,7 @@
 dnl libcyrus.m4--Cyrus libraries and includes
 dnl Derrick Brashear
 dnl from KTH kafs and Arla
+dnl $Id: libcyrus.m4,v 1.15.12.1 2002/06/06 21:07:36 jsmith2 Exp $
 
 AC_DEFUN(CMU_LIBCYRUS_INC_WHERE1, [
 AC_REQUIRE([AC_PROG_CC_GNU])

@@ -1,6 +1,7 @@
 /* mystring.c -- string utility
  * Tim Martin
  * 9/21/99
+ * $Id: mystring.c,v 1.4.10.1 2002/06/06 21:09:10 jsmith2 Exp $
  */
 /*
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
@@ -48,12 +49,10 @@
 #endif
 
 #include "mystring.h"
-
 #include "codes.h"
 
 #include <stdlib.h>
-
-#include <strings.h>
+#include <string.h>
 
 int string_allocate(int length,
 		    const char *buf,	/* NULL => no copy */

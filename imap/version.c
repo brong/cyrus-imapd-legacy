@@ -37,7 +37,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: version.c,v 1.4 2001/11/27 02:25:00 ken3 Exp $
+ * $Id: version.c,v 1.4.2.1 2002/06/06 21:08:20 jsmith2 Exp $
  */
 
 #include <config.h>
@@ -52,12 +52,12 @@
 #include <ucd-snmp/version.h>
 #endif
 
+#include <string.h>
 #include "version.h"
 #include "xversion.h"
 #include "prot.h"
-#include "mboxlist.h"
+#include "cyrusdb.h"
 #include "lock.h"
-#include "notify.h"
 #include "idle.h"
 #include "sieve_interface.h"
 
@@ -149,15 +149,20 @@ void id_response(struct protstream *pout)
     if (idle_method_desc)
 	snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
 		 "; idle = %s", idle_method_desc);
-    if (notify_method_desc)
-	snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
-		 "; notify = %s", notify_method_desc);
 #ifdef USE_DIR_FULL
     snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
 	     "; dirhash = full");
 #endif
     snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
-	     "; mboxlist = %s", CONFIG_DB_MBOX->name);
+	     "; mboxlist.db = %s", CONFIG_DB_MBOX->name);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; subs.db = %s", CONFIG_DB_SUBS->name);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; seen.db = %s", CONFIG_DB_SEEN->name);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; duplicate.db = %s", CONFIG_DB_DUPLICATE->name);
+    snprintf(env_buf + strlen(env_buf), MAXIDVALUELEN - strlen(env_buf),
+	     "; tls.db = %s", CONFIG_DB_TLS->name);
 
     prot_printf(pout, " \"environment\" \"%s\"", env_buf);
 }
