@@ -1,5 +1,5 @@
 /* imclient.c -- Streaming IMxP client library
- $Id: imclient.c,v 1.58 2001/07/27 23:30:37 leg Exp $
+ $Id: imclient.c,v 1.58.2.1 2001/07/31 17:15:35 rjs3 Exp $
  
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -64,7 +64,7 @@
 #include <sys/select.h>
 #endif
 
-#include <sasl.h>
+#include <sasl/sasl.h>
 
 #ifdef HAVE_SSL
 #include <openssl/lhash.h>
@@ -278,6 +278,7 @@ int imclient_connect(struct imclient **imclient,
   /* client new connection */
   saslresult=sasl_client_new("imap", /* xxx ideally this should be configurable */
 			     (*imclient)->servername,
+			     NULL, NULL,
 			     cbs ? cbs : callbacks,
 			     0,
 			     &((*imclient)->saslconn));
@@ -657,9 +658,8 @@ imclient_input(struct imclient *imclient, char *buf, int len)
     int keywordlen;
     int keywordindex;
     struct imclient_cmdcallback **cmdcb, *cmdcbtemp;
-    char *plainbuf;
+    const char *plainbuf;
     unsigned plainlen;
-    int freeplain;
     int result;
     
     if (imclient->saslcompleted == 1) {
@@ -670,11 +670,9 @@ imclient_input(struct imclient *imclient, char *buf, int len)
 	}
 
 	if (plainlen == 0) return;
-	freeplain = 1;
     } else {
 	plainbuf = buf;
 	plainlen = len;
-	freeplain = 0;
     }
 
     /* Ensure replybuf has enough space to take the input */
@@ -713,10 +711,6 @@ imclient_input(struct imclient *imclient, char *buf, int len)
     /* Copy the data to the buffer and NUL-terminate it */
     memcpy(imclient->replybuf + imclient->replylen, plainbuf, plainlen);
     imclient->replylen += plainlen;
-
-    if (freeplain && plainlen) {
-	free(plainbuf);
-    }
 
     /* Process the new data (of length 'plainlen') */
     while (parsed < imclient->replylen) {
@@ -993,7 +987,7 @@ struct imclient *imclient;
 
 	if ((imclient->saslcompleted==1) && (writelen>0)) {
 	    unsigned int cryptlen=0;
-	    char *cryptptr=NULL;
+	    const char *cryptptr=NULL;
 
 	  if (sasl_encode(imclient->saslconn, imclient->outstart, writelen,
 			  &cryptptr,&cryptlen)!=SASL_OK)
@@ -1015,11 +1009,9 @@ struct imclient *imclient;
 #endif /* HAVE_SSL */
 	  	  
 	  if (n > 0) {	    
-	    free(cryptptr);
 	    imclient->outstart += writelen;
 	    return;
 	  }
-
 
 	  /* XXX Also EPIPE & the like? */
 	  /* Make sure we select() for writing */
@@ -1176,10 +1168,31 @@ void fillin_interactions(sasl_interact_t *tlist, char *user)
     interaction(tlist, user);
     tlist++;
   }
-
 }
 
+/* FIXME: This only parses IPV4 addresses */
+static int iptostring(const struct sockaddr_in *addr,
+		      char *out, unsigned outlen) {
+    unsigned char a[4];
+    int i;
+    
+    /* FIXME: Weak bounds check, are we less than the largest possible size? */
+    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
+    if(outlen <= 21) return SASL_BUFOVER;
+    if(!addr || !out) return SASL_BADPARAM;
 
+    memset(out, 0, outlen);
+
+    for(i=3; i>=0; i--) {
+	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
+    }
+    
+    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
+	                                 (int)a[1],(int)a[0],
+	                                 (int)addr->sin_port);
+
+    return SASL_OK;
+}
 
 /*
  * Params:
@@ -1190,7 +1203,6 @@ void fillin_interactions(sasl_interact_t *tlist, char *user)
  *  1 - failure
  *  2 - severe failure?
  */
-
 static int imclient_authenticate_sub(struct imclient *imclient, 
 				     char *mechlist, 
 				     char *service, 
@@ -1202,20 +1214,18 @@ static int imclient_authenticate_sub(struct imclient *imclient,
   int saslresult;
   sasl_security_properties_t *secprops=NULL;
   socklen_t addrsize=sizeof(struct sockaddr_in);
-  struct sockaddr_in *saddr_l=malloc(sizeof(struct sockaddr_in));
-  struct sockaddr_in *saddr_r=malloc(sizeof(struct sockaddr_in));
+  struct sockaddr_in saddr_l;
+  struct sockaddr_in saddr_r;
+  char localip[60], remoteip[60];
   sasl_interact_t *client_interact=NULL;
-  char *out;
+  const char *out;
   unsigned int outlen;
   int inlen;
   struct authresult result;
 
-
-
   /*******
    * Now set the SASL properties
    *******/
-
   secprops=make_secprops(minssf,maxssf);
   if (secprops==NULL) return 1;
 
@@ -1223,23 +1233,25 @@ static int imclient_authenticate_sub(struct imclient *imclient,
   if (saslresult!=SASL_OK) return 1;
   free(secprops);
 
-  if (getpeername(imclient->fd,(struct sockaddr *)saddr_r,&addrsize)!=0)
-    return 1;
-
-  /*  saddr_r->sin_port=htons(saddr_r->sin_port);	*/
-  saslresult=sasl_setprop(imclient->saslconn, SASL_IP_REMOTE, saddr_r);
-  if (saslresult!=SASL_OK) return 1;
+  addrsize=sizeof(struct sockaddr_in);
+  if (getpeername(imclient->fd,(struct sockaddr *)&saddr_r,&addrsize)!=0)
+      return 1;
 
   addrsize=sizeof(struct sockaddr_in);
-  if (getsockname(imclient->fd,(struct sockaddr *)saddr_l,&addrsize)!=0)
-    return 1;
+  if (getsockname(imclient->fd,(struct sockaddr *)&saddr_l,&addrsize)!=0)
+      return 1;
 
-  /*  saddr_l->sin_port=htons(saddr_l->sin_port);	*/
-  saslresult=sasl_setprop(imclient->saslconn,   SASL_IP_LOCAL, saddr_l);
+  if(iptostring(&saddr_l, localip, 60) != SASL_OK)
+      return 1;
+
+  if(iptostring(&saddr_r, remoteip, 60) != SASL_OK)
+      return 1;
+
+  saslresult=sasl_setprop(imclient->saslconn, SASL_IPREMOTEPORT, remoteip);
   if (saslresult!=SASL_OK) return 1;
 
-  free(saddr_l);
-  free(saddr_r);
+  saslresult=sasl_setprop(imclient->saslconn, SASL_IPLOCALPORT, localip);
+  if (saslresult!=SASL_OK) return 1;
 
   /********
    * SASL is setup. Now try the actual authentication
@@ -1251,7 +1263,7 @@ static int imclient_authenticate_sub(struct imclient *imclient,
   while (saslresult==SASL_INTERACT)
   {
     saslresult=sasl_client_start(imclient->saslconn, mechlist,
-				 NULL, &client_interact,
+				 &client_interact,
 				 &out, &outlen,
 				 mechusing);
     if (saslresult==SASL_INTERACT) {
@@ -1314,9 +1326,6 @@ static int imclient_authenticate_sub(struct imclient *imclient,
 	return saslresult;
     }
 
-    if (outlen > 0) { 
-	free(out); 
-    }
     outlen = 0;
   }
 
@@ -1909,9 +1918,9 @@ int imclient_starttls(struct imclient *imclient,
 {
   int result;
   struct authresult theresult;
-
-  sasl_external_properties_t externalprop;
-
+  unsigned ssf;
+  char *auth_id;
+  
   imclient_send(imclient, tlsresult, (void *)&theresult,
 		"STARTTLS");
 
@@ -1927,7 +1936,7 @@ int imclient_starttls(struct imclient *imclient,
     printf("[ TLS engine failed ]\n");
     return 1;
   } else {
-    result=tls_start_clienttls(imclient, &externalprop.ssf, &externalprop.auth_id, imclient->fd);
+    result=tls_start_clienttls(imclient, &ssf, &auth_id, imclient->fd);
     
     if (result!=0) {
       printf("[ TLS negotiation did not succeed ]\n");
@@ -1942,14 +1951,18 @@ int imclient_starttls(struct imclient *imclient,
 
   imclient->tls_on = 1;
 
-  externalprop.auth_id=""; /* xxx this really should be peer_CN or
-  issuer_CN but I can't figure out which is which at the moment */
+  auth_id=""; /* xxx this really should be peer_CN or
+		 issuer_CN but I can't figure out which is
+		 which at the moment */
 
   /* tell SASL about the negotiated layer */
   result=sasl_setprop(imclient->saslconn,
 		      SASL_SSF_EXTERNAL,
-		      &externalprop);
-  
+		      &ssf);
+  if (result!=SASL_OK) return 1;
+  result=sasl_setprop(imclient->saslconn,
+		      SASL_AUTH_EXTERNAL,
+		      &auth_id);
   if (result!=SASL_OK) return 1;
 
   return 0;
