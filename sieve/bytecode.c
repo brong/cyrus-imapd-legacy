@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.3 2002/05/23 17:16:52 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.4 2002/05/24 18:49:04 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -1006,6 +1006,148 @@ void sieve_free_bytecode(bytecode_info_t **p)
     free(*p);
     *p = NULL;
 }
+/**************************************************************************/
+/**************************************************************************/
+/**************************************************************************/
+/**************************EXECUTING BYTECODE******************************/
+/**************************************************************************/
+/**************************************************************************/
+/**************************************************************************/
+/**************************************************************************/
+/* look for myaddr and myaddrs in the body of a header - return the match */
+static char* look_for_me(char *myaddr, int numaddresses, bytecode_t *bc, int i, const char **body)
+{
+    char *found = NULL;
+    int l;
+    int curra,x ;
+
+    /* loop through each TO header */
+    for (l = 0; body[l] != NULL && !found; l++) {
+	void *data = NULL, *marker = NULL;
+	char *addr;
+	
+	parse_address(body[l], &data, &marker);
+	/* loop through each address in the header */
+	while (!found && ((addr = get_address(ADDRESS_ALL,&data, &marker, 1))!= NULL)) 
+	  {
+	    if (!strcmp(addr, myaddr)) 
+	      {found = myaddr;
+		break;}
+	    curra=i;
+	    for(x=0; x<numaddresses; x++)
+	      {	void *altdata = NULL, *altmarker = NULL;
+		char *altaddr;
+		/* is this address one of my addresses? */
+		parse_address((char *)&(bc[curra+1].str), &altdata, &altmarker);
+		altaddr = get_address(ADDRESS_ALL, &altdata, &altmarker, 1);
+		if (!strcmp(addr,altaddr))
+		  {found=(char *)&(bc[curra+1].str);}
+		curra+=1+((ROUNDUP(bc[curra].len+1))/sizeof(bytecode_t));
+		free_address(&altdata, &altmarker);
+	      }
+	  }
+	free_address(&data, &marker);
+    }
+    return found;
+}
+ 
+
+
+int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t* bc, int i, char * found, char *reply_to )
+{
+  const char **body;
+  char buf[128];
+  char *myaddr = NULL;
+  int l = SIEVE_OK;
+  void *data = NULL, *marker = NULL;
+  char *tmp;
+  int curra, x;
+  
+  /* is there an Auto-Submitted keyword other than "no"? */
+  strcpy(buf, "auto-submitted");
+  if (interp->getheader(m, buf, &body) == SIEVE_OK) {
+    /* we don't deal with comments, etc. here */
+    /* skip leading white-space */
+    while (*body[0] && isspace((int) *body[0])) body[0]++;
+    if (strcasecmp(body[0], "no")) l = SIEVE_DONE;
+  }
+  
+  /* Note: the domain-part of all addresses are canonicalized */
+  
+  /* grab my address from the envelope */
+  if (l == SIEVE_OK) {
+    strcpy(buf, "to");
+    l = interp->getenvelope(m, buf, &body);
+    if (body[0]) {
+      parse_address(body[0], &data, &marker);
+      tmp = get_address(ADDRESS_ALL, &data, &marker, 1);
+      myaddr = (tmp != NULL) ? xstrdup(tmp) : NULL;
+      free_address(&data, &marker);
+    }  
+  }
+  if (l == SIEVE_OK) {
+    strcpy(buf, "from");
+    l = interp->getenvelope(m, buf, &body);
+  }
+  if (l == SIEVE_OK && body[0]) {
+    /* we have to parse this address & decide whether we
+       want to respond to it */
+    parse_address(body[0], &data, &marker);
+    tmp = get_address(ADDRESS_ALL, &data, &marker, 1);
+    reply_to = (tmp != NULL) ? xstrdup(tmp) : NULL;
+    free_address(&data, &marker);
+    
+    /* first, is there a reply-to address? */
+    if (reply_to == NULL) {
+      l = SIEVE_DONE;
+    }
+    
+    /* first, is it from me? */
+    if (l == SIEVE_OK && !strcmp(myaddr, reply_to)) {
+      l = SIEVE_DONE;
+    }
+    
+    /* ok, is it any of the other addresses i've
+       specified? */
+    if (l == SIEVE_OK)
+      {
+	curra=i;
+	for(x=0; x<numaddresses; x++)
+	  {if (!strcmp((char *)&(bc[curra+1].str), reply_to))
+	      {l=SIEVE_DONE;}
+	    curra+=1+((ROUNDUP(bc[curra].len+1))/sizeof(bytecode_t));
+	  }
+      }
+    
+    /* ok, is it a system address? */
+    if (l == SIEVE_OK && sysaddr(reply_to)) {
+      l = SIEVE_DONE;
+    }
+  }
+  
+  if (l == SIEVE_OK) {
+    /* ok, we're willing to respond to the sender.
+       but is this message to me?  that is, is my address
+       in the TO, CC or BCC fields? */
+    if (strcpy(buf, "to"), 
+	interp->getheader(m, buf, &body) == SIEVE_OK)
+      found = look_for_me(myaddr, numaddresses ,bc, i, body);
+    
+    if (!found && (strcpy(buf, "cc"),
+		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
+      found = look_for_me(myaddr, numaddresses, bc, i, body);
+    
+    if (!found && (strcpy(buf, "bcc"),
+		   (interp->getheader(m, buf, &body) == SIEVE_OK)))
+      found = look_for_me(myaddr, numaddresses, bc, i, body);
+    
+    if (!found)
+      l = SIEVE_DONE;
+  }
+  /* ok, ok, if we got here maybe we should reply */
+  if (myaddr) free(myaddr);
+  return l;
+}
 
 
 int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
@@ -1368,14 +1510,55 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	printf("(de)notify not done");
 	break;
       case B_VACATION:
-	  /*	  dump2(bc, bc_len);*/
-	  res=0;
-	  exit(1);
+	  {
+	    int respond;
+	    char * fromaddr=NULL;/*from address in message we are sending*/
+	    char * toaddr=NULL;
+	    int messageip=0;
+	    char buf[128];
+	    ip++;
+	    respond=shouldRespond(m,i, bc[ip].len, bc, ip+2, fromaddr, toaddr);
+	    if (respond==SIEVE_OK)
+	      {
+		ip=bc[ip+1].value/4;		
+		if ((&bc[ip+1].str) == NULL) {
+		/* we have to generate a subject */
+		const char **s;
+		
+		strcpy(buf, "subject");
+		if (i->getheader(m, buf, &s) != SIEVE_OK ||
+		    s[0] == NULL) {
+		  strcpy(buf, "Automated reply");
+		} else {
+		  /* s[0] contains the original subject */
+		  const char *origsubj = s[0];
+		  
+		  while (!strncasecmp(origsubj, "Re: ", 4)) {
+		    origsubj += 4;
+		  }
+		  snprintf(buf, sizeof(buf), "Re: %s", origsubj);
+		}
+	      } else {
+		/* user specified subject */
+		strncpy(buf, (char *)&(bc[ip+1].str), sizeof(buf));
+	      }
+	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      messageip=ip;
+	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      res = do_vacation(actions, toaddr, strdup(fromaddr),
+				strdup(buf),(char *)&(bc[messageip].str),
+				bc[ip].value, bc[ip+1].value);
+	      ip+=2;		
+	      if (res == SIEVE_RUN_ERROR)
+	      *errmsg = "Vacation can not be used with Reject or Vacation";
+	      }
+	    else if (respond != SIEVE_DONE) res = -1; /* something is bad */ 
 	  break;
+	  }
       default:
-	  printf("bytecode bad, or not yet implemented\n");
-	  if(errmsg) *errmsg = "Invalid sieve bytecode";
-	  return SIEVE_FAIL;
+	 printf("bytecode bad, or not yet implemented\n");
+	 if(errmsg) *errmsg = "Invalid sieve bytecode";
+	 return SIEVE_FAIL;
       }
 
       if (res) /* we've either encountered an error or a stop */

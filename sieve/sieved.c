@@ -351,6 +351,10 @@ void dump2(bytecode_t *d, int len)
 
 	case B_VACATION:/*15*/
 	  i++;
+	  /*add address list here!*/
+
+
+
 	  printf("%d: VACATION \nSUBJ((%db)%s) \n", i,
 		 d[i].len, (d[i].len == -1 ? "[nil]" : &(d[i+1].str)));
 	  i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
@@ -359,7 +363,7 @@ void dump2(bytecode_t *d, int len)
 		
 	  i+=1+(ROUNDUP(d[i].len+1))/sizeof(bytecode_t);
 	  printf("DAYS(%d) MIME(%d)\n",d[i].value, d[i+1].value);
-	  i++;/*?*/
+	  i+=2;;/*?*/
 	  break;
 	  
 	default:

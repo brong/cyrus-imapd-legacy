@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.1 2001/12/18 23:09:57 rjs3 Exp $
+ * $Id: script.c,v 1.43.2.2 2002/05/24 18:49:05 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -34,6 +34,10 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <md5global.h>
 #include <md5.h>
 #include <ctype.h>
+#include <syslog.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "xmalloc.h"
 
@@ -41,6 +45,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "interp.h"
 #include "script.h"
 #include "tree.h"
+#include "map.h"
 #include "sieve.h"
 #include "message.h"
 
@@ -104,6 +109,40 @@ int script_require(sieve_script_t *s, char *req)
     }
     return 0;
 }
+
+/*confusion about this fcn*/
+/* Load a compiled script */
+int sieve_script_load(sieve_interp_t *interp, int fd, const char *name,
+		      void *script_context, sieve_bytecode_t **ret) 
+{
+    struct stat sbuf;
+    sieve_bytecode_t *r;
+   
+    if(!ret || !interp) return SIEVE_FAIL;
+    if(!name) name = "";
+    
+    if (fstat(fd, &sbuf) == -1) {
+	syslog(LOG_ERR, "IOERROR: fstating sieve script: %m");
+	return SIEVE_FAIL;
+    }
+
+    r = (sieve_bytecode_t *)xmalloc(sizeof(sieve_bytecode_t));
+    if(!r) return SIEVE_NOMEM;
+    
+    memset(r, 0, sizeof(*r));
+
+    r->fd = fd;
+    r->interp = interp;
+    r->script_context = script_context;
+    
+    map_refresh(fd, 1, &r->data, &r->len, sbuf.st_size,
+		"sievescript", name);
+
+    *ret = r;
+    return SIEVE_OK;
+}
+
+
 
 /* given an interpretor and a script, produce an executable script */
 int sieve_script_parse(sieve_interp_t *interp, FILE *script,
@@ -187,10 +226,23 @@ int sieve_script_free(sieve_script_t **s)
 	    free_tree((*s)->cmds);
 	}
 	free(*s);
+	*s = NULL;
     }
 
     return SIEVE_OK;
 }
+
+int sieve_script_unload(sieve_bytecode_t **s) 
+{
+    if(s && *s) {
+	map_free(&((*s)->data), &((*s)->len));
+	close((*s)->fd);
+	free(*s);
+	*s = NULL;
+    } 
+    return SIEVE_FAIL;
+}
+
 
 static int sysaddr(char *addr)
 {
@@ -366,6 +418,8 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
     return 0;
 }
 
+/* evaluate bytecode data*/
+
 /* evaluate the script c.  returns negative if error was encountered,
    0 if it exited off the end, or positive if a stop action was encountered.
 
@@ -373,7 +427,8 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
    the naivest way.  if we implement some sort of depth limit, we'll
    be ok here; otherwise we'd want to transform it a little smarter */
 static int eval(sieve_interp_t *i, commandlist_t *c, 
-		void *m, action_list_t *actions, notify_action_t *notify_action,
+		void *m, action_list_t *actions,
+		notify_action_t *notify_action,
 		const char **errmsg)
 {
     int res = 0;
@@ -708,7 +763,8 @@ static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
     return SIEVE_OK;
 }
 
-static int send_notify_callback(sieve_script_t *s, void *message_context, 
+static int send_notify_callback(sieve_interp_t *interp, void *message_context, 
+				void *script_context,
 				notify_action_t *notify, char *actions_string,
 				const char **errmsg)
 {
@@ -718,7 +774,7 @@ static int send_notify_callback(sieve_script_t *s, void *message_context,
 
     sieve_notify_context_t nc;
 
-    fillin_headers(&(s->interp), notify->headers, message_context, 
+    fillin_headers(interp, notify->headers, message_context, 
 		   &headers, &headerslen);
 
     nc.message = xmalloc(strlen(notify->message) + headerslen + 
@@ -734,11 +790,11 @@ static int send_notify_callback(sieve_script_t *s, void *message_context,
     strcat(nc.message,actions_string);
     nc.priority = notify->priority;
 
-    ret =  s->interp.notify(&nc,
-			    s->interp.interp_context,
-			    s->script_context,
-			    message_context,
-			    errmsg);    
+    ret =  interp->notify(&nc,
+			  interp->interp_context,
+			  script_context,
+			  message_context,
+			  errmsg);    
 
     free(nc.message);
 
@@ -798,33 +854,95 @@ static int makehash(unsigned char hash[HASHSIZE], char *s1, char *s2)
     return SIEVE_OK;
 }
 
-/* execute a script on a message, producing side effects via callbacks.
-   it is the responsibility of the caller to save a message if this
-   returns anything but SIEVE_OK. */
-int sieve_execute_script(sieve_script_t *s, void *message_context)
-{
-    int ret = 0;
-    int implicit_keep = 0;
-    action_list_t *actions = NULL, *a;
-    action_t lastaction = -1;
-    notify_action_t *notify_action;
-    char actions_string[4096] = "";
-    const char *errmsg = NULL;
-    
-    notify_action = default_notify_action();
-    if (notify_action == NULL)
-	return SIEVE_NOMEM;
+#define ACTIONS_STRING_LEN 4096
 
-    actions = new_action_list();
-    if (actions == NULL) {
-	ret = SIEVE_NOMEM;
-	goto error;
+static int do_sieve_error(int ret,
+			  sieve_interp_t *interp,
+			  void *script_context,
+			  void *message_context,
+			  action_list_t *actions,
+			  notify_action_t *notify_action,
+			  int lastaction,
+			  int implicit_keep,
+			  char *actions_string,
+			  const char *errmsg
+			  ) 
+{
+    if (ret != SIEVE_OK) {
+	if (lastaction == -1) /* we never executed an action */
+	    snprintf(actions_string+strlen(actions_string),
+		     ACTIONS_STRING_LEN-strlen(actions_string),
+		     "script execution failed: %s\n",
+		     errmsg ? errmsg : sieve_errstr(ret));
+	else
+	    snprintf(actions_string+strlen(actions_string),
+		     ACTIONS_STRING_LEN-strlen(actions_string),
+		     "%s action failed: %s\n",
+		     action_to_string(lastaction),
+		     errmsg ? errmsg : sieve_errstr(ret));
     }
  
-    if (eval(&s->interp, s->cmds, message_context, actions,
-	     notify_action, &errmsg) < 0)
-	return SIEVE_RUN_ERROR;
-  
+    /* Process notify action if there is one */
+    if (interp->notify && notify_action->exists) {
+	ret |= send_notify_callback(interp, message_context, script_context,
+				    notify_action,
+				    actions_string, &errmsg);
+    }
+ 
+    if ((ret != SIEVE_OK) && interp->err) {
+	char buf[1024];
+	if (lastaction == -1) /* we never executed an action */
+	    sprintf(buf, "%s", errmsg ? errmsg : sieve_errstr(ret));
+	else
+	    sprintf(buf, "%s: %s", action_to_string(lastaction),
+		    errmsg ? errmsg : sieve_errstr(ret));
+ 
+	ret |= interp->execute_err(buf, interp->interp_context,
+				   script_context, message_context);
+    }
+
+    if (implicit_keep) {
+	sieve_keep_context_t keep_context;
+	int keep_ret;
+
+	keep_context.imapflags = &(interp->curflags);
+ 
+	lastaction = ACTION_KEEP;
+	keep_ret = interp->keep(&keep_context, interp->interp_context,
+				script_context, message_context, &errmsg);
+	ret |= keep_ret;
+        if (keep_ret == SIEVE_OK)
+            snprintf(actions_string+strlen(actions_string),
+		     sizeof(actions_string)-strlen(actions_string),
+		     "Kept\n");
+	else {
+	    implicit_keep = 0;	/* don't try an implicit keep again */
+	    return do_sieve_error(ret, interp, script_context, message_context,
+				  actions, notify_action, lastaction,
+				  implicit_keep, actions_string, errmsg);
+	}
+    }
+
+    if (actions)
+	free_action_list(actions);
+
+    return ret;
+}
+
+
+static int do_action_list(sieve_interp_t *interp,
+			  void *script_context,
+			  void *message_context,
+			  action_list_t *actions,
+			  notify_action_t *notify_action,
+			  char *actions_string,
+			  const char *errmsg) 
+{
+    action_list_t *a;
+    action_t lastaction = -1;
+    int ret = 0;
+    int implicit_keep = 0;
+    
     strcpy(actions_string,"Action(s) taken:\n");
   
     /* now perform actions attached to m */
@@ -837,13 +955,13 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	switch (a->a) {
 	case ACTION_REJECT:
 	    implicit_keep = 0;
-	    if (!s->interp.reject)
+	    if (!interp->reject)
 		return SIEVE_INTERNAL_ERROR;
-	    ret = s->interp.reject(&a->u.rej,
-				   s->interp.interp_context,
-				   s->script_context,
-				   message_context,
-				   &errmsg);
+	    ret = interp->reject(&a->u.rej,
+				 interp->interp_context,
+				 script_context,
+				 message_context,
+				 &errmsg);
 	    
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
@@ -853,13 +971,13 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	    break;
 	case ACTION_FILEINTO:
 	    implicit_keep = 0;
-	    if (!s->interp.fileinto)
+	    if (!interp->fileinto)
 		return SIEVE_INTERNAL_ERROR;
-	    ret = s->interp.fileinto(&a->u.fil,
-				     s->interp.interp_context,
-				     s->script_context,
-				     message_context,
-				     &errmsg);
+	    ret = interp->fileinto(&a->u.fil,
+				   interp->interp_context,
+				   script_context,
+				   message_context,
+				   &errmsg);
 
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
@@ -868,13 +986,13 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	    break;
 	case ACTION_KEEP:
 	    implicit_keep = 0;
-	    if (!s->interp.keep)
+	    if (!interp->keep)
 		return SIEVE_INTERNAL_ERROR;
-	    ret = s->interp.keep(&a->u.keep,
-				 s->interp.interp_context,
-				 s->script_context,
-				 message_context,
-				 &errmsg);
+	    ret = interp->keep(&a->u.keep,
+			       interp->interp_context,
+			       script_context,
+			       message_context,
+			       &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
 			 sizeof(actions_string)-strlen(actions_string),
@@ -882,13 +1000,13 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	    break;
 	case ACTION_REDIRECT:
 	    implicit_keep = 0;
-	    if (!s->interp.redirect)
+	    if (!interp->redirect)
 		return SIEVE_INTERNAL_ERROR;
-	    ret = s->interp.redirect(&a->u.red,
-				     s->interp.interp_context,
-				     s->script_context,
-				     message_context,
-				     &errmsg);
+	    ret = interp->redirect(&a->u.red,
+				   interp->interp_context,
+				   script_context,
+				   message_context,
+				   &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
 			 sizeof(actions_string)-strlen(actions_string),
@@ -896,11 +1014,11 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	    break;
 	case ACTION_DISCARD:
 	    implicit_keep = 0;
-	    if (s->interp.discard) /* discard is optional */
-		ret = s->interp.discard(NULL, s->interp.interp_context,
-					s->script_context,
-					message_context,
-					&errmsg);
+	    if (interp->discard) /* discard is optional */
+		ret = interp->discard(NULL, interp->interp_context,
+				      script_context,
+				      message_context,
+				      &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
 			 sizeof(actions_string)-strlen(actions_string),
@@ -911,7 +1029,7 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	    {
 		unsigned char hash[HASHSIZE];
 
-		if (!s->interp.vacation)
+		if (!interp->vacation)
 		    return SIEVE_INTERNAL_ERROR;
 
 		/* first, let's figure out if we should respond to this */
@@ -920,19 +1038,19 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 		if (ret == SIEVE_OK) {
 		    a->u.vac.autoresp.hash = hash;
 		    a->u.vac.autoresp.len = HASHSIZE;
-		    ret = s->interp.vacation->autorespond(&a->u.vac.autoresp,
-							  s->interp.interp_context,
-							  s->script_context,
-							  message_context,
-							  &errmsg);
+		    ret = interp->vacation->autorespond(&a->u.vac.autoresp,
+							interp->interp_context,
+							script_context,
+							message_context,
+							&errmsg);
 		}
 		if (ret == SIEVE_OK) {
 		    /* send the response */
-		    ret = s->interp.vacation->send_response(&a->u.vac.send,
-							    s->interp.interp_context,
-							    s->script_context, 
-							    message_context,
-							    &errmsg);
+		    ret = interp->vacation->send_response(&a->u.vac.send,
+							  interp->interp_context,
+							  script_context, 
+							  message_context,
+							  &errmsg);
 
 		    if (ret == SIEVE_OK)
 			snprintf(actions_string+strlen(actions_string),
@@ -952,34 +1070,34 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 
  
 	case ACTION_SETFLAG:
-	    free_imapflags(&s->interp.curflags);
-	    ret = sieve_addflag(&s->interp.curflags, a->u.fla.flag);
+	    free_imapflags(&interp->curflags);
+	    ret = sieve_addflag(&interp->curflags, a->u.fla.flag);
 	    break;
 	case ACTION_ADDFLAG:
-	    ret = sieve_addflag(&s->interp.curflags, a->u.fla.flag);
+	    ret = sieve_addflag(&interp->curflags, a->u.fla.flag);
 	    break;
 	case ACTION_REMOVEFLAG:
-	    ret = sieve_removeflag(&s->interp.curflags, a->u.fla.flag);
+	    ret = sieve_removeflag(&interp->curflags, a->u.fla.flag);
 	    break;
 	case ACTION_MARK:
 	    {
-		int n = s->interp.markflags->nflags;
+		int n = interp->markflags->nflags;
 
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_addflag(&s->interp.curflags,
-					s->interp.markflags->flag[--n]);
+		    ret = sieve_addflag(&interp->curflags,
+					interp->markflags->flag[--n]);
 		}
 		break;
 	    }
 	case ACTION_UNMARK:
 	    {
-		int n = s->interp.markflags->nflags;
+		int n = interp->markflags->nflags;
 
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_removeflag(&s->interp.curflags,
-					   s->interp.markflags->flag[--n]);
+		    ret = sieve_removeflag(&interp->curflags,
+					   interp->markflags->flag[--n]);
 		}
 		break;
 	    }
@@ -1000,62 +1118,71 @@ int sieve_execute_script(sieve_script_t *s, void *message_context)
 	}
     }
 
- error: /* report run-time errors */
- 
-    if (ret != SIEVE_OK) {
-	if (lastaction == -1) /* we never executed an action */
-	    snprintf(actions_string+strlen(actions_string),
-		     sizeof(actions_string)-strlen(actions_string),
-		     "script execution failed: %s\n",
-		     errmsg ? errmsg : sieve_errstr(ret));
-	else
-	    snprintf(actions_string+strlen(actions_string),
-		     sizeof(actions_string)-strlen(actions_string),
-		     "%s action failed: %s\n",
-		     action_to_string(lastaction),
-		     errmsg ? errmsg : sieve_errstr(ret));
-    }
- 
-    /* Process notify action if there is one */
-    if (s->interp.notify && notify_action->exists) {
-	ret |= send_notify_callback(s, message_context, notify_action,
-				    actions_string, &errmsg);
-    }
- 
-    if ((ret != SIEVE_OK) && s->interp.err) {
-	char buf[1024];
-	if (lastaction == -1) /* we never executed an action */
-	    sprintf(buf, "%s", errmsg ? errmsg : sieve_errstr(ret));
-	else
-	    sprintf(buf, "%s: %s", action_to_string(lastaction),
-		    errmsg ? errmsg : sieve_errstr(ret));
- 
-	ret |= s->interp.execute_err(buf, s->interp.interp_context,
-				     s->script_context, message_context);
+    return do_sieve_error(ret, interp, script_context, message_context,
+			  actions, notify_action, lastaction, implicit_keep,
+			  actions_string, errmsg);
+}
+
+
+/* execute some bytecode */
+int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context) 
+{
+    action_list_t *actions = NULL;
+    notify_action_t *notify_action;
+    action_t lastaction = -1;
+    int ret;
+    char actions_string[ACTIONS_STRING_LEN] = "";
+    const char *errmsg = NULL;
+
+    notify_action = default_notify_action();
+    if (notify_action == NULL)
+	return SIEVE_NOMEM;
+
+    actions = new_action_list();
+    if (actions == NULL) {
+	ret = SIEVE_NOMEM;
+	return do_sieve_error(ret, bc->interp, bc->script_context,
+			      message_context,
+			      actions, notify_action, lastaction, 0,
+			      actions_string, errmsg);
     }
 
-    if (implicit_keep) {
-	sieve_keep_context_t keep_context;
-	int keep_ret;
+      if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, actions,          notify_action, &errmsg) < 0)
+	return SIEVE_RUN_ERROR;  
 
-	keep_context.imapflags = &s->interp.curflags;
- 
-	lastaction = ACTION_KEEP;
-	keep_ret = s->interp.keep(&keep_context, s->interp.interp_context,
-			     s->script_context, message_context, &errmsg);
-	ret |= keep_ret;
-        if (keep_ret == SIEVE_OK)
-            snprintf(actions_string+strlen(actions_string),
-		     sizeof(actions_string)-strlen(actions_string),
-		     "Kept\n");
-	else {
-	    implicit_keep = 0;	/* don't try an implicit keep again */
-	    goto error;		/* process the implicit keep error */
-	}
+    return do_action_list(bc->interp, bc->script_context, message_context,
+			  actions, notify_action, actions_string, errmsg);
+}
+
+/* execute a script on a message, producing side effects via callbacks.
+   it is the responsibility of the caller to save a message if this
+   returns anything but SIEVE_OK. */
+int sieve_execute_script(sieve_script_t *s, void *message_context)
+{
+    action_list_t *actions = NULL;
+    notify_action_t *notify_action;
+    int ret;
+    action_t lastaction = -1;
+    char actions_string[ACTIONS_STRING_LEN] = "";
+    const char *errmsg = NULL;
+    
+    notify_action = default_notify_action();
+    if (notify_action == NULL)
+	return SIEVE_NOMEM;
+
+    actions = new_action_list();
+    if (actions == NULL) {
+	ret = SIEVE_NOMEM;
+	return do_sieve_error(ret, &s->interp, s->script_context,
+			      message_context,
+			      actions, notify_action, lastaction, 0,
+			      actions_string, errmsg);
     }
-
-    if (actions)
-	free_action_list(actions);
+ 
+    if (eval(&s->interp, s->cmds, message_context, actions,
+	     notify_action, &errmsg) < 0)
+	return SIEVE_RUN_ERROR;
   
-    return ret;
+    return do_action_list(&s->interp, s->script_context, message_context,
+			  actions, notify_action, actions_string, errmsg);
 }
