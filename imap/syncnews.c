@@ -27,7 +27,7 @@
  */
 
 /*
- * $Id: syncnews.c,v 1.13.4.1 1999/11/02 20:56:43 leg Exp $
+ * $Id: syncnews.c,v 1.13.4.2 1999/11/02 21:06:48 leg Exp $
  */
 
 #include <stdio.h>
@@ -45,6 +45,7 @@
 #include "exitcodes.h"
 #include "imap_err.h"
 #include "mailbox.h"
+#include "mboxlist.h"
 
 extern int errno;
 extern int optind;
