@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.14 1999/10/18 18:40:04 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.15 1999/10/18 18:49:26 leg Exp $
  */
 
 #include <stdio.h>
@@ -238,7 +238,7 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
     r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
     switch (r) {
     case 0:
-      mboxent=(struct mbox_entry *) data.data;
+      mboxent = (struct mbox_entry *) data.data;
       r = IMAP_MAILBOX_EXISTS;
       
       /* Lie about error if privacy demands */
@@ -725,6 +725,8 @@ int checkacl;
     }
 
 #if 0
+    /* should we delete the quota root?  are there any other mailboxes
+       in this quota root? */
     if (mailbox.quota.root &&
 	bsearch_mem(mailbox.quota.root, 1, list_base, list_size, 0, 0) == offset &&
 	(list_size <= offset + len + strlen(mailbox.quota.root) ||
