@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.33 2000/02/22 05:06:18 leg Exp $
+ * $Id: imapd.h,v 1.31.6.1 2000/07/06 18:46:23 ken3 Exp $
  *
  * Copyright 1999 Carnegie Mellon University
  * 
@@ -79,26 +79,21 @@ struct fetchargs {
 };
 
 /* Bitmasks for fetchitems */
-enum {
-    FETCH_UID =                 (1<<0),
-    FETCH_INTERNALDATE =        (1<<1),
-    FETCH_SIZE =                (1<<2),
-    FETCH_FLAGS =               (1<<3),
-    FETCH_ENVELOPE =	        (1<<4),
-    FETCH_BODYSTRUCTURE =	(1<<5),
-    FETCH_BODY =                (1<<6),
-    FETCH_HEADER =	        (1<<7),
-    FETCH_TEXT =                (1<<8),
-    FETCH_RFC822 =              (1<<9),
-    FETCH_SETSEEN =             (1<<10),
-    FETCH_UNCACHEDHEADER =      (1<<11)
-};
-
-enum {
-    FETCH_FAST = (FETCH_FLAGS|FETCH_INTERNALDATE|FETCH_SIZE),
-    FETCH_ALL = (FETCH_FLAGS|FETCH_INTERNALDATE|FETCH_SIZE|FETCH_ENVELOPE),
-    FETCH_FULL = (FETCH_ALL|FETCH_BODY)
-};
+#define FETCH_UID		(1<<0)
+#define FETCH_INTERNALDATE	(1<<1)
+#define FETCH_SIZE		(1<<2)
+#define FETCH_FLAGS		(1<<3)
+#define FETCH_ENVELOPE		(1<<4)
+#define FETCH_BODYSTRUCTURE	(1<<5)
+#define FETCH_BODY		(1<<6)
+#define FETCH_HEADER		(1<<7)
+#define FETCH_TEXT		(1<<8)
+#define FETCH_RFC822		(1<<9)
+#define FETCH_SETSEEN		(1<<10)
+#define FETCH_UNCACHEDHEADER	(1<<11)
+#define FETCH_FAST (FETCH_FLAGS|FETCH_INTERNALDATE|FETCH_SIZE)
+#define FETCH_ALL  (FETCH_FLAGS|FETCH_INTERNALDATE|FETCH_SIZE|FETCH_ENVELOPE)
+#define FETCH_FULL (FETCH_ALL|FETCH_BODY)
 
 /* Arguments to Store functions */
 struct storeargs {
@@ -116,11 +111,9 @@ struct storeargs {
 };
 
 /* values for operation */
-enum {
-    STORE_ADD = 1,
-    STORE_REMOVE = 2,
-    STORE_REPLACE = 3
-};
+#define STORE_ADD	1
+#define STORE_REMOVE	2
+#define STORE_REPLACE	3
 
 struct searchsub {
     struct searchsub *next;
@@ -132,13 +125,11 @@ struct searchsub {
     struct searchargs *sub2;
 };
 
-enum {
-    SEARCH_RECENT_SET =         (1<<0),
-    SEARCH_RECENT_UNSET	=       (1<<1),
-    SEARCH_SEEN_SET =           (1<<2),
-    SEARCH_SEEN_UNSET =	        (1<<3),
-    SEARCH_UNCACHEDHEADER =	(1<<4)
-};
+#define SEARCH_RECENT_SET	(1<<0)
+#define SEARCH_RECENT_UNSET	(1<<1)
+#define SEARCH_SEEN_SET		(1<<2)
+#define SEARCH_SEEN_UNSET	(1<<3)
+#define SEARCH_UNCACHEDHEADER	(1<<4)
 
 /* Things that may be searched for */
 struct searchargs {
@@ -163,44 +154,71 @@ struct searchargs {
     struct searchsub *sublist;
 };
 
-/* Bitmask for status queries */
-enum {
-    STATUS_MESSAGES =	        (1<<0),
-    STATUS_RECENT =		(1<<1),
-    STATUS_UIDNEXT =		(1<<2),
-    STATUS_UIDVALIDITY =	(1<<3),
-    STATUS_UNSEEN =		(1<<4)
+/* Sort criterion */
+struct sortcrit {
+    unsigned key;		/* sort key + modifier as defined below */
+    char *args[2];		/* argument(s) to the sort key */
 };
+
+/* Values for sort keys */
+enum {
+    SORT_SEQUENCE = 0,
+    SORT_ARRIVAL,
+    SORT_CC,
+    SORT_DATE,
+    SORT_FROM,
+    SORT_SIZE,
+    SORT_SUBJECT,
+    SORT_TO,
+    SORT_ANNOTATION
+    /* values > 255 are reserved for internal use */
+};
+
+/* Sort key modifier flag bits */
+#define SORT_REVERSE		(1<<15)
+
+/* Bitmask for status queries */
+#define STATUS_MESSAGES		(1<<0)
+#define STATUS_RECENT		(1<<1)
+#define STATUS_UIDNEXT		(1<<2)
+#define STATUS_UIDVALIDITY	(1<<3)
+#define STATUS_UNSEEN		(1<<4)
 
 extern struct protstream *imapd_out, *imapd_in;
 
 
-extern void index_closemailbox(struct mailbox *mailbox);
-extern void index_newmailbox(struct mailbox *mailbox, int examine_mode);
-extern void index_check(struct mailbox *mailbox, int usinguid,
-			   int checkseen);
-extern void index_checkseen(struct mailbox *mailbox, int quiet,
-			       int usinguid, int oldexists);
+extern void index_closemailbox P((struct mailbox *mailbox));
+extern void index_newmailbox P((struct mailbox *mailbox, int examine_mode));
+extern void index_check P((struct mailbox *mailbox, int usinguid,
+			   int checkseen));
+extern void index_checkseen P((struct mailbox *mailbox, int quiet,
+			       int usinguid, int oldexists));
 
 extern void index_fetch(struct mailbox *mailbox, char *sequence,
 			int usinguid, struct fetchargs *fetchargs,
 			int* fetchedsomething);
-extern int index_store(struct mailbox *mailbox, char *sequence,
+extern int index_store P((struct mailbox *mailbox, char *sequence,
 			  int usinguid, struct storeargs *storeargs,
-			  char **flag, int nflags);
-extern void index_search(struct mailbox *mailbox,
-			    struct searchargs *searchargs, int usinguid);
-extern int index_copy(struct mailbox *mailbox, char *sequence,
-			 int usinguid, char *name, char **copyuidp);
-extern int index_status(struct mailbox *mailbox, char *name,
-			   int statusitems);
+			  char **flag, int nflags));
+extern void index_search P((struct mailbox *mailbox,
+			    struct searchargs *searchargs, int usinguid));
+extern void list_thread_algorithms P((struct protstream *out));
+extern int find_thread_algorithm P((char *arg));
+extern void index_sort P((struct mailbox *mailbox, struct sortcrit *sortcrit,
+			  struct searchargs *searchargs, int usinguid));
+extern void index_thread P((struct mailbox *mailbox, int algorithm,
+			    struct searchargs *searchargs, int usinguid));
+extern int index_copy P((struct mailbox *mailbox, char *sequence,
+			 int usinguid, char *name, char **copyuidp));
+extern int index_status P((struct mailbox *mailbox, char *name,
+			   int statusitems));
 
-extern int index_getuids(struct mailbox *mailbox, unsigned lowuid);
-extern int index_getstate(struct mailbox *mailbox);
-extern int index_checkstate(struct mailbox *mailbox, unsigned indexdate,
-			       unsigned seendate);
+extern int index_getuids P((struct mailbox *mailbox, unsigned lowuid));
+extern int index_getstate P((struct mailbox *mailbox));
+extern int index_checkstate P((struct mailbox *mailbox, unsigned indexdate,
+			       unsigned seendate));
 
-extern int index_finduid(unsigned uid);
+extern int index_finduid P((unsigned uid));
 
 extern mailbox_decideproc_t index_expungeuidlist;
 

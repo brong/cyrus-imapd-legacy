@@ -26,10 +26,8 @@
  *
  */
 /*
- * $Id: index.c,v 1.101 2000/04/18 01:00:17 leg Exp $
+ * $Id: index.c,v 1.91.4.1 2000/07/06 18:46:23 ken3 Exp $
  */
-#include <config.h>
-
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -54,11 +52,13 @@
 #include "append.h"
 #include "charset.h"
 #include "xmalloc.h"
-#include "seen.h"
+#include "lsort.h"
+#include "message.h"
+#include "parseaddr.h"
+#include "hash.h"
+#include "stristr.h"
 
 extern int errno;
-
-extern void printastring (const char *s);
 
 /* The index and cache files, mapped into memory */
 static const char *index_base;
@@ -72,7 +72,7 @@ static long index_ino;
 static unsigned long start_offset;
 static unsigned long record_size;
 
-static unsigned recentuid;		/* UID of last non-\Recent message */
+static unsigned recentuid;	/* UID of last non-\Recent message */
 static unsigned lastnotrecent;	/* Msgno of last non-\Recent message */
 
 static time_t *flagreport;	/* Array for each msgno of last_updated when
@@ -96,7 +96,7 @@ static char *seenuids;		/* Sequence of UID's from last seen checkpoint */
 #define HEADER_SIZE(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_HEADER_SIZE)))
 #define CONTENT_OFFSET(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_CONTENT_OFFSET)))
 #define CACHE_OFFSET(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_CACHE_OFFSET)))
-#define LAST_UPDATED(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_LAST_UPDATED)))
+#define LAST_UPDATED(msgno) ((time_t)ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_LAST_UPDATED))))
 #define SYSTEM_FLAGS(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_SYSTEM_FLAGS)))
 #define USER_FLAGS(msgno,i) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_USER_FLAGS+((i)*4))))
 
@@ -104,6 +104,27 @@ static char *seenuids;		/* Sequence of UID's from last seen checkpoint */
 #define CACHE_ITEM_BIT32(ptr) (ntohl(*((bit32 *)(ptr))))
 #define CACHE_ITEM_LEN(ptr) CACHE_ITEM_BIT32(ptr)
 #define CACHE_ITEM_NEXT(ptr) ((ptr)+4+((3+CACHE_ITEM_LEN(ptr))&~3))
+
+/* Cached envelope token positions */
+enum {
+    ENV_DATE = 0,
+    ENV_SUBJECT,
+    ENV_FROM,
+    ENV_SENDER,
+    ENV_REPLYTO,
+    ENV_TO,
+    ENV_CC,
+    ENV_BCC,
+    ENV_INREPLYTO,
+    ENV_MSGID,
+};
+#define NUMENVTOKENS (10)
+
+/* Special "sort criteria" to load message-id and references/in-reply-to
+ * into msgdata array for threaders that need them.
+ */
+#define LOAD_IDS	256
+#define SORT_KEY_MASK	0xfff	/* we're using the high 4 bits for flags */
 
 struct copyargs {
     struct copymsg *copymsg;
@@ -114,6 +135,36 @@ struct copyargs {
 struct mapfile {
     const char *base;
     unsigned long size;
+};
+
+typedef struct msgdata {
+    unsigned msgno;		/* message number */
+    char *msgid;		/* message ID */
+    char **ref;			/* array of references */
+    int nref;			/* number of references */
+    time_t arrival;		/* internal arrival date & time of message */
+    time_t date;		/* sent date & time of message
+				   from Date: header (adjusted by time zone) */
+    char *cc;			/* local-part of first "cc" address */
+    char *from;			/* local-part of first "from" address */
+    char *to;			/* local-part of first "to" address */
+    char *xsubj;		/* extracted subject text */
+    unsigned xsubj_hash;	/* hash of extracted subject text */
+    int is_refwd;		/* is message a reply or forward? */
+    unsigned size;		/* size of message */
+    struct msgdata *next;
+} MsgData;
+
+typedef struct thread {
+    MsgData *msgdata;		/* message data */
+    struct thread *parent;	/* parent message */
+    struct thread *child;	/* first child message */
+    struct thread *next;	/* next sibling message */
+} Thread;
+
+struct thread_algorithm {
+    char *alg_name;
+    void (*threader)(unsigned *msgno_list, int nmsg, int usinguid);
 };
 
 /* Forward declarations */
@@ -166,6 +217,44 @@ static int index_searchheader P((char *name, char *substr, comp_pat *pat,
 static int index_searchcacheheader P((unsigned msgno, char *name, char *substr,
 				      comp_pat *pat));
 static index_sequenceproc_t index_copysetup;
+static int _index_search P((unsigned **msgno_list, struct mailbox *mailbox,
+			    struct searchargs *searchargs));
+
+static void parse_cached_envelope P((char *env, char *tokens[]));
+static char *get_localpart_addr P((const char *header));
+static char *index_extract_subject P((const char *subj, int *is_refwd));
+static void index_get_ids P((MsgData *msgdata,
+			     char *envtokens[], const char *headers));
+static MsgData *index_msgdata_load P((unsigned *msgno_list, int n,
+				      struct sortcrit *sortcrit));
+
+static void *index_sort_getnext P((MsgData *node));
+static void index_sort_setnext P((MsgData *node, MsgData *next));
+static int index_sort_compare P((MsgData *md1, MsgData *md2,
+				 struct sortcrit *call_data));
+static void index_msgdata_free P((MsgData *md));
+
+static void *index_thread_getnext P((Thread *thread));
+static void index_thread_setnext P((Thread *thread, Thread *next));
+static int index_thread_compare P((Thread *t1, Thread *t2,
+				   struct sortcrit *call_data));
+static void index_thread_orderedsubj P((unsigned *msgno_list, int nmsg,
+					int usinguid));
+static void index_thread_sort P((Thread *root, struct sortcrit *sortcrit));
+static void index_thread_print P((Thread *threads, int usinguid));
+#ifdef ENABLE_THREAD_JWZ
+static void index_thread_ref P((unsigned *msgno_list, int nmsg,
+				int usinguid));
+#endif
+
+static struct thread_algorithm thread_algs[] = {
+    { "ORDEREDSUBJECT", index_thread_orderedsubj },
+#ifdef ENABLE_THREAD_JWZ
+    { "REFERENCES", index_thread_ref },
+    { "X-JWZ", index_thread_ref },
+#endif
+    { NULL, NULL }
+};
 
 /*
  * A mailbox is about to be closed.
@@ -357,16 +446,15 @@ int checkseen;
 
     /* Check Flags */
     if (checkseen) index_checkseen(mailbox, 0, usinguid, oldexists);
-    else if (oldexists == -1) seen_unlock(seendb);
     for (i = 1; i <= imapd_exists && seenflag[i]; i++);
     if (i == imapd_exists + 1) allseen = mailbox->last_uid;
     if (oldexists == -1) {
 	if (imapd_exists && i <= imapd_exists) {
-	    prot_printf(imapd_out, "* OK [UNSEEN %u]  \r\n", i);
+	    prot_printf(imapd_out, "* OK [UNSEEN %u] \r\n", i);
 	}
-        prot_printf(imapd_out, "* OK [UIDVALIDITY %u]  \r\n",
+        prot_printf(imapd_out, "* OK [UIDVALIDITY %u] \r\n",
 		    mailbox->uidvalidity);
-	prot_printf(imapd_out, "* OK [UIDNEXT %u]  \r\n",
+	prot_printf(imapd_out, "* OK [UIDNEXT %u] \r\n",
 		    mailbox->last_uid + 1);
     }
 
@@ -430,8 +518,8 @@ int oldexists;
      */
     old = seenuids;
     new = newseenuids;
-    while (isdigit((int) *old)) oldnext = oldnext * 10 + *old++ - '0';
-    while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+    while (isdigit(*old)) oldnext = oldnext * 10 + *old++ - '0';
+    while (isdigit(*new)) newnext = newnext * 10 + *new++ - '0';
 
     for (msgno = 1; msgno <= imapd_exists; msgno++) {
 	uid = UID(msgno);
@@ -445,7 +533,7 @@ int oldexists;
 		oldnext = 0;
 		if (!*old) oldnext = mailbox->last_uid+1;
 		else old++;
-		while (isdigit((int) *old)) oldnext = oldnext * 10 + *old++ - '0';
+		while (isdigit(*old)) oldnext = oldnext * 10 + *old++ - '0';
 		oldnext += oldseen;
 	    }
 	}
@@ -462,7 +550,7 @@ int oldexists;
 		    neweof++;
 		}
 		else new++;
-		while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+		while (isdigit(*new)) newnext = newnext * 10 + *new++ - '0';
 		newnext += newseen;
 	    }
 	}
@@ -509,13 +597,11 @@ int oldexists;
 	    for (msgno = 1; msgno <= imapd_exists; msgno++) {
 		if (!seenflag[msgno]) break;
 	    }
-#if TOIMSP
 	    if (msgno == imapd_exists + 1) {
 		toimsp(mailbox->name, mailbox->uidvalidity,
 		       "SEENsnn", imapd_userid, mailbox->last_uid,
 		       seen_last_change, 0);
 	    }
-#endif
 	}
 	return;
     }
@@ -576,7 +662,7 @@ int oldexists;
 		neweof++;
 	    }
 	    else new++;
-	    while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+	    while (isdigit(*new)) newnext = newnext * 10 + *new++ - '0';
 	    newnext += newseen;
 	}
     }
@@ -594,7 +680,7 @@ int oldexists;
 		/* There's a ":M" after the ",N".  Parse/include that too. */
 		new++;
 		newnext = 0;
-		while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+		while (isdigit(*new)) newnext = newnext * 10 + *new++ - '0';
 	    }
 	    uid = newnext;
 	    newseen++;		/* Forget we parsed ",N" */
@@ -660,7 +746,6 @@ int oldexists;
 	return;
     }
 
-#if TOIMSP
     if (newallseen) {
 	toimsp(mailbox->name, mailbox->uidvalidity, "SEENsnn", imapd_userid,
 	       mailbox->last_uid, seen_last_change, 0);
@@ -669,8 +754,7 @@ int oldexists;
 	toimsp(mailbox->name, mailbox->uidvalidity, "SEENsnn", imapd_userid,
 	       0, seen_last_change, 0);
     }
-#endif    
-
+    
     free(newseenuids);
     seenuids = saveseenuids;
 }
@@ -835,14 +919,6 @@ int nflags;
     r = index_forsequence(mailbox, sequence, usinguid,
 			  index_storeflag, (char *)storeargs, NULL);
 
-
-    if (mailbox->dirty==1)
-    {
-	/* xxx what to do on failure? */
-	mailbox_write_index_header(mailbox);
-	mailbox->dirty = 0;
-    }
-
     mailbox_unlock_index(mailbox);
 
     /* Refresh the index file, for systems without mmap() */
@@ -854,7 +930,48 @@ int nflags;
 }
 
 /*
- * Performs a SEARCH command
+ * Guts of the SEARCH command.
+ * 
+ * Returns message numbers in an array.  This function is used by
+ * SEARCH, SORT and THREAD.
+ */
+static int
+_index_search(msgno_list, mailbox, searchargs)
+unsigned **msgno_list;
+struct mailbox *mailbox;
+struct searchargs *searchargs;
+{
+    unsigned msgno;
+    struct mapfile msgfile;
+    int n = 0;
+
+    *msgno_list = (unsigned *) xmalloc(imapd_exists * sizeof(unsigned));
+
+    for (msgno = 1; msgno <= imapd_exists; msgno++) {
+	msgfile.base = 0;
+	msgfile.size = 0;
+
+	if (index_search_evaluate(mailbox, searchargs, msgno, &msgfile)) {
+	    (*msgno_list)[n++] = msgno;
+	}
+	if (msgfile.base) {
+	    mailbox_unmap_message(mailbox, UID(msgno),
+				  &msgfile.base, &msgfile.size);
+	}
+    }
+
+    /* if we didn't find any matches, free msgno_list */
+    if (!n) {
+	free(*msgno_list);
+	*msgno_list = NULL;
+    }
+
+    return n;
+}
+
+/*
+ * Performs a SEARCH command.
+ * This is a wrapper around _index_search() which simply prints the results.
  */
 void
 index_search(mailbox, searchargs, usinguid)
@@ -862,46 +979,114 @@ struct mailbox *mailbox;
 struct searchargs *searchargs;
 int usinguid;
 {
-    unsigned msgno;
-    struct mapfile msgfile;
+    unsigned *msgno_list;
+    int i, n;
+
+    n = _index_search(&msgno_list, mailbox, searchargs);
 
     prot_printf(imapd_out, "* SEARCH");
 
-    for (msgno = 1; msgno <= imapd_exists; msgno++) {
-	msgfile.base = 0;
-	msgfile.size = 0;
+    for (i = 0; i < n; i++)
+	prot_printf(imapd_out, " %u",
+		    usinguid ? UID(msgno_list[i]) : msgno_list[i]);
 
-	if (index_search_evaluate(mailbox, searchargs, msgno, &msgfile)) {
-	    prot_printf(imapd_out, " %u", usinguid ? UID(msgno) : msgno);
-	}
-	if (msgfile.base) {
-	    mailbox_unmap_message(mailbox, UID(msgno),
-				  &msgfile.base, &msgfile.size);
-	}
-    }
+    if (n) free(msgno_list);
+
     prot_printf(imapd_out, "\r\n");
+}
+
+/*
+ * Performs a SORT command
+ */
+void
+index_sort(struct mailbox *mailbox,
+	   struct sortcrit *sortcrit,
+	   struct searchargs *searchargs,
+	   int usinguid)
+{
+    unsigned *msgno_list;
+    MsgData *msgdata = NULL, *freeme = NULL;
+    int n;
+
+    /* Search for messages based on the given criteria */
+    n = _index_search(&msgno_list, mailbox, searchargs);
+
+    prot_printf(imapd_out, "* SORT");
+
+    if (n) {
+	/* Create/load the msgdata array */
+	freeme = msgdata = index_msgdata_load(msgno_list, n, sortcrit);
+	free(msgno_list);
+
+	/* Sort the messages based on the given criteria */
+	msgdata = lsort(msgdata,
+			(void * (*)(void*)) index_sort_getnext,
+			(void (*)(void*,void*)) index_sort_setnext,
+			(int (*)(void*,void*,void*)) index_sort_compare,
+			sortcrit);
+
+	/* Output the sorted messages */ 
+	while (msgdata) {
+	    prot_printf(imapd_out, " %u",
+			usinguid ? UID(msgdata->msgno) : msgdata->msgno);
+
+	    /* free contents of the current node */
+	    index_msgdata_free(msgdata);
+
+	    msgdata = msgdata->next;
+	}
+
+	/* free the msgdata array */
+	free(freeme);
+    }
+
+    prot_printf(imapd_out, "\r\n");
+}
+
+/*
+ * Performs a THREAD command
+ */
+void index_thread(struct mailbox *mailbox, int algorithm,
+		  struct searchargs *searchargs, int usinguid)
+{
+    unsigned *msgno_list;
+    int nmsg;
+
+    /* Search for messages based on the given criteria */
+    nmsg = _index_search(&msgno_list, mailbox, searchargs);
+
+    if (nmsg) {
+	/* Thread messages using given algorithm */
+	(*thread_algs[algorithm].threader)(msgno_list, nmsg, usinguid);
+
+	free(msgno_list);
+    }
+
+#if 0 /* enable this if/when empty untagged responses are allowed */
+    else
+	index_thread_print(NULL, usinguid);
+#endif
 }
 
 /*
  * Performs a COPY command
  */
 int
-index_copy(struct mailbox *mailbox, 
-	   char *sequence, 
-	   int usinguid,
-	   char *name, 
-	   char **copyuidp)
+index_copy(mailbox, sequence, usinguid, name, copyuidp)
+struct mailbox *mailbox;
+char *sequence;
+int usinguid;
+char *name;
+char **copyuidp;
 {
     static struct copyargs copyargs;
     int i;
     unsigned long totalsize = 0;
     int r;
-    struct appendstate append_mailbox;
+    struct mailbox append_mailbox;
     char *copyuid;
     int copyuid_len, copyuid_size;
     int sepchar;
-    unsigned long uidvalidity;
-    unsigned long startuid, num;
 
     copyargs.nummsg = 0;
     index_forsequence(mailbox, sequence, usinguid, index_copysetup,
@@ -922,12 +1107,11 @@ index_copy(struct mailbox *mailbox,
 
     r = append_copy(mailbox, &append_mailbox, copyargs.nummsg,
 		    copyargs.copymsg, imapd_userid);
-    if (!r) append_commit(&append_mailbox, &uidvalidity, &startuid,
-			  &num);
+
     if (!r) {
 	copyuid_size = 1024;
 	copyuid = xmalloc(copyuid_size);
-	sprintf(copyuid, "%lu", uidvalidity);
+	sprintf(copyuid, "%u", append_mailbox.uidvalidity);
 	copyuid_len = strlen(copyuid);
 	sepchar = ' ';
 
@@ -936,7 +1120,7 @@ index_copy(struct mailbox *mailbox,
 		copyuid_size += 1024;
 		copyuid = xrealloc(copyuid, copyuid_size);
 	    }
-	    sprintf(copyuid+copyuid_len, "%c%lu", sepchar,
+	    sprintf(copyuid+copyuid_len, "%c%u", sepchar,
 		    copyargs.copymsg[i].uid);
 	    copyuid_len += strlen(copyuid+copyuid_len);
 	    if (i+1 < copyargs.nummsg &&
@@ -945,20 +1129,24 @@ index_copy(struct mailbox *mailbox,
 		    i++;
 		} while (i+1 < copyargs.nummsg &&
 			 copyargs.copymsg[i+1].uid == copyargs.copymsg[i].uid + 1);
-		sprintf(copyuid+copyuid_len, ":%lu",
+		sprintf(copyuid+copyuid_len, ":%u",
 			copyargs.copymsg[i].uid);
 		copyuid_len += strlen(copyuid+copyuid_len);
 	    }
 	    sepchar = ',';
 	}
-	if (num == 1) {
-	    sprintf(copyuid+copyuid_len, " %lu", startuid);
-	} else {
-	    sprintf(copyuid+copyuid_len, " %lu:%lu",
-		    startuid, startuid + num - 1);
+	if (copyargs.nummsg == 1) {
+	    sprintf(copyuid+copyuid_len, " %u", append_mailbox.last_uid);
+	}
+	else {
+	    sprintf(copyuid+copyuid_len, " %u:%u",
+		    append_mailbox.last_uid - copyargs.nummsg + 1,
+		    append_mailbox.last_uid);
 	}
 	*copyuidp = copyuid;
     }
+
+    mailbox_close(&append_mailbox);
 
     return r;
 }
@@ -1093,7 +1281,9 @@ unsigned lowuid;
 int
 index_getstate(mailbox)
 struct mailbox *mailbox;
-{    
+{
+    int r;
+    int msgno;
 
     prot_printf(imapd_out, "* XSTATE %u %u\r\n", mailbox->index_mtime,
 		seen_last_change);
@@ -1236,7 +1426,7 @@ index_forsequence(struct mailbox* mailbox,
     }
 
     for (;;) {
-	if (isdigit((int) *sequence)) {
+	if (isdigit(*sequence)) {
 	    start = start*10 + *sequence - '0';
 	}
 	else if (*sequence == '*') {
@@ -1245,7 +1435,7 @@ index_forsequence(struct mailbox* mailbox,
 	else if (*sequence == ':') {
 	    end = 0;
 	    sequence++;
-	    while (isdigit((int) *sequence)) {
+	    while (isdigit(*sequence)) {
 		end = end*10 + *sequence++ - '0';
 	    }
 	    if (*sequence == '*') {
@@ -1303,7 +1493,7 @@ int usinguid;
     unsigned i, start = 0, end;
 
     for (;;) {
-	if (isdigit((int) *sequence)) {
+	if (isdigit(*sequence)) {
 	    start = start*10 + *sequence - '0';
 	}
 	else if (*sequence == '*') {
@@ -1313,7 +1503,7 @@ int usinguid;
 	else if (*sequence == ':') {
 	    end = 0;
 	    sequence++;
-	    while (isdigit((int) *sequence)) {
+	    while (isdigit(*sequence)) {
 		end = end*10 + *sequence++ - '0';
 	    }
 	    if (*sequence == '*') {
@@ -1388,7 +1578,6 @@ unsigned octet_count;
 	    line = msg_base + offset;
 	    p = memchr(line, '\n', msg_size - offset);
 	    if (!p) {
-		/* partial last line */
 		p = msg_base + msg_size;
 		offset--;	/* hack to keep from going off end
 				 * of mapped region on next iteration */
@@ -1459,7 +1648,7 @@ unsigned start_octet;
 unsigned octet_count;
 {
     char *p;
-    int skip = 0;
+    int skip;
     int fetchmime = 0;
 
     cacheitem += 4;
@@ -1471,9 +1660,9 @@ unsigned octet_count;
 	if (*p == '<') {
 	    p++;
 	    start_octet = octet_count = 0;
-	    while (isdigit((int) *p)) start_octet = start_octet * 10 + *p++ - '0';
+	    while (isdigit(*p)) start_octet = start_octet * 10 + *p++ - '0';
 	    p++;			/* Skip over '.' */
-	    while (isdigit((int) *p)) octet_count = octet_count * 10 + *p++ - '0';
+	    while (isdigit(*p)) octet_count = octet_count * 10 + *p++ - '0';
 	    start_octet++;	/* Make 1-based */
 	}
 
@@ -1484,7 +1673,7 @@ unsigned octet_count;
 
     while (*p != ']' && *p != 'M') {
 	skip = 0;
-	while (isdigit((int) *p)) skip = skip * 10 + *p++ - '0';
+	while (isdigit(*p)) skip = skip * 10 + *p++ - '0';
 	if (*p == '.') p++;
 
 	/* section number too large */
@@ -1532,9 +1721,9 @@ unsigned octet_count;
     if (*p == '<') {
 	p++;
 	start_octet = octet_count = 0;
-	while (isdigit((int) *p)) start_octet = start_octet * 10 + *p++ - '0';
+	while (isdigit(*p)) start_octet = start_octet * 10 + *p++ - '0';
 	p++;			/* Skip over '.' */
-	while (isdigit((int) *p)) octet_count = octet_count * 10 + *p++ - '0';
+	while (isdigit(*p)) octet_count = octet_count * 10 + *p++ - '0';
 	start_octet++;		/* Make 1-based */
     }
 
@@ -1579,7 +1768,7 @@ const char *cacheitem;
 
     while (*p != 'H') {
 	skip = 0;
-	while (isdigit((int) *p)) skip = skip * 10 + *p++ - '0';
+	while (isdigit(*p)) skip = skip * 10 + *p++ - '0';
 	if (*p == '.') p++;
 
 	/* section number too large */
@@ -1608,9 +1797,9 @@ const char *cacheitem;
     if (p[1] == '<') {
 	p += 2;
 	start_octet = octet_count = 0;
-	while (isdigit((int) *p)) start_octet = start_octet * 10 + *p++ - '0';
+	while (isdigit(*p)) start_octet = start_octet * 10 + *p++ - '0';
 	p++;			/* Skip over '.' */
-	while (isdigit((int) *p)) octet_count = octet_count * 10 + *p++ - '0';
+	while (isdigit(*p)) octet_count = octet_count * 10 + *p++ - '0';
 	start_octet++;		/* Make 1-based */
     }
 
@@ -1705,7 +1894,7 @@ unsigned size;
     if (format == MAILBOX_FORMAT_NETNEWS) {
 	left = size;
 	p = buf;
-	while ((endline = memchr(msg_base, '\n', left))!=NULL) {
+	while (endline = memchr(msg_base, '\n', left)) {
 	    linelen = endline - msg_base;
 	    memcpy(p, msg_base, linelen);
 	    p += linelen;
@@ -1859,9 +2048,9 @@ char *trail;
     if (trail[1]) {
 	/* Deal with ]<start.count> */
 	trail += 2;
-	while (isdigit((int) *trail)) start_octet = start_octet * 10 + *trail++ - '0';
+	while (isdigit(*trail)) start_octet = start_octet * 10 + *trail++ - '0';
 	trail++;			/* Skip over '.' */
-	while (isdigit((int) *trail)) octet_count = octet_count * 10 + *trail++ - '0';
+	while (isdigit(*trail)) octet_count = octet_count * 10 + *trail++ - '0';
 
 	if (size <= start_octet) {
 	    crlf_start = start_octet - size;
@@ -1938,7 +2127,7 @@ struct mailbox *mailbox;
 	}
     }
     if (sepchar == '(') prot_printf(imapd_out, "(");
-    prot_printf(imapd_out, ")]  \r\n");
+    prot_printf(imapd_out, ")] \r\n");
 }
 
 /*
@@ -1956,7 +2145,7 @@ time_t last_updated;
 {
     int sepchar = '(';
     unsigned flag;
-    bit32 flagmask = 0;
+    bit32 flagmask;
 
     for (flag = 0; flag < MAX_USER_FLAGS; flag++) {
 	if ((flag & 31) == 0) {
@@ -2023,6 +2212,7 @@ void *rock;
     int fetchitems = fetchargs->fetchitems;
     const char *msg_base = 0;
     unsigned long msg_size = 0;
+    struct stat sbuf;
     int sepchar;
     int i;
     bit32 user_flags[MAX_USER_FLAGS/32];
@@ -2084,7 +2274,7 @@ void *rock;
 	    gmtnegative = 1;
 	}
 	gmtoff /= 60;
-	sprintf(datebuf, "%2u-%s-%u %.2u:%.2u:%.2u %c%.2lu%.2lu",
+	sprintf(datebuf, "%2u-%s-%u %.2u:%.2u:%.2u %c%.2u%.2u",
 		tm->tm_mday, monthname[tm->tm_mon], tm->tm_year+1900,
 		tm->tm_hour, tm->tm_min, tm->tm_sec,
 		gmtnegative ? '-' : '+', gmtoff/60, gmtoff%60);
@@ -2261,11 +2451,10 @@ void *rock;
     struct index_record record;
     int uid = UID(msgno);
     int low=1, high=mailbox->exists;
-    int mid = 0;
+    int mid;
     int r;
     int firsttry = 1;
     int dirty = 0;
-    bit32 oldflags;
 
     /* Change \Seen flag */
     if (storeargs->operation == STORE_REPLACE && (mailbox->myrights&ACL_SEEN))
@@ -2319,9 +2508,6 @@ void *rock;
 	}
     }
 
-    /* save old for acapmbox foo */
-    oldflags = record.system_flags;
-
     if (storeargs->operation == STORE_REPLACE) {
 	if (!(mailbox->myrights & ACL_WRITE)) {
 	    record.system_flags = (record.system_flags&~FLAG_DELETED) |
@@ -2343,7 +2529,6 @@ void *rock;
     }
     else if (storeargs->operation == STORE_ADD) {
 	if (~record.system_flags & storeargs->system_flags) dirty++;
-
 	record.system_flags |= storeargs->system_flags;
 	for (i = 0; i < MAX_USER_FLAGS/32; i++) {
 	    if (~record.user_flags[i] & storeargs->user_flags[i]) dirty++;
@@ -2352,8 +2537,6 @@ void *rock;
     }
     else {			/* STORE_REMOVE */
 	if (record.system_flags & storeargs->system_flags) dirty++;
-
-	/* change the individual entry */
 	record.system_flags &= ~storeargs->system_flags;
 	for (i = 0; i < MAX_USER_FLAGS/32; i++) {
 	    if (record.user_flags[i] & storeargs->user_flags[i]) dirty++;
@@ -2362,27 +2545,6 @@ void *rock;
     }
 
     if (dirty) {
-	/* update totals */
-	if ( (record.system_flags & FLAG_DELETED) && !(oldflags & FLAG_DELETED))
-	    mailbox->deleted++;
-	if ( !(record.system_flags & FLAG_DELETED) && (oldflags & FLAG_DELETED))
-	    mailbox->deleted--;
-
-	if ( (record.system_flags & FLAG_ANSWERED) && !(oldflags & FLAG_ANSWERED))
-	    mailbox->answered++;
-	if ( !(record.system_flags & FLAG_ANSWERED) && (oldflags & FLAG_ANSWERED))
-	    mailbox->answered--;
-
-	if ( (record.system_flags & FLAG_FLAGGED) && !(oldflags & FLAG_FLAGGED))
-	    mailbox->flagged++;
-	if ( !(record.system_flags & FLAG_FLAGGED) && (oldflags & FLAG_FLAGGED))
-	    mailbox->flagged--;
-
-	/* either a system or user flag changed. need to at least touch acap
-	   to change the modtime */
-	mailbox->dirty = 1;
-	
-
 	/* If .SILENT, assume client has updated their cache */
 	if (storeargs->silent && flagreport[msgno] &&
 	    flagreport[msgno] == record.last_updated) {
@@ -2430,6 +2592,7 @@ struct mapfile *msgfile;
     const char *cacheitem;
     int cachelen;
     struct searchsub *s;
+    struct stat sbuf;
 
     if ((searchargs->flags & SEARCH_RECENT_SET) && msgno <= lastnotrecent) return 0;
     if ((searchargs->flags & SEARCH_RECENT_UNSET) && msgno > lastnotrecent) return 0;
@@ -2662,7 +2825,7 @@ char *name;
 char *substr;
 comp_pat *pat;
 {
-    char *q;
+    char *p, *q;
     static struct strlist header;
     static char *buf;
     static int bufsize;
@@ -2691,7 +2854,7 @@ comp_pat *pat;
     index_pruneheader(buf, &header, 0);
     if (!*buf) return 0;	/* Header not present, fail */
     if (!*substr) return 1;	/* Only checking existence, succeed */
-    q = charset_decode1522(buf, NULL, 0);
+    p = charset_decode1522(buf, NULL, 0);
     r = charset_searchstring(substr, pat, q, strlen(q));
     free(q);
     return r;
@@ -2710,7 +2873,7 @@ void *rock;
     struct copyargs *copyargs = (struct copyargs *)rock;
     int flag = 0;
     unsigned userflag;
-    bit32 flagmask = 0;
+    bit32 flagmask;
 
     if (copyargs->nummsg == copyargs->msgalloc) {
 	copyargs->msgalloc += COPYARGSGROW;
@@ -2766,3 +2929,1170 @@ void *rock;
 
     return 0;
 }
+
+/*
+ * Creates a list of msgdata.
+ *
+ * We fill these structs with the info that will be needed
+ * by the specified sort criteria.
+ */
+static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
+				   struct sortcrit *sortcrit)
+{
+    MsgData *md, *cur;
+    const char *cacheitem, *env, *headers, *from, *to, *cc, *subj;
+    int i, j;
+    char *tmpenv;
+    char *envtokens[NUMENVTOKENS];
+
+    if (!n)
+	return NULL;
+
+    /* create an array of MsgData to use as nodes of linked list */
+    md = (MsgData *) xmalloc(n * sizeof(MsgData));
+    memset(md, 0, n * sizeof(MsgData));
+
+    for (i = 0, cur = md; i < n; i++, cur = cur->next) {
+	/* set msgno */
+	cur->msgno = msgno_list[i];
+
+	/* set pointer to next node */
+	cur->next = (i+1 < n ? cur+1 : NULL);
+
+	/* fetch cached info */
+	env = cache_base + CACHE_OFFSET(cur->msgno);
+	cacheitem = CACHE_ITEM_NEXT(env); /* bodystructure */
+	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* body */
+	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* section */
+	headers = CACHE_ITEM_NEXT(cacheitem);
+	from = CACHE_ITEM_NEXT(headers);
+	to = CACHE_ITEM_NEXT(from);
+	cc = CACHE_ITEM_NEXT(to);
+	cacheitem = CACHE_ITEM_NEXT(cc); /* bcc */
+	subj = CACHE_ITEM_NEXT(cacheitem);
+
+	/* make a working copy of envelope -- strip outer ()'s */
+	tmpenv = xstrndup(env+5, strlen(env+4) - 2);
+
+	/* parse envelope into tokens */
+	parse_cached_envelope(tmpenv, envtokens);
+
+	j = 0;
+	while (sortcrit[j].key) {
+	    switch (sortcrit[j++].key & SORT_KEY_MASK) {
+	    case SORT_ARRIVAL:
+		cur->arrival = INTERNALDATE(cur->msgno);
+		break;
+	    case SORT_CC:
+		cur->cc = get_localpart_addr(cc+4);
+		break;
+	    case SORT_DATE:
+		cur->date = message_parse_date(envtokens[ENV_DATE],
+					       PARSE_TIME | PARSE_ZONE);
+		break;
+	    case SORT_FROM:
+		cur->from = get_localpart_addr(from+4);
+		break;
+	    case SORT_SIZE:
+		cur->size = SIZE(cur->msgno);
+		break;
+	    case SORT_SUBJECT:
+		cur->xsubj = index_extract_subject(subj+4, &cur->is_refwd);
+		cur->xsubj_hash = hash(cur->xsubj);
+		break;
+	    case SORT_TO:
+		cur->to = get_localpart_addr(to+4);
+		break;
+	    case LOAD_IDS:
+		index_get_ids(cur, envtokens, headers+4);
+		break;
+	    }
+	}
+
+	free(tmpenv);
+    }
+
+    return md;
+}
+
+/*
+ * Parse a cached envelope into individual tokens
+ */
+static void parse_cached_envelope(char *env, char *tokens[])
+{
+    char *c;
+    int i = 0, len, ncom;
+
+    c = env;
+    while (*c != '\0') {
+	switch (*c) {
+	case ' ':			/* end of token */
+	    *c = '\0';			/* mark end of token */
+	    c++;
+	    break;
+	case 'N':			/* "NIL" */
+	    tokens[i++] = NULL;		/* empty token */
+	    c += 3;			/* skip "NIL" */
+	    break;
+	case '"':			/* quoted string */
+	    c++;			/* skip open quote */
+	    tokens[i++] = c;		/* start of string */
+	    c = strchr(c, '"');		/* find close quote */
+	    *c = '\0';			/* end of string */
+	    c++;			/* skip close quote */
+	    break;
+	case '{':			/* literal */
+	    c++;			/* skip open brace */
+	    len = 0;			/* determine length of literal */
+	    while (isdigit((int) *c)) {
+		len = len*10 + *c - '0';
+		c++;
+	    }
+	    c += 3;			/* skip close brace & CRLF */
+	    tokens[i++] = c;		/* start of literal */
+	    c += len;			/* skip literal */
+	    break;
+	case '(':			/* address list */
+	    c++;			/* skip open paren */
+	    tokens[i++] = c;		/* start of address list */
+	    ncom = 1;			/* find matching close paren */
+	    while (ncom) {		/* until all paren are closed... */
+		if (*c == '(')		/* new open - inc counter */
+		    ncom++;
+		else if (*c == ')')	/* close - dec counter */
+		    ncom--;
+		c++;
+	    }
+	    *(c-1) = '\0';		/* end of list - trim close paren */
+	    break;
+	}
+    }
+}
+
+/*
+ * Get the 'local-part' of an address from a header
+ */
+static char *get_localpart_addr(const char *header)
+{
+    struct address *addr = NULL;
+    char *ret;
+
+    parseaddr_list(header, &addr);
+    ret = xstrdup(addr && addr->mailbox ? addr->mailbox : "");
+    parseaddr_free(addr);
+    return ret;
+}
+
+/*
+ * Extract base subject from subject header
+ */
+static char *index_extract_subject(const char *subj, int *is_refwd)
+{
+    char *s, *base, *ret, *x;
+
+    if (!strcmp(subj, "NIL"))				/* "NIL"? */
+	return xstrdup("");				/* yes, return empty */
+
+    /* make a working copy of subj -- remove double-quotes, if they exist */
+    if (*subj == '"')
+	s = xstrndup(subj+1, strlen(subj) - 2);
+    else
+	s = xstrdup(subj);
+
+    /* trim trailer
+     *
+     * start at the end of the string and work towards the front,
+     * resetting the end of the string as we go.
+     */
+    for (x = s + strlen(s) - 1; x >= s;) {
+	if (isspace((int) *x)) {			/* whitespace? */
+	    *x = '\0';					/* yes, trim it */
+	    x--;					/* skip past it */
+	}
+	else if (x - s >= 4 &&
+		 !strncasecmp(x-4, "(fwd)", 5)) {	/* "(fwd)"? */
+	    *(x-4) = '\0';				/* yes, trim it */
+	    x -= 5;					/* skip past it */
+	    *is_refwd += 1;				/* inc refwd counter */
+	}
+	else
+	    break;					/* we're done */
+    }
+
+    /* trim leader
+     *
+     * start at the head of the string and work towards the end,
+     * skipping over stuff we don't care about.
+     */
+    for (base = s; base;) {
+	if (isspace((int) *base)) base++;		/* whitespace? */
+
+	/* possible refwd */
+	else if ((!strncasecmp(base, "re", 2) &&	/* "re"? */
+		  (x = base + 2)) ||			/* yes, skip past it */
+		 (!strncasecmp(base, "fwd", 3) &&	/* "fwd"? */
+		  (x = base + 3)) ||			/* yes, skip past it */
+		 (!strncasecmp(base, "fw", 2) &&	/* "fw"? */
+		  (x = base + 2))) {			/* yes, skip past it */
+	    int count = 0;				/* init counter */
+	    
+	    while (isspace((int) *x)) x++;		/* skip whitespace */
+
+	    if (*x == '[') {				/* start of blob? */
+		for (x++; x;) {				/* yes, get count */
+		    if (!*x) {				/* end of subj, quit */
+			x = NULL;
+			break;
+		    }
+		    else if (*x == ']')			/* end of blob, done */
+			break;
+		    			/* if we have a digit, and we're still
+					   counting, keep building the count */
+		    else if (isdigit((int) *x) && count != -1)
+			count = count * 10 + *x - '0';
+		    else				/* no digit, */
+			count = -1;			/*  abort counting */
+		    x++;
+		}
+
+		if (x)					/* end of blob? */
+		    x++;				/* yes, skip past it */
+		else
+		    break;				/* no, we're done */
+	    }
+
+	    while (isspace((int) *x)) x++;		/* skip whitespace */
+
+	    if (*x == ':') {				/* ending colon? */
+		base = x + 1;				/* yes, skip past it */
+		*is_refwd += (count > 0 ? count : 1);	/* inc refwd counter
+							   by count or 1 */
+	    }
+	    else
+		break;					/* no, we're done */
+	}
+
+#if 0 /* do nested blobs - wait for decision on this */
+	else if (*base == '[') {			/* start of blob? */
+	    int count = 1;				/* yes, */
+	    x = base + 1;				/*  find end of blob */
+	    while (count) {				/* find matching ']' */
+		if (!*x) {				/* end of subj, quit */
+		    x = NULL;
+		    break;
+		}
+		else if (*x == '[')			/* new open */
+		    count++;				/* inc counter */
+		else if (*x == ']')			/* close */
+		    count--;				/* dec counter */
+		x++;
+	    }
+
+	    if (!x)					/* blob didn't close */
+		break;					/*  so quit */
+
+	    else if (*x)				/* end of subj? */
+		base = x;				/* no, skip blob */
+#else
+	else if (*base == '[' &&			/* start of blob? */
+		 (x = strpbrk(base+1, "[]")) &&		/* yes, end of blob */
+		 *x == ']') {				/*  (w/o nesting)? */
+
+	    if (*(x+1))					/* yes, end of subj? */
+		base = x + 1;				/* no, skip blob */
+#endif
+	    else
+		break;					/* yes, return blob */
+	}
+	else
+	    break;					/* we're done */
+    }
+
+    /* Hack to catch Netscape's wacky "[Fwd: ...]" notation. */
+    if (!strncasecmp(base, "[fwd:", 5) &&
+	base[strlen(base) - 1]  == ']') {
+
+	/* trim ']' */
+	base[strlen(base) - 1] = '\0';
+
+	/* extract contents */
+	ret = index_extract_subject(base+1, is_refwd);
+    }
+
+    /* make a copy of the extracted base */
+    else
+	ret = xstrdup(base);
+
+    free(s);
+
+    return ret;
+}
+
+/* Find a message-id looking thingy in a string.  Returns a pointer to the
+ * id and the length is returned in the *len parameter.
+ *
+ * This is a poor-man's way of finding the message-id.  We simply look for
+ * any string having the format "< ... @ ... >" and assume that the mail
+ * client created a properly formatted message-id.
+ */
+char *find_msgid(char *str, int *len)
+{
+    char *start, *at, *end;
+
+    if (str &&
+	(start = strchr(str, '<')) &&
+	(at = strchr(start, '@')) &&
+	(end = strchr(at, '>'))) {
+	*len = end - start + 1;
+	return start;
+    }
+    else {
+	*len = 0;
+	return NULL;
+    }
+}
+
+/* Get message-id, and references/in-reply-to */
+#define REFGROWSIZE 10
+
+void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers)
+{
+    char *msgid, *refstr, *ref, *in_reply_to;
+    int len, refsize = REFGROWSIZE;
+    char buf[100];
+
+    /* get msgid */
+    msgid = find_msgid(envtokens[ENV_MSGID], &len);
+    /* if we have one, make a copy of it */
+    if (msgid)
+	msgdata->msgid = xstrndup(msgid, len);
+    /* otherwise, create one */
+    else {
+	sprintf(buf, "<Empty-ID: %u>", msgdata->msgno);
+	msgdata->msgid = xstrdup(buf);
+    }
+
+    /* grab the References header */
+    if ((refstr = stristr(headers, "references:"))) {
+	/* allocate some space for refs */
+	msgdata->ref = (char **) xmalloc(refsize * sizeof(char *));
+	/* find references */
+	while ((ref = find_msgid(refstr, &len)) != NULL) {
+	    /* reallocate space for this msgid if necessary */
+	    if (msgdata->nref == refsize) {
+		refsize += REFGROWSIZE;
+		msgdata->ref = (char **)
+		    xrealloc(msgdata->ref, refsize * sizeof(char *));
+	    }
+	    /* store this msgid in the array */
+	    msgdata->ref[msgdata->nref++] = xstrndup(ref, len);
+	    /* skip past this msgid */
+	    refstr = ref + len;
+	}
+    }
+
+    /* if we have no references, try in-reply-to */
+    if (!msgdata->nref) {
+	/* get in-reply-to id */
+	in_reply_to = find_msgid(envtokens[ENV_INREPLYTO], &len);
+	/* if we have an in-reply-to id, make it the ref */
+	if (in_reply_to) {
+	    msgdata->ref = (char **) xmalloc(sizeof(char *));
+	    msgdata->ref[msgdata->nref++] = xstrndup(in_reply_to, len);
+	}
+    }
+}
+
+/*
+ * Getnext function for sorting message lists.
+ */
+static void *index_sort_getnext(MsgData *node)
+{
+    return node->next;
+}
+
+/*
+ * Setnext function for sorting message lists.
+ */
+static void index_sort_setnext(MsgData *node, MsgData *next)
+{
+    node->next = next;
+}
+
+/*
+ * Function for comparing two integers.
+ */
+static int numcmp(int x, int y)
+{
+    return ((x < y) ? -1 : (x > y) ? 1 : 0);
+}
+
+/*
+ * Comparison function for sorting message lists.
+ */
+static int index_sort_compare(MsgData *md1, MsgData *md2,
+			      struct sortcrit *sortcrit)
+{
+    int reverse, ret = 0, i = 0;
+    int label;
+
+    do {
+	/* determine sort order from reverse flag bit */
+	reverse = sortcrit[i].key & SORT_REVERSE;
+	label = sortcrit[i].key & SORT_KEY_MASK;
+
+	switch (label) {
+	case SORT_SEQUENCE:
+	    ret = numcmp(md1->msgno, md2->msgno);
+	    break;
+	case SORT_ARRIVAL:
+	    ret = numcmp(md1->arrival, md2->arrival);
+	    break;
+	case SORT_CC:
+	    ret = strcmp(md1->cc, md2->cc);
+	    break;
+	case SORT_DATE:
+	    ret = numcmp(md1->date, md2->date);
+	    break;
+	case SORT_FROM:
+	    ret = strcmp(md1->from, md2->from);
+	    break;
+	case SORT_SIZE:
+	    ret = numcmp(md1->size, md2->size);
+	    break;
+	case SORT_SUBJECT:
+	    ret = strcmp(md1->xsubj, md2->xsubj);
+	    break;
+	case SORT_TO:
+	    ret = strcmp(md1->to, md2->to);
+	    break;
+	}
+    } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
+
+    return (reverse ? -ret : ret);
+}
+
+/*
+ * Free a msgdata node.
+ */
+static void index_msgdata_free(MsgData *md)
+{
+#define FREE(x)	if (x) free(x)
+    int i;
+
+    if (!md)
+	return;
+    FREE(md->cc);
+    FREE(md->from);
+    FREE(md->to);
+    FREE(md->xsubj);
+    FREE(md->msgid);
+    for (i = 0; i < md->nref; i++)
+	free(md->ref[i]);
+    FREE(md->ref);
+}
+
+/*
+ * Getnext function for sorting thread lists.
+ */
+static void *index_thread_getnext(Thread *thread)
+{
+    return thread->next;
+}
+
+/*
+ * Setnext function for sorting thread lists.
+ */
+static void index_thread_setnext(Thread *thread, Thread *next)
+{
+    thread->next = next;
+}
+
+/*
+ * Comparison function for sorting threads.
+ */
+static int index_thread_compare(Thread *t1, Thread *t2,
+				struct sortcrit *call_data)
+{
+    MsgData *md1, *md2;
+
+    /* if the container is empty, use the first child's container */
+    md1 = t1->msgdata ? t1->msgdata : t1->child->msgdata;
+    md2 = t2->msgdata ? t2->msgdata : t2->child->msgdata;
+    return index_sort_compare(md1, md2, call_data);
+}
+
+/*
+ * Sort a list of threads.
+ */
+static void index_thread_sort(Thread *root, struct sortcrit *sortcrit)
+{
+    Thread *child;
+
+    /* sort the grandchildren */
+    child = root->child;
+    while (child) {
+	/* if the child has children, sort them */
+	if (child->child)
+	    index_thread_sort(child, sortcrit);
+	child = child->next;
+    }
+
+    /* sort the children */
+    root->child = lsort(root->child,
+			(void * (*)(void*)) index_thread_getnext,
+			(void (*)(void*,void*)) index_thread_setnext,
+			(int (*)(void*,void*,void*)) index_thread_compare,
+			sortcrit);
+}
+
+/*
+ * Thread a list of messages using the ORDEREDSUBJECT algorithm.
+ */
+static void index_thread_orderedsubj(unsigned *msgno_list, int nmsg,
+				     int usinguid)
+{
+    MsgData *msgdata, *freeme;
+    struct sortcrit sortcrit[] = {{ SORT_SUBJECT,  {0,0} },
+				  { SORT_DATE,     {0,0} },
+				  { SORT_SEQUENCE, {0,0} }};
+    unsigned psubj_hash = 0;
+    char *psubj;
+    Thread *head, *newnode, *cur, *parent;
+
+    /* Create/load the msgdata array */
+    freeme = msgdata = index_msgdata_load(msgno_list, nmsg, sortcrit);
+
+    /* Sort messages by subject and date */
+    msgdata = lsort(msgdata,
+		    (void * (*)(void*)) index_sort_getnext,
+		    (void (*)(void*,void*)) index_sort_setnext,
+		    (int (*)(void*,void*,void*)) index_sort_compare,
+		    sortcrit);
+
+    /* create an array of Thread to use as nodes of thread tree
+     *
+     * we will be building threads under a dummy head,
+     * so we need (nmsg + 1) nodes
+     */
+    head = (Thread *) xmalloc((nmsg + 1) * sizeof(Thread));
+    memset(head, 0, (nmsg + 1) * sizeof(Thread));
+
+    newnode = head + 1;	/* set next newnode to the second
+			   one in the array (skip the head) */
+    parent = head;	/* parent is the head node */
+    psubj = NULL;	/* no previous subject */
+    cur = NULL;		/* no current thread */
+
+    while (msgdata) {
+	/* if no previous subj, or
+	   current subj = prev subj (subjs have same hash, and
+	   the strings are equal), then add message to current thread */
+	if (!psubj ||
+	    (msgdata->xsubj_hash == psubj_hash &&
+	     !strcmp(msgdata->xsubj, psubj))) {
+	    parent->child = newnode;	/* create a new child */
+	    parent->child->msgdata = msgdata;
+	    if (!cur)
+		cur = parent->child;	/* first thread */
+	    parent = parent->child;	/* this'll be the parent 
+					   next time around */
+	}
+	/* otherwise, create a new thread */
+	else {
+	    cur->next = newnode;	/* create and start a new thread */
+	    cur->next->msgdata = msgdata;
+	    parent = cur = cur->next;	/* now work with the new thread */
+	}
+
+	psubj_hash = msgdata->xsubj_hash;
+	psubj = msgdata->xsubj;
+	msgdata = msgdata->next;
+	newnode++;
+    }
+
+    /* Sort threads by date */
+    index_thread_sort(head, sortcrit+1);
+
+    /* Output the threaded messages */ 
+    index_thread_print(head, usinguid);
+
+    /* free the thread array */
+    free(head);
+
+    /* free the msgdata array */
+    free(freeme);
+}
+
+/*
+ * Guts of thread printing.  Recurses over children when necessary.
+ *
+ * Frees contents of msgdata as a side effect.
+ */
+static void _index_thread_print(Thread *thread, int usinguid)
+{
+    Thread *child;
+
+    /* for each thread... */
+    while (thread) {
+	/* start the thread */
+	prot_printf(imapd_out, "(");
+
+	/* if we have a message, print its identifier
+	 * (do nothing for empty containers)
+	 */
+	if (thread->msgdata) {
+	    prot_printf(imapd_out, "%u",
+			usinguid ? UID(thread->msgdata->msgno) :
+			thread->msgdata->msgno);
+
+	    /* if we have a child, print the parent-child separator */
+	    if (thread->child) prot_printf(imapd_out, " ");
+
+	    /* free contents of the current node */
+	    index_msgdata_free(thread->msgdata);
+	}
+
+	/* for each child, grandchild, etc... */
+	child = thread->child;
+	while (child) {
+	    /* if the child has siblings, print new branch and break */
+	    if (child->next) {
+		_index_thread_print(child, usinguid);
+		break;
+	    }
+	    /* otherwise print the only child */
+	    else {
+		prot_printf(imapd_out, "%u",
+			    usinguid ? UID(child->msgdata->msgno) :
+			    child->msgdata->msgno);
+
+		/* if we have a child, print the parent-child separator */
+		if (child->child) prot_printf(imapd_out, " ");
+
+		/* free contents of the child node */
+		index_msgdata_free(child->msgdata);
+
+		child = child->child;
+	    }
+	}
+
+	/* end the thread */
+	prot_printf(imapd_out, ")");
+
+	thread = thread->next;
+    }
+}
+
+/*
+ * Print a list of threads.
+ *
+ * This is a wrapper around _index_thread_print() which simply prints the
+ * start and end of the untagged thread response.
+ */
+static void index_thread_print(Thread *thread, int usinguid)
+{
+    prot_printf(imapd_out, "* THREAD ");
+
+    if (thread) _index_thread_print(thread->child, usinguid);
+
+    prot_printf(imapd_out, "\r\n");
+}
+
+/*
+ * List threading algorithms for CAPABILITY.
+ */
+void list_thread_algorithms(struct protstream *out)
+{
+    struct thread_algorithm *thr_alg;
+
+    for (thr_alg = thread_algs; thr_alg->alg_name; thr_alg++)
+	prot_printf(out, " THREAD=%s", thr_alg->alg_name);
+}
+
+/*
+ * Find threading algorithm for given arg.
+ * Returns index into thread_algs[], or -1 if not found.
+ */
+int find_thread_algorithm(char *arg)
+{
+    int alg;
+
+    ucase(arg);
+    for (alg = 0; thread_algs[alg].alg_name; alg++) {
+	if (!strcmp(arg, thread_algs[alg].alg_name))
+	    return alg;
+    }
+    return -1;
+}
+
+#ifdef ENABLE_THREAD_JWZ
+/*
+ * The following code is an interpretation of JWZ's description
+ * and pseudo-code in http://www.jwz.org/doc/threading.html.
+ */
+
+/*
+ * Determines if child is a descendent of parent.
+ *
+ * Returns 1 if yes, 0 otherwise.
+ */
+static int thread_is_descendent(Thread *parent, Thread *child)
+{
+    Thread *kid;
+
+    /* self */
+    if (parent == child)
+	return 1;
+
+    /* search each child's decendents */
+    for (kid = parent->child; kid; kid = kid->next) {
+	if (thread_is_descendent(kid, child))
+	    return 1;
+    }
+    return 0;
+}
+
+/*
+ * Links child into parent's children.
+ */
+static void thread_adopt_child(Thread *parent, Thread *child)
+{
+    child->parent = parent;
+    child->next = parent->child;
+    parent->child = child;
+}
+
+/*
+ * Unlinks child from it's parent's children.
+ */
+static void thread_orphan_child(Thread *child)
+{
+    Thread *prev, *cur;
+
+    /* sanity check -- make sure child is actually a child of parent */
+    for (prev = NULL, cur = child->parent->child;
+	 cur != child && cur != NULL; prev = cur, cur = cur->next);
+
+    if (!cur) {
+	/* uh oh!  couldn't find the child in it's parent's children
+	 * we should probably return NO to thread command
+	 */
+	return;
+    }
+
+    /* unlink child */
+    if (!prev)	/* first child */
+	child->parent->child = child->next;
+    else
+	prev->next = child->next;
+    child->parent = child->next = NULL;
+}
+
+/*
+ * Link messages together using message-id and references.
+ */
+void ref_link_messages(MsgData *msgdata, Thread **newnode,
+		       struct hash_table *id_table)
+{
+    Thread *cur, *parent, *ref;
+    int i;
+
+    /* for each message... */
+    while (msgdata) {
+	/* Step 1A: fill the containers with msgdata
+	 *
+	 * if we already have a container, use it
+	 */
+	if ((cur = (Thread *) hash_lookup(msgdata->msgid, id_table))) {
+	    /* If this container is not empty, then we have a duplicate
+	     * Message-ID.  Make this one unique so that we don't stomp
+	     * on the old one.
+	     */
+	    if (cur->msgdata) {
+		msgdata->msgid =
+		    (char *) xrealloc(msgdata->msgid, strlen(msgdata->msgid)+5);
+		strcat(msgdata->msgid, "-dup");
+		/* clear cur so that we create a new container */
+		cur = NULL;
+	    }
+	    else
+		cur->msgdata = msgdata;
+	}
+
+	/* otherwise, make and index a new container */
+	if (!cur) {
+	    cur = *newnode;
+	    cur->msgdata = msgdata;
+	    hash_insert(msgdata->msgid, cur, id_table);
+	    (*newnode)++;
+	}
+
+	/* Step 1B */
+	for (i = 0, parent = NULL; i < msgdata->nref; i++) {
+	    /* if we don't already have a container for the reference,
+	     * make and index a new (empty) container
+	     */
+	    if (!(ref = (Thread *) hash_lookup(msgdata->ref[i], id_table))) {
+		ref = *newnode;
+		hash_insert(msgdata->ref[i], ref, id_table);
+		(*newnode)++;
+	    }
+
+	    /* link the references together as parent-child iff:
+	     * - we won't change existing links, AND
+	     * - we won't create a loop
+	     */
+	    if (!ref->parent &&
+		parent && !thread_is_descendent(ref, parent)) {
+		thread_adopt_child(parent, ref);
+	    }
+
+	    parent = ref;
+	}
+
+	/* Step 1C
+	 *
+	 * if we have a parent already, it is probably bogus (the result
+	 * of a truncated references field), so unlink from it because
+	 * we now have the actual parent
+	 */
+	if (cur->parent) thread_orphan_child(cur);
+
+	/* make the last reference the parent of our message iff:
+	 * - we won't create a loop
+	 */
+	if (parent && !thread_is_descendent(cur, parent))
+	    thread_adopt_child(parent, cur);
+
+	msgdata = msgdata->next;
+    }
+}
+
+/* Root node for all threads - all threads are children of this dummy node */
+static Thread *root;
+
+/* Number of children of the root node */
+static unsigned nroot;
+
+/*
+ * Gather orphan messages under the root node.
+ */
+static void ref_gather_orphans(char *key, Thread *node)
+{
+    /* we only care about nodes without parents */
+    if (!node->parent) {
+	if (node->next) {
+	    /* uh oh!  a node without a parent should not have a sibling
+	     * we should probably return NO to thread command
+	     */
+	    return;
+	}
+
+	/* add this node to root's children */
+	node->next = root->child;
+	root->child = node;
+	nroot++;
+    }
+}
+
+/*
+ * Prune tree of empty containers.
+ */
+static void ref_prune_tree(Thread *parent)
+{
+    Thread *cur, *prev, *next, *child;
+
+    for (prev = NULL, cur = parent->child, next = cur->next;
+	 cur;
+	 prev = cur, cur = next, next = (cur ? cur->next : NULL)) {
+
+	/* if we have an empty container with no children, delete it */
+	if (!cur->msgdata && !cur->child) {
+	    if (!prev)	/* first child */
+		parent->child = cur->next;
+	    else
+		prev->next = cur->next;
+
+	    /* we just removed cur from our list,
+	     * so we need to keep the same prev for the next pass
+	     */
+	    cur = prev;
+	}
+
+	/* if we have empty container with children, AND
+	 * we're not at the root OR we only have one child,
+	 * then remove the container but promote its children to this level
+	 * (splice them into the current child list)
+	 */
+	else if (!cur->msgdata && cur->child &&
+		 (cur->parent || !cur->child->next)) {
+	    /* move cur's children into cur's place (start the splice) */
+	    if (!prev)	/* first child */
+		parent->child = cur->child;
+	    else
+		prev->next = cur->child;
+
+	    /* make cur's parent the new parent of cur's children
+	     * (they're moving in with grandma!)
+	     */
+	    child = cur->child;
+	    do {
+		child->parent = cur->parent;
+	    } while (child->next && (child = child->next));
+
+	    /* make the cur's last child point to cur's next sibling
+	     * (finish the splice)
+	     */
+	    child->next = cur->next;
+
+	    /* we just replaced cur with it's children
+	     * so make it's first child the next node to process
+	     */
+	    next = cur->child;
+
+	    /* make cur childless and siblingless */
+	    cur->child = cur->next = NULL;
+
+	    /* we just removed cur from our list,
+	     * so we need to keep the same prev for the next pass
+	     */
+	    cur = prev;
+	}
+
+	/* if we have a message with children, prune it's children */
+	else if (cur->child)
+	    ref_prune_tree(cur);
+    }
+}
+
+void ref_group_subjects(Thread *root, unsigned nroot, Thread **newnode)
+{
+    Thread *cur, *old, *prev, *next, *child;
+    struct hash_table subj_table;
+    char *subj;
+
+    /* Step 5A: create a subj_table with one bucket for every possible
+     * subject in the root set
+     */
+    construct_hash_table(&subj_table, nroot);
+
+    /* Step 5B: populate the table with a container for each subject
+     * at the root
+     */
+    for (cur = root->child; cur; cur = cur->next) {	
+	/* if the container is not empty, use it's subject */
+	if (cur->msgdata)
+	    subj = cur->msgdata->xsubj;
+	/* otherwise, use the subject of it's first child */
+	else
+	    subj = cur->child->msgdata->xsubj;
+
+#if 0 /* part of JWZ but NOT part of current REFERENCES draft */
+	/* if subject is empty, skip it */
+	if (!strlen(subj)) continue;
+#endif
+
+	/* lookup this subject in the table */
+	old = (Thread *) hash_lookup(subj, &subj_table);
+
+	/* insert the current container into the table iff:
+	 * - this subject is not in the table, OR
+	 * - this container is empty AND the one in the table is not
+	 *   (the empty one is more interesting as a root), OR
+	 * - the container in the table is a re/fwd AND this one is not
+	 *   (the non-re/fwd is the more interesting of the two)
+	 */
+	if (!old ||
+	    (!cur->msgdata && old->msgdata) ||
+	    (old->msgdata && old->msgdata->is_refwd &&
+	     cur->msgdata && !cur->msgdata->is_refwd)) {
+	  hash_insert(subj, cur, &subj_table);
+	}
+    }
+
+    /* 5C - group containers with the same subject together */
+    for (prev = NULL, cur = root->child, next = cur->next;
+	 cur;
+	 prev = cur, cur = next, next = (next ? next->next : NULL)) {	
+	/* if container is not empty, use it's subject */
+	if (cur->msgdata)
+	    subj = cur->msgdata->xsubj;
+	/* otherwise, use the subject of it's first child */
+	else
+	    subj = cur->child->msgdata->xsubj;
+
+#if 0 /* part of JWZ but NOT part of current REFERENCES draft */
+	/* if subject is empty, skip it */
+	if (!strlen(subj)) continue;
+#endif
+
+	/* lookup this subject in the table */
+	old = (Thread *) hash_lookup(subj, &subj_table);
+
+	/* if we found ourselves, skip it */
+	if (old == cur) continue;
+
+	/* ok, we already have a container which contains our current subject,
+	 * so pull this container out of the root set, because we are going to
+	 * merge this node with another one
+	 */
+	if (!prev)	/* we're at the root */
+	    root->child = cur->next;
+	else
+	    prev->next = cur->next;
+	cur->next = NULL;
+
+	/* if both containers are dummies, append cur's children to old's */
+	if (!old->msgdata && !cur->msgdata) {
+	    /* find old's last child */
+	    for (child = old->child; child->next; child = child->next);
+
+	    /* append cur's children to old's children list */
+	    child->next = cur->child;
+
+	    /* make old the parent of cur's children */
+	    for (child = cur->child; child; child = child->next)
+		child->parent = old;
+
+	    /* make cur childless */
+	    cur->child = NULL;
+	}
+
+	/* if:
+	 * - old container is empty, OR
+	 * - the current message is a re/fwd AND the old one is not,
+	 * make the current container a child of the old one
+	 *
+	 * Note: we don't have to worry about the reverse cases
+	 * because step 5B guarantees that they won't happen
+	 */
+	else if (!old->msgdata ||
+		 (cur->msgdata && cur->msgdata->is_refwd &&
+		  !old->msgdata->is_refwd)) {
+	    thread_adopt_child(old, cur);
+	}
+
+	/* if both messages are re/fwds OR neither are re/fwds,
+	 * then make them both children of a new dummy container
+	 * (we don't want to assume any parent-child relationship between them)
+	 *
+	 * perhaps we can create a parent-child relationship
+	 * between re/fwds by counting the number of re/fwds
+	 *
+	 * Note: we need the hash table to still point to old,
+	 * so we must make old the dummy and make the contents of the
+	 * new container a copy of old's original contents
+	 */
+	else {
+	    Thread *new = (*newnode)++;
+
+	    /* make new a copy of old (except parent and next) */
+ 	    new->msgdata = old->msgdata;
+	    new->child = old->child;
+	    new->next = NULL;
+
+	    /* make new the parent of it's newly adopted children */
+	    for (child = new->child; child; child = child->next)
+		child->parent = new;
+
+	    /* make old the parent of cur and new */
+	    cur->parent = old;
+	    new->parent = old;
+
+	    /* empty old and make it have two children (cur and new) */
+	    old->msgdata = NULL;
+	    old->child = cur;
+	    cur->next = new;
+	}
+
+	/* we just removed cur from our list,
+	 * so we need to keep the same prev for the next pass
+	 */
+	cur = prev;
+    }
+
+    free_hash_table(&subj_table, NULL);
+}
+
+/*
+ * Thread a list of messages using the REFERENCES algorithm.
+ */
+void index_thread_ref(unsigned *msgno_list, int nmsg, int usinguid)
+{
+    MsgData *msgdata, *freeme, *md;
+    struct sortcrit sortcrit[] = {{ LOAD_IDS,      {0,0} },
+				  { SORT_SUBJECT,  {0,0} },
+				  { SORT_DATE,     {0,0} },
+				  { SORT_SEQUENCE, {0,0} }};
+    int tref, nnode;
+    Thread *newnode;
+    struct hash_table id_table;
+
+    /* Create/load the msgdata array */
+    freeme = msgdata = index_msgdata_load(msgno_list, nmsg, sortcrit);
+
+    /* calculate the sum of the number of references for all messages */
+    for (md = msgdata, tref = 0; md; md = md->next)
+	tref += md->nref;
+
+    /* create an array of Thread to use as nodes of thread tree (including
+     * empty containers)
+     *
+     * - We will be building threads under a dummy root, so we need at least
+     *   (nmsg + 1) nodes.
+     * - We also will need containers for references to non-existent messages.
+     *   To make sure we have enough, we will take the worst case and
+     *   use the sum of the number of references for all messages.
+     * - Finally, we will might need containers to group threads with the same
+     *   subject together.  To make sure we have enough, we will take the
+     *   worst case which will be half of the number of messages.
+     *
+     * This is overkill, but it is the only way to make sure we have enough
+     * ahead of time.  If we tried to use xrealloc(), the array might be moved,
+     * and our parent/child/next pointers will no longer be correct
+     * (been there, done that).
+     */
+    nnode = (int) (1.5 * nmsg + 1 + tref);
+    root = (Thread *) xmalloc(nnode * sizeof(Thread));
+    memset(root, 0, nnode * sizeof(Thread));
+
+    newnode = root + 1;	/* set next newnode to the second
+			   one in the array (skip the root) */
+
+    /* Step 0: create an id_table with one bucket for every possible
+     * message-id and reference (nmsg + tref)
+     */
+    construct_hash_table(&id_table, nmsg + tref);
+
+    /* Step 1: link messages together */
+    ref_link_messages(msgdata, &newnode, &id_table);
+
+    /* Step 2: find the root set (gather all of the orphan messages) */
+    nroot = 0;
+    hash_enumerate(&id_table, (void (*)(char*,void*)) ref_gather_orphans);
+
+    /* Step 3: discard id_table */
+    free_hash_table(&id_table, NULL);
+
+    /* Step 4: prune tree of empty containers - get our deposit back :^) */
+    ref_prune_tree(root);
+
+    /* Step 5: group root set by subject */
+    ref_group_subjects(root, nroot, &newnode);
+
+    /* Step 6: done threading */
+
+    /* Step 7: sort threads by date */
+    index_thread_sort(root, sortcrit+2);
+
+    /* Output the threaded messages */ 
+    index_thread_print(root, usinguid);
+
+    /* free the thread array */
+    free(root);
+
+    /* free the msgdata array */
+    free(freeme);
+}
+#endif /* ENABLE_THREAD_JWZ */
