@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.304.2.8.2.6 2001/07/08 15:59:59 ken3 Exp $ */
+/* $Id: imapd.c,v 1.304.2.8.2.7 2001/07/09 18:36:17 ken3 Exp $ */
 
 #include <config.h>
 
@@ -5551,7 +5551,8 @@ void* rock;
 static void mstringdata(char *cmd, char *name, int matchlen, int maycreate)
 {
     static char lastname[MAX_MAILBOX_PATH];
-    static int lastnamedelayed;
+    static int lastnamedelayed = 0;
+    static int lastnamenoinferiors = 0;
     static int sawuser = 0;
     int lastnamehassub = 0;
     int c;
@@ -5568,19 +5569,19 @@ static void mstringdata(char *cmd, char *name, int matchlen, int maycreate)
     mstringdatacalls++;
     
     if (lastnamedelayed) {
-	if (name && strcasecmp(lastname, "INBOX") != 0 &&
-	    strncmp(lastname, name, strlen(lastname)) == 0 &&
+	if (name && strncmp(lastname, name, strlen(lastname)) == 0 &&
 	    name[strlen(lastname)] == '.') {
 	    lastnamehassub = 1;
 	}
 	prot_printf(imapd_out, "* %s (%s) \"%c\" ", cmd,
-		    lastnamehassub ? "" : "\\Noinferiors",
+		    lastnamenoinferiors ? "\\Noinferiors" :
+		    lastnamehassub ? "\\HasChildren" : "\\HasNoChildren",
 		    imapd_namespace.hier_sep);
 	(*imapd_namespace.mboxname_toexternal)(lastname, &imapd_namespace,
 					       imapd_userid, mboxname);
 	printstring(mboxname);
 	prot_printf(imapd_out, "\r\n");
-	lastnamedelayed = 0;
+	lastnamedelayed = lastnamenoinferiors = 0;
     }
 
     /* Special-case to flush any final state */
@@ -5606,14 +5607,16 @@ static void mstringdata(char *cmd, char *name, int matchlen, int maycreate)
     strcpy(lastname, name);
     lastname[matchlen] = '\0';
 
-    if (!name[matchlen] && !maycreate) {
+    if (!name[matchlen]) {
 	lastnamedelayed = 1;
+	if (!maycreate) lastnamenoinferiors = 1;
 	return;
     }
 
     c = name[matchlen];
     if (c) name[matchlen] = '\0';
-    prot_printf(imapd_out, "* %s (%s) \"%c\" ", cmd, c ? "\\Noselect" : "",
+    prot_printf(imapd_out, "* %s (%s) \"%c\" ", cmd,
+		c ? "\\HasChildren \\Noselect" : "",
 		imapd_namespace.hier_sep);
     (*imapd_namespace.mboxname_toexternal)(name, &imapd_namespace,
 					   imapd_userid, mboxname);
