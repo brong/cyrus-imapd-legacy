@@ -1,5 +1,5 @@
 /* exitcodes.h -- wrapper around sysextis.h
- * $Id: exitcodes.h,v 1.1 1999/09/21 23:16:10 tmartin Exp $
+ * $Id: exitcodes.h,v 1.1.2.1 1999/10/13 19:29:48 leg Exp $
  *
  *        Copyright 1998 by Carnegie Mellon University
  *

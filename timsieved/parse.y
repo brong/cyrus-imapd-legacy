@@ -3,7 +3,7 @@
 /* parse.y -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parse.y,v 1.6 1999/10/04 18:23:08 leg Exp $
+ * $Id: parse.y,v 1.6.2.1 1999/10/13 19:29:55 leg Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University

@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.7 1999/10/04 18:23:07 leg Exp $
+ * $Id: actions.c,v 1.7.2.1 1999/10/13 19:29:52 leg Exp $
  * 
  */
 /***********************************************************

@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.1 1999/10/13 19:09:33 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.2 1999/10/13 19:29:46 leg Exp $
  */
 
 #include <stdio.h>
