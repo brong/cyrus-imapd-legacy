@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.h,v 1.1.2.1 2004/02/14 16:15:15 ken3 Exp $
+ * $Id: lmtp_proxy.h,v 1.1.2.2 2004/02/18 19:08:50 ken3 Exp $
  */
 
 #ifndef _LMTP_PROXY_H
@@ -82,14 +82,9 @@ struct remote_msgdata {
 
 typedef struct remote_msgdata remote_msgdata_t;
 
-struct backend *proxy_findserver(const char *server);
-
 void adddest(remote_msgdata_t *mydata, const char *rcpt,
 	     char *server, char *mailbox, const char *authas);
 
 void runme(remote_msgdata_t *mydata, message_data_t *msgdata);
-
-
-void kick_mupdate(void);
 
 #endif /* _LMTP_PROXY_H */

@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.c,v 1.1.2.2 2004/02/16 21:20:40 ken3 Exp $
+ * $Id: lmtp_proxy.c,v 1.1.2.3 2004/02/18 19:08:50 ken3 Exp $
  */
 
 #include <config.h>
@@ -59,44 +59,10 @@
 #include "mboxname.h"
 #include "mupdate-client.h"
 #include "prot.h"
+#include "proxy.h"
 #include "xmalloc.h"
 
 extern struct backend **backend_cached;
-
-/* return the connection to the server */
-struct backend *proxyd_findserver(const char *server)
-{
-    int i = 0;
-    struct backend *ret = NULL;
-
-    while (backend_cached && backend_cached[i]) {
-	if (!strcmp(server, backend_cached[i]->hostname)) {
-	    ret = backend_cached[i];
-	    /* ping/noop the server */
-	    if ((ret->sock != -1) && backend_ping(ret)) {
-		backend_disconnect(ret);
-	    }
-	    break;
-	}
-	i++;
-    }
-
-    if (!ret || (ret->sock == -1)) {
-	/* need to (re)establish connection to server or create one */
-	ret = backend_connect(ret, server, &protocol[PROTOCOL_LMTP], "", NULL);
-	if (!ret) return NULL;
-    }
-
-    /* insert server in list of cached connections */
-    if (!backend_cached[i]) {
-	backend_cached = (struct backend **) 
-	    xrealloc(backend_cached, (i + 2) * sizeof(struct backend *));
-	backend_cached[i] = ret;
-	backend_cached[i + 1] = NULL;
-    }
-
-    return ret;
-}
 
 void adddest(remote_msgdata_t *mydata, const char *rcpt,
 	     char *server, char *mailbox, const char *authas)
@@ -161,7 +127,8 @@ void runme(remote_msgdata_t *mydata, message_data_t *msgdata)
 	}
 	assert(i == d->rnum);
 
-	remote = proxyd_findserver(d->server);
+	remote = proxy_findserver(d->server, &protocol[PROTOCOL_LMTP], "",
+				  &backend_cached, NULL, NULL, NULL);
 	if (remote) {
 	    r = lmtp_runtxn(remote, lt);
 	} else {
@@ -205,43 +172,4 @@ void runme(remote_msgdata_t *mydata, message_data_t *msgdata)
 	free(lt);
 	d = d->next;
     }
-}
-
-void kick_mupdate(void)
-{
-    char buf[2048];
-    struct sockaddr_un srvaddr;
-    int s, r;
-    int len;
-    
-    s = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (s == -1) {
-	syslog(LOG_ERR, "socket: %m");
-	return;
-    }
-
-    strlcpy(buf, config_dir, sizeof(buf));
-    strlcat(buf, FNAME_MUPDATE_TARGET_SOCK, sizeof(buf));
-    memset((char *)&srvaddr, 0, sizeof(srvaddr));
-    srvaddr.sun_family = AF_UNIX;
-    strcpy(srvaddr.sun_path, buf);
-    len = sizeof(srvaddr.sun_family) + strlen(srvaddr.sun_path) + 1;
-
-    r = connect(s, (struct sockaddr *)&srvaddr, len);
-    if (r == -1) {
-	syslog(LOG_ERR, "kick_mupdate: can't connect to target: %m");
-	close(s);
-	return;
-    }
-
-    r = read(s, buf, sizeof(buf));
-    if (r <= 0) {
-	syslog(LOG_ERR, "kick_mupdate: can't read from target: %m");
-	close(s);
-	return;
-    }
-
-    /* if we got here, it's been kicked */
-    close(s);
-    return;
 }
