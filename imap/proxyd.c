@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.4 2001/08/07 21:51:22 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.5 2001/08/09 19:19:52 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -581,14 +581,14 @@ static int proxy_authenticate(struct backend *s)
     if (getpeername(s->sock, (struct sockaddr *)&saddr_r, &addrsize) != 0)
 	return SASL_FAIL;
     if(iptostring((struct sockaddr *)&saddr_r, sizeof(struct sockaddr_in),
-		  remoteip, 60) == 0)
+		  remoteip, 60) != 0)
 	return SASL_FAIL;
   
     addrsize=sizeof(struct sockaddr_in);
     if (getsockname(s->sock, (struct sockaddr *)&saddr_l, &addrsize)!=0)
 	return SASL_FAIL;
     if(iptostring((struct sockaddr *)&saddr_l, sizeof(struct sockaddr_in),
-		  localip, 60) == 0)
+		  localip, 60) != 0)
 	return SASL_FAIL;
 
     r = sasl_client_new("imap", s->hostname, localip, remoteip,
