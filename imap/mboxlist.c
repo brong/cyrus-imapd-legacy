@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.16 1999/10/18 21:27:22 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.17 1999/10/18 22:01:21 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -754,8 +754,7 @@ int checkacl;
 	  /* if this entry is not in the quota root then we can delete the quota root */
 	  if ( strlen(mboxent->name) >= strlen(mailbox.quota.root)+1)
 	    if (strncmp(mboxent->name, mailbox.quota.root, strlen(mailbox.quota.root))!=0)
-	      if ((mboxent->name[strlen(mailbox.quota.root)]=='.') ||
-		  (mboxent->name[strlen(mailbox.quota.root)]=='\t'))
+	      if (mboxent->name[strlen(mailbox.quota.root)]!='.')
 		delete_quota_root=1;
 
 	  break;
@@ -1439,8 +1438,8 @@ void* rock;
 
     memset(&data, 0, sizeof(data));
     memset(&key, 0, sizeof(key));
-    key.data = ""; /* xxx should use pattern */
-    key.size = 0;
+    key.data = pattern;
+    key.size = prefixlen;
 
     r = cursor->c_get(cursor, &key, &data, DB_FIRST);
 
