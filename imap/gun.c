@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.10 1999/11/03 03:53:31 leg Exp $
+ * $Id: gun.c,v 1.1.2.11 1999/11/03 04:46:15 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -337,7 +337,7 @@ void tell_proxies_commit(void)
 
     while (ptr != NULL) {
 	fprintf(stderr, "writing 'go' to %x\n", ptr);
-	r = prot_putc('g', ptr->in);
+	r = prot_putc('g', ptr->out);
 	if (!r) r = prot_putc('o', ptr->out);
 	if (!r) r = prot_flush(ptr->out);
     
@@ -360,7 +360,7 @@ void tell_proxies_abort(void)
 
     while (ptr != NULL) {
 	fprintf(stderr, "writing 'ab' to %x\n", ptr);
-	r = prot_putc('a', ptr->in);
+	r = prot_putc('a', ptr->out);
 	if (!r) r = prot_putc('b', ptr->out);
 	if (!r) r = prot_flush(ptr->out);
     
