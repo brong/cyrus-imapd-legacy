@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.9 2001/08/07 21:51:18 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.10 2001/08/20 15:52:41 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -561,10 +561,8 @@ int service_main(int argc, char **argv, char **envp)
     sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
 
     if (imapd_haveaddr) {
-	sasl_setprop(imapd_saslconn, SASL_IPREMOTEPORT,
-		     (const void **)&remoteip);
-	sasl_setprop(imapd_saslconn, SASL_IPLOCALPORT,
-		     (const void **)&localip);
+	sasl_setprop(imapd_saslconn, SASL_IPREMOTEPORT, remoteip);
+	sasl_setprop(imapd_saslconn, SASL_IPLOCALPORT, localip);
     }
 
     proc_register("imapd", imapd_clienthost, NULL, NULL);
