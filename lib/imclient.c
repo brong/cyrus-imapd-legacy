@@ -1,5 +1,5 @@
 /* imclient.c -- Streaming IMxP client library
- * $Id: imclient.c,v 1.58.2.3 2001/08/02 21:45:20 rjs3 Exp $
+ * $Id: imclient.c,v 1.58.2.4 2001/08/03 15:05:34 rjs3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -1996,7 +1996,7 @@ int imclient_starttls(struct imclient *imclient,
   if (result!=SASL_OK) return 1;
   result=sasl_setprop(imclient->saslconn,
 		      SASL_AUTH_EXTERNAL,
-		      &auth_id);
+		      auth_id);
   if (result!=SASL_OK) return 1;
 
   return 0;

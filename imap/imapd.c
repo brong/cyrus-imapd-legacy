@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.6 2001/08/01 22:15:58 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.7 2001/08/03 15:04:20 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -4149,7 +4149,7 @@ void cmd_starttls(char *tag, int imaps)
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
 
-    result = sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, &auth_id);
+    result = sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
 
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);

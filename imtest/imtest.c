@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62.6.4 2001/08/01 20:18:06 rjs3 Exp $
+ * $Id: imtest.c,v 1.62.6.5 2001/08/03 15:04:24 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -1318,18 +1318,21 @@ int main(int argc, char **argv)
     result=sasl_setprop(conn,
 			SASL_SSF_EXTERNAL,
 			&ssf);
-    if (result!=SASL_OK) imtest_fatal("Error setting SASL property");
+    if (result!=SASL_OK)
+	imtest_fatal("Error setting SASL property (external ssf)");
 
     result=sasl_setprop(conn,
 			SASL_AUTH_EXTERNAL,
-			&auth_id);
-    if (result!=SASL_OK) imtest_fatal("Error setting SASL property");
+			auth_id);
+    if (result!=SASL_OK)
+	imtest_fatal("Error setting SASL property (external auth_id)");
 
     prot_settls (pin,  tls_conn);
     prot_settls (pout, tls_conn);
 
     /* ask for the capabilities again */
-    if (verbose==1) printf("Asking for capabilities again since they might have changed\n");
+    if (verbose==1)
+	printf("Asking for capabilities again since they might have changed\n");
     mechlist=ask_capability(&server_supports_tls);
 
   } else if ((dotls==1) && (server_supports_tls!=1)) {
