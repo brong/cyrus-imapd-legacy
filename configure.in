@@ -42,7 +42,7 @@ dnl
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.198.2.3 2001/08/01 19:21:45 rjs3 Exp $
+dnl $Id: configure.in,v 1.198.2.4 2001/08/29 22:22:51 rjs3 Exp $
 dnl
 
 
@@ -163,23 +163,6 @@ if test "$sievedir" != "no"; then
 
 	PRE_SUBDIRS="${PRE_SUBDIRS} $sievedir"
 	EXTRA_OUTPUT="${EXTRA_OUTPUT} $sievedir/Makefile"
-fi
-
-AC_ARG_WITH(perl,       [  --with-perl=PERL           use PERL for perl],
-	with_perl="$withval", with_perl="perl5")
-if test "${with_perl}" = yes; then
-    with_perl="perl5"
-fi
-if test "${with_perl}" != no; then
-    AC_CHECK_PROGS(PERL, ${with_perl} perl, with_perl=no)
-fi
-if test "$with_perl" = "no"; then
-    AC_MSG_WARN(No Perl found: administrative tools won't be available)
-else
-dnl compile perl stuff
-    EXTRA_SUBDIRS="${EXTRA_SUBDIRS} perl"
-dnl and compile perl/cyradm
-    PERL_SUBDIRS="imap"
 fi
 
 dnl for timsieved
@@ -714,6 +697,30 @@ AC_ARG_ENABLE(netscapehack,
 
 AC_CHECK_FUNC(dlopen,,AC_CHECK_LIB(dl, dlopen))
 CMU_SASL2_REQUIRED
+
+AC_ARG_WITH(perl,       [  --with-perl=PERL           use PERL for perl],
+	with_perl="$withval", with_perl="perl5")
+
+if test "${with_perl}" = yes; then
+    with_perl="perl5"
+fi
+if test "${with_perl}" != no; then
+    if test ${with_sasl} = "static"; then
+	AC_MSG_WARN([Cannot compile perl utilities using static libsasl])
+	with_perl="no"
+    else 
+	AC_CHECK_PROGS(PERL, ${with_perl} perl, with_perl=notfound)
+    fi
+fi
+if test "$with_perl" = "notfound"; then
+    AC_MSG_WARN(Perl not found: Administrative tools won't be available)
+elif test "${with_perl}" != "no"; then
+dnl compile perl stuff
+    EXTRA_SUBDIRS="${EXTRA_SUBDIRS} perl"
+dnl and compile perl/cyradm
+    PERL_SUBDIRS="imap"
+fi
+
 
 dnl
 dnl Check for sasl_checkapop()
