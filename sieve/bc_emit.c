@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_emit.c,v 1.1.2.7 2003/01/30 16:54:45 jsmith2 Exp $
+ * $Id: bc_emit.c,v 1.1.2.8 2003/02/20 21:58:12 rjs3 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -310,7 +310,7 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
     /*debugging variable to check filelen*/
     /*int location;*/
     
-    syslog(LOG_ERR, "entered with filelen: %d", filelen);
+    syslog(LOG_DEBUG, "entered bc_action_emit with filelen: %d", filelen);
     
     /* All non-string data MUST be sizeof(int)
        byte alligned so the end of each string may require a pad */
