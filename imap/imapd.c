@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.269 2000/09/15 03:37:35 leg Exp $ */
+/* $Id: imapd.c,v 1.269.4.1 2000/09/24 02:40:09 ken3 Exp $ */
 
 #include <config.h>
 
@@ -4872,12 +4872,12 @@ time_t *start, *end;
 #define SORTGROWSIZE	10
 
 /*
- * Parse a sort criteria
+ * Parse sort criteria
  */
 int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 {
     int c;
-    static struct buf arg;
+    static struct buf criteria, arg;
     int nsort, n;
 
     *sortcrit = NULL;
@@ -4885,8 +4885,8 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
     c = prot_getc(imapd_in);
     if (c != '(') goto missingcrit;
 
-    c = getword(&arg);
-    if (arg.s[0] == '\0') goto missingcrit;
+    c = getword(&criteria);
+    if (criteria.s[0] == '\0') goto missingcrit;
 
     *sortcrit = NULL;
     nsort = 0;
@@ -4902,35 +4902,93 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    memset((*sortcrit)+n, 0, SORTGROWSIZE * sizeof(struct sortcrit));
 	}
 
-	lcase(arg.s);
-	if (!strcmp(arg.s, "reverse")) {
+	lcase(criteria.s);
+	if (!strcmp(criteria.s, "reverse")) {
 	    (*sortcrit)[n].key = SORT_REVERSE;
 	    goto nextcrit;
 	}
-	else if (!strcmp(arg.s, "arrival"))
+	else if (!strcmp(criteria.s, "arrival"))
 	    (*sortcrit)[n].key |= SORT_ARRIVAL;
-	else if (!strcmp(arg.s, "cc"))
+	else if (!strcmp(criteria.s, "cc"))
 	    (*sortcrit)[n].key |= SORT_CC;
-	else if (!strcmp(arg.s, "date"))
+	else if (!strcmp(criteria.s, "date"))
 	    (*sortcrit)[n].key |= SORT_DATE;
-	else if (!strcmp(arg.s, "from"))
+	else if (!strcmp(criteria.s, "from"))
 	    (*sortcrit)[n].key |= SORT_FROM;
-	else if (!strcmp(arg.s, "size"))
+	else if (!strcmp(criteria.s, "size"))
 	    (*sortcrit)[n].key |= SORT_SIZE;
-	else if (!strcmp(arg.s, "subject"))
+	else if (!strcmp(criteria.s, "subject"))
 	    (*sortcrit)[n].key |= SORT_SUBJECT;
-	else if (!strcmp(arg.s, "to"))
+	else if (!strcmp(criteria.s, "to"))
 	    (*sortcrit)[n].key |= SORT_TO;
+
+	/***  SORT2 keys  ***/
+	else if (!strcmp(criteria.s, "answered"))
+	    (*sortcrit)[n].key |= SORT_ANSWERED;
+	else if (!strcmp(criteria.s, "bcc"))
+	    (*sortcrit)[n].key |= SORT_BCC;
+	else if (!strcmp(criteria.s, "deleted"))
+	    (*sortcrit)[n].key |= SORT_DELETED;
+	else if (!strcmp(criteria.s, "draft"))
+	    (*sortcrit)[n].key |= SORT_DRAFT;
+	else if (!strcmp(criteria.s, "flagged"))
+	    (*sortcrit)[n].key |= SORT_FLAGGED;
+	else if (!strcmp(criteria.s, "header")) {
+	    if (c != ' ') goto missingarg;
+	    c = getastring(&arg);
+	    if (c == EOF) goto missingarg;
+	    (*sortcrit)[n].key |= SORT_HEADER;
+	    (*sortcrit)[n].args.hdr = strdup(lcase(arg.s));
+	}
+	else if (!strcmp(criteria.s, "keyword")) {
+	    int flag;
+
+	    if (c != ' ') goto missingarg;
+	    c = getword(&arg);
+	    if (c == EOF || !strlen(arg.s)) goto missingarg;
+	    if (!imparse_isatom(arg.s)) {
+		prot_printf(imapd_out,
+			    "%s BAD Invalid flag name %s in Sort criterion %s\r\n",
+			    tag, arg.s, criteria.s);
+		if (c != EOF) prot_ungetc(c, imapd_in);
+		return EOF;
+	    }
+	    lcase(arg.s);
+	    for (flag=0; flag < MAX_USER_FLAGS; flag++) {
+		if (imapd_mailbox->flagname[flag] &&
+		    !strcasecmp(imapd_mailbox->flagname[flag], arg.s)) break;
+	    }
+	    /* If we don't have this keyword in the mailbox, ignore it */
+	    if (flag == MAX_USER_FLAGS) goto nextcrit;
+		
+	    (*sortcrit)[n].key |= SORT_KEYWORD;
+	    (*sortcrit)[n].args.flag = flag;
+	}
+	else if (!strcmp(criteria.s, "new"))
+	    (*sortcrit)[n].key |= SORT_NEW;
+	else if (!strcmp(criteria.s, "parts"))
+	    (*sortcrit)[n].key |= SORT_PARTS;
+	else if (!strcmp(criteria.s, "recent"))
+	    (*sortcrit)[n].key |= SORT_RECENT;
+	else if (!strcmp(criteria.s, "replyto"))
+	    (*sortcrit)[n].key |= SORT_REPLYTO;
+	else if (!strcmp(criteria.s, "seen"))
+	    (*sortcrit)[n].key |= SORT_SEEN;
+	else if (!strcmp(criteria.s, "sender"))
+	    (*sortcrit)[n].key |= SORT_SENDER;
+	else if (!strcmp(criteria.s, "uid"))
+	    (*sortcrit)[n].key |= SORT_UID;
+
 	else {
 	    prot_printf(imapd_out, "%s BAD Invalid Sort criterion %s\r\n",
-			tag, arg.s);
+			tag, criteria.s);
 	    if (c != EOF) prot_ungetc(c, imapd_in);
 	    return EOF;
 	}
 	n++;
 
-nextcrit:
-	if (c == ' ') c = getword(&arg);
+ nextcrit:
+	if (c == ' ') c = getword(&criteria);
 	else break;
     }
 
@@ -4957,6 +5015,12 @@ nextcrit:
 
  missingcrit:
     prot_printf(imapd_out, "%s BAD Missing Sort criteria\r\n", tag);
+    if (c != EOF) prot_ungetc(c, imapd_in);
+    return EOF;
+
+ missingarg:
+    prot_printf(imapd_out, "%s BAD Missing argument to Sort criterion %s\r\n",
+		tag, criteria.s);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
 }
@@ -5394,8 +5458,15 @@ static void freesortcrit(struct sortcrit *s)
 
     if (!s) return;
     do {
-	if (s[i].args[0]) free(s[i].args[0]);
-	if (s[i].args[1]) free(s[i].args[1]);
+	switch (s[i].key) {
+	case SORT_ANNOTATION:
+	    free(s[i].args.ann.entry);
+	    free(s[i].args.ann.attr);
+	    break;
+	case SORT_HEADER:
+	    free(s[i].args.hdr);
+	    break;
+	}
 	i++;
     } while (s[i].key != SORT_SEQUENCE);
     free(s);
