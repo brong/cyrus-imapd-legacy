@@ -1,4 +1,4 @@
-/* $Id: acconfig.h,v 1.17.6.1 2001/08/01 17:25:40 rjs3 Exp $ */
+/* $Id: acconfig.h,v 1.17.6.2 2001/09/05 19:47:38 rjs3 Exp $ */
 /* 
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -135,6 +135,9 @@ typedef int rlim_t;
 #undef ID_SAVE_CMDLINE
 
 /* getaddrinfo things */
+#include <netdb.h>
+#include <sys/socket.h>
+
 #ifndef HAVE_GETADDRINFO
 #define	getaddrinfo	sasl_getaddrinfo
 #define	freeaddrinfo	sasl_freeaddrinfo
