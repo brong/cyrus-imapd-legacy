@@ -1,7 +1,7 @@
 /* mupdate.c -- cyrus murder database master 
  *
- * $Id: mupdate.c,v 1.10.2.1 2001/08/01 22:11:14 rjs3 Exp $
- * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
+ * $Id: mupdate.c,v 1.10.2.2 2001/11/24 19:20:24 ken3 Exp $
+ * Copyright (c) 2001 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -590,6 +590,8 @@ int service_main_fd(int fd, int argc, char **argv, char **envp)
     if (r == 0) {
 	pthread_detach(t);
     }
+
+    return 0;
 }
 
 /* mailbox name MUST be first, since it is the key */

@@ -1,5 +1,5 @@
 /* rfc822date.c -- Generate an 822 date
- $Id: rfc822date.c,v 1.2.2.1 2001/10/01 19:54:57 rjs3 Exp $
+ $Id: rfc822date.c,v 1.2.2.2 2001/11/24 19:20:29 ken3 Exp $
  
  * Copyright (c) 1998-2001 Carnegie Mellon University.  All rights reserved.
  *
@@ -41,6 +41,7 @@
  *
  */
 
+#include <stdio.h>
 #include <time.h>
 
 #include "assert.h"

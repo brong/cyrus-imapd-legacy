@@ -44,6 +44,8 @@ exec perl -x -S $0 ${1+"$@"} # -*-perl-*-
 use Cyrus::SIEVE::managesieve;
 use Getopt::Long;
 use strict;
+use File::Temp qw/ tempfile /;
+use Pod::Usage;
 
 my $puthelp =        "put <filename>   - upload script to server\n";
 my $gethelp =        "get <name> [<filename>]\n" .
@@ -56,14 +58,21 @@ my $username = $ENV{USER};
 my $authname = $ENV{USER};
 my $realm = "";
 my $ex = "";
-my $ret = GetOptions("a|authname:s" => \$authname,
-                  "u|username:s" => \$username,
-		  "r|realm:s" => \$realm,
-		  "e|exec:s" => \$ex
-                  );
-if (!$ret || $#ARGV != 0) { 
-    show_help();
-    exit;
+my $help = 0;
+my $man = 0;
+my $ret;
+
+GetOptions("a|authname:s" => \$authname,
+    "u|username:s" => \$username,
+    "r|realm:s" => \$realm,
+    "e|exec:s" => \$ex,
+    "help|?" => \$help,
+    man => \$man) or pod2usage(2);
+pod2usage(1) if $help;
+pod2usage(-exitstatus => 0, -verbose => 2) if $man;
+
+if ($#ARGV != 0) { 
+    pod2usage("$0: need a server\n");
 }
 
 my $acapserver = $ARGV[0];
@@ -72,13 +81,12 @@ my $filehandle;
 my $interactive;
 
 if (! $ex eq "") {
-    my $tmpfile = "/tmp/sieveshell.tmp";
-    open (TMP,">$tmpfile") || die "Unable to open tmp file";
-    print TMP $ex;
-    close(TMP);
-    open (TMP,"<$tmpfile") || die "Unable to open tmp file";
-    unlink($tmpfile);
-    $filehandle = *TMP;
+    $filehandle = tempfile();
+
+    if (!$filehandle) { die "unable to open tmp file: $?"; }
+
+    print $filehandle $ex;
+    seek $filehandle, 0, 0; # rewind file
     $interactive = 0;
 } else {
     $filehandle = *STDIN;
@@ -112,11 +120,24 @@ sub prompt {
       return $realm;
   }
 
+  my $ostty;
+  my $str = "";
+  chomp($ostty = `stty -g`);
+
+  if ($type eq "password") {
+      system "stty -echo -icanon min 1 time 0 2>/dev/null || " .
+	     "stty -echo cbreak";
+      $str = "\n";
+  }
+
   print "$prompt: ";
 
   $b = <STDIN>;
   chop($b);
   
+  print $str;
+  system "stty $ostty";
+
   return $b;
 }
 
@@ -238,3 +259,74 @@ while($_ = getline()) {
 	print "Invalid command: $words[0]\n";
     } 
 }
+
+__END__
+
+=head1 NAME
+
+sieveshell - remotely manipulate sieve scripts
+
+=head1 SYNOPSIS
+
+sieveshell [B<--user>=I<user>] [B<--authname>=I<authname>] 
+[B<--realm>=I<realm>] [B<--exec>=I<script>] I<server>
+
+sieveshell B<--help>
+
+=head1 DESCRIPTION
+
+B<sieveshell> allows users to manipulate their scripts on a remote
+server.  It works via MANAGESIEVE, a work in progress.
+
+The following commands are recognized:
+
+=over 4
+
+B<list> list scripts on server.
+
+B<put> <filename> upload script to server.
+
+B<get> <name> [<filename>] get script. if no filename display to stdout
+
+B<delete> <name> delete script.
+
+B<activate> <name> activate script.
+
+B<deactivate> deactivate all scripts.
+
+=back
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-u> I<user>, B<--user>=I<user> 
+
+The authorization name to request; by default, derived from the
+authentication credentials.
+
+=item B<-a> I<authname>, B<--authname>=I<authname> 
+
+The user to use for authentication (defaults to current user).
+
+=item B<-r> I<realm>, B<--realm>=I<realm> 
+
+The realm to attempt authentication in.
+
+=item B<-e> I<script>, B<--exec>=I<script> 
+
+Instead of working interactively, run commands from I<script>, and
+exit when done.
+
+=back
+
+=head1 REFERENCES
+
+[MANAGESIEVE] Martin, T.; "A Protocol for Remotely Managing Sieve
+Scripts", draft-ietf-managesieve-03.txt, Mirapoint, Inc.; May 2001,
+work in progress.
+
+=head1 AUTHOR
+
+Tim Martin E<lt>tmartin@mirapoint.comE<gt>, and the rest of the Cyrus
+team E<lt>cyrus-bugs@andrew.cmu.eduE<gt>.

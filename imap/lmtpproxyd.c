@@ -1,6 +1,6 @@
 /* lmtpproxyd.c -- Program to sieve and proxy mail delivery
  *
- * $Id: lmtpproxyd.c,v 1.15.6.5 2001/10/23 00:21:34 rjs3 Exp $
+ * $Id: lmtpproxyd.c,v 1.15.6.6 2001/11/24 19:20:22 ken3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -305,12 +305,14 @@ int service_init(int argc, char **argv, char **envp)
 	return EC_SOFTWARE;
     }
 
-    /* initialize duplicate delivery database */
-    dupelim = 1;
-    if (duplicate_init(NULL, 0) != 0) {
-	syslog(LOG_ERR, 
-	       "deliver: unable to init duplicate delivery database\n");
-	dupelim = 0;
+    dupelim = config_getswitch("duplicatesuppression", 1);
+    if (dupelim) {
+	/* initialize duplicate delivery database */
+	if (duplicate_init(NULL, 0) != 0) {
+	    syslog(LOG_ERR, 
+		   "deliver: unable to init duplicate delivery database\n");
+	    dupelim = 0;
+	}
     }
 
     /* so we can do mboxlist operations */

@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.15 2001/11/07 04:19:19 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.16 2001/11/24 19:20:24 ken3 Exp $
  */
 #include <config.h>
 
@@ -372,10 +372,9 @@ int service_main(int argc, char **argv, char **envp)
 	*popd_apop_chal = 0;
     }
 
-    prot_printf(popd_out, "+OK %s Cyrus POP3 %s server ready\r\n",
-		apop_enabled() ? popd_apop_chal : config_servername,
-		CYRUS_VERSION);
-
+    prot_printf(popd_out, "+OK %s Cyrus POP3 %s server ready %s\r\n",
+		config_servername, CYRUS_VERSION,
+		apop_enabled() ? popd_apop_chal : "");
     cmdloop();
 
     /* QUIT executed */
@@ -770,6 +769,7 @@ static void cmd_starttls(int pop3s)
 				 !pop3s);  /* TLS only? */
 
     if (result == -1) {
+
 	syslog(LOG_ERR, "[pop3d] error initializing TLS");
 
 	if (pop3s == 0)

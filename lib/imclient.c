@@ -1,6 +1,6 @@
 /* imclient.c -- Streaming IMxP client library
  *
- * $Id: imclient.c,v 1.58.2.6 2001/10/01 19:54:56 rjs3 Exp $
+ * $Id: imclient.c,v 1.58.2.7 2001/11/24 19:20:28 ken3 Exp $
  *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -278,10 +278,9 @@ int imclient_connect(struct imclient **imclient,
     (*imclient)->tls_on=0;
 #endif /* HAVE_SSL */
 
-
     if (!didinit) {
 	/* attempt to start sasl */
-	saslresult=sasl_client_init(NULL);
+	saslresult = sasl_client_init(NULL);
 	if (saslresult!=SASL_OK) return 1;
 	didinit = 1;
     }

@@ -40,7 +40,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * 
- * $Id: mboxlist.h,v 1.13.2.2 2001/10/01 19:54:49 rjs3 Exp $
+ * $Id: mboxlist.h,v 1.13.2.3 2001/11/24 19:20:23 ken3 Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -53,8 +53,13 @@
 #include "mboxname.h"
 
 /* --- cut here --- */
+#ifndef CONFIG_DB_SUBS
 #define CONFIG_DB_SUBS (&cyrusdb_flat)
+#endif
+
+#ifndef CONFIG_DB_MBOX
 #define CONFIG_DB_MBOX (&cyrusdb_db3)
+#endif
 /* -- cut here -- */
 extern struct db *mbdb;
 

@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.148.2.2 2001/10/01 19:54:47 rjs3 Exp $
+ * $Id: mboxlist.c,v 1.148.2.3 2001/11/24 19:20:22 ken3 Exp $
  */
 
 #include <config.h>
@@ -96,8 +96,8 @@ static int mboxlist_dbopen = 0;
 static int mboxlist_opensubs();
 static void mboxlist_closesubs();
 
-static struct quota *mboxlist_newquota;
-static int mboxlist_changequota();
+static int mboxlist_changequota(const char *name, int matchlen, int maycreate,
+				void *rock);
 
 #define FNAME_SUBSSUFFIX ".sub"
 
@@ -139,6 +139,13 @@ char *mboxlist_makeentry(int mbtype, char *part, char *acl)
 				     (30 + strlen(acl) + strlen(part)));
     sprintf(mboxent, "%d %s %s", mbtype, part, acl);
     return mboxent;
+}
+
+static const int get_deleteright(void)
+{
+    const char *r = config_getstring("deleteright", "c");
+
+    return cyrus_acl_strtomask(r);
 }
 
 /*
@@ -691,6 +698,7 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
     struct txn *tid = NULL;
     int isremote = 0;
     int mbtype;
+    int deleteright = get_deleteright();
 
  retry:
     /* Check for request to delete a user:
@@ -723,7 +731,7 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	 * the user is an admin.
 	 */
 	if (checkacl &&
-	    (!(cyrus_acl_myrights(auth_state, acl) & ACL_CREATE))) {
+	    (!(cyrus_acl_myrights(auth_state, acl) & deleteright))) {
 	    r = IMAP_PERMISSION_DENIED;
 	    DB->abort(mbdb, tid);
 	    goto done;
@@ -750,7 +758,7 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 
     /* check if user has Delete right */
     access = cyrus_acl_myrights(auth_state, acl);
-    if (checkacl && !(access & ACL_CREATE)) {
+    if (checkacl && !(access & deleteright)) {
 	/* User has admin rights over their own mailbox namespace */
 	if (mboxname_userownsmailbox(userid, name)) {
 	    isadmin = 1;
@@ -850,6 +858,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     struct txn *tid = NULL;
     char *newpartition = NULL;
     char *mboxent = NULL;
+    int deleteright = get_deleteright();
 
     int acap_madenew = 0;
 
@@ -893,7 +902,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	if (!strcmp(oldname+5, userid)) {
 	    /* Special case of renaming inbox */
 	    access = cyrus_acl_myrights(auth_state, oldacl);
-	    if (!(access & ACL_CREATE)) {
+	    if (!(access & deleteright)) {
 	      r = IMAP_PERMISSION_DENIED;
 	      goto done;
 	    }
@@ -905,7 +914,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	}
     } else {
 	access = cyrus_acl_myrights(auth_state, oldacl);
-	if (!(access & ACL_CREATE) && !isadmin) {
+	if (!(access & deleteright) && !isadmin) {
 	    r = (isadmin || (access & ACL_LOOKUP)) ?
 		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    goto done;
@@ -1766,12 +1775,11 @@ int mboxlist_setquota(const char *root, int newquota)
 
     strcpy(pattern, quota.root);
     strcat(pattern, ".*");
-    mboxlist_newquota = &quota;
     
     /* top level mailbox */
-    mboxlist_changequota(quota.root, 0, 0);
+    mboxlist_changequota(quota.root, 0, 0, &quota);
     /* submailboxes - we're using internal names here */
-    mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_changequota, NULL);
+    mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_changequota, &quota);
     
     r = mailbox_write_quota(&quota);
     if (quota.fd != -1) {
@@ -1811,14 +1819,14 @@ int access;
  * Helper function to change the quota root for 'name' to that pointed
  * to by the static global struct pointer 'mboxlist_newquota'.
  */
-static int
-mboxlist_changequota(name, matchlen, maycreate)
-char *name;
-int matchlen;
-int maycreate;
+static int mboxlist_changequota(const char *name, int matchlen, int maycreate,
+				void *rock)
 {
     int r;
     struct mailbox mailbox;
+    struct quota *mboxlist_newquota = (struct quota *) rock;
+
+    assert(rock != NULL);
 
     r = mailbox_open_header(name, 0, &mailbox);
     if (r) goto error_noclose;

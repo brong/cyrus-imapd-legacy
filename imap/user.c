@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: user.c,v 1.2.4.1 2001/10/01 19:54:52 rjs3 Exp $
+ * $Id: user.c,v 1.2.4.2 2001/11/24 19:20:27 ken3 Exp $
  */
 
 #include <config.h>
@@ -76,7 +76,7 @@
 #include "user.h"
 #include "mboxlist.h"
 #include "mailbox.h"
-
+#include "util.h"
 
 static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 {
@@ -232,8 +232,8 @@ int user_deletequotas(const char *user)
     DIR *dirp;
     struct dirent *f;
 
-    c = (char) tolower((int) *user);
-    if (!islower((int) c)) c = 'q';
+    /* this violates the quota abstraction layer; oh well */
+    c = dir_hash_c(user);
     sprintf(qpath, "%s%s%c/", config_dir, FNAME_QUOTADIR, c);
     tail = qpath + strlen(qpath);
 
@@ -251,4 +251,6 @@ int user_deletequotas(const char *user)
 	}
 	closedir(dirp);
     }
+
+    return 0;
 }

@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.21 2001/02/16 18:56:43 leg Exp $
+ * $Id: message.c,v 1.21.6.1 2001/11/24 19:20:31 ken3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -43,6 +43,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "message.h"
 #include "parseaddr.h"
 #include "xmalloc.h"
+#include "util.h"
 
 /* reject message m with message msg
  *

@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.9.6.2 2001/10/23 00:21:50 rjs3 Exp $
+ * $Id: parser.c,v 1.9.6.3 2001/11/24 19:20:32 ken3 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -56,6 +56,7 @@
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
 
+#include "xmalloc.h"
 #include "prot.h"
 #include "tls.h"
 #include "lex.h"

@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.8 2001/11/07 04:19:19 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.9 2001/11/24 19:20:25 ken3 Exp $
  */
 #include <config.h>
 
@@ -301,9 +301,9 @@ int service_main(int argc, char **argv, char **envp)
 	*popd_apop_chal = 0;
     }
 
-    prot_printf(popd_out, "+OK %s Cyrus POP3 Murder %s server ready\r\n",
-		apop_enabled() ? popd_apop_chal : config_servername,
-		CYRUS_VERSION);
+    prot_printf(popd_out, "+OK %s Cyrus POP3 Murder %s server ready %s\r\n",
+		config_servername, CYRUS_VERSION,
+		apop_enabled() ? popd_apop_chal : "");
     cmdloop();
     
     return 0;
@@ -628,22 +628,11 @@ static void cmd_starttls(int pop3s)
 
 static int apop_enabled(void)
 {
-    static int chal_done = 0;
-
-    /* Check if it is enabled (challenge == NULL) */
-    if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
-	return 0;
-
-    /* Create APOP challenge string for banner */
-    if (!chal_done &&
-	!sasl_mkchal(popd_saslconn, popd_apop_chal, sizeof(popd_apop_chal), 1)) {
-	syslog(LOG_WARNING,
-	       "can't create APOP challenge string - APOP disabled");
-	popd_apop_chal[0] = '\0';
-    }
-
-    chal_done = 1;
-    return *popd_apop_chal;
+    /* Check if pseudo APOP mechanism is enabled (challenge == NULL) */
+    if (sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK) return 0;
+    /* Check if we have a challenge string */
+    if (!*popd_apop_chal) return 0;
+    return 1;
 }
 
 static void cmd_apop(char *response)

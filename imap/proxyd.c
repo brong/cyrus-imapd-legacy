@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.10 2001/11/07 04:19:19 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.11 2001/11/24 19:20:25 ken3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -1942,7 +1942,7 @@ void cmd_login(char *tag, char *user, char *passwd)
     char buf[MAX_MAILBOX_PATH];
     char *p;
     int plaintextloginpause;
-    int result=SASL_FAIL, r;
+    int r;
 
     canon_user = auth_canonifyid(user, 0);
 
@@ -1980,12 +1980,12 @@ void cmd_login(char *tag, char *user, char *passwd)
 	    return;
 	}
     }
-    else if ((result=sasl_checkpass(proxyd_saslconn,
+    else if ((r = sasl_checkpass(proxyd_saslconn,
 				    canon_user,
 				    strlen(canon_user),
 				    passwd,
 				    strlen(passwd)))!=SASL_OK) {
-	const char *errorstring = sasl_errstring(result, NULL, NULL);
+	const char *errorstring = sasl_errstring(r, NULL, NULL);
 	if (reply) {
 	    syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
 		   proxyd_clienthost, canon_user, reply);
@@ -2039,8 +2039,8 @@ void cmd_login(char *tag, char *user, char *passwd)
 
     /* Set namespace */
     if ((r = mboxname_init_namespace(&proxyd_namespace, proxyd_userisadmin)) != 0) {
-	syslog(LOG_ERR, error_message(result));
-	fatal(error_message(result), EC_CONFIG);
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     return;
@@ -4010,6 +4010,7 @@ void cmd_starttls(char *tag, int imaps)
 				 !imaps);  /* TLSv1 only? */
 
     if (result == -1) {
+
 	syslog(LOG_ERR, "error initializing TLS");
 
 	if (imaps == 0)

@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: master.c,v 1.42.2.2 2001/10/23 00:21:40 rjs3 Exp $ */
+/* $Id: master.c,v 1.42.2.3 2001/11/24 19:20:30 ken3 Exp $ */
 
 #include <config.h>
 
@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <grp.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #ifdef HAVE_UNISTD_H
@@ -147,8 +148,9 @@ void fatal(char *msg, int code)
 int become_cyrus(void)
 {
     struct passwd *p;
+    int newuid, newgid;
+    int result;
     static int uid = 0;
-    static int gid = 0;
 
     if (uid) return setuid(uid);
 
@@ -157,22 +159,29 @@ int become_cyrus(void)
 	syslog(LOG_ERR, "no entry in /etc/passwd for user %s", CYRUS_USER);
 	return -1;
     }
-    uid = p->pw_uid;
-    gid = p->pw_gid;
 
-    if (initgroups(CYRUS_USER, gid)) {
+    /* Save these in case initgroups does a getpw*() */
+    newuid = p->pw_uid;
+    newgid = p->pw_gid;
+
+    if (initgroups(CYRUS_USER, newgid)) {
         syslog(LOG_ERR, "unable to initialize groups for user %s: %s",
 	       CYRUS_USER, strerror(errno));
         return -1;
     }
 
-    if (setgid(gid)) {
+    if (setgid(newgid)) {
         syslog(LOG_ERR, "unable to set group id to %d for user %s: %s",
-              gid, CYRUS_USER, strerror(errno));
+              newgid, CYRUS_USER, strerror(errno));
         return -1;
     }
 
-    return setuid(uid);
+    result = setuid(newuid);
+
+    /* Only set static uid if successful, else future calls won't reset gid */
+    if (result == 0)
+        uid = newuid;
+    return result;
 }
 
 void get_prog(char *path, char *const *cmd)
@@ -463,8 +472,7 @@ void spawn_service(struct service *s)
 
     switch (p = fork()) {
     case -1:
-	syslog(LOG_ERR, "can't fork process to run service %s: %m",
-	       Services[i].name);
+	syslog(LOG_ERR, "can't fork process to run service %s: %m", s->name);
 	break;
 
     case 0:

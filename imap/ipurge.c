@@ -6,7 +6,7 @@
  *
  * includes support for ISPN virtual host extensions
  *
- * $Id: ipurge.c,v 1.11.2.1 2001/10/01 19:54:46 rjs3 Exp $
+ * $Id: ipurge.c,v 1.11.2.2 2001/11/24 19:20:21 ken3 Exp $
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -59,6 +59,7 @@
 #include <com_err.h>
 #include <string.h>
 #include <time.h>
+#include <netinet/in.h>
 
 /* cyrus includes */
 #include "imapconf.h"
@@ -259,7 +260,6 @@ void deleteit(bit32 msgsize, mbox_stats_t *stats)
 /* 0 = no, 1 = yes */
 int
 purge_check(struct mailbox *mailbox, void *deciderock, char *buf) {
-  struct index_record *the_record;
   unsigned long       my_time;
   mbox_stats_t *stats = (mbox_stats_t *) deciderock;
   bit32 senttime;

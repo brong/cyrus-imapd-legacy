@@ -37,7 +37,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: version.c,v 1.2.2.2 2001/11/06 18:37:06 ken3 Exp $
+ * $Id: version.c,v 1.2.2.3 2001/11/24 19:20:27 ken3 Exp $
  */
 
 #include <config.h>
@@ -92,7 +92,7 @@ void id_response(struct protstream *pout)
 		" \"version\" \"%s %s\""
 		" \"vendor\" \"Project Cyrus\""
 		" \"support-url\" \"http://asg.web.cmu.edu/cyrus\"",
-		CYRUS_VERSION, CVSDATE);
+		CYRUS_VERSION, CYRUS_CVSDATE);
 
     /* add the os info */
     if (uname(&os) != -1)

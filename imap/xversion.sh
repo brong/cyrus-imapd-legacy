@@ -1,9 +1,9 @@
 #!/bin/sh
 #
 # xversion.sh: extract the timestamp from the $Id: string
-# in every source file and use the most recent as the CVSDATE
+# in every source file and use the most recent as the CYRUS_CVSDATE
 #
-# $Id: xversion.sh,v 1.4.2.2 2001/10/31 16:39:03 rjs3 Exp $
+# $Id: xversion.sh,v 1.4.2.3 2001/11/24 19:20:28 ken3 Exp $
 
 if [ "$AWK" = "" ]; then
     AWK=awk
@@ -14,7 +14,7 @@ TIMEPAT=[0-2][0-9]:[0-5][0-9]:[0-5][0-9]
 
 printf "/* Generated automatically by xversion.sh */\n\n" > xversion.h
 
-printf "#define CVSDATE " >> xversion.h
+printf "#define CYRUS_CVSDATE " >> xversion.h
 
 find .. -name '*.[chly]' -print | \
 	xargs egrep '\$Id: ' | \

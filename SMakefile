@@ -40,10 +40,11 @@
 # This file is specific to Carnegie Mellon University's
 # software build process
 # 
-# $Id: SMakefile,v 1.69.2.1 2001/11/19 23:13:02 rjs3 Exp $
+# $Id: SMakefile,v 1.69.2.2 2001/11/24 19:20:07 ken3 Exp $
 #
 
-if test ! -x configure; then
+if test ! -x configure -o configure.in -nt configure -o \
+        acconfig.h -nt configure -o SMakefile -nt configure; then
   echo aclocal -I cmulocal
   aclocal -I cmulocal
   echo autoheader
@@ -69,7 +70,7 @@ else
   # anonymous cvs?
   VER="anoncvs"
 fi
-LOCALDEFS="-DEXTRA_IDENT=\\\"$VER\\\""
+LOCALDEFS="-DEXTRA_IDENT=\\\"$VER\\\" -DCONFIG_DB_MBOX=\"(&cyrusdb_flat)\""
 
 # PERL CONFIGURATION
 PERL_MM_OPT="INSTALLPRIVLIB=${DESTDIR}/usr/local/lib/perl5 INSTALLARCHLIB=${DESTDIR}/usr/local/lib/perl5/5.6.0 INSTALLSITELIB=${DESTDIR}/usr/local/lib/perl5/site_perl/5.6.0 INSTALLSITEARCH=${DESTDIR}/usr/local/lib/perl5/site_perl/5.6.0 INSTALLBIN=${DESTDIR}/usr/local/bin INSTALLSCRIPT=${DESTDIR}/usr/local/bin INSTALLMAN1DIR=${DESTDIR}/usr/local/man/man1 INSTALLMAN3DIR=${DESTDIR}/usr/local/man/man3"

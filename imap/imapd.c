@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.18 2001/11/08 16:59:02 ken3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.19 2001/11/24 19:20:17 ken3 Exp $ */
 
 #include <config.h>
 
@@ -1463,7 +1463,7 @@ char *passwd;
     char buf[MAX_MAILBOX_PATH];
     char *p;
     int plaintextloginpause;
-    int result=SASL_FAIL, r;
+    int r;
 
     canon_user = auth_canonifyid(user, 0);
 
@@ -1501,24 +1501,22 @@ char *passwd;
 	    return;
 	}
     }
-    else if ((result=sasl_checkpass(imapd_saslconn,
-				    canon_user,
-				    strlen(canon_user),
-				    passwd,
-				    strlen(passwd))) != SASL_OK) {
+    else if ((r = sasl_checkpass(imapd_saslconn,
+				 canon_user,
+				 strlen(canon_user),
+				 passwd,
+				 strlen(passwd))) != SASL_OK) {
 	syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
 	       imapd_clienthost, canon_user, sasl_errdetail(imapd_saslconn));
 
-	/* Apply penalty only if not under layer */
-	if (imapd_starttls_done == 0)
-	    sleep(3);
+	sleep(3);
 
 	if (reply) {
 	    prot_printf(imapd_out, "%s NO Login failed: %s\r\n", tag, reply);
-	} else if ((reply = sasl_errstring(result, NULL, NULL))!=NULL) {
+	} else if ((reply = sasl_errstring(r, NULL, NULL)) != NULL) {
 	    prot_printf(imapd_out, "%s NO Login failed: %s\r\n", tag, reply);
 	} else {
-	    prot_printf(imapd_out, "%s NO Login failed: %d\r\n", tag, result);
+	    prot_printf(imapd_out, "%s NO Login failed: %d\r\n", tag, r);
 	}
 	snmp_increment_args(AUTHENTICATION_NO, 1,
 			    VARIABLE_AUTH, hash_simple("LOGIN"), 
@@ -1564,8 +1562,8 @@ char *passwd;
 
     /* Set namespace */
     if ((r = mboxname_init_namespace(&imapd_namespace, imapd_userisadmin)) != 0) {
-	syslog(LOG_ERR, error_message(result));
-	fatal(error_message(result), EC_CONFIG);
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
     }
 
     /* Translate any separators in userid */

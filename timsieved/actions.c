@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.25.8.3 2001/10/23 00:21:50 rjs3 Exp $
+ * $Id: actions.c,v 1.25.8.4 2001/11/24 19:20:32 ken3 Exp $
  * 
  */
 /*
@@ -564,7 +564,7 @@ int cmd_havespace(struct protstream *conn, mystring_t *sieve_name, unsigned long
     {
 	prot_printf(conn,
 		    "NO (\"QUOTA\") \"Script size is too large. "
-		    "Max script size is %d bytes\"\r\n",
+		    "Max script size is %ld bytes\"\r\n",
 		    maxscriptsize);
 	return TIMSIEVE_FAIL;
     }

@@ -1,5 +1,5 @@
 /* mboxname.c -- Mailbox list manipulation routines
- * $Id: mboxname.c,v 1.20.6.2 2001/10/01 19:54:49 rjs3 Exp $
+ * $Id: mboxname.c,v 1.20.6.3 2001/11/24 19:20:23 ken3 Exp $
  * Copyright (c)1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -272,7 +272,7 @@ static int mboxname_toexternal_alt(struct namespace *namespace, const char *name
     else if (!strncmp(name, "user", 4) &&
 	     (name[4] == '\0' || name[4] == '.')) {
 	sprintf(result, "%.*s",
-		strlen(namespace->prefix[NAMESPACE_USER])-1,
+		(int) strlen(namespace->prefix[NAMESPACE_USER])-1,
 		namespace->prefix[NAMESPACE_USER]);
 	if (name[4] == '.') {
 	    sprintf(result+strlen(result), "%c%s",

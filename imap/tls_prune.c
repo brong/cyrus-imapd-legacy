@@ -40,12 +40,15 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: tls_prune.c,v 1.1.2.1 2001/10/01 19:54:52 rjs3 Exp $ */
+/* $Id: tls_prune.c,v 1.1.2.2 2001/11/24 19:20:27 ken3 Exp $ */
+
+#include <config.h>
 
 #include <stdio.h>
 #include <unistd.h>
 
 #include "tls.h"
+#include "imapconf.h"
 #include "exitcodes.h"
 
 void fatal(const char *message, int code)
@@ -84,5 +87,4 @@ int main(int argc, char *argv[])
     config_init(alt_config, "tls_prune");
 
     return tls_prune_sessions();
-
 }

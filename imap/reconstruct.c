@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: reconstruct.c,v 1.60.6.1 2001/10/01 19:54:51 rjs3 Exp $ */
+/* $Id: reconstruct.c,v 1.60.6.2 2001/11/24 19:20:26 ken3 Exp $ */
 
 #include <config.h>
 
@@ -193,7 +193,7 @@ int main(int argc, char **argv)
     }
 
     for (i = optind; i < argc; i++) {
-	strcpy(buf, argv[1]);
+	strcpy(buf, argv[i]);
 	/* Translate any separators in mailboxname */
 	mboxname_hiersep_tointernal(&recon_namespace, buf);
 	do_reconstruct(buf, 0, 0, fflag ? &head : NULL);
@@ -595,12 +595,17 @@ int reconstruct(char *name, struct discovered *found)
 	    if (stat(dirent->d_name, &sbuf) < 0) continue;
 	    if (!S_ISDIR(sbuf.st_mode)) continue;
 
-	    /* ok, we found a directory that doesn't have a dot in it */
-	    strcpy(fnamebuf, name);
-	    strcat(fnamebuf, ".");
-	    strcat(fnamebuf, dirent->d_name);
+	    /* ok, we found a directory that doesn't have a dot in it;
+	     is there a cyrus.header file? */
+	    snprintf(fnamebuf, sizeof(fnamebuf), "%s/cyrus.header",
+		     dirent->d_name);
+	    if (stat(fnamebuf, &sbuf) < 0) continue;
 
-	    /* does fnamebuf exist as a mailbox? */
+	    /* ok, we have a real mailbox directory */
+	    snprintf(fnamebuf, sizeof(fnamebuf), "%s.%s", 
+		     name, dirent->d_name);
+
+	    /* does fnamebuf exist as a mailbox in mboxlist? */
 	    do {
 		r = mboxlist_lookup(fnamebuf, NULL, NULL, NULL);
 	    } while (r == IMAP_AGAIN);
@@ -673,9 +678,7 @@ todo_append_hashed(char *name, char *path, char *partition)
     }
 }
 
-char *cleanacl(acl, mboxname)
-char *acl;
-char *mboxname;
+char *cleanacl(char *acl, char *mboxname)
 {
     char owner[MAX_MAILBOX_NAME+1];
     cyrus_acl_canonproc_t *aclcanonproc = 0;

@@ -1,10 +1,7 @@
-/* tls.h - STARTTLS helper functions for imapd
- * Tim Martin
- * 9/21/99
+/* mupdate-client.c -- cyrus murder database clients
  *
- *  Based upon Lutz Jaenicke's TLS patches for postfix
- *
- * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
+ * $Id: mupdate-client.h,v 1.1.2.1 2001/11/24 19:20:24 ken3 Exp $
+ * Copyright (c) 2001 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,39 +40,42 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef INCLUDED_TLS_H
-#define INCLUDED_TLS_H
+#ifndef INCLUDED_MUPDATE_CLIENT_H
+#define INCLUDED_MUPDATE_CLIENT_H
 
-/* is tls enabled? */
-int tls_enabled(const char *ident);
+typedef struct mupdate_handle_s mupdate_handle;
 
-#ifdef HAVE_SSL
+/* connect to a mupdate server */
+int mupdate_connect(const char *server, mupdate_handle **handle);
 
-#include <openssl/ssl.h>
+/* authenticate to the server */
+int mupdate_authenticate(mupdate_handle *handle);
 
-/* init tls */
-int tls_init_serverengine(const char *ident,
-			  int verifydepth, /* depth to verify */
-			  int askcert,     /* 1 = client auth */
-			  int requirecert, /* 1 = require client auth */
-			  int tlsonly);
+/* activate a mailbox */
+int mupdate_activate(mupdate_handle *handle, 
+		     const char *mailbox, const char *server,
+		     const char *acl);
 
-/* start tls negotiation */
-int tls_start_servertls(int readfd, int writefd, 
-			int *layerbits, char **authid, SSL **ret);
+/* reserve a piece of namespace */
+int mupdate_reserve(mupdate_handle *handle,
+		    const char *mailbox, const char *server);
 
-/* reset tls */
-int tls_reset_servertls(SSL **conn);
+/* delete a mailbox */
+int mupdate_delete(mupdate_handle *handle,
+		   const char *mailbox);
 
-/* shutdown/cleanup tls */
-int tls_shutdown_serverengine(void);
+struct mupdate_mailboxdata {
+    const char *mailbox;
+    const char *server;
+    const char *acl;
+};
+typedef int (*mupdate_callback)(struct mupdate_mailboxdata *mdata, 
+				const char *rock);
+int mupdate_listen(mupdate_handle *handle,
+		   mupdate_callback *create,
+		   mupdate_callback *reserve,
+		   mupdate_callback *delete,
+		   mupdate_callback *noop,
+		   int pingtime);
 
-/* remove expired sessions from the external cache */
-int tls_prune_sessions(void);
-
-/* fill string buffer with info about tls connection */
-int tls_get_info(SSL *conn, char *buf, size_t len);
-
-#endif /* HAVE_SSL */
-
-#endif /* INCLUDED_TLS_H */
+#endif

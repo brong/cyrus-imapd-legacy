@@ -1,6 +1,6 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.62.2.5 2001/10/23 00:21:34 rjs3 Exp $
+ * $Id: lmtpd.c,v 1.62.2.6 2001/11/24 19:20:21 ken3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -94,6 +94,7 @@
 #include "notify.h"
 #include "idle.h"
 #include "rfc822date.h"
+#include "tls.h"
 
 #include "lmtpengine.h"
 #include "lmtpstats.h"
@@ -302,12 +303,14 @@ int service_init(int argc, char **argv, char **envp)
 	return EC_SOFTWARE;
     }
 
-    /* initialize duplicate delivery database */
-    dupelim = 1;
-    if (duplicate_init(NULL, 0) != 0) {
-	syslog(LOG_ERR, 
-	       "lmtpd: unable to init duplicate delivery database\n");
-	dupelim = 0;
+    dupelim = config_getswitch("duplicatesuppression", 1);
+    if (dupelim) {
+	/* initialize duplicate delivery database */
+	if (duplicate_init(NULL, 0) != 0) {
+	    syslog(LOG_ERR, 
+		   "lmtpd: unable to init duplicate delivery database\n");
+	    dupelim = 0;
+	}
     }
 
     /* so we can do mboxlist operations */
