@@ -1,5 +1,5 @@
 /* mailbox.c -- Mailbox manipulation routines
- $Id: mailbox.c,v 1.81.4.1 1999/10/15 17:26:27 tmartin Exp $
+ $Id: mailbox.c,v 1.81.4.2 1999/10/17 22:35:15 tmartin Exp $
  
  # Copyright 1998 Carnegie Mellon University
  # 
@@ -1823,9 +1823,11 @@ char *indexbuf;
 }
 
 int
-mailbox_rename(oldname, newname, newpath, isinbox, olduidvalidityp,
+mailbox_rename(oldname, oldpath, oldacl, newname, newpath, isinbox, olduidvalidityp,
 	       newuidvalidityp)
 const char *oldname;
+const char *oldpath;
+const char *oldacl;
 const char *newname;
 char *newpath;
 int isinbox;
@@ -1839,31 +1841,21 @@ bit32 *newuidvalidityp;
     char oldfname[MAX_MAILBOX_PATH], newfname[MAX_MAILBOX_PATH];
     char *oldfnametail, *newfnametail;
 
-    printf("mb rename 1\n");
-
     /* Open old mailbox and lock */
-    r = mailbox_open_header(oldname, 0, &oldmailbox);
-    if (r) {
-	return r;
-    }
+    mailbox_open_header_path(oldname, oldpath, oldacl, 0, &oldmailbox, 0);
+
     if (oldmailbox.format == MAILBOX_FORMAT_NETNEWS) {
 	mailbox_close(&oldmailbox);
 	return IMAP_MAILBOX_NOTSUPPORTED;
     }
 
-    printf("mb rename 2\n");
-
     r =  mailbox_lock_header(&oldmailbox);
-    printf("mb rename 3\n");
     if (!r) r = mailbox_open_index(&oldmailbox);
-    printf("mb rename 4\n");
     if (!r) r = mailbox_lock_index(&oldmailbox);
     if (r) {
 	mailbox_close(&oldmailbox);
 	return r;
     }
-
-    printf("mb rename 5\n");
 
     /* Create new mailbox */
     r = mailbox_create(newname, newpath, oldmailbox.acl, oldmailbox.format,
@@ -1893,8 +1885,6 @@ bit32 *newuidvalidityp;
 	return r;
     }
 
-    printf("mb rename 6\n");
-
     /* Check quota if necessary */
     if (newmailbox.quota.root) {
 	r = mailbox_lock_quota(&newmailbox.quota);
@@ -1912,8 +1902,6 @@ bit32 *newuidvalidityp;
 	    return r;
 	}
     }
-
-    printf("mb rename 7\n");
 
     strcpy(oldfname, oldmailbox.path);
     oldfnametail = oldfname + strlen(oldfname);
