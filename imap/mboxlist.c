@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.21 1999/10/19 03:47:20 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.22 1999/10/19 04:09:37 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -703,6 +703,7 @@ int checkacl;
       r = mboxlist_lookup(name, &path, &acl, tid);
     else
       r = mboxlist_lookup_writelock(name, &path, &acl, tid);
+
     if (r!=0) {
       goto done;
     }
@@ -747,6 +748,7 @@ int checkacl;
     if (deleteuser==1) {
 	int namelen = strlen(name)+1;
 	char *endname, *endline;
+	struct mbox_entry *mboxent=NULL;
 
 	strcpy(submailboxname, name);
 	strcat(submailboxname, ".");
@@ -763,11 +765,12 @@ int checkacl;
 	key.size = strlen(submailboxname);
 	
 	/* this should start at user.foo */
-	r = cursor->c_get(cursor, &key, &data, DB_FIRST);	
+	r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);	
 
 	while (r != DB_NOTFOUND) {
 	    switch (r) {
 	    case 0:
+	      mboxent = (struct mbox_entry *) data.data;
 		break;
 		
 	    case EAGAIN:
@@ -779,6 +782,8 @@ int checkacl;
 		r = IMAP_IOERROR;
 		goto done;
 	    }
+
+	    if (strncmp(mboxent->name, submailboxname, strlen(submailboxname))!=0) break;
 
 	    /* delete the mailbox */
 	    r=mbdb->del(mbdb, tid, &key, 0);
@@ -876,6 +881,13 @@ int checkacl;
     toimsp(name, uidvalidity, "RENsn", "", 0, 0);
 
   done:
+
+    if (r!=0)
+    {
+	txn_abort(tid);
+	return r;
+    }
+
     switch (txn_commit(tid)) {
     case 0:      
 	break;
