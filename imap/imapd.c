@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180 1999/10/02 00:43:03 leg Exp $ */
+/* $Id: imapd.c,v 1.180.4.1 1999/10/13 19:11:50 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -1549,7 +1549,7 @@ char *name;
 		mboxlist_createmailboxcheck(mailboxname, 0, 0,
 					    imapd_userisadmin,
 					    imapd_userid, imapd_authstate,
-					    (char **)0, (char **)0) == 0)
+					    (char **)0, (char **)0, NULL) == 0)
 	       ? "[TRYCREATE] " : "", error_message(r));
 	goto freeflags;
     }
@@ -2415,7 +2415,7 @@ int usinguid;
 		     mboxlist_createmailboxcheck(mailboxname, 0, 0,
 						 imapd_userisadmin,
 						 imapd_userid, imapd_authstate,
-						 (char **)0, (char **)0) == 0)
+						 (char **)0, (char **)0, NULL) == 0)
 		    ? "[TRYCREATE] " : "", error_message(r));
     }
     else {
