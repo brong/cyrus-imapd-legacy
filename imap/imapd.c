@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.13 2001/10/23 00:21:32 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.14 2001/10/25 20:42:51 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -223,6 +223,17 @@ extern void proc_cleanup(void);
 
 static int hash_simple (const char *str);
 
+/* Enable the resetting of a sasl_conn_t */
+static int reset_saslconn(sasl_conn_t **conn);
+
+static struct 
+{
+    char *ipremoteport;
+    char *iplocalport;
+    sasl_ssf_t ssf;
+    char *authid;
+} saslprops = {NULL,NULL,0,NULL};
+
 /*
  * acl_ok() checks to see if the the inbox for 'user' grants the 'a'
  * right to the principal 'auth_identity'. Returns 1 if so, 0 if not.
@@ -401,6 +412,21 @@ static void imapd_reset(void)
 	imapd_saslconn = NULL;
     }
     imapd_starttls_done = 0;
+
+    if(saslprops.iplocalport) {
+	free(saslprops.iplocalport);
+	saslprops.iplocalport = NULL;
+    }
+    if(saslprops.ipremoteport) {
+	free(saslprops.ipremoteport);
+	saslprops.ipremoteport = NULL;
+    }
+    if(saslprops.authid) {
+	free(saslprops.authid);
+	saslprops.authid = NULL;
+    }
+    saslprops.ssf = 0;
+
 #ifdef HAVE_SSL
     if (tls_conn) {
 	if (tls_reset_servertls(&tls_conn) == -1) {
@@ -555,7 +581,9 @@ int service_main(int argc, char **argv, char **envp)
 
     if (imapd_haveaddr) {
 	sasl_setprop(imapd_saslconn, SASL_IPREMOTEPORT, remoteip);
+	saslprops.ipremoteport = xstrdup(remoteip);
 	sasl_setprop(imapd_saslconn, SASL_IPLOCALPORT, localip);
+	saslprops.iplocalport = xstrdup(localip);
     }
 
     proc_register("imapd", imapd_clienthost, NULL, NULL);
@@ -1590,12 +1618,26 @@ cmd_authenticate(char *tag,char *authtype)
 
     while (sasl_result == SASL_CONTINUE)
     {
+      char c;
+	
       /* print the message to the user */
       printauthready(imapd_out, serveroutlen, (unsigned char *)serverout);
+
+      c = prot_getc(imapd_in);
+      if(c == '*') {
+	  eatline(imapd_in,c);
+	  prot_printf(imapd_out,
+		      "%s NO Client canceled authentication\r\n", tag);
+	  reset_saslconn(&imapd_saslconn);
+	  return;
+      } else {
+	  prot_ungetc(c, imapd_in);
+      }
 
       /* get string from user */
       clientinlen = getbase64string(imapd_in, &clientin);
       if (clientinlen == -1) {
+	reset_saslconn(&imapd_saslconn);
 	prot_printf(imapd_out, "%s BAD Invalid base64 string\r\n", tag);
 	return;
       }
@@ -1617,7 +1659,8 @@ cmd_authenticate(char *tag,char *authtype)
 			    VARIABLE_AUTH, hash_simple(authtype), 
 			    VARIABLE_LISTEND);
 	sleep(3);
-	
+
+	reset_saslconn(&imapd_saslconn);
 	prot_printf(imapd_out, "%s NO Error authenticating\r\n", tag);
 
 	return;
@@ -1636,6 +1679,7 @@ cmd_authenticate(char *tag,char *authtype)
 		    tag, sasl_result);
 	syslog(LOG_ERR, "weird SASL error %d getting SASL_USERNAME", 
 	       sasl_result);
+	reset_saslconn(&imapd_saslconn);
 	return;
     }
 
@@ -4168,16 +4212,18 @@ void cmd_starttls(char *tag, int imaps)
 
     /* tell SASL about the negotiated layer */
     result = sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &ssf);
-
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
+    saslprops.ssf = ssf;
 
     result = sasl_setprop(imapd_saslconn, SASL_AUTH_EXTERNAL, auth_id);
-
     if (result != SASL_OK) {
 	fatal("sasl_setprop() failed: cmd_starttls()", EC_TEMPFAIL);
     }
+    if(saslprops.authid)
+	free(saslprops.authid);
+    saslprops.authid = xstrdup(auth_id);
 
     /* tell the prot layer about our new layers */
     prot_settls(imapd_in, tls_conn);
@@ -5730,3 +5776,49 @@ void* rock;
     mstringdata("LSUB", name, matchlen, maycreate, *((int*) rock));
     return 0;
 }
+
+/* Reset the given sasl_conn_t to a sane state */
+static int reset_saslconn(sasl_conn_t **conn) 
+{
+    int ret;
+    sasl_security_properties_t *secprops = NULL;
+
+    sasl_dispose(conn);
+    /* do initialization typical of service_main */
+    ret = sasl_server_new("imap", config_servername,
+		          NULL, NULL, NULL,
+			  NULL, 0, conn);
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.ipremoteport)
+	ret = sasl_setprop(*conn, SASL_IPREMOTEPORT,
+			   saslprops.ipremoteport);
+    if(ret != SASL_OK) return ret;
+    
+    if(saslprops.iplocalport)
+	ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
+			   saslprops.iplocalport);
+    if(ret != SASL_OK) return ret;
+    
+    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
+    if(ret != SASL_OK) return ret;
+    /* end of service_main initialization excepting SSF */
+
+    /* If we have TLS/SSL info, set it */
+    if(saslprops.ssf) {
+	ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &saslprops.ssf);
+    } else {
+	ret = sasl_setprop(*conn, SASL_SSF_EXTERNAL, &extprops_ssf);
+    }
+    if(ret != SASL_OK) return ret;
+
+    if(saslprops.authid) {
+	ret = sasl_setprop(*conn, SASL_AUTH_EXTERNAL, saslprops.authid);
+	if(ret != SASL_OK) return ret;
+    }
+    /* End TLS/SSL Info */
+
+    return SASL_OK;
+}
+
