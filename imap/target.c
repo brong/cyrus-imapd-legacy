@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.7 1999/11/03 17:39:20 leg Exp $
+ * $Id: target.c,v 1.1.2.8 1999/11/04 00:43:13 leg Exp $
  */
 
 #include <stdio.h>
@@ -428,6 +428,7 @@ void be_process(struct be *ptr)
 
 	if (!cr) {
 	    r = do_txn(ptr->hostname, &inbuf, &txn);
+	    assert(r || (txn != NULL));
 	}
 
 	if (!cr && r) {		/* say NO don't commit */

@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.40 1999/11/03 18:51:46 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.41 1999/11/04 00:43:11 leg Exp $
  */
 
 #include <stdio.h>
@@ -1299,22 +1299,23 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     key.size = strlen(name);
     
     /* xxx this is really stupid!!! we're doing a second get */
-    if (r==0)
-      r = mbdb->get(mbdb, tid, &key, &data, 0);
+    if (!r) {
+        r = mbdb->get(mbdb, tid, &key, &data, 0);
 
-    switch (r) {
-    case 0:
-      oldent= (struct mbox_entry *) data.data;      
-      break;
-    case DB_NOTFOUND:
-      r = IMAP_MAILBOX_NONEXISTENT;
-      break;
-    case EAGAIN:
-	goto retry;
-    default:
-	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
-	       name, strerror(r));
-	r = IMAP_IOERROR;
+	switch (r) {
+	case 0:
+	    oldent= (struct mbox_entry *) data.data;      
+	    break;
+	case DB_NOTFOUND:
+	    r = IMAP_MAILBOX_NONEXISTENT;
+	    break;
+	case EAGAIN:
+	    goto retry;
+	default:
+	    syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+		   name, strerror(r));
+	    r = IMAP_IOERROR;
+	}
     }
 
     if (!r && !isadmin && !isusermbox) {
@@ -1327,16 +1328,19 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     }
 
     /* Open & lock  mailbox header */
-    r = mailbox_open_header_path(name, path, oldacl, auth_state, &mailbox, 0);
-    if (r) {
-      goto done;
-    }
+    if (!(oldent->mbtype & MBTYPE_REMOTE)) {
+        r = mailbox_open_header_path(name, path, oldacl, auth_state, 
+				     &mailbox, 0);
 
-    mailbox_isopen = 1;
+	if (r) {
+	    goto done;
+	}
+	mailbox_isopen = 1;
 
-    r = mailbox_lock_header(&mailbox);
-    if (r) {
-      goto done;
+	r = mailbox_lock_header(&mailbox);
+	if (r) {
+	    goto done;
+	}
     }
 
     /* Make change to ACL */
@@ -1396,13 +1400,14 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     }
 
 
-    /* set it in the /var/spool part */
-    free(mailbox.acl);
-    mailbox.acl = xstrdup(newacl);
-    (void) mailbox_write_header(&mailbox);
-    timestamp = time(0);
-    uidvalidity = mailbox.uidvalidity;
-    toimsp(name, uidvalidity, "ACLsn", newacl, timestamp, 0);
+    if (!(newent->mbtype != MBTYPE_REMOTE)) {
+        /* set it in the /var/spool part */
+        free(mailbox.acl);
+	mailbox.acl = xstrdup(newacl);
+	(void) mailbox_write_header(&mailbox);
+	timestamp = time(0);
+	uidvalidity = mailbox.uidvalidity;
+    }
 
   done:
     free(newent);
