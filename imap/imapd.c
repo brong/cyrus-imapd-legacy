@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.1 1999/10/13 19:11:50 leg Exp $ */
+/* $Id: imapd.c,v 1.180.4.2 1999/10/13 21:13:03 tmartin Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -391,6 +391,8 @@ char **envp;
 
     setproctitle_init(argc, argv, envp);
     config_init("imapd");
+
+    mboxlist_open();
 
     signal(SIGPIPE, SIG_IGN);
 

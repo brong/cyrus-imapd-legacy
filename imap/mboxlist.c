@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.2 1999/10/13 19:29:46 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.3 1999/10/13 21:13:05 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -150,13 +150,18 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp)
     key.data = (char *) name;
     key.size = strlen(name);
 
+    tmp_log_string("Looking up: ");
+    tmp_log_string(name);
+
     /* we don't bother with a transaction for this one */
     r = mbdb->get(mbdb, NULL, &key, &data, 0);
 	
     switch (r) {
     case 0:
+      tmp_log_string("Mailbox does exist!");
 	break;
     case DB_NOTFOUND:
+      tmp_log_string("Mailbox does NOT exist!");
 	return IMAP_MAILBOX_NONEXISTENT;
 	break;
     default:
@@ -217,6 +222,7 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
     unsigned long parentlen;
     char *parentname, *parentpartition, *parentacl;
     unsigned long parentpartitionlen, parentacllen;
+    DBT key, data;
 
     /* Check for invalid name/partition */
     if (partition && strlen(partition) > MAX_PARTITION_LEN) {
@@ -252,12 +258,36 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
     /* Search for a parent */
     strcpy(parent, name);
     parentlen = 0;
-    while (!parentlen && (p = strrchr(parent, '.'))) {
+    while ((parentlen==0) && (p = strrchr(parent, '.'))) {
 	*p = '\0';
 	/* no need to search. we're using a DB! */
-	/*	offset = bsearch_mem(parent, 1, list_base, list_size, 0, &parentlen);*/
+	memset(&key, 0, sizeof(key));
+	key.data=parent;
+	key.size=strlen(parent);
+	memset(&data, 0, sizeof(data));
+
+	r = mbdb->get(mbdb, tid, &key, &data, 0);
+
+	switch(r)
+	{
+	case DB_NOTFOUND:	  
+	  break;
+	case 0:
+	  parentlen=strlen(parent);
+	  break;
+	case EAGAIN:
+	  /* xxx	  goto retry;*/
+	  break;
+	default:
+	  tmp_log_string("error updatng db\n");
+	  tmp_log_string(strerror(r));
+	  syslog(LOG_ERR, "DBERROR: error updating database: %s",
+		 name, strerror(r));
+	  r = IMAP_IOERROR;	  
+	}
+
     }
-    if (parentlen) {
+    if (parentlen!=0) {
 
       /*
 	mboxlist_parseline(offset, parentlen, &parentname, (unsigned long *)0,
@@ -288,8 +318,9 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
 
 	/* Canonicalize case of parent prefix */
 	strncpy(name, parent, strlen(parent));
-    }
-    else {
+
+    } 
+    else { /* parentlen == 0 */
 	if (!isadmin) {
 	    return IMAP_PERMISSION_DENIED;
 	}
@@ -378,10 +409,6 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     DBT key, keydel, data;
     struct mbox_entry *mboxent;
 
-    tmp_log_string("opening db\n");
-
-    mboxlist_open();
-
     txnp = dbenv.tx_info;
 
     if (0) {
@@ -452,12 +479,13 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 
     memset(&data, 0, sizeof(data));
     data.data = mboxent;
-    data.size = sizeof(mboxent) + strlen(acl);
+    data.size = sizeof(struct mbox_entry) + strlen(acl);
 
     tmp_log_string("trying to put into db\n");
     tmp_log_string(name);
     
-    r = mbdb->put(mbdb, tid, &key, &data, 0);
+    r = mbdb->put(mbdb, NULL, &key, &data, 0);
+
     switch (r) {
     case 0:
 	break;
@@ -471,7 +499,13 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 	       name, strerror(r));
 	r = IMAP_IOERROR;
     }
-
+    /*
+    memset(&data, 0, sizeof(data));
+    r = mbdb->get(mbdb, NULL, &key, &data, 0);
+    tmp_log_string("[");
+    tmp_log_string(data.data);
+    tmp_log_string("\n");
+    */
     if (!r) {
 	/* Create new mailbox and move new mailbox list file into place */
 	mailbox_hash_mbox(buf2, root, name);
@@ -493,6 +527,8 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 	syslog(LOG_ERR, "DBERROR: failed on commit: %s", strerror(r));
 	r = IMAP_IOERROR;
     }
+    
+    tmp_log_string("\nTransaction complete!\n");
 
     toimsp(name, newmailbox.uidvalidity,
 	   "ACLsn", newmailbox.acl, newmailbox.uidvalidity, 0);
@@ -2060,6 +2096,10 @@ static int mbdb_order(const DBT *a, const DBT *b)
     int cmp;
     char c2;
 
+    return strcmp(s1,s2);
+
+    tmp_log_string("in order function\n");
+
     for (;;) {
 	if ((c2 = *s2) == 0) {
 	    return (unsigned char)*s1;
@@ -2177,7 +2217,7 @@ void db_err(char *db_prfx, char *buffer)
  * Get the filenames of the mailbox list and the temporary file to
  * use when updating the mailbox list.
  */
-static void
+void
 mboxlist_open(void)
 {
     int ret;
