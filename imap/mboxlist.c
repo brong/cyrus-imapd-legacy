@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.19 1999/10/18 23:11:35 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.20 1999/10/19 02:46:06 leg Exp $
  */
 
 #include <stdio.h>
@@ -402,10 +402,10 @@ mboxlist_createmailbox(char *name, int format, char *partition,
 {
     int r;
     unsigned long offset, len;
-    char *acl;
+    char *acl = NULL;
     char buf2[MAX_MAILBOX_PATH];
     const char *root;
-    char *newpartition=NULL;
+    char *newpartition = NULL;
     int newlistfd;
     struct iovec iov[10];
     int n;
@@ -413,7 +413,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     DB_TXN *tid;
     DB_TXNMGR *txnp;
     DBT key, keydel, data;
-    struct mbox_entry *mboxent=NULL;
+    struct mbox_entry *mboxent = NULL;
 
     txnp = dbenv.tx_info;
 
@@ -503,9 +503,9 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     mailbox_close(&newmailbox);
 
  done:
-    free(mboxent);
-    free(newpartition);
-    free(acl);
+    if (mboxent) free(mboxent);
+    if (newpartition) free(newpartition);
+    if (acl) free(acl);
 
     if (r != 0)
     {
@@ -1243,7 +1243,7 @@ void* rock;
     char aclbuf[1024];
     char namebuf[MAX_MAILBOX_NAME+1];
     int rights;
-    int r;
+    int r, r2;
     char *inboxcase;
     DBC *cursor;
     DB_TXN *tid;
@@ -1360,21 +1360,22 @@ void* rock;
      * search for those mailboxes next
      */
 
+    r = mbdb->cursor(mbdb, tid, &cursor, 0);
+    if (r != 0) { 
+	syslog(LOG_ERR, "DBERROR: Unable to create cursor");
+	goto done;
+    }
+
     if (userid &&
 	(!strncmp(usermboxname, pattern, usermboxnamelen-1) ||
 	 !strncasecmp("inbox.", pattern, prefixlen < 6 ? prefixlen : 6))) {
-      int result;
+	int result;
+	
 	if (!strncmp(usermboxname, pattern, usermboxnamelen-1)) {
 	    inboxoffset = 0;
 	}
 	else {
 	    inboxoffset = strlen(userid);
-	}
-
-	r=mbdb->cursor(mbdb, tid, &cursor, 0);
-	if (r!=0) { 
-	  syslog(LOG_ERR, "Unable to create cursor");
-	  goto done;
 	}
 
 	memset(&data, 0, sizeof(data));
@@ -1390,7 +1391,6 @@ void* rock;
 	      break;
 		
 	    case EAGAIN:
-		syslog(LOG_WARNING, "unexpected deadlock in mboxlist.c");
 		goto retry;
 		break;
 		
@@ -1403,7 +1403,9 @@ void* rock;
 	    mboxent = (struct mbox_entry *) data.data;
 
 	    /* make sure has the prefix */
-	    if (strncmp(mboxent->name, usermboxname, usermboxnamelen)!=0) break;
+	    if (strncmp(mboxent->name, usermboxname, usermboxnamelen) != 0) {
+		break;
+	    }
 
 	    minmatch = 0;
 	    while (minmatch >= 0) {
@@ -1429,19 +1431,16 @@ void* rock;
     }
 
     /* Search for all remaining mailboxes.  Start at the pattern prefix */
-
-    r=mbdb->cursor(mbdb, tid, &cursor, 0);
-    if (r!=0) { 
-      syslog(LOG_ERR, "Unable to create cursor");
-      goto done;
+    if (prefixlen) {
+	memset(&data, 0, sizeof(data));
+	memset(&key, 0, sizeof(key));
+	key.data = pattern;
+	key.size = prefixlen;
+	
+	r = cursor->c_get(cursor, &key, &data, DB_SET_RANGE);
+    } else {
+	r = cursor->c_get(cursor, &key, &data, DB_FIRST);
     }
-
-    memset(&data, 0, sizeof(data));
-    memset(&key, 0, sizeof(key));
-    key.data = pattern;
-    key.size = prefixlen;
-
-    r = cursor->c_get(cursor, &key, &data, DB_FIRST);
 
     if (userid) usermboxname[--usermboxnamelen] = '\0';
     while (r != DB_NOTFOUND) {
@@ -1450,7 +1449,6 @@ void* rock;
 	  break;
 
 	case EAGAIN:
-	    syslog(LOG_WARNING, "unexpected deadlock in mboxlist.c");
 	    goto retry;
 	    break;
 	    
@@ -1466,10 +1464,9 @@ void* rock;
 
 	/* does this even match our prefix? */
 	if (strncmp(namebuf, pattern, prefixlen)) break;
-	 
 
 	/* does it match the glob? */
-	minmatch=0;
+	minmatch = 0;
 	while (minmatch >= 0) {
 	    matchlen = glob_test(g, name, namelen, &minmatch);
 
@@ -1485,25 +1482,24 @@ void* rock;
 	    namebuf[namelen] = '\0';
 
 	    if (isadmin) {
-	      r = proc(namebuf, matchlen, 1, rock);
-	      if (r) {
-		glob_free(&g);
-		list_doingfind--;
-		goto done;
-	      }
-	    } else {
-	      rights = acl_myrights(auth_state, mboxent->acls);
-	      if (rights & ACL_LOOKUP) {
-		r = proc(namebuf, matchlen, (rights & ACL_CREATE),
-			 rock);
+		r = proc(namebuf, matchlen, 1, rock);
 		if (r) {
-		  glob_free(&g);
-		  list_doingfind--;
-		  goto done;
+		    glob_free(&g);
+		    list_doingfind--;
+		    goto done;
 		}
-	      }
-	  }
-
+	    } else {
+		rights = acl_myrights(auth_state, mboxent->acls);
+		if (rights & ACL_LOOKUP) {
+		    r = proc(namebuf, matchlen, (rights & ACL_CREATE),
+			     rock);
+		    if (r) {
+			glob_free(&g);
+			list_doingfind--;
+			goto done;
+		    }
+		}
+	    }
 	}
 
 	memset(&data, 0, sizeof(data));
@@ -1513,6 +1509,20 @@ void* rock;
     r = 0;
 
   done:
+    if (cursor) {
+	switch (r2 = cursor->c_close(cursor)) {
+	case 0:
+	    break;
+	case EAGAIN:
+	    goto retry;
+	    break;
+	default:
+	    syslog(LOG_ERR, "DBERROR: couldn't close cursor: %s",
+		   strerror(r2));
+	    break;
+	}
+    }
+
     switch (txn_commit(tid)) {
     case 0:
 	break;
@@ -2537,12 +2547,12 @@ void mboxlist_done(void)
     int r;
 
     r = mbdb->close(mbdb, 0);
-    if (!r) {
+    if (r) {
 	syslog(LOG_ERR, "DBERROR: error closing mailboxes: %s",
 	       strerror(r));
     }
     r = db_appexit(&dbenv);
-    if (!r) {
+    if (r) {
 	syslog(LOG_ERR, "DBERROR: error exiting application: %s",
 	       strerror(r));
     }
