@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: lmtp_proxy.c,v 1.1.2.5 2004/02/19 17:53:41 ken3 Exp $
+ * $Id: lmtp_proxy.c,v 1.1.2.6 2004/02/19 19:41:17 ken3 Exp $
  */
 
 #include <config.h>
@@ -63,7 +63,7 @@
 #include "xmalloc.h"
 
 void adddest(remote_msgdata_t *mydata, const char *rcpt,
-	     char *server, char *mailbox, const char *authas)
+	     char *server, const char *authas)
 {
     struct rcpt *new_rcpt = xmalloc(sizeof(struct rcpt));
     struct dest *d;
