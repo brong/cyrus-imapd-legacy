@@ -27,7 +27,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: gun.c,v 1.1.2.2 1999/11/02 21:08:10 leg Exp $
+ * $Id: gun.c,v 1.1.2.3 1999/11/02 21:52:31 leg Exp $
  */
 
 /* we need to support 4 functions in this:
@@ -362,10 +362,12 @@ int main(int argc, char *argv[], char *envp[])
     signal(SIGALRM, SIG_IGN);
 
     if ((msqin = msgget(COMMANDS, IPC_CREAT | 0600)) < 0) {
+        perror("msgget");
 	fatal("msgget COMMANDS failed", 1);
     }
 
     if ((msqout = msgget(RESPONSES, IPC_CREAT | 0600)) < 0) {
+        perror("msgget");
 	fatal("msgget RESPONSES failed", 1);
     }
 
@@ -464,7 +466,9 @@ int main(int argc, char *argv[], char *envp[])
 		tell_proxies_commit();
 	    } else {
 		/* abort it */
-		mboxlist_abort(mytxn);
+  	        if (mytxn) {
+		    mboxlist_abort(mytxn);
+		}
 
 		/* tell the proxies */
 		tell_proxies_abort();

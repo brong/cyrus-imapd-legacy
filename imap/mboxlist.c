@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.31 1999/11/02 20:56:39 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.32 1999/11/02 21:52:32 leg Exp $
  */
 
 #include <stdio.h>
@@ -530,17 +530,28 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	return r;
     }
 
-    switch (txn_commit(tid)) {
-    case 0: 
-	break;
-    default:
-	syslog(LOG_ERR, "DBERROR: failed on commit: %s",
-	       strerror(r));
-	return IMAP_IOERROR;
+    if (rettid) {
+        /* just get ready to commit */
+        switch (r = txn_prepare(tid)) {
+        case 0:
+	  *rettid = tid;
+	  break;
+	default:
+	  syslog(LOG_ERR, "DBERROR: failed on commit: %s",
+		 strerror(r));
+	  r = IMAP_IOERROR;
+	  break;
+	}
+    } else {
+        switch (txn_commit(tid)) {
+	case 0: 
+	  break;
+	default:
+	  syslog(LOG_ERR, "DBERROR: failed on commit: %s",
+		 strerror(r));
+	  return IMAP_IOERROR;
+	}
     }
-
-    toimsp(name, newmailbox.uidvalidity,
-	   "ACLsn", newmailbox.acl, newmailbox.uidvalidity, 0);
 
     return r;
 }
@@ -1515,13 +1526,13 @@ static int mypid = 0;
 static int get_gun_queues(void)
 {
     if (msqin == 0 &&
-	(msqin = msgget(COMMANDS, 0666)) < 0) {
+	(msqin = msgget(COMMANDS, 0600)) < 0) {
 	msqin = 0;
 	syslog(LOG_ERR, "gun: msgget msqin: %m");
 	return IMAP_IOERROR;
     }
     if (msqout == 0 &&
-	(msqout = msgget(RESPONSES, 0666)) < 0) {
+	(msqout = msgget(RESPONSES, 0600)) < 0) {
 	msqout = 0;
 	syslog(LOG_ERR, "gun: msgget msqout: %m");
 	return IMAP_IOERROR;
