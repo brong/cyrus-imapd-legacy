@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.11 2001/10/01 19:54:43 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.12 2001/10/15 15:45:20 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -1609,7 +1609,7 @@ cmd_authenticate(char *tag,char *authtype)
     /* failed authentication */
     if (sasl_result != SASL_OK)
     {
-	syslog(LOG_NOTICE, "badlogin: %s %s %s [%s]",
+	syslog(LOG_NOTICE, "badlogin: %s %s [%s]",
 	       imapd_clienthost, authtype, sasl_errdetail(imapd_saslconn));
 
 	snmp_increment_args(AUTHENTICATION_NO, 1,
