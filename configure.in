@@ -2,7 +2,7 @@ dnl Process this file with autoconf to produce a configure script.
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.149.2.1.2.1 2000/07/06 18:49:32 ken3 Exp $
+dnl $Id: configure.in,v 1.149.2.1.2.2 2000/07/06 21:18:39 ken3 Exp $
 dnl
 
 AC_INIT(imap/imapd.c)
@@ -531,7 +531,7 @@ if test "$TCL_SUBDIRS" != ""; then
       # filename, it should be safe to add it (to the front of the line --
       # somef vendors have older, badly installed tclshs that we want to avoid
       # if we can)
-      AC_PATH_PROGS(TCLSH, [tclsh8.1 tclsh8.0 tclsh], "unknown")
+      AC_PATH_PROGS(TCLSH, [tclsh8.2 tclsh8.1 tclsh8.0 tclsh], "unknown")
     fi
 
     # Do we know where to get a tclsh?
@@ -840,6 +840,7 @@ case "$with_openssl" in
 		
 		;;
 	*)  CPPFLAGS="${CPPFLAGS} -I${with_openssl}/include"
+	    LDFLAGS="${LDFLAGS} -L${with_openssl}/lib"
 	    LIBS="${LIBS} -lssl -lcrypto";;
 esac
 
