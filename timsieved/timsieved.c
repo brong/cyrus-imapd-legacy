@@ -141,7 +141,7 @@ static int mysasl_authproc(void *context,
     char *realm;
     static char replybuf[100];
 
-    canon_authuser = (char *) auth_canonifyid(auth_identity);
+    canon_authuser = (char *) auth_canonifyid(auth_identity,0);
     if (!canon_authuser) {
 	*errstr = "bad userid authenticated";
 	return SASL_BADAUTH;
@@ -149,7 +149,7 @@ static int mysasl_authproc(void *context,
     canon_authuser = xstrdup(canon_authuser);
 
     if (!requested_user) requested_user = auth_identity;
-    canon_requser = (char *) auth_canonifyid(requested_user);
+    canon_requser = (char *) auth_canonifyid(requested_user,0);
     if (!canon_requser) {
 	*errstr = "bad userid requested";
 	return SASL_BADAUTH;
