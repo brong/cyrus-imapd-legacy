@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.51 1999/11/05 23:28:26 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.52 1999/11/05 23:42:40 leg Exp $
  */
 
 #include <stdio.h>
@@ -618,7 +618,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 			    MAILBOX_FORMAT_NETNEWS :
 			    MAILBOX_FORMAT_NORMAL), 
 			   &newmailbox);
-	if (r != 0) {
+	if (!r) {
 	    mailbox_close(&newmailbox);
 	}
     }
