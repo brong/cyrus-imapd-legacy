@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.47 1999/11/05 18:15:31 cyrus Exp $
+ * $Id: mboxlist.c,v 1.94.4.48 1999/11/05 18:16:30 cyrus Exp $
  */
 
 #include <stdio.h>
@@ -549,6 +549,7 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     strcpy(mboxent->name, name);
     mboxent->mbtype = mbtype;
     strcpy(mboxent->partition, newpartition);
+    free(newpartition); newpartition = NULL;
     strcpy(mboxent->acls, acl);
     free(acl); acl = NULL;
 
@@ -614,8 +615,8 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	}
     }
 
-    if (newpartition) free(newpartition);
     if (acl) free(acl);
+    if (newpartition) free(newpartition);
     if (mboxent) free(mboxent);
     if (mtxn) free(mtxn);
 
