@@ -145,7 +145,7 @@ static int init(const char *dbdir, int myflags)
  retry:
     flags |= DB_INIT_LOCK | DB_INIT_MPOOL | 
 	     DB_INIT_LOG | DB_INIT_TXN;
-#if DB_VERSION_MINOR > 0
+#if (DB_VERSION_MAJOR > 3) || ((DB_VERSION_MAJOR==3) && (DB_VERSION_MINOR > 0))
     r = dbenv->open(dbenv, dbdir, flags, 0644); 
 #else
     r = dbenv->open(dbenv, dbdir, NULL, flags, 0644); 
