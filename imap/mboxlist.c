@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.10 1999/10/18 02:47:36 tmartin Exp $
+ * $Id: mboxlist.c,v 1.94.4.11 1999/10/18 04:19:30 leg Exp $
  */
 
 #include <stdio.h>
@@ -144,12 +144,12 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
 
     switch (r) {
     case 0:
-      /* copy out interesting parts */
-      mboxent=(struct mbox_entry *) data.data;
-      partitionlen=strlen(mboxent->partition);
-      acllen=strlen(mboxent->acls);
-       
+	/* copy out interesting parts */
+	mboxent=(struct mbox_entry *) data.data;
+	partitionlen=strlen(mboxent->partition);
+	acllen=strlen(mboxent->acls);
 	break;
+
     case DB_NOTFOUND:
 	return IMAP_MAILBOX_NONEXISTENT;
 	break;
@@ -235,21 +235,17 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
     key.data = (char *) name;
     key.size = strlen(name);
 
-    /* we don't bother with a transaction for this one */
     r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
-
     switch (r) {
     case 0:
-
       mboxent=(struct mbox_entry *) data.data;
-
       r = IMAP_MAILBOX_EXISTS;
       
       /* Lie about error if privacy demands */
       if (!isadmin) {
-	if (!(acl_myrights(auth_state, mboxent->acls) & ACL_LOOKUP)) {
-	  r = IMAP_PERMISSION_DENIED;
-	}
+	  if (!(acl_myrights(auth_state, mboxent->acls) & ACL_LOOKUP)) {
+	      r = IMAP_PERMISSION_DENIED;
+	  }
       }
       return r;       
       break;
@@ -276,7 +272,7 @@ mboxlist_createmailboxcheck(char *name, int format, char *partition,
 	key.size=strlen(parent);
 	memset(&data, 0, sizeof(data));
 
-	r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
+	r = mbdb->get(mbdb, tid, &key, &data, 0);
 
 	switch (r) {
 	case DB_NOTFOUND:	  
@@ -514,7 +510,7 @@ mboxlist_createmailbox(char *name, int format, char *partition,
     free(partition);
     free(acl);
 
-    if (r!=0)
+    if (r != 0)
     {
 	txn_abort(tid);
 	return r;
@@ -2343,7 +2339,7 @@ void mboxlist_init(void)
 
     /* create the name of the db file */
     strcpy(dbdir, config_dir);
-    /*    strcat(dbdir, FNAME_DBDIR);*/
+    strcat(dbdir, FNAME_DBDIR);
     
     r = db_appinit(dbdir, NULL, &dbenv, 
 		   DB_INIT_LOCK | DB_INIT_MPOOL | DB_INIT_TXN | DB_TXN_NOSYNC
@@ -2367,6 +2363,7 @@ mboxlist_open(void)
     if (!listfname) {
 	listfname = xmalloc(strlen(config_dir)+sizeof(FNAME_MBOXLIST));
 	strcpy(listfname, config_dir);
+	strcat(listfname, FNAME_DBDIR);
 	strcat(listfname, FNAME_MBOXLIST);
     }
 
