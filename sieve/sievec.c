@@ -1,6 +1,6 @@
 /* sievec.c -- compile a sieve script to bytecode manually
  * Rob Siemborski
- * $Id: sievec.c,v 1.1.2.1 2001/12/18 23:09:57 rjs3 Exp $
+ * $Id: sievec.c,v 1.1.2.2 2001/12/18 23:24:35 rjs3 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -100,7 +100,7 @@ int main(int argc, char **argv)
     }
 
     /* Now, open the new file */
-    fd = open(argv[2], O_CREAT | O_TRUNC | O_WRONLY);
+    fd = open(argv[2], O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if(fd < 0) {
 	printf("couldn't open bytecode output file\n");
 	exit(1);
