@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.17 2003/01/08 23:41:52 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.18 2003/01/09 18:43:34 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,8 +55,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-#define DUMPCODE 1
-#define VERBOSE 1
+#define DUMPCODE 0
+#define VERBOSE 0
 
 #if DUMPCODE
 void dump(bytecode_info_t *d);
