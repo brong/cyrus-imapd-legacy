@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: proxyd.c,v 1.69.2.1 2001/08/01 22:11:15 rjs3 Exp $ */
+/* $Id: proxyd.c,v 1.69.2.2 2001/08/02 21:41:44 rjs3 Exp $ */
 
 #undef PROXY_IDLE
 
@@ -542,6 +542,7 @@ extern sasl_callback_t *mysasl_callbacks(const char *username,
 					 const char *authname,
 					 const char *realm,
 					 const char *password);
+void free_callbacks(sasl_callback_t *in);
 
 static int proxy_authenticate(struct backend *s)
 {
@@ -642,6 +643,8 @@ static int proxy_authenticate(struct backend *s)
 
 	r = mysasl_getauthline(s->in, mytag, &in, &inlen);
     }
+
+    free_callbacks(cb);
 
     if (r == SASL_OK) {
 	prot_setsasl(s->in, s->saslconn);

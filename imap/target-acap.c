@@ -40,7 +40,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: target-acap.c,v 1.26.6.1 2001/08/01 22:11:16 rjs3 Exp $
+ * $Id: target-acap.c,v 1.26.6.2 2001/08/02 21:41:45 rjs3 Exp $
  */
 
 #include <config.h>
@@ -78,6 +78,7 @@ extern sasl_callback_t *mysasl_callbacks(const char *username,
 					 const char *authname,
 					 const char *realm,
 					 const char *password);
+void free_callbacks(sasl_callback_t *in);
 
 static acap_conn_t *acap_conn;
 static acap_context_t *mycontext;
@@ -145,7 +146,7 @@ int connect_acap(const char *server)
 	}
 
 	/* probably should setup callbacks here if configured to! */
-	r = sasl_client_init(cb);
+	r = sasl_client_init(NULL);
 	if (r != SASL_OK) {
   	    syslog(LOG_ERR, "sasl_client_init() failed: %s",
 		   sasl_errstring(r, NULL, NULL));
@@ -159,7 +160,8 @@ int connect_acap(const char *server)
     snprintf(acapurl, sizeof(acapurl), "acap://%s@%s/", user, server);
     r = ACAP_NO_CONNECTION;
 
-    r = acap_conn_connect(acapurl, NULL, &acap_conn);
+    r = acap_conn_connect(acapurl, cb, &acap_conn);
+    free_callbacks(cb);
     if (r != ACAP_OK) {
 	int t = config_getint("acap_retry_timeout", 60);
 	

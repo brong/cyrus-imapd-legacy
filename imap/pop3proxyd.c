@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3proxyd.c,v 1.17.2.2 2001/08/01 22:16:00 rjs3 Exp $
+ * $Id: pop3proxyd.c,v 1.17.2.3 2001/08/02 21:41:44 rjs3 Exp $
  */
 #include <config.h>
 
@@ -1024,6 +1024,7 @@ extern sasl_callback_t *mysasl_callbacks(const char *username,
 					 const char *authname,
 					 const char *realm,
 					 const char *password);
+extern void free_callbacks(sasl_callback_t *in);
 
 static int proxy_authenticate(const char *hostname)
 {
@@ -1136,6 +1137,9 @@ static int proxy_authenticate(const char *hostname)
 
 	r = mysasl_getauthline(backend_in, &in, &inlen);
     }
+
+    /* Done with callbacks */
+    free_callbacks(cb);
 
     if (r == SASL_OK) {
 	prot_setsasl(backend_in, backend_saslconn);
