@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.5 1999/11/05 23:00:36 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.6 1999/11/05 23:07:48 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -2260,19 +2260,18 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
     char *server;
     char *cmd = usinguid ? "UID Copy" : "Copy";
     struct backend *s = NULL;
+    char mailboxname[MAX_MAILBOX_NAME+1];
     int r;
 
     assert(backend_current != NULL);
 
-    r = mboxlist_lookup(name, &server, NULL, NULL);
-
-    if (!r) {
-	s = proxyd_findserver(server);
-    }
+    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    if (!r) r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
+    if (!r) s = proxyd_findserver(server);
 
     if (!s) {
 	/* no such mailbox or other problem */
-	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin, 
+	r = mboxlist_createmailboxcheck(mailboxname, 0, 0, proxyd_userisadmin, 
 					proxyd_userid, proxyd_authstate,
 					NULL, NULL);
 	prot_printf(proxyd_out, "%s NO %s%s\r\n", tag,
@@ -2280,7 +2279,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
     } else if (s == backend_current) {
 	/* this is the easy case */
 	prot_printf(backend_current->out, "%s %s %s {%d+}\r\n%s\r\n",
-		    tag, cmd, sequence, strlen(name), name);
+		    tag, cmd, sequence, strlen(mailboxname), mailboxname);
 	pipe_including_tag(backend_current, tag);
     } else {
 #if NEEDS_PROXY
@@ -2316,10 +2315,13 @@ void cmd_expunge(char *tag, char *sequence)
 void cmd_create(char *tag, char *name, char *server)
 {
     struct backend *s = NULL;
+    char mailboxname[MAX_MAILBOX_NAME+1];
     int r;
 
-    if (!server) {
-	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin,
+    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+
+    if (!r && !server) {
+	r = mboxlist_createmailboxcheck(mailboxname, 0, 0, proxyd_userisadmin,
 					proxyd_userid, proxyd_authstate,
 					NULL, &server);
     }
@@ -2330,7 +2332,7 @@ void cmd_create(char *tag, char *name, char *server)
 	    /* ok, send the create to that server */
 
 	    prot_printf(s->out, "%s CREATE {%d+}\r\n%s\r\n", 
-			tag, strlen(name), name);
+			tag, strlen(mailboxname), mailboxname);
 	    pipe_including_tag(s, tag);
 	} else {
 	    /* you want it where?!? */
@@ -2351,13 +2353,17 @@ void cmd_delete(char *tag, char *name)
     int r;
     char *server;
     struct backend *s = NULL;
+    char mailboxname[MAX_MAILBOX_NAME+1];
 
-    r = mboxlist_lookup(name, &server, NULL, NULL);
+    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+
+    if (!r) r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
     if (!r) {
 	s = proxyd_findserver(server);
 
 	if (s) {
-	    prot_printf(s->out, "%s DELETE {%d+}\r\n%s\r\n", tag, name);
+	    prot_printf(s->out, "%s DELETE {%d+}\r\n%s\r\n", 
+			tag, strlen(mailboxname), mailboxname);
 	    pipe_including_tag(s, tag);
 	} else {
 	    prot_printf(proxyd_out, "%s NO %s\r\n",
@@ -2375,19 +2381,24 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 {
     int r;
     char *server;
+    char oldmailboxname[MAX_MAILBOX_NAME+1];
+    char newmailboxname[MAX_MAILBOX_NAME+1];
     struct backend *s = NULL;
 
     if (partition) {
 	prot_printf(proxyd_out, 
 		    "%s NO cross-server RENAME not implemented\r\n", tag);
     } else {
-	r = mboxlist_lookup(oldname, &server, NULL, NULL);
+        r = mboxname_tointernal(oldname, imapd_userid, oldmailboxname);
+	if (!r) mboxname_tointernal(newname, imapd_userid, newmailboxname);
+	if (!r) r = mboxlist_lookup(oldmailboxname, &server, NULL, NULL);
 	if (!r) {
 	    s = proxyd_findserver(server);
 
 	    if (s) {
 		prot_printf(s->out, "%s RENAME {%d+}\r\n%s {%d+}\r\n%s\r\n", 
-			    tag, oldname, newname);
+			    tag, strlen(oldmailboxname), oldmailboxname,
+			    strlen(newmailboxname), newmailboxname);
 		pipe_including_tag(s, tag);
 	    } else {
 		prot_printf(proxyd_out, "%s NO %s\r\n",
