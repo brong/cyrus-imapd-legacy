@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.123.2.13 2000/11/11 04:53:52 ken3 Exp $
+ * $Id: deliver.c,v 1.123.2.14 2000/12/19 19:27:40 ken3 Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.123.2.13 2000/11/11 04:53:52 ken3 Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.123.2.14 2000/12/19 19:27:40 ken3 Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1040,9 +1040,24 @@ int sieve_redirect(void *ac, void *ic, void *sc, void *mc, const char **errmsg)
     sieve_redirect_context_t *rc = (sieve_redirect_context_t *) ac;
     script_data_t *sd = (script_data_t *) sc;
     message_data_t *m = (message_data_t *) mc;
+    char buf[8192], *sievedb = NULL;
     int res;
 
+    /* if we have a msgid, we can track our redirects */
+    if (m->id) {
+	snprintf(buf, sizeof(buf), "%s-%s", m->id, rc->addr);
+	sievedb = make_sieve_db(sd->username);
+
+	/* ok, let's see if we've redirected this message before */
+	if (duplicate_check(buf, strlen(buf), sievedb, strlen(sievedb)))
+	    return SIEVE_OK;
+    }
+
     if ((res = send_forward(rc->addr, m->return_path, m->data)) == 0) {
+	/* mark this message as redirected */
+	if (sievedb) duplicate_mark(buf, strlen(buf), 
+				    sievedb, strlen(sievedb), time(NULL));
+
 	return SIEVE_OK;
     } else {
 	if (res == -1)
