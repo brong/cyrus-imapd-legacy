@@ -41,7 +41,7 @@
  */
 
 /*
- * $Id: auth_unix.c,v 1.27 2000/05/23 20:56:12 robeson Exp $
+ * $Id: auth_unix.c,v 1.27.8.1 2001/08/01 15:32:52 rjs3 Exp $
  */
 
 #include <config.h>
@@ -150,13 +150,17 @@ static char allowedchars[256] = {
  * representations: one for getpwent calls and one for folder names.  The
  * latter canonicalizes to a MUTF7 representation.
  */
-char *auth_canonifyid(identifier)
+char *auth_canonifyid(identifier, len)
 const char *identifier;
+size_t len;
 {
     static char retbuf[81];
     struct group *grp;
     char sawalpha;
     char *p;
+
+    if(!len) len = strlen(identifier);
+    if(len >= sizeof(retbuf)) return NULL;
 
     if (strcasecmp(identifier, "anonymous") == 0) {
 	return "anonymous";
@@ -166,8 +170,8 @@ const char *identifier;
 	return "anyone";
     }
     
-    if (strlen(identifier) >= sizeof(retbuf)) return 0;
-    strcpy(retbuf, identifier);
+    memcpy(retbuf, identifier, len);
+    retbuf[len] = '\0';
 
     /* This used to be far more restrictive, but many sites seem to ignore the 
      * ye olde Unix conventions of username.  Specifically, we used to
@@ -184,16 +188,11 @@ const char *identifier;
 	return retbuf;
     }
 
-    if (strlen(identifier) >= sizeof(retbuf)) return 0;
-
     /* Copy the string and look up values in the allowedchars array above.
      * If we see any we don't like, reject the string.
      */
-    p = retbuf;
     sawalpha = 0;
-    while (*identifier) {
-	*p = *identifier++;
-
+    for(p = retbuf; *p; p++) {
 	switch (allowedchars[*(unsigned char*) p]) {
 	case 0:
 	    return NULL;
@@ -205,9 +204,7 @@ const char *identifier;
 	default:
 	    ;
 	}
-	p++;
     }
-    *p = 0;
 
     if (!sawalpha) return NULL;  /* has to be one alpha char */
 
@@ -229,7 +226,7 @@ const char *cacheid;
     struct group *grp;
     char **mem;
 
-    identifier = auth_canonifyid(identifier);
+    identifier = auth_canonifyid(identifier, 0);
     if (!identifier) return 0;
     if (!strncmp(identifier, "group:", 6)) return 0;
     

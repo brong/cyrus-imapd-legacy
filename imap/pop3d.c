@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.1 2001/07/31 20:54:04 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.2 2001/08/01 15:32:50 rjs3 Exp $
  */
 #include <config.h>
 
@@ -894,7 +894,7 @@ static void cmd_apop(char *user, char *digest)
 	prot_flush(popd_out);
 	shut_down(0);
     }
-    else if (!(p = auth_canonifyid(user)) ||
+    else if (!(p = auth_canonifyid(user,0)) ||
 	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
 	syslog(LOG_NOTICE,
@@ -961,7 +961,7 @@ char *user;
 	prot_flush(popd_out);
 	shut_down(0);
     }
-    else if (!(p = auth_canonifyid(user)) ||
+    else if (!(p = auth_canonifyid(user,0)) ||
 	       strchr(p, '.') || strlen(p) + 6 > MAX_MAILBOX_PATH) {
 	prot_printf(popd_out, "-ERR Invalid user\r\n");
 	syslog(LOG_NOTICE,

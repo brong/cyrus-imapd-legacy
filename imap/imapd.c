@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.2 2001/07/31 23:11:09 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.3 2001/08/01 15:32:48 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -276,7 +276,7 @@ static int mysasl_authproc(sasl_conn_t *conn,
 	    while (*val && isspace((int) *val)) val++;
 	}
 	if (!*val) {
-	    sasl_seterror(context, 0, "cross-realm login %s denied",
+	    sasl_seterror(conn, 0, "cross-realm login %s denied",
 			  auth_identity);
 	    return SASL_BADAUTH;
 	}
@@ -302,7 +302,7 @@ static int mysasl_authproc(sasl_conn_t *conn,
 	    
 	    imapd_authstate = auth_newstate(requested_user, NULL);
 	} else {
-	    sasl_seterror(context, 0, "user is not allowed to proxy");
+	    sasl_seterror(conn, 0, "user is not allowed to proxy");
 	    
 	    auth_freestate(imapd_authstate);
 	    
@@ -326,7 +326,7 @@ int mysasl_canon_user(sasl_conn_t *conn,
 {
     char *canon_authuser = NULL, *canon_requser = NULL;
 
-    canon_authuser = auth_canonifyid(authid);
+    canon_authuser = auth_canonifyid(authid, alen);
     if (!canon_authuser) {
 	sasl_seterror(conn, 0, "bad userid authenticated");
 	return SASL_BADAUTH;
@@ -340,7 +340,7 @@ int mysasl_canon_user(sasl_conn_t *conn,
     strncpy(out_authid, canon_authuser, out_amax);
     
     if (!user) user = authid;
-    canon_requser = auth_canonifyid(user);
+    canon_requser = auth_canonifyid(user, ulen);
     if (!canon_requser) {
 	sasl_seterror(conn, 0, "bad userid requested");
 	return SASL_BADAUTH;
@@ -1439,7 +1439,7 @@ char *passwd;
     int plaintextloginpause;
     int result;
 
-    canon_user = auth_canonifyid(user);
+    canon_user = auth_canonifyid(user, 0);
 
     /* possibly disallow login */
     if ((imapd_starttls_done == 0) &&
@@ -3792,7 +3792,7 @@ char *identifier;
     }
 
     if (!r) {
-	canon_identifier = auth_canonifyid(identifier);
+	canon_identifier = auth_canonifyid(identifier, 0);
 	if (canon_identifier) canonidlen = strlen(canon_identifier);
 
 	if (!canon_identifier) {
