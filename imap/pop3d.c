@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.10 2001/08/02 17:08:10 ken3 Exp $
+ * $Id: pop3d.c,v 1.98.2.11 2001/08/02 21:29:34 rjs3 Exp $
  */
 #include <config.h>
 
@@ -327,7 +327,7 @@ int service_main(int argc, char **argv, char **envp)
 
     /* Create APOP challenge for banner */
     if (!sasl_mkchal(popd_saslconn, popd_apop_chal, sizeof(popd_apop_chal), 1)) {
-	syslog(LOG_ERROR, "APOP disabled: can't create challenge");
+	syslog(LOG_ERR, "APOP disabled: can't create challenge");
 	*popd_apop_chal = 0;
     }
 
