@@ -73,9 +73,9 @@ int load(int fd, bytecode_t ** d)
     */
     printf("\n");
 
-    for (i=0; i<(len); i+=4)
+    /*  for (i=0; i<(len); i+=4)
       {printf ("%d ", (int)data[i]);}
-      printf("\n\n");
+      printf("\n\n");*/
    return (len/sizeof(int));
 
 
@@ -273,7 +273,7 @@ int dump2_test(bytecode_t * d, int i)
       case B_DETAIL:printf("detail");break;
       }
     printf("              Headers:");
-    i=write_list(d[i+3].len, i+4, d);
+    i=write_list(d[i].len, i+1, d);
     printf("              Data:");
     i=write_list(d[i].len, i+1, d);
     printf("             ]\n");
@@ -424,7 +424,10 @@ void dump2(bytecode_t *d, int len)
 	  i+=2;
 
 	  break;
-	  
+	case B_NULL:/*16*/
+	  printf("%d:NULL\n",i);
+	  i++;
+	  break;		  
 	default:
 	    printf("%d: %d (NOT AN OP)\n",i,d[i].op);
 	    exit(1);

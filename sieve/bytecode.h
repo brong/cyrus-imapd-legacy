@@ -76,7 +76,8 @@ enum bytecode {
     B_NOTIFY,
     B_DENOTIFY,
 
-    B_VACATION
+    B_VACATION,
+    B_NULL
 };
 
 enum bytecode_comps {

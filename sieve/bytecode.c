@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.19 2003/01/10 17:03:24 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.20 2003/01/14 22:20:51 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,8 +55,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-#define DUMPCODE 0
-#define VERBOSE 0
+#define DUMPCODE 1
+#define VERBOSE 1
 
 #if DUMPCODE
 void dump(bytecode_info_t *d);
@@ -65,20 +65,26 @@ void dump(bytecode_info_t *d);
 
 struct bytecode_info 
 {
-    bytecode_t *data;
-    size_t curlen;
-    size_t reallen;
+  bytecode_t *data;/* pointer to almost-flat bytecode */
+  size_t curlen; /* xxx what is this really used for ? */
+  size_t reallen; /* allocated length of 'data' */
 };
 
 static int bc_test_generate(int codep, bytecode_info_t *retval, test_t *t);
 
+/* returns false if the request can't be satisfied, true if it can. */
+
 static int atleast(bytecode_info_t *arr, size_t len) 
 {
     if(arr->reallen < len) {
-
+      /* too small; double if that's big enough, otherwise increase to the
+	 requested size. */
 	arr->reallen = (len > arr->reallen * 2 ? len : arr->reallen * 2);
-	arr->data = realloc(arr->data, arr->reallen*sizeof(bytecode_info_t));
-	if(!arr->data) return 0;
+	arr->data = realloc(arr->data, arr->reallen*sizeof(bytecode_t));
+	if(!arr->data) 
+	  { /* out of memory? */
+	    return 0;
+	  }
     }
     
     return 1;
@@ -374,39 +380,46 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
     int jumploc,baseloc;
 
     if(!retval) return -1;
-    do {
-      switch(c->type) {
-        case STOP:
+    if (c==NULL)
+      {  if(!atleast(retval,codep+1)) return -1;
+	    retval->data[codep++].op = B_NULL;
+	    retval->curlen++;
+      }
+    else
+      {
+	do {
+	  switch(c->type) {
+	  case STOP:
 	    /* STOP (no arguments) */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_STOP;
 	    retval->curlen++;
 	    break;
-	case DISCARD:
+	  case DISCARD:
 	    /* DISCARD (no arguments) */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_DISCARD;
 	    retval->curlen++;
 	    break;
-        case KEEP:
+	  case KEEP:
 	    /* KEEP (no arguments) */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_KEEP;
 	    retval->curlen++;
 	    break;
-        case MARK:
+	  case MARK:
 	    /* MARK (no arguments) */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_MARK;
 	    retval->curlen++;
 	    break;
-        case UNMARK:
+	  case UNMARK:
 	    /* UNMARK (no arguments) */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_UNMARK;
 	    retval->curlen++;
 	    break;
-	case DENOTIFY:
+	  case DENOTIFY:
 	    /* DENOTIFY  */
 	    if(!atleast(retval,codep+1)) return -1;
 	    retval->data[codep++].op = B_DENOTIFY;
@@ -436,7 +449,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 
 	    retval->curlen+=6;
 	    break;
-        case REJCT:
+	  case REJCT:
 	    /* REJECT (STRING: len + dataptr) */
 	    if(!atleast(retval,codep+3)) return -1;
 	    retval->data[codep++].op = B_REJECT;
@@ -444,7 +457,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->data[codep++].str = c->u.str;
 	    retval->curlen+=3;
 	    break;
-	case FILEINTO:
+	  case FILEINTO:
 	    /* FILEINTO (STRING: len + dataptr) */
 	    if(!atleast(retval,codep+3)) return -1;
 	    retval->data[codep++].op = B_FILEINTO;
@@ -452,7 +465,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->data[codep++].str = c->u.str;
 	    retval->curlen+=3;
 	    break;
-	case REDIRECT:
+	  case REDIRECT:
 	    /* REDIRECT (STRING: len + dataptr) */
 	    if(!atleast(retval,codep+3)) return -1;
 	    retval->data[codep++].op = B_REDIRECT;
@@ -460,7 +473,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->data[codep++].str = c->u.str;
 	    retval->curlen+=3;
 	    break;
-	case ADDFLAG:
+	  case ADDFLAG:
 	    /* ADDFLAG stringlist */
 	    if(!atleast(retval,codep+2)) return -1;
 	    retval->data[codep++].op = B_ADDFLAG;
@@ -469,7 +482,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 
 	    if(codep == -1) return -1;
 	    break;
-	case SETFLAG:
+	  case SETFLAG:
 	    /* SETFLAG stringlist */
 	    if(!atleast(retval,codep+2)) return -1;
 	    retval->data[codep++].op = B_SETFLAG;
@@ -478,7 +491,7 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 
 	    if(codep == -1) return -1;
 	    break;
-        case REMOVEFLAG:
+	  case REMOVEFLAG:
 	    /* REMOVEFLAG stringlist */
 	    if(!atleast(retval,codep+2)) return -1;
 	    retval->data[codep++].op = B_REMOVEFLAG;
@@ -487,10 +500,15 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 
 	    if(codep == -1) return -1;
 	    break;
-        case NOTIFY:
+	  case NOTIFY:
 	    /* NOTIFY 
-	     * (STRING: len + dataptr)/(STRING len + dataptr)/stringlist/(STRING: len + dataptr)/(STRING len + dataptr)
-	     *method/id /options list/priority/message */
+	       (STRING: len + dataptr)
+	       (STRING: len + dataptr)
+	       stringlist
+	       (STRING: len + dataptr)
+	       (STRING: len + dataptr)
+	       method/id /options list/priority/message 
+	    */
 	    if(!atleast(retval,codep+9)) return -1;
 	    retval->data[codep++].op = B_NOTIFY;
 	    retval->data[codep++].len = strlen(c->u.n.method);
@@ -506,18 +524,18 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    retval->data[codep++].str = c->u.n.message;
 	    retval->curlen+=4;
 	    break;
-      case VACATION:
-	   /* VACATION
-	      STRINGLIST addresses
-	      STRING subject (if len is -1, then subject was NULL)
-	      STRING message (again, len == -1 means subject was NULL)
-	      VALUE days
-	      VALUE mime
+	  case VACATION:
+	    /* VACATION
+	       STRINGLIST addresses
+	       STRING subject (if len is -1, then subject was NULL)
+	       STRING message (again, len == -1 means subject was NULL)
+	       VALUE days
+	       VALUE mime
 	    */
 
 	    if(!atleast(retval,codep+7)) return -1;
 	    retval->data[codep++].op = B_VACATION;
-
+	    
 	    codep = bc_stringlist_generate(codep,retval,c->u.v.addresses);
 
 	    if(c->u.v.subject) {
@@ -537,31 +555,31 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
             retval->data[codep++].value = c->u.v.days;
             retval->data[codep++].value = c->u.v.mime;
 	    retval->curlen+=7;
-
+	    
 
 	    if(codep == -1) return -1;
 	    break;
-      case IF:
-	{int jumpVal; /* do not remove this variable. 
-			 the function test_generate might change the value 
-			 of retval and this makes things unhappy*/
-
+	  case IF:
+	    {int jumpVal; /* do not remove this variable. 
+			     the function test_generate might change the value 
+			     of retval and this makes things unhappy*/
+	    
 	    /* IF (test / codep else / codep done) */
 	    baseloc = codep;
-
+	    
 	    /* Allocate operator + jump table offsets */
 	    if(!atleast(retval,codep+3)) return -1;
 
 	    if(c->u.i.do_else) {
-	        jumploc = codep+4;
-		/* we need an extra */
-		if(!atleast(retval,jumploc)) return -1;
-	        retval->curlen+=4;
-	        retval->data[codep++].op = B_IFELSE;
+	      jumploc = codep+4;
+	      /* we need an extra */
+	      if(!atleast(retval,jumploc)) return -1;
+	      retval->curlen+=4;
+	      retval->data[codep++].op = B_IFELSE;
 	    } else {
-		jumploc = codep+3;
-	        retval->curlen+=3;
-	    	retval->data[codep++].op = B_IF;
+	      jumploc = codep+3;
+	      retval->curlen+=3;
+	      retval->data[codep++].op = B_IF;
 	    }
 	    
 	    /* offset to if code */
@@ -605,15 +623,15 @@ static int bc_generate(int codep, bytecode_info_t *retval, commandlist_t *c)
 	    }
 	    
 	    break;
-	}
-      default:
-	return -1;
-    }
-      
+	    }
+	  default:
+	    return -1;
+	  }
+	  
       /* generate from next command */
-      c = c->next;
-    } while(c);
-    
+	  c = c->next;
+	} while(c);
+      }
     return codep;
 }
 
@@ -1111,7 +1129,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		filelen += sizeof(int);
 
 		break;
-
+	    case B_NULL:
 	    case B_STOP:
 	    case B_DISCARD:
 	    case B_KEEP:
@@ -1345,7 +1363,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
   int address=0;/*to differentiate between address and envelope*/
   comparator_t * comp=NULL;
   void * comprock=NULL;
-
+  printf("WERT %d\n",bc[i].value);
   switch(bc[i].value)
     {
     case BC_FALSE:res=0; i++;break;
@@ -1448,7 +1466,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      interp->getheader(m, (char*)&(bc[currh+1].str), &val) :
 	      interp->getenvelope(m, (char*)&(bc[currh+1].str), &val) != SIEVE_OK) 
 	    {continue; /* try next header */}
-	  
+	
 	  /*header exists, now to test it*/
 	  /*search through all teh headers that match*/
 	  if  (match == B_COUNT )
@@ -1456,22 +1474,23 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	  else
 	    {
 	      for (y=0; val[y]!=NULL && !res; y++)
-		{
+		{ 
 		  if (parse_address(val[y], &data, &marker)!=SIEVE_OK) 
 		    {return 0;}
 		  addr=get_address(addrpart, &data, &marker, 0);
 		  /*search through all the data*/ 
 		  currd=datai+2;
 		  for (z=0; z<numdata && !res; z++)
-		    {
+		    {printf("4wert\n");
 		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		    }
+		  printf("5wert\n");
 		}
 	    }
 	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));
 	}
-
+     
 	  if  (match == B_COUNT )
 	    {
 	      sprintf(scount, "%u", count);
@@ -1822,6 +1841,9 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    else res = -1; /* something is bad */ 
 	    break;
 	  }
+      case B_NULL:/*16*/
+	ip++;
+	break;
       default:
 	
 	if(errmsg) *errmsg = "Invalid sieve bytecode";
@@ -2047,6 +2069,9 @@ void dump(bytecode_info_t *d)
 		   d->data[i+5].value, d->data[i+6].value);
 	    i+=6;
 	
+	    break;
+	case B_NULL:
+	    printf("%d: NULL\n",i);
 	    break;
 
 	default:
