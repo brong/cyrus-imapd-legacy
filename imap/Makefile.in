@@ -1,5 +1,5 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.137.2.3 2001/10/23 00:21:32 rjs3 Exp $
+# $Id: Makefile.in,v 1.137.2.4 2001/10/31 16:40:49 rjs3 Exp $
 # 
 # @configure_input@
 #
@@ -60,6 +60,7 @@ VPATH = @srcdir@
 CC = @CC@
 INSTALL = @INSTALL@
 RANLIB = @RANLIB@
+AWK = @AWK@
 
 CYRUS_USER=@cyrus_user@
 CYRUS_GROUP=@cyrus_group@
@@ -139,7 +140,7 @@ xversion.h: xversion
 
 xversion:
 	rm -f version.o
-	sh $(srcdir)/xversion.sh
+	AWK=$(AWK) $(srcdir)/xversion.sh
 
 idled: idled.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o idled \
