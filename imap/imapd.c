@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: imapd.c,v 1.180.4.10 2000/01/14 23:47:45 leg Exp $ */
+/* $Id: imapd.c,v 1.180.4.11 2000/01/28 19:04:41 tmartin Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -434,6 +434,8 @@ char **envp;
     setproctitle_init(argc, argv, envp);
     config_init("imapd");
 
+    mboxlist_init();
+
     mboxlist_open(NULL);
 
     signal(SIGPIPE, SIG_IGN);
@@ -481,6 +483,7 @@ char **envp;
 			     config_getint("sasl_maximum_layer", 256));
 
     sasl_setprop(imapd_saslconn, SASL_SEC_PROPS, secprops);
+    free(secprops);
     if (extprops.ssf) {
 	sasl_setprop(imapd_saslconn, SASL_SSF_EXTERNAL, &extprops);
     }
@@ -705,7 +708,7 @@ cmdloop()
 		if (!imapd_mailbox) goto nomailbox;
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
-		mboxlist_close();	
+
 		cmd_noop(tag.s, cmd.s);
 	    }
 	    else if (!strcmp(cmd.s, "Copy")) {
@@ -741,7 +744,7 @@ cmdloop()
 		if (!imapd_mailbox) goto nomailbox;
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
-		mboxlist_close();	
+
 		cmd_close(tag.s);
 	    }
 	    else goto badcmd;
@@ -778,7 +781,7 @@ cmdloop()
 		if (!imapd_mailbox) goto nomailbox;
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
-		mboxlist_close();	
+
 		cmd_expunge(tag.s, 0);
 	    }
 	    else if (!strcmp(cmd.s, "Examine")) {
@@ -802,7 +805,7 @@ cmdloop()
 		c = getword(&arg1);
 		if (c == '\r') goto missingargs;
 		if (c != ' ' || !imparse_issequence(arg1.s)) goto badsequence;
-		mboxlist_close();	
+
 		cmd_fetch(tag.s, arg1.s, usinguid);
 	    }
 	    else if (!strcmp(cmd.s, "Find")) {
@@ -937,7 +940,7 @@ cmdloop()
 	    if (!strcmp(cmd.s, "Noop")) {
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
-		mboxlist_close();	
+
 		cmd_noop(tag.s, cmd.s);
 	    }
 #ifdef ENABLE_X_NETSCAPE_HACK
@@ -969,7 +972,7 @@ cmdloop()
 		c = getword(&arg4);
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
-		mboxlist_close();	
+
 		cmd_partial(tag.s, arg1.s, arg2.s, arg3.s, arg4.s);
 	    }
 	    else goto badcmd;
@@ -1035,7 +1038,7 @@ cmdloop()
 		if (c != ' ' || !imparse_issequence(arg1.s)) goto badsequence;
 		c = getword(&arg2);
 		if (c != ' ') goto badsequence;
-		mboxlist_close();	
+
 		cmd_store(tag.s, arg1.s, arg2.s, usinguid);
 	    }
 	    else if (!strcmp(cmd.s, "Select")) {
@@ -1052,7 +1055,7 @@ cmdloop()
 		usinguid = 0;
 		if (c != ' ') goto missingargs;
 	    search:
-		mboxlist_close();	
+
 		cmd_search(tag.s, usinguid);
 	    }
 	    else if (!strcmp(cmd.s, "Subscribe")) {

@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.7.2.2 1999/12/15 19:51:53 leg Exp $
+ * $Id: actions.c,v 1.7.2.3 2000/01/28 19:05:02 tmartin Exp $
  * 
  */
 /***********************************************************
@@ -87,8 +87,6 @@ int actions_setuser(char *userid)
   if (!islower((int) hash)) { hash = 'q'; }
     
   snprintf(sieve_dir, 1023, "%s/%c/%s", foo, hash,userid);
-
-  printf("sievedir=%s\n",sieve_dir);
 
   result = chdir(sieve_dir);
   if (result != 0) {

@@ -2,7 +2,7 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.7 2000/01/14 23:47:49 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.8 2000/01/28 19:04:50 tmartin Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -10,6 +10,7 @@
 
 #include <db.h>
 #include "auth.h"
+#include "acap.h"
 
 /*
  * Maximum length of partition name. [config.c has a limit of 70]
@@ -112,5 +113,12 @@ void mboxlist_init(void);
 
 /* done with database stuff */
 void mboxlist_done(void);
+
+
+
+/* open up acap connection if possible */
+int mboxlist_acapinit(void);
+
+
 
 #endif

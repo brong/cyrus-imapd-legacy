@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.5.4.1 2000/01/15 00:23:26 leg Exp $
+ * $Id: sieve.y,v 1.5.4.2 2000/01/28 19:05:00 tmartin Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -73,6 +73,7 @@ static void free_vtags(struct vtags *v);
 
 static int verify_mailboxes(stringlist_t *sl);
 static int verify_addresses(stringlist_t *sl);
+static int verify_flags(stringlist_t *sl);
 #ifdef ENABLE_REGEX
 static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
 #endif
@@ -100,6 +101,8 @@ extern int yylex(void);
 %token <sval> STRING
 %token IF ELSIF ELSE
 %token REJCT FILEINTO FORWARD KEEP STOP DISCARD VACATION REQUIRE
+%token SETFLAG ADDFLAG REMOVEFLAG MARK UNMARK
+%token NOTIFY DENOTIFY
 %token ANYOF ALLOF EXISTS FALSE TRUE HEADER NOT SIZE ADDRESS ENVELOPE
 %token COMPARATOR IS CONTAINS MATCHES REGEX OVER UNDER ALL LOCALPART DOMAIN
 %token DAYS ADDRESSES SUBJECT MIME
@@ -112,6 +115,7 @@ extern int yylex(void);
 %type <htag> htags
 %type <aetag> aetags
 %type <vtag> vtags
+%type <sl> optional_headers
 
 %%
 
@@ -173,7 +177,84 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
   				     $$ = build_vacation(VACATION,
 					    canon_vtags($2), $3);
 				   } }
+        | SETFLAG stringlist     { if (!parse_script->support.imapflags) {
+                                    yyerror("imapflags not required");
+                                    YYERROR;
+                                   }
+                                  if (!verify_flags($2)) {
+                                    YYERROR; /* vf should call yyerror() */
+                                  }
+                                  $$ = new_command(SETFLAG);
+                                  $$->u.sl = $2; }
+         | ADDFLAG stringlist     { if (!parse_script->support.imapflags) {
+                                    yyerror("imapflags not required");
+                                    YYERROR;
+                                    }
+                                  if (!verify_flags($2)) {
+                                    YYERROR; /* vf should call yyerror() */
+                                  }
+                                  $$ = new_command(ADDFLAG);
+                                  $$->u.sl = $2; }
+         | REMOVEFLAG stringlist  { if (!parse_script->support.imapflags) {
+                                    yyerror("imapflags not required");
+                                    YYERROR;
+                                    }
+                                  if (!verify_flags($2)) {
+                                    YYERROR; /* vf should call yyerror() */
+                                  }
+                                  $$ = new_command(REMOVEFLAG);
+                                  $$->u.sl = $2; }
+         | MARK                   { if (!parse_script->support.imapflags) {
+                                    yyerror("imapflags not required");
+                                    YYERROR;
+                                    }
+                                  $$ = new_command(MARK); }
+         | UNMARK                 { if (!parse_script->support.imapflags) {
+                                    yyerror("imapflags not required");
+                                    YYERROR;
+                                    }
+                                  $$ = new_command(UNMARK); }
+
+         | NOTIFY STRING STRING STRING optional_headers
+                                    {
+					if (!parse_script->support.notify) {
+					    yyerror("notify not required");
+					    YYERROR;
+					}
+
+					if (!verify_priority($2)) {
+					    YYERROR; /* vf should call yyerror() */ 
+					}
+					/* xxx verify method? */										
+					$$ = new_command(NOTIFY); 
+					$$->u.n.priority = $2;
+					$$->u.n.method = $3;
+					$$->u.n.message = $4;
+					$$->u.n.headers_list = $5;
+				    }
+         | DENOTIFY               { if (!parse_script->support.notify) {
+                                    yyerror("notify not required");
+                                    YYERROR;
+                                    }
+	                            $$ = new_command(DENOTIFY); }
+
 	;
+
+optional_headers: /* empty */ { stringlist_t *sl;
+	                        char *subj = xmalloc(8);
+                                char *from = xmalloc(5);
+				char *to   = xmalloc(3);
+				strcpy(subj,"subject");
+				strcpy(from,"from");
+				strcpy(to,"to");
+	                        
+				sl = new_sl(subj,NULL);
+                                if (sl!=NULL) sl = new_sl(from,sl);
+				if (sl!=NULL) sl = new_sl(to,sl);
+				$$ = sl;
+	                      }
+                 | stringlist { $$ = $1; }
+                 ;
 
 vtags: /* empty */		 { $$ = new_vtags(); }
 	| vtags DAYS NUMBER	 { if ($$->days != -1) { 
@@ -523,11 +604,56 @@ static int verify_mailbox(char *s)
     return 1;
 }
 
+static int verify_priority(char *s)
+{
+    char errbuf[500];
+
+    if ((strcmp(s,"none")!=0) && (strcmp(s,"low")!=0) && 
+	(strcmp(s,"medium")!=0) && (strcmp(s,"high")!=0))
+    {
+	sprintf(errbuf, "Invalid priority %s",s);
+	yyerror(errbuf);
+	return 0;
+    }
+
+    return 1;
+}
+
 static int verify_mailboxes(stringlist_t *sl)
 {
     for (; sl != NULL && verify_mailbox(sl->s); sl = sl->next) ;
     return (sl == NULL);
 }
+
+static int verify_flag(char *f)
+{
+    char errbuf[100];
+ 
+    if (f[0] == '\\') {
+	lcase(f);
+	if (strcmp(f, "\\seen") && strcmp(f, "\\answered") &&
+	    strcmp(f, "\\flagged") && strcmp(f, "\\draft") &&
+	    strcmp(f, "\\deleted")) {
+	    sprintf(errbuf, "flag '%s': not a system flag", f);
+	    yyerror(errbuf);
+	    return 0;
+	}
+	return 1;
+    }
+    if (!imparse_isatom(f)) {
+	sprintf(errbuf, "flag '%s': not a valid keyword", f);
+	yyerror(errbuf);
+	return 0;
+    }
+    return 1;
+}
+ 
+static int verify_flags(stringlist_t *sl)
+{
+    for (; sl != NULL && verify_flag(sl->s); sl = sl->next) ;
+    return (sl == NULL);
+}
+
 
 #ifdef ENABLE_REGEX
 static regex_t *verify_regex(char *s, int cflags)

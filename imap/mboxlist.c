@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.58 2000/01/20 23:17:19 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.59 2000/01/28 19:04:46 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -67,9 +67,13 @@ extern int errno;
 #include "imap_err.h"
 #include "xmalloc.h"
 
+#include "acap.h"
+#include "acapmbox.h"
+
 #include "gun.h"
 
 #include "mboxlist.h"
+
 
 struct mbox_txn {
     DB_TXN *tid;
@@ -124,6 +128,167 @@ static char *mboxlist_hash_usersubs(const char *userid);
 #define FNAME_DBDIR "/db"
 #define FNAME_USERDIR "/user/"
 #define FNAME_SUBSSUFFIX ".sub"
+
+acap_conn_t *acap_conn = NULL;
+
+int using_acap = 0; /* wheather acap support is turned on */
+
+const char *acap_authname = NULL;
+const char *acap_realm = NULL;
+const char *acap_password = NULL;
+
+/* callback to get userid or authid */
+static int getsimple(void *context __attribute__((unused)),
+		     int id,
+		     const char **result,
+		     unsigned *len)
+{
+  char *username;
+  char *authid;
+
+  if (! result)
+    return SASL_BADPARAM;
+
+  switch (id) {
+  case SASL_CB_GETREALM:
+      if (acap_realm == NULL) return SASL_FAIL;
+
+      *result = acap_realm;
+      if (len)
+	  *len = acap_realm ? strlen(acap_realm) : 0;
+      return SASL_FAIL;
+      break;
+
+  case SASL_CB_USER:
+    *result = acap_authname;
+    if (len)
+      *len = acap_authname ? strlen(acap_authname) : 0;
+    break;
+  case SASL_CB_AUTHNAME:
+    *result = acap_authname;
+    if (len)
+      *len = acap_authname ? strlen(acap_authname) : 0;
+      break;
+  case SASL_CB_LANGUAGE:
+    *result = NULL;
+    if (len)
+      *len = 0;
+    break;
+  default:
+    return SASL_BADPARAM;
+  }
+  return SASL_OK;
+}
+
+/* callback to get password */
+static int
+getsecret(sasl_conn_t *conn,
+	  void *context __attribute__((unused)),
+	  int id,
+	  sasl_secret_t **psecret)
+{
+  if (! conn || ! psecret || id != SASL_CB_PASS)
+    return SASL_BADPARAM;
+
+  if (acap_password==NULL)
+  {
+      syslog(LOG_ERR,"Unable to find acap_password\n");      
+      return SASL_FAIL;
+  }
+
+  *psecret = (sasl_secret_t *) malloc(sizeof(sasl_secret_t)+strlen(acap_password)+1);
+  if (! *psecret)
+    return SASL_FAIL;
+
+  strcpy((*psecret)->data, acap_password);
+  (*psecret)->len=strlen(acap_password);
+
+  return SASL_OK;
+}
+
+/* callbacks we support */
+static sasl_callback_t callbacks[] = {
+  {
+#ifdef SASL_CB_GETREALM
+    SASL_CB_GETREALM, &getsimple, NULL
+  }, {
+#endif
+    SASL_CB_AUTHNAME, &getsimple, NULL
+  }, {
+    SASL_CB_PASS, &getsecret, NULL    
+  }, {
+    SASL_CB_LIST_END, NULL, NULL
+  }
+};
+
+/* initialize acap connection if necessary */
+int mboxlist_acapinit(void)
+{
+    int r;
+    char *str;
+    const char *acapserver;
+
+    /* if it's already initialized just return */
+    if (acap_conn != NULL) return 0;
+
+    
+    /* See if it's turned on */
+    if (config_getswitch("useacap", 0)==0) {
+	using_acap = 0;
+	return 0;
+    }
+    using_acap = 1;
+    
+    r = acap_init();
+    if (r != ACAP_OK) {
+	syslog(LOG_ERR,"acap_init failed()");
+	return -1;
+    }
+
+    r = sasl_client_init(callbacks);
+    if (r != SASL_OK) {
+	syslog(LOG_ERR,"sasl_client_init() failed");
+	return -2;
+    }
+
+    acap_authname = config_getstring("acap_authname", NULL);
+    if (acap_authname == NULL)
+    {
+	syslog(LOG_ERR,"unable to find option acap_authname");
+	return -3;
+    }
+
+    /* these aren't required */
+    acap_password = config_getstring("acap_password", NULL);
+    acap_realm = config_getstring("acap_realm", NULL);
+    
+
+    acapserver = config_getstring("acap_server", NULL);
+    if (acapserver == NULL)
+    {
+	syslog(LOG_ERR,"unable to find option acap_server");
+	return -4;
+    }
+
+    str = (char *) xmalloc (strlen("acap://")+strlen(acap_authname)+1+strlen(acapserver)+2);
+    
+    sprintf(str,"acap://%s@%s/",acap_authname,acapserver);
+    
+    r = acap_conn_connect(str, &acap_conn);
+    free(str);
+    if (r != SASL_OK) {
+	syslog(LOG_ERR,"acap_conn_connect() failed");
+	return -5;
+    }
+
+    return 0;
+}
+
+int convert_acap_errorcode(int r)
+{
+    /* xxx */
+    return IMAP_IOERROR;
+}
 
 /*
  * Check our configuration for consistency, die if there's a problem
@@ -515,7 +680,21 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
 
 /*
  * Create a mailbox
+ *
+ *
+ *
+ * 1. start mailboxes transaction
+ * 2. verify ACL's to best of ability (CRASH: abort)
+ * 3. open ACAP connection if necessary
+ * 4. verify parent ACL's if need to
+ * 5. create ACAP entry and set as reserved (CRASH: ACAP inconsistant)
+ * 6. create on disk (CRASH: ACAP inconsistant, disk inconsistant)
+ * 7. ???
+ * 8. commit local transaction (CRASH: ACAP inconsistant)
+ * 9. set ACAP entry as commited (CRASH: commited)
+ *
  */
+
 int real_mboxlist_createmailbox(char *name, int mbtype, char *partition, 
 				int isadmin, char *userid, 
 				struct auth_state *auth_state,
@@ -534,7 +713,9 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     DB_TXN *tid;
     DBT key, keydel, data;
     struct mbox_entry *mboxent = NULL;
-    struct mbox_txn_create *mtxn;
+    struct mbox_txn_create *mtxn = NULL;
+    acapmbox_data_t mboxdata;
+    int madereserved = 0; /* if we made the acap entry (so we can know to roll back) */
 
     if (rettid && *rettid) {
 	/* two phase commit */
@@ -559,14 +740,14 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	}
     }
 
-    /* begin transaction */
+    /* 1. start mailboxes transaction */
     if ((r = txn_begin(dbenv, NULL, &tid, 0)) != 0) {
 	syslog(LOG_ERR, "DBERROR: error beginning txn: %s", db_strerror(r));
 	r = IMAP_IOERROR;
 	goto done;
     }
 
-    /* Check ability to create mailbox */
+    /* 2. verify ACL's to best of ability (CRASH: abort) */
     r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, 
 				      userid, auth_state, 
 				      &acl, &newpartition, DB_RMW, tid);
@@ -577,6 +758,11 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     if (r != 0) {
 	goto done;
     }
+
+    /* 3. open ACAP connection if necessary */
+    r = mboxlist_acapinit();
+    if (r != 0) goto done;
+
 
     if (!(mbtype & MBTYPE_REMOTE)) {
 	/* Get partition's path */
@@ -591,6 +777,42 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	    goto done;
 	}
     }
+
+    /* 5. create ACAP entry and set as reserved (CRASH: ACAP inconsistant) */
+    if (acap_conn != NULL)
+    {
+	char *postaddr = NULL;
+	char *url = NULL;
+
+	postaddr = xmalloc(strlen(name)+50);
+	sprintf(postaddr,"post+%s@andrew.cmu.edu",name); /* xxx */
+
+	url = xmalloc(strlen(name)+50);
+	sprintf(url,"imap://%s/%s","polarbear.andrew.cmu.edu",name); /* xxx */
+
+	memset(&mboxdata, '\0', sizeof(acapmbox_data_t));
+
+	mboxdata.name = name;	
+	mboxdata.post = postaddr;
+	mboxdata.haschildren = 0; /* xxx */
+	mboxdata.url = url;
+	/* all other are initialized to zero */
+	
+	r = acapmbox_create(acap_conn, 
+			    name,
+			    &mboxdata);
+
+	free(postaddr);
+	free(url);
+
+	if (r != ACAP_OK)
+	{
+	    r = convert_acap_errorcode(r);
+	    goto done;
+	}
+	madereserved = 1; /* so we can roll back on failure */
+    }
+
     
     /* add the new entry */
     mboxent = (struct mbox_entry *) xmalloc(sizeof(struct mbox_entry) +
@@ -679,7 +901,17 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     if (rettid) *rettid = NULL;
     
     if (r != 0) {
-	int r2 = txn_abort(tid);
+	int r2;
+
+	/* delete ACAP entry if we made it */
+	if ((madereserved == 1) && (acap_conn != NULL))
+	{
+	    r = acapmbox_delete(acap_conn,
+				name);
+	    /* xxx Can we deal with this failure? */
+	}
+
+	r2 = txn_abort(tid);
 
 	switch (r2) {
 	case 0:
@@ -698,6 +930,22 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	}
     }
 
+    /* 9. set ACAP entry as commited (CRASH: commited) */
+    if (r == 0)
+    {
+	if (acap_conn != NULL)
+	{
+	    r = acapmbox_markactive(acap_conn,
+				    name);
+	    if (r!=0)
+	    {
+		syslog(LOG_ERR,"ACAP probably in inconsistant state for %s\n",name);
+		r = convert_acap_errorcode(r);
+	    }
+	}
+
+    }
+   
     return r;
 }
 
@@ -797,6 +1045,17 @@ int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
  * Deleting the mailbox user.FOO deletes the user "FOO".  It may only be
  * performed by an admin.  The operation removes the user "FOO"'s 
  * subscriptions and all sub-mailboxes of user.FOO
+ *
+ *
+ * 1. Begin transaction
+ * 2. Verify ACL's
+ * 3. Open ACAP connection if necessary
+ * 4. ACAP mark entry reserved
+ * 5. remove from database
+ * 6. remove from disk
+ * 7. commit transaction
+ * 8. delete from ACAP
+ *
  */
 int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid, 
 				struct auth_state *auth_state, int checkacl,
@@ -890,6 +1149,24 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	
 	deleteuser = 1;
     }
+
+    /* 3. open ACAP connection if necessary */
+    r = mboxlist_acapinit();
+    if (r != 0) goto done;
+
+    /* 4. ACAP mark entry reserved */
+    if (acap_conn != NULL)
+    {
+	r = acapmbox_markreserved(acap_conn,
+				  name);
+	if ( r != ACAP_OK)
+	{
+	    r = convert_acap_errorcode(r);
+	    goto done;
+	}
+    }
+
+
 
     key.data = name;
     key.size = strlen(name);
@@ -1078,6 +1355,17 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
     if (mtxn) free(mtxn);
 
     if (r != 0) {
+
+	if (acap_conn != NULL)
+	{
+	    r = acapmbox_markactive(acap_conn,
+				    name);
+	    if ( r != ACAP_OK)
+	    {
+		r = convert_acap_errorcode(r);
+	    }
+	}
+
 	switch (r = txn_abort(tid)) {
 	case 0:
 	    break;
@@ -1098,11 +1386,37 @@ int real_mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	}
     }
 
+    /* 8. delete from ACAP */
+    if (acap_conn != NULL)
+    {
+	r = acapmbox_delete(acap_conn,
+			    name);
+	if (r!=0)
+	{
+	    syslog(LOG_ERR,"Error deleting mailbox entry on ACAP server for %s\n",name);
+	    r = convert_acap_errorcode(r);
+	}
+    }
+
     return r;
 }
 
 /*
  * Rename/move a mailbox
+ *
+ *
+ *
+ * 1. start transaction
+ * 2. verify acl's
+ * 3. open acap connection if needed
+ * 4. Delete entry from berkeley db
+ * 5. ACAP make the new entry
+ * 6. set old ACAP entry as reserved
+ * 7. delete from disk
+ * 8. commit transaction
+ * 9. set new ACAP entry commited
+ * 10. delete old ACAP entry
+ *
  */
 int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
 				int isadmin, char *userid, 
@@ -1113,7 +1427,8 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     long access;
     int isusermbox = 0;
     int mbtype;
-    char *oldpath;
+    char *oldpath = NULL;
+    char *oldpath_alloc = NULL;
     char newpath[MAX_MAILBOX_PATH];
     char buf2[MAX_MAILBOX_PATH];
     char *oldacl;
@@ -1123,6 +1438,9 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     struct mbox_entry *mboxent = NULL, *newent = NULL;
     char *newpartition = NULL;
     struct mbox_txn_rename *mtxn = NULL;
+    int acap_madenew = 0;
+    int acap_markedold = 0;
+    char *oldname_tofree = NULL;
 
     memset(&key, 0, sizeof(key));
     memset(&data, 0, sizeof(data));
@@ -1148,6 +1466,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     }
 
     oldname = xstrdup(oldname);	/* we need a persistant copy of this */
+    oldname_tofree = oldname;
 
     /* place to retry transaction */
     if (0) {
@@ -1177,6 +1496,7 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	oldacl = mboxent->acls;
 	mbtype = mboxent->mbtype;
 	oldpath = (char *) xmalloc(MAX_MAILBOX_PATH);
+	oldpath_alloc = oldpath; /* save for freeing later */
 	r = mboxlist_getpath(mboxent->partition, mboxent->name, &oldpath);
 	if (r) {
 	    goto done;
@@ -1240,16 +1560,6 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	}
     }
 
-    if (!(mbtype & MBTYPE_REMOTE)) {
-	/* Get partition's path */
-	sprintf(buf2, "partition-%s", newpartition);
-	root = config_getstring(buf2, (char *)0);
-	if (!root) {
-	    r = IMAP_PARTITION_UNKNOWN;
-	    goto done;
-	}
-    }
-
     /* Check ability to create new mailbox */
     if (strcmp(oldname, newname) != 0) {
 	if (!strncmp(newname, "user.", 5) && !strchr(newname+5, '.')) {
@@ -1274,7 +1584,24 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	newpartition = xstrdup(partition);
     }
 
-    /* delete old entry */
+    if (!(mbtype & MBTYPE_REMOTE)) {
+	/* Get partition's path */
+	sprintf(buf2, "partition-%s", newpartition);
+	root = config_getstring(buf2, (char *)0);
+	if (!root) {
+	    r = IMAP_PARTITION_UNKNOWN;
+	    goto done;
+	}
+    }
+
+
+
+    /* 3. open ACAP connection if necessary */
+    r = mboxlist_acapinit();
+    if (r != 0) goto done;
+
+
+    /* 4. Delete entry from berkeley db */
     key.data = oldname;
     key.size = strlen(oldname);
 
@@ -1356,6 +1683,33 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	return r;
     }
 
+    /* 5. ACAP make the new entry */
+    if (acap_conn != NULL)
+    {
+	r = acapmbox_copy(acap_conn,
+			  oldname,
+			  newname);
+	if (r != ACAP_OK)
+	{
+	    r = convert_acap_errorcode(r);
+	    goto done;
+	}
+	acap_madenew = 1;
+    }
+
+    /* 6. set old ACAP entry as reserved */
+    if (acap_conn != NULL)
+    {
+	r =  acapmbox_markreserved(acap_conn,
+				   oldname);
+	if (r != ACAP_OK)
+	{
+	    r = convert_acap_errorcode(r);
+	    goto done;
+	}
+	acap_markedold = 1;
+    }
+
  done: /* ALL DATABASE OPERATIONS DONE; NEED TO DO FILESYSTEM OPERATIONS */
     if (!r) {
 	/* ACAP: delete mailbox now */
@@ -1374,20 +1728,54 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 			   newpath, isusermbox, NULL, NULL);
     }
 
-    if (newpartition) free(newpartition);
-    if (oldpath) free(oldpath);
-    if (oldname) free(oldname);
-    if (newent) free(newent);
-    if (mtxn) free(mtxn);
-
     if (r != 0) {
+	int r2;
+	
+	/* unroll acap operations if necessary */
+	if ((acap_madenew == 1) && (acap_conn != NULL))
+	{
+	    r2 = acapmbox_delete(acap_conn,
+				 newname);
+	    if (r2 != 0) syslog(LOG_ERR,"Error cleaning up %s\n",newname);
+	}
+
+	if ((acap_markedold == 1) && (acap_conn != NULL))
+	{
+	    r2 = acapmbox_markactive(acap_conn,
+				     oldname);
+	    if (r2 != 0) syslog(LOG_ERR,"Error setting %s as active in rollback\n",oldname);
+	}
+	
 	txn_abort(tid);
 	if (rettid) *rettid = NULL;
     } else {
 	/* commit now */
 	switch (r = txn_commit(tid, 0)) {
 	case 0: 
-	    /* ACAP: set mailbox here */
+	    /* 9. set new ACAP entry commited */
+	    if (acap_conn != NULL)
+	    {
+		r = acapmbox_markactive(acap_conn,
+					newname);
+	    }
+	    
+
+	    /* 10. delete old ACAP entry */
+	    if (acap_conn != NULL)
+	    {
+		if (r == ACAP_OK)
+		{
+		    r = acapmbox_delete(acap_conn,
+					oldname);
+		}
+
+		if (r != ACAP_OK)
+		{
+		    r = convert_acap_errorcode(r);
+		    goto done;
+		}
+	    }
+
 	    break;
 	default:
 	    syslog(LOG_ERR, "DBERROR: failed on commit: %s",
@@ -1395,6 +1783,13 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    r = IMAP_IOERROR;
 	}
     }
+
+    /* free memory */
+    if (newpartition) free(newpartition);
+    if (oldpath_alloc) free(oldpath_alloc);
+    if (oldname_tofree) free(oldname_tofree);
+    if (newent) free(newent);
+    if (mtxn) free(mtxn);
     
     return r;
 }
@@ -1404,6 +1799,16 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
  * rights enumerated in the string 'rights'.  If 'rights' is the null
  * pointer, removes the ACL entry for 'identifier'.   'isadmin' is
  * nonzero if user is a mailbox admin.  'userid' is the user's login id.
+ *
+ *
+ * 1. Start transaction
+ * 2. Check rights
+ * 3. Open ACAP connection if necessary
+ * 4. Set db entry
+ * 5. Change on disk
+ * 6. Commit transaction
+ * 7. Change ACAP entry 
+ *
  */
 int real_mboxlist_setacl(char *name, char *identifier, char *rights, 
 			 int isadmin, char *userid, 
@@ -1423,7 +1828,7 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     DB_TXN *tid;
     DBT key, data;
     struct mbox_entry *oldent, *newent=NULL;
-    struct mbox_txn_setacl *mtxn;
+    struct mbox_txn_setacl *mtxn = NULL;
 
     if (rettid && *rettid) {
 	/* two phase commit */
@@ -1496,6 +1901,11 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	}
     }
 
+    /* 3. Open ACAP connection if necessary */
+    r = mboxlist_acapinit();
+    if (r != 0) goto done;
+    
+
     /* Make change to ACL */
     newacl = xstrdup(oldent->acls);
     if (rights) {
@@ -1538,8 +1948,6 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
     memset(&data, 0, sizeof(data));
     data.data = newent;
     data.size = sizeof(struct mbox_entry) + strlen(newacl);
-
-    free(newacl); newacl = NULL;
 
     r = mbdb->put(mbdb, tid, &key, &data, 0);
     switch (r) {
@@ -1618,6 +2026,19 @@ int real_mboxlist_setacl(char *name, char *identifier, char *rights,
 	    r = IMAP_IOERROR;
 	}
     }
+
+    /* 7. Change ACAP entry  */
+    if (acap_conn != NULL)
+    {
+	r = acapmbox_setproperty_acl(acap_conn,
+				     name,
+				     newacl);
+	if (r != 0) r = convert_acap_errorcode(r);
+    }
+
+
+
+    if (newacl) free(newacl);
     
     return r;
 }
@@ -1764,7 +2185,9 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
     struct mbox_entry *mboxent;
     findall_t state = FINDALL_START;
     DBT DID_inboxstar_data;
-    DBT DID_rest_data;
+    DBT DID_rest_data;    
+
+    memset(&DID_rest_data, 0, sizeof(DID_rest_data));
 
     g = glob_init(pattern, GLOB_HIERARCHY|GLOB_INBOXCASE);
     inboxcase = glob_inboxcase(g);
@@ -1987,6 +2410,8 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	    /* now skip to the next one */
 	    r = cursor->c_get(cursor, &key, &data, DB_NEXT);
 	}
+	free(DID_rest_data.data); DID_rest_data.data = NULL;
+
     } else {
 	if (prefixlen) {
 	    key.data = pattern;
@@ -2060,6 +2485,7 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	}
 
 	/* this is the last one we output (used when we have to restart) */
+	if (DID_rest_data.data) free(DID_rest_data.data);
 	memset(&DID_rest_data, 0, sizeof(DID_rest_data));
 	DID_rest_data.data = xmalloc(key.size);
 	memcpy(DID_rest_data.data, key.data, key.size);
@@ -2098,6 +2524,8 @@ int mboxlist_findall(char *pattern, int isadmin, char *userid,
 	r = IMAP_IOERROR;
 	break;
     }
+
+    if (DID_rest_data.data) free(DID_rest_data.data);
 	
     glob_free(&g);
     return r;
@@ -3206,63 +3634,66 @@ void mboxlist_init(void)
 {
     int r;
     char dbdir[1024];
-    
-    if (!mboxlist_dbinit) {
-	if ((r = db_env_create(&dbenv, 0)) != 0) {
-	    char err[1024];
-	    
-	    sprintf(err, "DBERROR: db_appinit failed: %s", db_strerror(r));
-	    
-	    syslog(LOG_ERR, err);
-	    fatal(err, EC_TEMPFAIL);
-	}
 
-	/* dbenv->set_paniccall(dbenv, (void (*)(DB_ENV *, int)) &db_panic);*/
-	/* dbenv.db_errcall = &db_err; */
-	dbenv->set_verbose(dbenv, DB_VERB_DEADLOCK, 1);
-	dbenv->set_verbose(dbenv, DB_VERB_WAITSFOR, 1);
-	dbenv->set_errfile(dbenv, stderr);
-	dbenv->set_errpfx(dbenv, "mbdb");
+    assert (!mboxlist_dbinit);
 
-	/*
-	 * We want to specify the shared memory buffer pool cachesize,
-	 * but everything else is the default.
-	 */
-	if ((r = dbenv->set_cachesize(dbenv, 0, 64 * 1024, 0)) != 0) {
-		dbenv->err(dbenv, r, "set_cachesize");
-		dbenv->close(dbenv, 0);
-		fatal("DBERROR: set_cachesize()", EC_TEMPFAIL);
-	}
-
-	/* create the name of the db file */
-	strcpy(dbdir, config_dir);
-	strcat(dbdir, FNAME_DBDIR);
- 	r = dbenv->open(dbenv, "/var/imap/db", NULL, 
-			DB_CREATE | DB_INIT_LOCK | DB_INIT_MPOOL
-			| DB_INIT_LOG | DB_INIT_TXN, 0644);
-	if (r) {
-	    char err[1024];
+    if ((r = db_env_create(&dbenv, 0)) != 0) {
+	char err[1024];
 	    
-	    sprintf(err, "DBERROR: dbenv->open '%s' failed: %s", dbdir,
-		    db_strerror(r));
-	    syslog(LOG_ERR, err);
-	    fatal(err, EC_TEMPFAIL);
-	}
+	sprintf(err, "DBERROR: db_appinit failed: %s", db_strerror(r));
+	    
+	syslog(LOG_ERR, err);
+	fatal(err, EC_TEMPFAIL);
     }
-	
-    mboxlist_dbinit++;
+
+    /* dbenv->set_paniccall(dbenv, (void (*)(DB_ENV *, int)) &db_panic);*/
+    /* dbenv.db_errcall = &db_err; */
+    dbenv->set_verbose(dbenv, DB_VERB_DEADLOCK, 1);
+    dbenv->set_verbose(dbenv, DB_VERB_WAITSFOR, 1);
+    dbenv->set_errfile(dbenv, stderr);
+    dbenv->set_errpfx(dbenv, "mbdb");
+
+    /*
+     * We want to specify the shared memory buffer pool cachesize,
+     * but everything else is the default.
+     */
+    if ((r = dbenv->set_cachesize(dbenv, 0, 64 * 1024, 0)) != 0) {
+	dbenv->err(dbenv, r, "set_cachesize");
+	dbenv->close(dbenv, 0);
+	fatal("DBERROR: set_cachesize()", EC_TEMPFAIL);
+    }
+
+    /* create the name of the db file */
+    strcpy(dbdir, config_dir);
+    strcat(dbdir, FNAME_DBDIR);
+    r = dbenv->open(dbenv, "/var/imap/db", NULL, 
+		    DB_CREATE | DB_INIT_LOCK | DB_INIT_MPOOL
+		    | DB_INIT_LOG | DB_INIT_TXN, 0644);
+    if (r) {
+	char err[1024];
+	    
+	sprintf(err, "DBERROR: dbenv->open '%s' failed: %s", dbdir,
+		db_strerror(r));
+	syslog(LOG_ERR, err);
+	fatal(err, EC_TEMPFAIL);
+    }
+
+    mboxlist_dbinit = 1;
+
 }
 
 void mboxlist_open(char *fname)
 {
     int ret;
     int flags = DB_CREATE;
+    char *tofree = NULL;
 
-    mboxlist_init();
+    assert (mboxlist_dbinit);
 
     /* create db file name */
     if (!fname) {
 	fname = xmalloc(strlen(config_dir)+sizeof(FNAME_MBOXLIST));
+	tofree = fname;
 	strcpy(fname, config_dir);
 	strcat(fname, FNAME_MBOXLIST);
     }
@@ -3287,6 +3718,8 @@ void mboxlist_open(char *fname)
 	fatal("can't read mailboxes file", EC_TEMPFAIL);
     }    
 
+    if (tofree) free(tofree);
+
     mboxlist_dbopen = 1;
 }
 
@@ -3308,14 +3741,16 @@ void mboxlist_done(void)
 {
     int r;
 
-    mboxlist_dbinit--;
-    if (mboxlist_dbinit == 0) {
-	r = dbenv->close(dbenv, 0);
-	if (r) {
-	    syslog(LOG_ERR, "DBERROR: error exiting application: %s",
-		   db_strerror(r));
-	}
+    assert (mboxlist_dbinit);
+
+
+    r = dbenv->close(dbenv, 0);
+    if (r) {
+	syslog(LOG_ERR, "DBERROR: error exiting application: %s",
+	       db_strerror(r));
     }
+    
+    mboxlist_dbinit = 0;
 }
 
 /* hash the userid to a file containing the subscriptions for that user */

@@ -8,6 +8,9 @@
 int yyerror(char *msg);
 extern int yylex(void);
 
+#define yyparse addrparse
+#define yyerror addrerror
+
 #define YYERROR_VERBOSE /* i want better error messages! */
 %}
 

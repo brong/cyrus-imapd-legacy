@@ -1,5 +1,5 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.80.4.4 2000/01/14 23:47:42 leg Exp $
+# $Id: Makefile.in,v 1.80.4.5 2000/01/28 19:04:37 tmartin Exp $
 # 
 # @configure_input@
 #
@@ -46,12 +46,12 @@ CYRUS_USER=@cyrus_user@
 CYRUS_GROUP=@cyrus_group@
 
 DEFS = @DEFS@ @LOCALDEFS@
-CPPFLAGS = -I. -I$(srcdir) -I$(srcdir)/../lib @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@
+CPPFLAGS = -I. -I$(srcdir) -I$(srcdir)/../lib -I$(srcdir)/../acap @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@
 IMAP_LIBS = @IMAP_LIBS@
 SIEVE_LIBS = @SIEVE_LIBS@
 IMAP_COM_ERR_LIBS = @IMAP_COM_ERR_LIBS@
 LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
-DEPLIBS = ../lib/libcyrus.a @DEPLIBS@
+DEPLIBS = ../acap/libacap.a ../lib/libcyrus.a @DEPLIBS@
 
 CFLAGS = @CFLAGS@
 LDFLAGS = @LDFLAGS@ @CFLAGS@ @COM_ERR_LDFLAGS@ 
@@ -86,7 +86,7 @@ LOBJS= append.o mailbox.o mboxlist.o mboxname.o message.o \
 
 IMAPDOBJS= imapd.o index.o tls.o
 
-PROGS = collectnews syncnews imapd pop3d \
+PROGS = collectnews syncnews imapd pop3d populateacap \
 	arbitron fud reconstruct quota dump_deliverdb mbpath
 SUIDPROGS = deliver
 
@@ -166,6 +166,9 @@ pop3d: pop3d.o libimap.a $(DEPLIBS)
 
 arbitron: arbitron.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o arbitron arbitron.o libimap.a $(DEPLIBS) $(LIBS)
+
+populateacap: populateacap.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o populateacap populateacap.o libimap.a $(DEPLIBS) $(LIBS)
 
 fud: fud.o libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o fud fud.o libimap.a $(DEPLIBS) $(LIBS)

@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.2.4.1 1999/12/15 19:51:52 leg Exp $
+ * $Id: comparator.c,v 1.2.4.2 2000/01/28 19:04:58 tmartin Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -92,6 +92,14 @@ static int octet_matches(char *pat, char *text)
     return !fnmatch(pat, text, 0);
 }
 
+#ifdef ENABLE_REGEX
+static int octet_regex(char *pat, char *text)
+{
+    return (!regexec((regex_t *) pat, text, 0, NULL, 0));
+}
+#endif
+
+
 /* --- i;ascii-casemap comparators --- */
 
 static int ascii_casemap_is(char *pat, char *text)
@@ -170,6 +178,11 @@ comparator_t *lookup_comp(char *comp, int mode)
 	case MATCHES:
 	    ret = &octet_matches;
 	    break;
+#ifdef ENABLE_REGEX
+	case REGEX:
+	    ret = &octet_regex;
+	    break;
+#endif
 	}
     } else if (!strcmp(comp, "i;ascii-casemap")) {
 	switch (mode) {
@@ -182,6 +195,13 @@ comparator_t *lookup_comp(char *comp, int mode)
 	case MATCHES:
 	    ret = &ascii_casemap_matches;
 	    break;
+#ifdef ENABLE_REGEX
+	case REGEX:
+	    /* the ascii-casemap destinction is made during
+	       the compilation of the regex in verify_regex() */
+	    ret = &octet_regex;
+	    break;
+#endif
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {

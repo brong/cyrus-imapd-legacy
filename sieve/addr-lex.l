@@ -1,6 +1,6 @@
 %{
 /*
- * addr.y -- RFC 822 address parser
+ * addr-lex.y -- RFC 822 address parser
  */
 
 #include "addr.h"

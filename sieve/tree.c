@@ -1,6 +1,6 @@
 /* tree.c -- abstract syntax tree handling
  * Larry Greenfield
- * $Id: tree.c,v 1.5.4.1 2000/01/15 00:23:26 leg Exp $
+ * $Id: tree.c,v 1.5.4.2 2000/01/28 19:05:01 tmartin Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -210,6 +210,9 @@ void free_tree(commandlist_t *cl)
 	    
 	case FILEINTO:
 	case FORWARD:
+	case SETFLAG:
+	case ADDFLAG:
+	case REMOVEFLAG:
 	    free_sl(cl->u.sl);
 	    break;
 

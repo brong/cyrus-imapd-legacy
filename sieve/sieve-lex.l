@@ -80,6 +80,13 @@ CRLF		(\r\n|\r|\n)
 <INITIAL>require         return REQUIRE;
 <INITIAL>stop		return STOP;
 <INITIAL>discard		return DISCARD;
+<INITIAL>setflag      return SETFLAG;
+<INITIAL>addflag      return ADDFLAG;
+<INITIAL>removeflag   return REMOVEFLAG;
+<INITIAL>mark         return MARK;
+<INITIAL>unmark               return UNMARK;
+<INITIAL>notify       return NOTIFY;
+<INITIAL>denotify     return DENOTIFY;
 <INITIAL>vacation	return VACATION;
 <INITIAL>:days		return DAYS;
 <INITIAL>:addresses	return ADDRESSES;
