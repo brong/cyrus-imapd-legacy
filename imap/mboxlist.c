@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.20 1999/10/19 02:46:06 leg Exp $
+ * $Id: mboxlist.c,v 1.94.4.21 1999/10/19 03:47:20 tmartin Exp $
  */
 
 #include <stdio.h>
@@ -141,6 +141,85 @@ int mboxlist_lookup(const char* name, char** pathp, char** aclp, DB_TXN *tid)
 
     /* we don't bother with a transaction for this one */
     r = mbdb->get(mbdb, tid, &key, &data, 0);
+
+    switch (r) {
+    case 0:
+	/* copy out interesting parts */
+	mboxent=(struct mbox_entry *) data.data;
+	partitionlen=strlen(mboxent->partition);
+	acllen=strlen(mboxent->acls);
+	break;
+
+    case DB_NOTFOUND:
+	return IMAP_MAILBOX_NONEXISTENT;
+	break;
+    default:
+	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+	       name, strerror(r));
+	return IMAP_IOERROR;
+	break;
+    }
+    mboxent = (struct mbox_entry *) data.data;
+
+    /* construct pathname if requested */
+    if (pathp) {
+	if (partitionlen > sizeof(optionbuf)-11) {
+	    return IMAP_PARTITION_UNKNOWN;
+	}
+	strcpy(optionbuf, "partition-");
+	strcat(optionbuf, mboxent->partition);
+	
+	root = config_getstring(optionbuf, (char *)0);
+	if (!root) {
+	    return IMAP_PARTITION_UNKNOWN;
+	}
+	mailbox_hash_mbox(pathresult, root, name);
+	*pathp = pathresult;
+    }
+
+    /* return ACL if requested */
+    if (aclp) {
+	if ((strlen(mboxent->acls) + 1) > aclresultalloced) {
+	    aclresultalloced = strlen(mboxent->acls) + 100;
+	    aclresult = xrealloc(aclresult, aclresultalloced);
+	}
+	strcpy(aclresult, mboxent->acls);
+
+	*aclp = aclresult;
+    }
+    return 0;
+}
+
+
+/*
+ * Lookup 'name' in the mailbox list.
+ * The capitalization of 'name' is canonicalized to the way it appears
+ * in the mailbox list.
+ * If 'path' is non-nil, a pointer to the full pathname of the mailbox
+ * is placed in the char * pointed to by it.  If 'acl' is non-nil, a pointer
+ * to the mailbox ACL is placed in the char * pointed to by it.
+ */
+int mboxlist_lookup_writelock(const char* name, char** pathp, char** aclp, DB_TXN *tid)
+{
+    unsigned long offset, len, partitionlen, acllen;
+    char optionbuf[MAX_MAILBOX_NAME+1];
+    char *partition, *acl;
+    const char *root;
+    static char pathresult[MAX_MAILBOX_PATH];
+    static char *aclresult;
+    static int aclresultalloced;
+    int r;
+    DBT key, data;
+    struct mbox_entry *mboxent;
+
+    memset(&data, 0, sizeof(key));
+
+    memset(&key, 0, sizeof(key));
+    key.data = (char *) name;
+    key.size = strlen(name);
+
+    /* we don't bother with a transaction for this one */
+    r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
 
     switch (r) {
     case 0:
@@ -558,6 +637,7 @@ int checkacl;
     DB_TXNMGR *txnp = dbenv.tx_info;
     DBT key, data;
     DBC *cursor;
+    int havewritelock;
 
     /* restart transaction place */
     if (0) {
@@ -568,6 +648,8 @@ int checkacl;
 	    return IMAP_IOERROR;
 	}
     }
+
+    havewritelock=0;
 
     /* begin transaction */
     if ((r = txn_begin(txnp, NULL, &tid)) != 0) {
@@ -582,21 +664,26 @@ int checkacl;
     if (!strncmp(name, "user.", 5) && !strchr(name+5, '.')) {
 	/* Can't DELETE INBOX (your own inbox) */
 	if (!strcmp(name+5, userid)) {
-	    return IMAP_MAILBOX_NOTSUPPORTED;
+	    r= IMAP_MAILBOX_NOTSUPPORTED;
+	    goto done;
 	}
 
 	/* Only admins may delete user */
-	if (!isadmin) return IMAP_PERMISSION_DENIED;
+	if (!isadmin) { r = IMAP_PERMISSION_DENIED; goto done; }
 
-	r = mboxlist_lookup(name, &path, &acl, tid);
-	if (r) return r;
+	r = mboxlist_lookup_writelock(name, &path, &acl, tid);
+	havewritelock=1;
+	if (r) {
+	  goto done;
+	}
 	
 	/* Check ACL before doing anything stupid
 	 * We don't have to lie about the error code since we know
 	 * the user is an admin.
 	 */
 	if (!(acl_myrights(auth_state, acl) & ACL_DELETE)) {
-	    return IMAP_PERMISSION_DENIED;
+	    r = IMAP_PERMISSION_DENIED;
+	    goto done;
 	}
 	
 	deleteuser = 1;
@@ -611,9 +698,13 @@ int checkacl;
 	    free(fname);
 	}
     }
-    r = mboxlist_lookup(name, &path, &acl, tid);
+
+    if (havewritelock==1)
+      r = mboxlist_lookup(name, &path, &acl, tid);
+    else
+      r = mboxlist_lookup_writelock(name, &path, &acl, tid);
     if (r!=0) {
-	return r;
+      goto done;
     }
 
     /* check if user has Delete right */
@@ -627,8 +718,9 @@ int checkacl;
 	}
 
 	/* Lie about error if privacy demands */
-	return (isadmin || (access & ACL_LOOKUP)) ?
+	r = (isadmin || (access & ACL_LOOKUP)) ?
 	  IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
+	goto done;
     }
 
     /* delete entry */
@@ -848,7 +940,12 @@ struct auth_state *auth_state;
     }
 
     /* lookup the mailbox to make sure it exists and get it's acl */
-    r = mboxlist_lookup(oldname, &oldpath, &oldacl, tid);
+    r = mboxlist_lookup_writelock(oldname, &oldpath, &oldacl, tid);
+
+    if (r==EAGAIN)
+    {
+      goto retry;
+    }
 
     if (r!=0) {
       goto done;
@@ -913,6 +1010,12 @@ struct auth_state *auth_state;
 	}
 	r = mboxlist_createmailboxcheck(newname, 0, partition, isadmin, userid,
 					auth_state, (char **)0, &partition, tid);
+
+	if (r==EAGAIN)
+	{
+	  goto retry;
+	}
+
 	if (r) {
 	  /* not allowed to create the new mailbox */
 	    free(acl);
@@ -2035,7 +2138,6 @@ int newquota;
     r = mailbox_write_quota(&quota);
 
     if (r) {
-
 	return r;
     }
 
