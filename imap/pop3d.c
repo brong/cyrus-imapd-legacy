@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.98.2.4 2001/08/01 17:25:05 rjs3 Exp $
+ * $Id: pop3d.c,v 1.98.2.5 2001/08/01 17:59:25 rjs3 Exp $
  */
 #include <config.h>
 
@@ -831,10 +831,13 @@ static void cmd_starttls(int pop3s __attribute__((unused)))
 }
 #endif /* HAVE_SSL */
 
-#ifdef HAVE_APOP
 static int apop_enabled(void)
 {
     static int chal_done = 0;
+
+    /* Check if it is enabled (challenge == NULL) */
+    if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
+	return 0;
 
     /* Create APOP challenge string for banner */
     if (!chal_done &&
@@ -865,6 +868,10 @@ static void cmd_apop(char *response)
 	return;
     }
 
+    /* Check if it is enabled (challenge == NULL) */
+    if(sasl_checkapop(popd_saslconn, NULL, 0, NULL, 0) != SASL_OK)
+	fatal("cmd_apop called without working sasl_checkapop", EC_SOFTWARE);
+
     sprintf(shutdownfilename, "%s/msg/shutdown", config_dir);
     if ((fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
 	shutdown_in = prot_new(fd, 0);
@@ -879,11 +886,11 @@ static void cmd_apop(char *response)
     }
 
     sasl_result = sasl_checkapop(popd_saslconn,
-			     popd_apop_chal,
-			     strlen(popd_apop_chal),
-			     response,
-			     strlen(response));
-
+				 popd_apop_chal,
+				 strlen(popd_apop_chal),
+				 response,
+				 strlen(response));
+    
     /* failed authentication */
     if (sasl_result != SASL_OK)
     {
@@ -901,7 +908,8 @@ static void cmd_apop(char *response)
 
     /* successful authentication */
 
-    /* get the userid from SASL --- already canonicalized from
+    /*
+     * get the userid from SASL --- already canonicalized from
      * mysasl_authproc()
      */
     sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
@@ -919,17 +927,6 @@ static void cmd_apop(char *response)
 
     openinbox();
 }
-#else
-static int apop_enabled(void)
-{
-    return 0;
-}
-
-static void cmd_apop(char *response __attribute__((unused)))
-{
-    fatal("cmd_apop() called, but no sasl_checkapop()", EC_SOFTWARE);
-}
-#endif /* HAVE_APOP */
 
 void
 cmd_user(user)
