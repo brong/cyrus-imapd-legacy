@@ -25,9 +25,11 @@ AC_ARG_WITH(sasl,
 
 	dnl be sure to check for a SASLv2 specific function
 	AC_CHECK_HEADER(sasl/sasl.h,
-	  AC_CHECK_LIB(sasl2, prop_get, 
-                       ac_cv_found_sasl=yes,
-		       ac_cv_found_sasl=no), ac_cv_found_sasl=no)
+	  AC_CHECK_HEADER(sasl/saslutil.h,
+	    AC_CHECK_LIB(sasl2, prop_get, 
+                         ac_cv_found_sasl=yes,
+		         ac_cv_found_sasl=no),
+	                 ac_cv_found_sasl=no), ac_cv_found_sasl=no)
 
 	LIBS="$cmu_saved_LIBS"
 	LDFLAGS="$cmu_saved_LDFLAGS"
