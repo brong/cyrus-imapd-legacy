@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.4 1999/11/05 22:45:53 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.3 1999/11/05 22:42:22 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -768,7 +768,7 @@ struct backend *proxyd_findserver(char *server)
 	prot_setflushonread(ret->in, ret->out);
 
 	/* now need to authenticate to backend server */
-	if (proxy_authenticate(ret)) {
+	if (proxy_authenticate(sock, ret)) {
 	    fatal("couldn't authenticate to backend server", 1);
 	}
     }
@@ -1197,7 +1197,7 @@ cmdloop()
 	i = 0;
 	mark = time(NULL) - IDLE_TIMEOUT;
 	while (backend_cached[i]) {
-	    if ((backend_cached[i]->lastused < mark) &&
+	    if ((bachend_cached[i]->lastused < mark) &&
 		backend_cached[i] != backend_current) {
 		/* idle and not our current server */
 		proxyd_downserver(backend_cached[i]);
@@ -2256,22 +2256,23 @@ void cmd_search(char *tag, int usinguid)
  */    
 void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 {
-    char *server;
+    char *otherserver;
     char *cmd = usinguid ? "UID Copy" : "Copy";
     struct backend *s = NULL;
     int r;
 
     assert(backend_current != NULL);
 
-    r = mboxlist_lookup(name, &server, NULL, NULL);
+    r = mboxlist_lookup(mailboxname, &otherserver, NULL, NULL);
 
     if (!r) {
-	s = proxyd_findserver(server);
+	s = proxyd_findserver(newserver);
     }
 
     if (!s) {
 	/* no such mailbox or other problem */
-	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin, 
+	r = mboxlist_createmailboxcheck(mailboxname, 0, 0,
+					proxyd_userisadmin, 
 					proxyd_userid, proxyd_authstate,
 					NULL, NULL);
 	prot_printf(proxyd_out, "%s NO %s%s\r\n", tag,
@@ -2312,23 +2313,23 @@ void cmd_expunge(char *tag, char *sequence)
 /*
  * Perform a CREATE command
  */
-void cmd_create(char *tag, char *name, char *server)
+void cmd_create(char *tag, char *name, char *partition)
 {
     struct backend *s = NULL;
     int r;
 
-    if (!server) {
+    if (!partition) {
 	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin,
 					proxyd_userid, proxyd_authstate,
-					NULL, &server);
+					NULL, &partition);
     }
-    if (!r && server) {
-	s = proxyd_findserver(server);
+    if (!r && partition) {
+	s = proxyd_findserver(newserver);
 
 	if (s) {
 	    /* ok, send the create to that server */
 
-	    prot_printf(s->out, "%s CREATE {%d+}\r\n%s\r\n", 
+	    prot_printf(s, "%s CREATE {%d+}\r\n%s\r\n", 
 			tag, strlen(name), name);
 	    pipe_including_tag(s, tag);
 	} else {
@@ -2351,7 +2352,7 @@ void cmd_delete(char *tag, char *name)
     char *server;
     struct backend *s = NULL;
 
-    r = mboxlist_lookup(name, &server, NULL, NULL);
+    r = mboxlist_lookup(mailboxname, &server, NULL, NULL);
     if (!r) {
 	s = proxyd_findserver(server);
 
