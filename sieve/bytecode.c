@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.20 2003/01/14 22:20:51 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.21 2003/01/14 22:53:13 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,8 +55,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-#define DUMPCODE 1
-#define VERBOSE 1
+#define DUMPCODE 0
+#define VERBOSE 0
 
 #if DUMPCODE
 void dump(bytecode_info_t *d);
@@ -1363,7 +1363,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
   int address=0;/*to differentiate between address and envelope*/
   comparator_t * comp=NULL;
   void * comprock=NULL;
-  printf("WERT %d\n",bc[i].value);
+  /* printf("WERT %d\n",bc[i].value);*/
   switch(bc[i].value)
     {
     case BC_FALSE:res=0; i++;break;
@@ -1481,11 +1481,11 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		  /*search through all the data*/ 
 		  currd=datai+2;
 		  for (z=0; z<numdata && !res; z++)
-		    {printf("4wert\n");
+		    {/*printf("4wert\n");*/
 		      res|= comp(addr, (char*)&(bc[currd+1].str), comprock);
 		      currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
 		    }
-		  printf("5wert\n");
+		 /* printf("5wert\n");*/
 		}
 	    }
 	  currh+=1+((ROUNDUP(bc[currh].len+1))/sizeof(bytecode_t));

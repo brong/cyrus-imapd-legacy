@@ -44,7 +44,7 @@ typedef union
     /* store strings (need 2 consecutive bytecodes) */
     int len;
     char *str;
-    char str_begin; /* For re-interpretation. */
+  /*  char str_begin;  For re-interpretation. */
 } bytecode_t;
 
 
@@ -53,7 +53,7 @@ typedef union
 /* IMPORTANT: To maintain forward compatibility of bytecode, please only add
  * new instructions to the end of these enums.  (The reason these values
  * are all duplicated here is to avoid silliness if this caveat is forgotten
- * about in the other tables. */
+ * about in the other tables.) */
 enum bytecode {
     B_STOP,
 
