@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.309.2.7 2001/08/03 15:04:20 rjs3 Exp $ */
+/* $Id: imapd.c,v 1.309.2.8 2001/08/07 21:00:02 rjs3 Exp $ */
 
 #include <config.h>
 
@@ -1546,7 +1546,6 @@ cmd_authenticate(char *tag,char *authtype)
     
     const char *serverout;
     unsigned int serveroutlen;
-    const char *errorstring;
     
     const int *ssfp;
     char *ssfmsg=NULL;
@@ -1589,11 +1588,7 @@ cmd_authenticate(char *tag,char *authtype)
 			    VARIABLE_LISTEND);
 	sleep(3);
 	
-	if (errorstring) {
-	    prot_printf(imapd_out, "%s NO %s\r\n", tag, errorstring);
-	} else {
-	    prot_printf(imapd_out, "%s NO Error authenticating\r\n", tag);
-	}
+	prot_printf(imapd_out, "%s NO Error authenticating\r\n", tag);
 
 	return;
     }
