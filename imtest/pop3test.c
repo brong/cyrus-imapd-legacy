@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.3 2001/09/05 20:11:02 rjs3 Exp $
+ * $Id: pop3test.c,v 1.1.2.4 2001/11/08 20:54:40 ken3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -102,6 +102,7 @@ sasl_conn_t *conn;
 int sock; /* socket descriptor */
 
 int verbose=0;
+int dochallenge=1;
 
 struct protstream *pout, *pin;
 
@@ -124,6 +125,8 @@ struct stringlist *strlist_head = NULL;
 /* callbacks we support */
 static sasl_callback_t callbacks[] = {
   {
+    SASL_CB_ECHOPROMPT, NULL, NULL    
+  }, {
 #ifdef SASL_CB_GETREALM
     SASL_CB_GETREALM, NULL, NULL
   }, {
@@ -599,7 +602,7 @@ static int init_sasl(char *serverFQDN, int port, int minssf, int maxssf)
   struct sockaddr_in saddr_r;
 
   /* attempt to start sasl */
-  saslresult=sasl_client_init(callbacks);
+  saslresult=sasl_client_init(callbacks+(!dochallenge ? 1 : 0));
 
   if (saslresult!=SASL_OK) return IMTEST_FAIL;
 
@@ -683,7 +686,7 @@ imt_stat getauthline(char **line, int *linelen)
   return STAT_CONT;
 }
 
-void interaction (int id, const char *prompt,
+void interaction (int id, const char *challenge, const char *prompt,
 		  char **tresult, unsigned int *tlen)
 {
     char result[1024];
@@ -726,6 +729,7 @@ void interaction (int id, const char *prompt,
     } else {
 	int c;
 	
+	if (challenge) printf("Server challenge: %s\n", challenge);
 	printf("%s: ",prompt);
 	fgets(result, sizeof(result) - 1, stdin);
 	c = strlen(result);
@@ -747,7 +751,7 @@ void fillin_interactions(sasl_interact_t *tlist)
 {
   while (tlist->id!=SASL_CB_LIST_END)
   {
-    interaction(tlist->id, tlist->prompt,
+    interaction(tlist->id, tlist->challenge, tlist->prompt,
 		(void *) &(tlist->result), 
 		&(tlist->len));
     tlist++;
@@ -778,8 +782,8 @@ static int auth_login(void)
   char *pass;
   unsigned int passlen;
 
-  interaction(SASL_CB_AUTHNAME,"Authname",&username,&userlen);
-  interaction(SASL_CB_PASS,"Password",&pass,&passlen);
+  interaction(SASL_CB_AUTHNAME,NULL,"Authname",&username,&userlen);
+  interaction(SASL_CB_PASS,NULL,"Password",&pass,&passlen);
 
   printf("C: USER %s\r\n", username);
   prot_printf(pout,"USER %s\r\n", username);
@@ -827,8 +831,8 @@ static int auth_apop(void)
       imtest_fatal("[Server does not support APOP]\n");
   }
 
-  interaction(SASL_CB_AUTHNAME,"Authname",&username,&userlen);
-  interaction(SASL_CB_PASS,"Password",&pass,&passlen);
+  interaction(SASL_CB_AUTHNAME,NULL,"Authname",&username,&userlen);
+  interaction(SASL_CB_PASS,NULL,"Password",&pass,&passlen);
 
   MD5_Init(&ctx);
   MD5_Update(&ctx,apop_chal,strlen(apop_chal));
@@ -1176,8 +1180,11 @@ void usage(void)
   printf("  -f file  : pipe file into connection after authentication\n");
   printf("  -r realm : realm\n");
 #ifdef HAVE_SSL
-  printf("  -t file  : Enable TLS. file has the TLS public and private keys (specify \"\" not to use TLS for authentication)\n");
+  printf("  -t file  : Enable TLS. file has the TLS public and private keys\n"
+	 "             (specify \"\" to not use TLS for authentication)\n");
 #endif /* HAVE_SSL */
+  printf("  -c       : turn off challenge prompt callbacks\n"
+	 "             (enter secret pass-phrase instead of one-time password)\n");
 
   exit(1);
 }
@@ -1213,8 +1220,11 @@ int main(int argc, char **argv)
   setbuf(stderr, NULL);
 
   /* look at all the extra args */
-  while ((c = getopt(argc, argv, "vk:l:p:u:a:m:f:r:t:")) != EOF)
+  while ((c = getopt(argc, argv, "cvk:l:p:u:a:m:f:r:t:")) != EOF)
     switch (c) {
+    case 'c':
+	dochallenge=0;
+	break;
     case 'v':
 	verbose=1;
 	break;
