@@ -26,7 +26,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.94.4.48 1999/11/05 18:16:30 cyrus Exp $
+ * $Id: mboxlist.c,v 1.94.4.49 1999/11/05 22:42:19 leg Exp $
  */
 
 #include <stdio.h>
@@ -265,11 +265,11 @@ int mboxlist_lookup_writelock(const char *name, char** pathp, char** aclp,
  * Check/set up for mailbox creation
  */
 int
-mboxlist_createmailboxcheck(char *name, int mbtype, char *partition, 
-			    int isadmin, char *userid, 
-			    struct auth_state *auth_state, 
-			    char **newacl, char **newpartition,
-			    DB_TXN *tid)
+mboxlist_mycreatemailboxcheck(char *name, int mbtype, char *partition, 
+			      int isadmin, char *userid, 
+			      struct auth_state *auth_state, 
+			      char **newacl, char **newpartition,
+			      int RMW, DB_TXN *tid)
 {
     int r;
     char *p;
@@ -299,14 +299,13 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
     }
 
     /* Check to see if new mailbox exists */
-
     memset(&data, 0, sizeof(key));
-
     memset(&key, 0, sizeof(key));
+
     key.data = (char *) name;
     key.size = strlen(name);
 
-    r = mbdb->get(mbdb, tid, &key, &data, DB_RMW);
+    r = mbdb->get(mbdb, tid, &key, &data, RMW);
     switch (r) {
     case 0:
       mboxent = (struct mbox_entry *) data.data;
@@ -337,14 +336,11 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
     parentlen = 0;
     while ((parentlen==0) && (p = strrchr(parent, '.'))) {
 	*p = '\0';
-	/* no need to search. we're using a DB! */
-	memset(&key, 0, sizeof(key));
-	key.data=parent;
-	key.size=strlen(parent);
-	memset(&data, 0, sizeof(data));
+
+	key.data = parent;
+	key.size = strlen(parent);
 
 	r = mbdb->get(mbdb, tid, &key, &data, 0);
-
 	switch (r) {
 	case DB_NOTFOUND:	  
 	    break;
@@ -461,6 +457,17 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
     return 0;
 }
 
+int
+mboxlist_createmailboxcheck(char *name, int mbtype, char *partition, 
+			      int isadmin, char *userid, 
+			      struct auth_state *auth_state, 
+			      char **newacl, char **newpartition)
+{
+    return mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin,
+					 userid, auth_state, newacl, 
+					 newpartition, 0, NULL);
+}
+
 /*
  * Create a mailbox
  */
@@ -516,8 +523,8 @@ int real_mboxlist_createmailbox(char *name, int mbtype, char *partition,
     }
 
     /* Check ability to create mailbox */
-    r = mboxlist_createmailboxcheck(name, mbtype, partition, isadmin, userid,
-				    auth_state, &acl, &newpartition, tid);
+    r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, userid,
+				      auth_state, &acl, &newpartition, 1, tid);
     if (r == IMAP_AGAIN) {
 	goto retry;
     }
@@ -1196,9 +1203,9 @@ int real_mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    r = IMAP_MAILBOX_NOTSUPPORTED;
 	    goto done;
 	}
-	r = mboxlist_createmailboxcheck(newname, 0, partition, isadmin, userid,
-					auth_state, (char **)0, 
-					&newpartition, tid);
+	r = mboxlist_mycreatemailboxcheck(newname, 0, partition, isadmin, 
+					  userid, auth_state, (char **)0, 
+					  &newpartition, 1, tid);
 	switch (r) {
 	case 0:
 	    break;

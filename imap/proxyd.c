@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: proxyd.c,v 1.1.2.2 1999/11/04 20:16:08 leg Exp $ */
+/* $Id: proxyd.c,v 1.1.2.4 1999/11/05 22:45:53 leg Exp $ */
 
 #ifndef __GNUC__
 #define __attribute__(foo)
@@ -70,13 +70,15 @@
 /* we want a list of our outgoing connections here and which one we're
    currently piping */
 #define LAST_RESULT_LEN 1024
+#define IDLE_TIMEOUT (5 * 60)
 
 struct backend {
     char *hostname;
     struct sockaddr_in addr;
+    int sock;
     time_t lastused;
     sasl_conn_t *saslconn;
-    char last_result[1024];
+    char last_result[LAST_RESULT_LEN];
     struct protstream *in; /* from the be server to me, the proxy */
     struct protstream *out; /* to the be server */
 };
@@ -595,7 +597,7 @@ static int mysasl_getauthline(struct protstream *p, char *tag,
     }
 }
 
-static int proxy_authenticate(int sock, struct backend *s)
+static int proxy_authenticate(struct backend *s)
 {
     int r;
     sasl_security_properties_t *secprops = NULL;
@@ -629,13 +631,13 @@ static int proxy_authenticate(int sock, struct backend *s)
     }
 
     /* set the IP addresses */
-    if (getpeername(sock, (struct sockaddr *)saddr_r, &addrsize) != 0)
+    if (getpeername(s->sock, (struct sockaddr *)saddr_r, &addrsize) != 0)
 	return SASL_FAIL;
     r = sasl_setprop(s->saslconn, SASL_IP_REMOTE, saddr_r);
     if (r != SASL_OK) return r;
   
     addrsize=sizeof(struct sockaddr_in);
-    if (getsockname(sock,(struct sockaddr *)saddr_l,&addrsize)!=0)
+    if (getsockname(s->sock, (struct sockaddr *)saddr_l,&addrsize)!=0)
 	return SASL_FAIL;
     r = sasl_setprop(s->saslconn, SASL_IP_LOCAL, saddr_l);
     if (r != SASL_OK) return r;
@@ -693,6 +695,32 @@ static int proxy_authenticate(int sock, struct backend *s)
     return r;
 }
 
+void proxyd_downserver(struct backend *s)
+{
+    char tag[128];
+    int taglen;
+    char buf[1024];
+
+    if (!s->lastused) {
+	/* already disconnected */
+	return;
+    }
+
+    /* need to logout of server */
+    proxyd_gentag(tag);
+    prot_printf(s->out, "%s LOGOUT\r\n", tag);
+    while (prot_fgets(buf, sizeof(buf), s->in)) {
+	if (!strncmp(tag, buf, taglen)) {
+	    break;
+	}
+    }
+
+    close(s->sock);
+    prot_free(s->in);
+    prot_free(s->out);
+    s->lastused = 0;
+}
+
 /* return the connection to the server */
 struct backend *proxyd_findserver(char *server)
 {
@@ -736,10 +764,11 @@ struct backend *proxyd_findserver(char *server)
 	
 	ret->in = prot_new(sock, 0);
 	ret->out = prot_new(sock, 1);
+	ret->sock = sock;
 	prot_setflushonread(ret->in, ret->out);
 
 	/* now need to authenticate to backend server */
-	if (proxy_authenticate(sock, ret)) {
+	if (proxy_authenticate(ret)) {
 	    fatal("couldn't authenticate to backend server", 1);
 	}
     }
@@ -1096,14 +1125,16 @@ int fd;
 void shut_down(int code) __attribute__((noreturn));
 void shut_down(int code)
 {
+    int i;
+
     proc_cleanup();
-#if NEEDS_PROXY
-    if (imapd_mailbox) {
-	index_closemailbox(imapd_mailbox);
-	mailbox_close(imapd_mailbox);
+
+    while (backend_cached[i]) {
+	proxyd_downserver(backend_cached[i]);
+
+	i++;
     }
-    /* need to close connections to backend servers! */
-#endif
+
     mboxlist_done();
     prot_flush(proxyd_out);
     exit(code);
@@ -1137,7 +1168,8 @@ cmdloop()
     char shutdownfilename[1024];
     char motdfilename[1024];
     char hostname[MAXHOSTNAMELEN+1];
-    int c;
+    int c, i;
+    time_t mark;
     int usinguid, havepartition, havenamespace, oldform;
     static struct buf tag, cmd, arg1, arg2, arg3, arg4;
     char *p;
@@ -1160,6 +1192,16 @@ cmdloop()
 	if (! proxyd_userisadmin &&
 	    (fd = open(shutdownfilename, O_RDONLY, 0)) != -1) {
 	    shutdown_file(fd);
+	}
+
+	i = 0;
+	mark = time(NULL) - IDLE_TIMEOUT;
+	while (backend_cached[i]) {
+	    if ((backend_cached[i]->lastused < mark) &&
+		backend_cached[i] != backend_current) {
+		/* idle and not our current server */
+		proxyd_downserver(backend_cached[i]);
+	    }
 	}
 
 	/* Parse tag */
@@ -2214,46 +2256,38 @@ void cmd_search(char *tag, int usinguid)
  */    
 void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 {
-#ifdef NEEDS_PROXY
+    char *server;
+    char *cmd = usinguid ? "UID Copy" : "Copy";
+    struct backend *s = NULL;
     int r;
-    char mailboxname[MAX_MAILBOX_NAME+1];
-    char *copyuid;
 
-    r = mboxname_tointernal(name, imapd_userid, mailboxname);
+    assert(backend_current != NULL);
+
+    r = mboxlist_lookup(name, &server, NULL, NULL);
+
     if (!r) {
-	r = index_copy(imapd_mailbox, sequence, usinguid, mailboxname,
-		       &copyuid);
+	s = proxyd_findserver(server);
     }
 
-    index_check(imapd_mailbox, usinguid, 0);
-
-    if (r) {
-	prot_printf(imapd_out, "%s NO %s%s\r\n", tag,
-		    (r == IMAP_MAILBOX_NONEXISTENT &&
-		     mboxlist_createmailboxcheck(mailboxname, 0, 0,
-						 imapd_userisadmin,
-						 imapd_userid, imapd_authstate,
-						 (char **)0, (char **)0, NULL)
-		     == 0)
-		    ? "[TRYCREATE] " : "", error_message(r));
-    }
-    else {
-	if (copyuid) {
-	    prot_printf(imapd_out, "%s OK [COPYUID %s] %s\r\n", tag,
-			copyuid, error_message(IMAP_OK_COMPLETED));
-	    free(copyuid);
-	}
-	else if (usinguid) {
-	    prot_printf(imapd_out, "%s OK %s\r\n", tag,
-			error_message(IMAP_OK_COMPLETED));
-	}
-	else {
-	    /* normal COPY, message doesn't exist */
-	    prot_printf(imapd_out, "%s NO %s\r\n", tag,
-			error_message(IMAP_NO_NOSUCHMSG));
-	}
-    }
+    if (!s) {
+	/* no such mailbox or other problem */
+	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin, 
+					proxyd_userid, proxyd_authstate,
+					NULL, NULL);
+	prot_printf(proxyd_out, "%s NO %s%s\r\n", tag,
+		    r == 0 ? "[TRYCREATE] " : "", error_message(r));
+    } else if (s == backend_current) {
+	/* this is the easy case */
+	prot_printf(backend_current->out, "%s %s %s {%d+}\r\n%s\r\n",
+		    tag, cmd, sequence, strlen(name), name);
+	pipe_including_tag(backend_current, tag);
+    } else {
+#if NEEDS_PROXY
+	/* this is the hard case; we have to fetch the messages and append
+	   them to the other mailbox */
+	prot_printf(proxyd_out, "%s NO i don't like you\r\n");
 #endif
+    }
 }    
 
 /*
@@ -2278,11 +2312,34 @@ void cmd_expunge(char *tag, char *sequence)
 /*
  * Perform a CREATE command
  */
-void cmd_create(char *tag, char *name, char *partition)
+void cmd_create(char *tag, char *name, char *server)
 {
-#ifdef NEEDS_PROXY
+    struct backend *s = NULL;
+    int r;
 
-#endif
+    if (!server) {
+	r = mboxlist_createmailboxcheck(name, 0, 0, proxyd_userisadmin,
+					proxyd_userid, proxyd_authstate,
+					NULL, &server);
+    }
+    if (!r && server) {
+	s = proxyd_findserver(server);
+
+	if (s) {
+	    /* ok, send the create to that server */
+
+	    prot_printf(s->out, "%s CREATE {%d+}\r\n%s\r\n", 
+			tag, strlen(name), name);
+	    pipe_including_tag(s, tag);
+	} else {
+	    /* you want it where?!? */
+	    
+	    prot_printf(proxyd_out, "%s NO %s\r\n", 
+			error_message(IMAP_SERVER_UNAVAILABLE));
+	}
+    } else {
+	prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
+    }
 }
 
 /*
@@ -2290,9 +2347,24 @@ void cmd_create(char *tag, char *name, char *partition)
  */
 void cmd_delete(char *tag, char *name)
 {
-#ifdef NEEDS_PROXY
+    int r;
+    char *server;
+    struct backend *s = NULL;
 
-#endif
+    r = mboxlist_lookup(name, &server, NULL, NULL);
+    if (!r) {
+	s = proxyd_findserver(server);
+
+	if (s) {
+	    prot_printf(s->out, "%s DELETE {%d+}\r\n%s\r\n", tag, name);
+	    pipe_including_tag(s, tag);
+	} else {
+	    prot_printf(proxyd_out, "%s NO %s\r\n",
+			error_message(IMAP_SERVER_UNAVAILABLE));
+	}
+    } else {
+	prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
+    }
 }	
 
 /*
@@ -2300,9 +2372,30 @@ void cmd_delete(char *tag, char *name)
  */
 void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
 {
-#ifdef NEEDS_PROXY
+    int r;
+    char *server;
+    struct backend *s = NULL;
 
-#endif
+    if (partition) {
+	prot_printf(proxyd_out, 
+		    "%s NO cross-server RENAME not implemented\r\n", tag);
+    } else {
+	r = mboxlist_lookup(oldname, &server, NULL, NULL);
+	if (!r) {
+	    s = proxyd_findserver(server);
+
+	    if (s) {
+		prot_printf(s->out, "%s RENAME {%d+}\r\n%s {%d+}\r\n%s\r\n", 
+			    tag, oldname, newname);
+		pipe_including_tag(s, tag);
+	    } else {
+		prot_printf(proxyd_out, "%s NO %s\r\n",
+			    error_message(IMAP_SERVER_UNAVAILABLE));
+	    }
+	} else {
+	    prot_printf(proxyd_out, "%s NO %s\r\n", tag, error_message(r));
+	}
+    }
 }
 
 /*

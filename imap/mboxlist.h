@@ -2,7 +2,7 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.4 1999/11/05 17:57:51 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.5 1999/11/05 22:42:22 leg Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -51,6 +51,12 @@ int mboxlist_lookup(const char *name, char **pathp, char **aclp, void *tid);
 /* insert a stub entry */
 int mboxlist_insertremote(char *name, int mbtype, char *host, char *acl,
 			  void **rettid);
+
+/* check user's ability to create mailbox */
+int mboxlist_createmailboxcheck(char *name, int mbtype, char *partition, 
+				int isadmin, char *userid, 
+				struct auth_state *auth_state, 
+				char **newacl, char **newpartition);
 
 /* create mailbox; don't commit if tid != NULL */
 int mboxlist_createmailbox(char *name, int mbtype, char *partition, 
