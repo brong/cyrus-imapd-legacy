@@ -1,6 +1,6 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
- * $Id: comparator.c,v 1.7.12.3 2002/06/06 21:09:18 jsmith2 Exp $
+ * $Id: comparator.c,v 1.7.12.4 2002/06/17 17:13:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -294,22 +294,27 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
     *comprock = NULL;
     if (!strcmp(comp, "i;octet")) {
  	switch (mode) {
+	case IS:
 	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &octet_cmp;
 	    break;
+	case CONTAINS:
 	case B_CONTAINS:
 	    ret = &octet_contains;
 	    break;
+	case MATCHES:
 	case B_MATCHES:
 	    ret = &octet_matches;
 	    break;
 #ifdef ENABLE_REGEX
+	case REGEX:
 	case B_REGEX:
 	    ret = &octet_regex;
 	    break;
 #endif
 #ifdef ENABLE_VALUE
+	case VALUE:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &octet_cmp;
@@ -318,17 +323,21 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	}
     }else if (!strcmp(comp, "i;ascii-casemap")) {
      	switch (mode) {
+	case IS:
 	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &strcasecmp;
 	    break;
+	case CONTAINS:
 	case B_CONTAINS:
 	    ret = &ascii_casemap_contains;
 	    break;
+	case MATCHES:
 	case B_MATCHES:
 	    ret = &ascii_casemap_matches;
 	    break;
 #ifdef ENABLE_REGEX
+	case REGEX:
 	case B_REGEX:
 	    /* the ascii-casemap destinction is made during
 	       the compilation of the regex in verify_regex() */
@@ -336,7 +345,7 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	    break;
 #endif
 #ifdef ENABLE_VALUE
-
+	case VALUE:
 	case B_VALUE:
 	    ret = lookup_rel(relation);
 	    *comprock = &strcasecmp;
@@ -345,11 +354,14 @@ comparator_t *lookup_comp(const char *comp, int mode, const char *relation,
 	}
     } else if (!strcmp(comp, "i;ascii-numeric")) {
 	switch (mode) {
+	case IS:
 	case B_IS:
 	    ret = &rel_eq;
 	    *comprock = &ascii_numeric_cmp;
 	    break;
 #ifdef ENABLE_VALUE
+	case COUNT:
+	case VALUE:
 	case B_COUNT:
 	case B_VALUE:
 	    ret = lookup_rel(relation);

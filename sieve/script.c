@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43.2.6 2002/06/06 21:09:18 jsmith2 Exp $
+ * $Id: script.c,v 1.43.2.7 2002/06/17 17:13:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -779,7 +779,7 @@ static int fillin_headers(sieve_interp_t *i, char *msg,
 static int sieve_addflag(sieve_imapflags_t *imapflags, char *flag)
 {
     int n;
- 
+    printf("WERT %d flags\n", imapflags->nflags);
     /* search for flag already in list */
     for (n = 0; n < imapflags->nflags; n++) {
 	if (!strcmp(imapflags->flag[n], flag))
@@ -803,7 +803,8 @@ static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
     int n;
  
     /* search for flag already in list */
-    for (n = 0; n < imapflags->nflags; n++) {
+    printf("NUMFLAGS %d\n", imapflags->nflags);
+     for (n = 0; n < imapflags->nflags; n++) {
 	if (!strcmp(imapflags->flag[n], flag))
 	    break;
     }
@@ -811,15 +812,22 @@ static int sieve_removeflag(sieve_imapflags_t *imapflags, char *flag)
     /* remove flag from list, iff in list */
     if (n < imapflags->nflags) {
 	free(imapflags->flag[n]);
-	imapflags->nflags--;
+	/*imapflags->nflags--;*/
  
 	for (; n < imapflags->nflags; n++)
 	    imapflags->flag[n] = imapflags->flag[n+1];
  
-	imapflags->flag =
-	    (char **) xrealloc((char *)imapflags->flag,
-			       imapflags->nflags*sizeof(char *));
-    }
+	imapflags->nflags--;
+	if (imapflags->nflags)
+	  {imapflags->flag =
+              (char **) xrealloc((char *)imapflags->flag,
+                                 imapflags->nflags*sizeof(char *));
+          }
+	else
+	  {free(imapflags->flag);
+	  imapflags->flag=NULL;
+	  }
+	}
  
     return SIEVE_OK;
 }
@@ -1258,7 +1266,10 @@ int sieve_script_unload(sieve_bytecode_t **s)
 	free(*s);
 	*s = NULL;
     } 
-    return SIEVE_FAIL;
+    /*i added this else, i'm not sure why, but this function always returned SIEVE_FAIL*/
+    else
+      return SIEVE_FAIL;
+    return SIEVE_OK;
 }
 
 
@@ -1268,7 +1279,7 @@ static int do_sieve_error(int ret,
 			  sieve_interp_t *interp,
 			  void *script_context,
 			  void *message_context,
-			  sieve_imapflags_t imapflags,
+			  sieve_imapflags_t * imapflags,
 			  action_list_t *actions,
 			  notify_list_t *notify_list,
 			  /* notify_action_t *notify_action,*/
@@ -1367,7 +1378,7 @@ static int do_sieve_error(int ret,
 static int do_action_list(sieve_interp_t *interp,
 			  void *script_context,
 			  void *message_context,
-			  sieve_imapflags_t imapflags,
+			  sieve_imapflags_t *imapflags,
 			  action_list_t *actions,
 			  notify_list_t *notify_list,
 			  /* notify_action_t *notify_action,*/
@@ -1506,14 +1517,14 @@ static int do_action_list(sieve_interp_t *interp,
 
  
 	case ACTION_SETFLAG:
-	    free_imapflags(&imapflags);
-	    ret = sieve_addflag(&imapflags, a->u.fla.flag);
+	    free_imapflags(imapflags);
+	    ret = sieve_addflag(imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_ADDFLAG:
-	    ret = sieve_addflag(&imapflags, a->u.fla.flag);
+	    ret = sieve_addflag(imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_REMOVEFLAG:
-	    ret = sieve_removeflag(&imapflags, a->u.fla.flag);
+	    ret = sieve_removeflag(imapflags, a->u.fla.flag);
 	    break;
 	case ACTION_MARK:
 	    {
@@ -1521,7 +1532,7 @@ static int do_action_list(sieve_interp_t *interp,
 
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_addflag(&imapflags,
+		    ret = sieve_addflag(imapflags,
 					interp->markflags->flag[--n]);
 		}
 		break;
@@ -1529,10 +1540,10 @@ static int do_action_list(sieve_interp_t *interp,
 	case ACTION_UNMARK:
 	    {
 		int n = interp->markflags->nflags;
-
+		printf("UNMARK");
 		ret = SIEVE_OK;
 		while (n && ret == SIEVE_OK) {
-		    ret = sieve_removeflag(&imapflags,
+		    ret = sieve_removeflag(imapflags,
 					   interp->markflags->flag[--n]);
 		}
 		break;
@@ -1588,17 +1599,17 @@ int sieve_execute_bytecode(sieve_bytecode_t *bc, void *message_context)
       {
 	ret = SIEVE_NOMEM;
 	return do_sieve_error(ret, bc->interp, bc->script_context,
-			      message_context, imapflags,
+			      message_context, &imapflags,
 			      actions, notify_list, lastaction, 0,
 			      actions_string, errmsg);
       }
     
     if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, 
-		      imapflags, actions, notify_list, &errmsg) < 0)
+		      &imapflags, actions, notify_list, &errmsg) < 0)
       return SIEVE_RUN_ERROR;  
     
     return do_action_list(bc->interp, bc->script_context, message_context, 
-			  imapflags, actions, notify_list, actions_string,
+			  &imapflags, actions, notify_list, actions_string,
 			  errmsg);
 }
 

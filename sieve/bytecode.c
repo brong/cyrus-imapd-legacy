@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.9 2002/06/14 18:37:04 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.10 2002/06/17 17:13:25 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -1456,7 +1456,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 }
 
 int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
-		  void *m, sieve_imapflags_t imapflags, action_list_t *actions,
+		  void *m, sieve_imapflags_t * imapflags, action_list_t *actions,
 		  notify_list_t *notify_list,
 		  const char **errmsg) 
 {
@@ -1490,7 +1490,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  res=1;
 	  break;
       case B_KEEP:/*1*/
-	  res = do_keep(actions, &imapflags);
+	  res = do_keep(actions, imapflags);
 	  if (res == SIEVE_RUN_ERROR)
 	    *errmsg = "Keep can not be used with Reject";
 	  /* return res;*/
@@ -1518,7 +1518,7 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 		    ip+=3;
 		    for (x=0; x<l; x++)\
 		    {*/
-	    res = do_fileinto(actions,(char*)&(bc[ip+2].str), &imapflags);
+	    res = do_fileinto(actions,(char*)&(bc[ip+2].str), imapflags);
 	    if (res == SIEVE_RUN_ERROR)
 	      *errmsg = "Fileinto can not be used with Reject";
 	    ip+=1+((ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t));
