@@ -26,7 +26,7 @@
  *  (412) 268-4387, fax: (412) 268-7395
  *  tech-transfer@andrew.cmu.edu
  *
- * $Id: target.c,v 1.1.2.1 1999/11/02 20:56:43 leg Exp $
+ * $Id: target.c,v 1.1.2.2 1999/11/03 00:07:52 leg Exp $
  */
 
 #include <stdio.h>
@@ -185,6 +185,8 @@ void be_connect(struct be *ptr)
     /* ptr is currently DOWN.  let's try to make it UP */
     assert(ptr->be_status == DOWN);
 
+    fprintf(stderr, "attempting connection to '%s'...\n", host);
+
     if ((hp = gethostbyname(ptr->hostname)) == NULL) {
 	syslog(LOG_ERR, "gethostbyname(): unknown host: %s\n", ptr->hostname);
 	return;
@@ -203,6 +205,8 @@ void be_connect(struct be *ptr)
 	syslog(LOG_ERR, "can't connect to %s: %m", ptr->hostname);
 	return;
     }
+
+    fprintf(stderr, "connected\n");
 
     ptr->in = prot_new(ptr->sock, 0);
     ptr->out = prot_new(ptr->sock, 1);
@@ -223,6 +227,7 @@ void be_connect(struct be *ptr)
 	while (isdigit(ch)) {
 	    sz = 10 * sz + (ch - '0');
 	}
+	fprintf(stderr, "looking for %d bytes...", sz);
 	if (ch != 'M') {
 	    break;
 	}
@@ -240,6 +245,7 @@ void be_connect(struct be *ptr)
 		goto out;
 	    }
 	}
+	fprintf(stderr, "got '%s'\n", mboxent[n]->name);
 	n++;
     }
   out:
@@ -281,6 +287,9 @@ void be_connect(struct be *ptr)
 	free(rock->saw);
 	free(rock);
     }
+
+    if (!cr) fprintf(stderr, "about to send\n");
+    else fprintf(stderr, "bad connection\n");
     
     /* done */
     if (!cr) cr = prot_putc('o', ptr->out);
