@@ -55,8 +55,8 @@ int load(int fd, bytecode_t ** d)
   const char * data=NULL;
   struct stat sbuf;
   unsigned long len=0;
-  int i;
-   if (fstat(fd, &sbuf) == -1) {
+/*int i;*/
+  if (fstat(fd, &sbuf) == -1) {
      /*	syslog(LOG_ERR, "IOERROR: fstating sieve script: %m");*/
 	return SIEVE_FAIL;
     }
@@ -85,13 +85,12 @@ int load(int fd, bytecode_t ** d)
 
 int main(int argc, char * argv[])
 {
-  /*  sieve_bytecode_t *sbc;*//*defined in script.h, declared in sieve_interface*/
+
    bytecode_t * bc;
    int script_fd;
-   /*   int res;*/
+
    unsigned long len;
-   /*   int i;*/
-   /*check input*/
+
    if (argc!=2)
      {
        fprintf(stderr, "usage:\n %s script\n", argv[0]);
@@ -105,24 +104,8 @@ int main(int argc, char * argv[])
        exit(1);
      }
    
-   /*res = sieve_script_load(NULL, script_fd, "test script",
-     NULL, &sbc);
-     if (res != SIEVE_OK) {
-     printf("can not load script\n%d  %d  %d  %d\n",res, SIEVE_OK, SIEVE_FAIL, SIEVE_NOMEM);
-     exit(1);
-     }
-   */
-   
    len=load(script_fd,&bc);
    close(script_fd);
-   
- /* this is what sieve_execute_bytecode does when it calls eval...
-    i don't understand the bc->interp
-    if (sieve_eval_bc(bc->interp, bc->data, bc->len, message_context, actions,          notify_action, &errmsg) < 0)
-    return SIEVE_RUN_ERROR; 
-    
- */
-   /*  bc=(bytecode_t *)sbc->data;*/
    
    if (bc !=NULL)
      { dump2(bc, len );
@@ -176,6 +159,9 @@ int printComparison(bytecode_t *d ,int i)
 	case B_NE: printf(" not equal ");    break;
 	case B_EQ: printf(" equal ");break;
 	}
+  
+    default: exit(1);
+	
       break;
     }
    switch (d[i+2].value)
@@ -183,6 +169,7 @@ int printComparison(bytecode_t *d ,int i)
      case B_ASCIICASEMAP: printf("   (ascii-casemap) "); break;
      case B_OCTET: printf("    (octet) "); break;
      case B_ASCIINUMERIC:  printf("   (ascii-numeric) "); break;
+     default: exit(1);
      }
    printf("\n");
   return i+3;
@@ -381,28 +368,28 @@ void dump2(bytecode_t *d, int len)
 	case B_DENOTIFY:/*14*/
 	    printf("%d: DENOTIFY\n",i);
 	    i++; 
-	    printf("Comparison type %d ({%d}%s) ",d[i], d[i+1].len,(char*)&(d[i+2].str));
-      	    i+=2+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
-
-	    printf("PRIORITY({%d}%s)\n",d[i].len,(char*)&(d[i+1].str));
+	    printf("            PRIORITY(%d) Comparison type %d \n",d[i].value,d[i+1].value);
+	    i+=2;
+	    
+	    printf("           ({%d}%s)\n", d[i].len,(d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
       	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
-
 	    break;
 	    
 	case B_NOTIFY: /*13*/
-	    printf("%d: NOTIFY METHOD({%d}%s)",i,
+	    printf("%d: NOTIFY METHOD({%d}%s)\n",i,
 		   d[i+1].len,(char*)&(d[i+2].str));  
 	    i+=2+((ROUNDUP(d[i+1].len+1))/sizeof(bytecode_t));
 
-	    printf(",ID({%d}%s) OPTIONS",d[i].len,(char*)&(d[i+1].str));
+	    printf("            ID({%d}%s) OPTIONS ",d[i].len,(d[i].len == -1 ? "[nil]" : (char*)&(d[i+1].str)));
 	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
-		  
+	    printf("len%d\n",d[i].len);
+	    
 	    i=write_list(d[i].len,i+1,d);
 	    
-	    printf("PRIORITY({%d}%s)",d[i].len,(char*)&(d[i+1].str));
-      	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
+	    printf("            PRIORITY(%d)\n",d[i].value);
+      	    i++;
 		  
-	    printf("MESSAGE({%d}%s)\n", d[i].len,(char*)&(d[i+1].str));
+	    printf("            MESSAGE({%d}%s)\n", d[i].len,(char*)&(d[i+1].str));
 	    i+=1+((ROUNDUP(d[i].len+1))/sizeof(bytecode_t));
 
 	    break;

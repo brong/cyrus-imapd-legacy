@@ -28,7 +28,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 
 /* for debugging*/
-#define DUMPCODE 0
+#define DUMPCODE 1
 #define VERBOSE 0
 
 
@@ -129,12 +129,13 @@ enum bytecode_tags {
     B_MATCHES,
     B_REGEX,/* require regex*/
     B_COUNT,/* require relational*/
-    B_VALUE /* require relational*/
+    B_VALUE, /* require relational*/
 
     /*priorities*/
-    /*B_LOW
-      B_MEDIUM 
-      B_HIGH*/
+    B_LOW,
+    B_NORMAL,
+    B_HIGH,
+    B_ANY
 };
 
 #endif

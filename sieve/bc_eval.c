@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.3 2003/01/22 01:11:02 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.4 2003/01/22 22:54:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -57,12 +57,15 @@ char ** bc_makeArray(int len, int i, bytecode_t *bc)
 { 
   int x;
   char** array;
-  array=(char**)xmalloc(len* sizeof(char *));
+/* int endoflist=bc[i].value;*/
+  i++;
+  
+   array=(char**)xmalloc(len* sizeof(char *));
   for (x=0; x<len; x++)
-    {
+    { 
 	/* array[x]=(char*)xmalloc(bc[i].len);
 	   strncpy(array[x], (char*)&(bc[i+1].str), bc[i].len);*/
-	array[x]= xstrdup(bc[i+1].str);
+	array[x]= xstrdup(&bc[i+1].str);
 	
     }
   
@@ -392,9 +395,9 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		      {
 			  if (isReg)
 			   {
-			       reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			       reg= bc_compile_regex((char*)&bc[currd+1].str, ctag, errbuf);
 			       if (!reg) exit (1);
-			       res|= comp(val[y],reg, comprock);
+			       res|= comp(val[y], reg, comprock);
 			       free(reg);
 			   }
 			  else
@@ -418,7 +421,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      for (z=0; z<numdata && !res; z++)
 		{ 	if (isReg)
 			{
-			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    reg= bc_compile_regex((char *)&bc[currd+1].str, ctag, errbuf);
 			    if (!reg) exit (1);
 			    res|= comp(val[y],reg, comprock);
 			    free( reg);
@@ -501,7 +504,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		    {
 			if (isReg)
 			{
-			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    reg= bc_compile_regex((char *)&bc[currd+1].str, ctag, errbuf);
 			    if (!reg) exit (1);
 			    res|= comp(val[y],reg, comprock);
 			    free( reg);
@@ -530,7 +533,7 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 		  {
 		      	if (isReg)
 			{
-			    reg= bc_compile_regex(&bc[currd+1].str, ctag, errbuf);
+			    reg= bc_compile_regex((char *)&bc[currd+1].str, ctag, errbuf);
 			    if (!reg) exit (1);
 			    res|= comp(val[y],reg, comprock);
 			    free( reg);
@@ -716,35 +719,53 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    break;
 	  }
       case B_NOTIFY:
-	{
+      {
+	 
 	  char * id;
 	  char * method;
 	  char **options=NULL;
 	  const char * priority;
 	  char * message;
-	  
 	  ip++;
+	  /*method*/
 	  method= (char*)&(bc[ip+1].str); 
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*	  printf("%s\n", method);*/
-	  
-	  id=(char*)&(bc[ip+1].str);
+ 	  /*id*/
+	  if (bc[ip].len ==-1)
+	  {
+	      id=NULL;
+	  }else
+	  {
+	      id=(char*)&(bc[ip+1].str);
+	  }
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*	  printf("%s\n", id);*/
-	  
-	  options=bc_makeArray(bc[ip].len, ip+2,bc); 
-	  ip=(bc[ip+1].value/4);
-  
-	  priority= (const char*)&(bc[ip+1].str); 
-	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*printf("priority %s\n", priority);*/
 
+          /*options*/
+	  options=bc_makeArray(bc[ip].len, ip+1,bc); 
+	  ip=(bc[ip+1].value/4);
+	  /*priority*/
+	  switch (bc[ip++].value)
+	  {
+	  case B_LOW:
+	      priority="low";
+	  case B_NORMAL:
+	      priority="normal";
+	      break;
+	  case B_HIGH: 
+	      priority="high";
+	      break; 
+	  case B_ANY:
+	      priority="any";
+	      break;
+	  default:
+	      res=SIEVE_RUN_ERROR;
+	  }
+	  /*message*/
 	  message=(char*)&(bc[ip+1].str);
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*	  printf("%s\n", message);*/
-
-	  res = do_notify(notify_list, id, method, &options, priority, message);
 	  
+	  res = do_notify(notify_list, id, method, &options, priority, message);
+	 	  
 	  break;
 	}
       case B_DENOTIFY:
@@ -757,36 +778,57 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  char * priority;
 	  void * comprock=NULL;
 
-	  int isReg = (bc[ip+1].value == B_REGEX);
-	  comp=lookup_comp("i;ascii-casemap",bc[ip+1].value, -1, comprock);
-	  
-	  ip+=2;
-
-	  if (isReg)
+	  int isReg;
+	  int isAny;
+	  ip++;
+	    switch (bc[ip++].value)
 	  {
-	      reg=bc_compile_regex(bc[ip+1].str, REG_EXTENDED | REG_NOSUB | REG_ICASE, *errmsg);
-	      if (!reg) {res = SIEVE_RUN_ERROR;}
+	  case B_LOW:
+	      priority="low";
+	      
+	  case B_NORMAL:
+	       priority="normal";
+	      break;
+	  case B_HIGH: 
+	      priority="high";
+	      break; 
+	  case B_ANY:
+	      priority="any";
+	      break;
+	  default:
+	      res=SIEVE_RUN_ERROR;
 	  }
-	  else
+	  isReg = (bc[ip].value == B_REGEX);
+	  isAny = (bc[ip].value == B_ANY);
+	 
+	  if (isAny)
+	  { 
+	      ip++;
+	      comp=NULL;
+	  }else
+	  { 
+	      comp=lookup_comp(B_ASCIICASEMAP,bc[ip++].value, -1, &comprock);
+	  }
+	 
+	  if (bc[ip].len ==-1)
 	  {
-	      pattern= (char*)&(bc[ip+1].str); 
-	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+	      pattern=NULL;
+	  }else
+	  {
+	      pattern= (char*)&(bc[ip+1].str);
 	  }
-	
-	  priority= (char*)&(bc[ip+1].str); 
 	  ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	  /*printf("priority %s\n", priority);*/
 	  
 	  if (isReg)
-	  {
+	  {	
+	      reg=bc_compile_regex(pattern, REG_EXTENDED | REG_NOSUB | REG_ICASE, *errmsg);
+	      if (!reg) {res = SIEVE_RUN_ERROR;}
 	      res = do_denotify(notify_list, comp, reg, comprock, priority);
 	      free(reg);
-	  }
-	  else
+	  }else
 	  {
 	      res = do_denotify(notify_list, comp, pattern, comprock, priority);
 	  }
-	  
 	  break;
 	}
       case B_VACATION:

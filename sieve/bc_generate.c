@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_generate.c,v 1.1.2.5 2003/01/22 01:11:02 jsmith2 Exp $
+ * $Id: bc_generate.c,v 1.1.2.6 2003/01/22 22:54:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -410,6 +410,22 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		/* DENOTIFY  */
 		if(!atleast(retval,codep+6)) return -1;
 		retval->data[codep++].op = B_DENOTIFY;
+		switch(c->u.d.priority) {
+		case LOW:
+		    retval->data[codep++].value = B_LOW;
+		    break;
+		case NORMAL:
+		    retval->data[codep++].value = B_NORMAL;
+		    break;
+		case HIGH:
+		    retval->data[codep++].value = B_HIGH;
+		    break;
+		case ANY:
+		    retval->data[codep++].value = B_ANY;
+		    break;
+		default:
+		    return -1;
+		}
 		switch(c->u.d.comptag) {
 		case IS:
 		    retval->data[codep++].value = B_IS;
@@ -425,14 +441,21 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		    retval->data[codep++].value = B_REGEX;
 		    break;
 #endif
+		case ANY:
+		    retval->data[codep++].value = B_ANY;
+		    break; 
 		default:
 		    return -1;
 		}
-		retval->data[codep++].len = strlen(c->u.d.pattern);
-		retval->data[codep++].str = c->u.d.pattern;
-
-		retval->data[codep++].len = strlen(c->u.d.priority);
-		retval->data[codep++].str = (c->u.d.priority);
+	
+		if(c->u.d.pattern)
+		{
+		    retval->data[codep++].len = strlen(c->u.d.pattern);
+		    retval->data[codep++].str = c->u.d.pattern;
+		} else {
+		    retval->data[codep++].len = -1;
+		    retval->data[codep++].str = NULL;
+		}
 
 		break;
 	    case REJCT:
@@ -489,19 +512,46 @@ static int bc_action_generate(int codep, bytecode_info_t *retval, commandlist_t 
 		   (STRING: len + dataptr)
 		   method/id /options list/priority/message 
 		*/
+			
 		if(!atleast(retval,codep+5)) return -1;
 		retval->data[codep++].op = B_NOTIFY;
+		
 		retval->data[codep++].len = strlen(c->u.n.method);
 		retval->data[codep++].str = c->u.n.method;
-		retval->data[codep++].len = strlen(c->u.n.id);
-		retval->data[codep++].str = c->u.n.id;
-	    
+				
+		if (c->u.n.id)
+		{
+		    retval->data[codep++].len = strlen(c->u.n.id);
+		    retval->data[codep++].str = c->u.n.id;
+		}
+		else
+		{
+		    retval->data[codep++].len = -1;
+		    retval->data[codep++].str = NULL;
+		}
+		
 		codep = bc_stringlist_generate(codep,retval,c->u.n.options);
 		if(codep == -1) return -1;
 
-		if(!atleast(retval,codep+4)) return -1;
-		retval->data[codep++].len = strlen(c->u.n.priority);
-		retval->data[codep++].str = c->u.n.priority;
+		if(!atleast(retval,codep+3)) return -1;
+
+		switch(c->u.n.priority) {
+		case LOW:
+		    retval->data[codep++].value = B_LOW;
+		    break;
+		case NORMAL:
+		    retval->data[codep++].value = B_NORMAL;
+		    break;
+		case HIGH:
+		    retval->data[codep++].value = B_HIGH;
+		    break;
+		case ANY:
+		    retval->data[codep++].value = B_ANY;
+		    break;
+		default:
+		    return -1;
+		}
+		
 		retval->data[codep++].len = strlen(c->u.n.message);
 		retval->data[codep++].str = c->u.n.message;
 		break;

@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_emit.c,v 1.1.2.4 2003/01/16 22:05:53 jsmith2 Exp $
+ * $Id: bc_emit.c,v 1.1.2.5 2003/01/22 22:54:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -462,66 +462,97 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
 	    break;
 	    
 	case B_NOTIFY:
-	    /* method string, id string, options string list,Priority String, Message String */
-	    
+	    /* method string, id string, options string list,priotity, Message String */
+	    /*method and id*/
 	    for(i=0; i<2; i++) {
 		len = bc->data[codep++].len;
 		if(write(fd,&len,sizeof(len)) == -1)
 		    return -1;
 		filelen += sizeof(int);
-		
-		if(write(fd,bc->data[codep++].str,len) == -1)
-		    return -1;
+		if(len == -1)
+		{/*this will probably only happen for the id*/
+		    /* this is a nil string */
+		    /* skip the null pointer and make up for it 
+		     * by adjusting the offset */
+		    codep++;
+		}
+		else
+		{	
+		    if(write(fd,bc->data[codep++].str,len) == -1)
+			return -1;
 		    
-		ret = align_string(fd, len);
-		if(ret == -1) return -1;
+		    ret = align_string(fd, len);
+		    if(ret == -1) return -1;
+		    
+		    filelen += len + ret;
+		}
 		
-		filelen += len + ret;
 	    }
+	    /*options */
 	    ret = bc_stringlist_emit(fd, &codep, bc);
 	    if(ret < 0) return -1;
 	    filelen+=ret;
-
-	    for(i=0; i<2; i++) {
-		len = bc->data[codep++].len;
-		if(write(fd,&len,sizeof(len)) == -1)
-		    return -1;
-		filelen += sizeof(int);
-		  
-		if(write(fd,bc->data[codep++].str,len) == -1)
-		    return -1;
-		  
-		ret = align_string(fd, len);
-		if(ret == -1) return -1;
-		  
-		filelen += len + ret;
-	    }
+	    
+	    /*priority*/
+	    if(write(fd, &bc->data[codep].value,
+		     sizeof(bc->data[codep].value)) == -1)
+		return -1;
+	    codep++;
+	    filelen += sizeof(int);
+	    
+	    len = bc->data[codep++].len;
+	    if(write(fd,&len,sizeof(len)) == -1)
+		return -1;
+	    filelen += sizeof(int);
+	    
+	    if(write(fd,bc->data[codep++].str,len) == -1)
+		return -1;
+	    
+	    ret = align_string(fd, len);
+	    if(ret == -1) return -1;
+	    
+ 	    filelen += len + ret;
 	    break;
 
 		
 	case B_DENOTIFY:
-	    /*comptype  num, comp string,priority string*/ 
-	    if(write(fd, &bc->data[codep].value,
-		     sizeof(bc->data[codep].value)) == -1)
-		return -1;
-	    filelen += sizeof(int);
-	    codep++;
+	    /* priority num,comptype  num, comp string*/ 
+
+	    /* priority and comptype*/
 	    for(i=0; i<2; i++) 
 	    {
-		len = bc->data[codep++].len;
-		if(write(fd,&len,sizeof(len)) == -1)
+		if(write(fd, &bc->data[codep].value,
+			 sizeof(bc->data[codep].value)) == -1)
 		    return -1;
 		filelen += sizeof(int);
-	      
+		codep++;
+	    }
+	    
+	    /*comp string*/
+	    
+	    len = bc->data[codep++].len;
+	    if(write(fd,&len,sizeof(len)) == -1)
+		return -1;
+	    filelen += sizeof(int);
+	    
+	    if(len == -1)
+	    {
+		/* this is a nil string */
+		/* skip the null pointer and make up for it 
+		 * by adjusting the offset */
+		codep++;
+	    }
+	    else
+	    {
 		if(write(fd,bc->data[codep++].str,len) == -1)
 		    return -1;
-	      
+		
 		ret = align_string(fd, len);
 		if(ret == -1) return -1;
-	      
+		
 		filelen += len + ret;
 	    }
-	    break;
+	    	    break;
 	case B_VACATION:
 	    /* Address list, Subject String, Message String, Days (word), Mime (word) */
 	   
@@ -539,21 +570,25 @@ static int bc_action_emit(int fd, int codep, int stopcodep,
 		    return -1;
 		filelen += sizeof(int);
 		    
-		if(len == -1) {
+		if(len == -1)
+		{
 		    /* this is a nil string */
 		    /* skip the null pointer and make up for it 
 		     * by adjusting the offset */
 		    codep++;
-		    continue;
 		}
-		/*write string*/
-		if(write(fd,bc->data[codep++].str,len) == -1)
-		    return -1;
-		 
-		ret = align_string(fd, len);
-		if(ret == -1) return -1;
+		else
+		{
+		    /*write string*/
+		    if(write(fd,bc->data[codep++].str,len) == -1)
+			return -1;
+		    
+		    ret = align_string(fd, len);
+		    if(ret == -1) return -1;
+		    
+		    filelen += len + ret;
+		}
 		
-		filelen += len + ret;
 	    }
 	    if(write(fd,&bc->data[codep++].value,
 		     sizeof(bc->data[codep++].value)) == -1)

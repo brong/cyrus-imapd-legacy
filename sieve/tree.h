@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3.14.7 2003/01/22 01:11:04 jsmith2 Exp $
+ * $Id: tree.h,v 1.3.14.8 2003/01/22 22:54:31 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -110,17 +110,15 @@ struct Commandlist {
 	    char *method;
 	    char *id;
 	    stringlist_t *options;
-	    const char *priority;
+	    int priority;
 	    char *message;
 	} n;
 	struct { /* it's a denotify action */
 	    int comptag;
-	  /*comparator_t *comp; not needed for bytecode!*/
-	  /* char * comparator;*/
 	    int relation;
 	    void *comprock;
 	    void *pattern;
-	    const char *priority;
+	    int priority;
 	} d;
     } u;
     struct Commandlist *next;

@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_dump.c,v 1.1.2.2 2003/01/16 17:39:57 jsmith2 Exp $
+ * $Id: bc_dump.c,v 1.1.2.3 2003/01/22 22:54:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -158,6 +158,7 @@ static int dump_test(bytecode_info_t *d, int ip) {
 void dump(bytecode_info_t *d) 
 {
     int i;
+    printf("Dumping almost flattened bytecode\n\n");
     
     if(!d) return;
     
@@ -232,18 +233,24 @@ void dump(bytecode_info_t *d)
 	    break;
 
 	case B_DENOTIFY:
-	    printf("%d: DENOTIFY comp,%d %s  %s\n",i, d->data[i+1].value,d->data[i+3].str,d->data[i+5].str);
-	    i+=5;
+	    printf("%d: DENOTIFY priority %d,comp %d   %s\n", 
+		   i,
+		   d->data[i+1].value,
+		   d->data[i+2].value,
+		   (d->data[i+3].len == -1 ? "[nil]" : d->data[i+4].str));
+	    i+=4;
 	    break;
 
 	case B_NOTIFY: 
 	    printf("%d: NOTIFY\n   METHOD(%s),\n   ID(%s),\n   OPTIONS",
-		   i,d->data[i+2].str,d->data[i+4].str);
+		   i,
+		   d->data[i+2].str,
+		   (d->data[i+3].len == -1 ? "[nil]" : d->data[i+4].str));
 	    i+=5;
 	    i=dump_sl(d,i);
-	    printf("   PRIORITY(%s),\n   MESSAGE({%d}%s)\n", 
-		   d->data[i+2].str, d->data[i+3].len,d->data[i+4].str);
-	    i+=4;
+	    printf("   PRIORITY(%d),\n   MESSAGE({%d}%s)\n", 
+		   d->data[i+1].value, d->data[i+2].len,d->data[i+3].str);
+	    i+=3;
 	    break;
 
 	case B_VACATION:

@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.7 2003/01/22 01:11:03 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.8 2003/01/22 22:54:30 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -70,8 +70,7 @@ struct ntags {
     char *method;
     char *id;
     stringlist_t *options;
-    /*int priority;*/
-    char * priority;
+    int priority;
     char *message;
 };
 
@@ -79,8 +78,7 @@ struct dtags {
     int comptag;
     int relation;
     void *pattern;
-    /*int priority;*/
-    char * priority;
+    int priority;
 };
 
 static commandlist_t *ret;
@@ -151,7 +149,7 @@ extern int yylex(void);
 %token GT GE LT LE EQ NE
 %token ALL LOCALPART DOMAIN USER DETAIL
 %token DAYS ADDRESSES SUBJECT MIME
-%token METHOD ID OPTIONS LOW NORMAL HIGH MESSAGE
+%token METHOD ID OPTIONS LOW NORMAL HIGH ANY MESSAGE
 
 %type <cl> commands command action elsif block
 %type <sl> stringlist strings
@@ -163,7 +161,7 @@ extern int yylex(void);
 %type <vtag> vtags
 %type <ntag> ntags
 %type <dtag> dtags
-%type <sval> priority
+%type <nval> priority
 
 %%
 
@@ -276,7 +274,7 @@ action: REJCT STRING             { if (!parse_script->support.reject) {
 				       $$ = new_command(DENOTIFY);
 				       YYERROR;
 				    } else {
-					$$ = build_denotify(DENOTIFY, $2);
+					$$ = build_denotify(DENOTIFY, canon_dtags($2));
 					if ($$ == NULL) { 
 			yyerror("unable to find a compatible comparator");
 			YYERROR; } } }
@@ -292,16 +290,16 @@ ntags: /* empty */		 { $$ = new_ntags(); }
 	| ntags OPTIONS stringlist { if ($$->options != NULL) { 
 					yyerror("duplicate :options"); YYERROR; }
 				     else { $$->options = $3; } }
-| ntags priority	 { if ($$->priority != /*-1*/NULL) { 
-					yyerror("duplicate :priority"); YYERROR; }
-				   else { $$->priority = $2; } }
+        | ntags priority	 { if ($$->priority != -1) { 
+                                 yyerror("duplicate :priority"); YYERROR; }
+                                   else { $$->priority = $2; } }
 	| ntags MESSAGE STRING	 { if ($$->message != NULL) { 
 					yyerror("duplicate :message"); YYERROR; }
 				   else { $$->message = $3; } }
 	;
 
 dtags: /* empty */		 { $$ = new_dtags(); }
-	| dtags priority	 { if ($$->priority != /*-1*/NULL) { 
+	| dtags priority	 { if ($$->priority != -1) { 
 				yyerror("duplicate priority level"); YYERROR; }
 				   else { $$->priority = $2; } }
 	| dtags comptag STRING 	 { if ($$->comptag != -1)
@@ -329,9 +327,9 @@ dtags: /* empty */		 { $$ = new_dtags(); }
 				   } }
 	;
 
-priority: LOW    { $$ = "low"/*LOW*/; }
-| NORMAL { $$ = "normal"/*NORMAL*/; }
-| HIGH   { $$ = "high"/*HIGH*/; }
+priority: LOW                   { $$ = LOW; }
+        | NORMAL                { $$ = NORMAL; }
+        | HIGH                  { $$ = HIGH; }
         ;
 
 vtags: /* empty */		 { $$ = new_vtags(); }
@@ -636,8 +634,7 @@ static commandlist_t *build_notify(int t, struct ntags *n)
     commandlist_t *ret = new_command(t);
 
     assert(t == NOTIFY);
-    printf("%s\n", n->message);
-    if (ret) {
+       if (ret) {
 	ret->u.n.method = n->method; n->method = NULL;
 	ret->u.n.id = n->id; n->id = NULL;
 	ret->u.n.options = n->options; n->options = NULL;
@@ -676,7 +673,7 @@ static struct aetags *new_aetags(void)
 
 static struct aetags *canon_aetags(struct aetags *ae)
 {
-    if (ae->addrtag == -1) { ae->addrtag = ALL; }
+    if (ae->addrtag == -1) { ae->addrtag = ANY; }
     if (ae->comparator == NULL) { ae->comparator = strdup("i;ascii-casemap"); }
     if (ae->comptag == -1) { ae->comptag = IS; }
     return ae;
@@ -752,7 +749,7 @@ static struct ntags *new_ntags(void)
     r->method = NULL;
     r->id = NULL;
     r->options = NULL;
-    r->priority = NULL;
+    r->priority = -1;
     r->message = NULL;
 
     return r;
@@ -760,14 +757,15 @@ static struct ntags *new_ntags(void)
 
 static struct ntags *canon_ntags(struct ntags *n)
 {
-    if (n->priority == NULL) { n->priority = "normal"; }
+    if (n->priority == -1) { n->priority = NORMAL; }
     if (n->message == NULL) { n->message = strdup("$from$: $subject$"); }
     if (n->method == NULL) { n->method = strdup("none"); }
     return n;
 }
 static struct dtags *canon_dtags(struct dtags *d)
 {
-    if (d->priority == NULL) { d->priority = "ALL"; }
+    if (d->priority == -1) { d->priority = ANY; }
+    if (d->comptag == -1) { d->comptag = ANY; }
        return d;
 }
 
@@ -784,8 +782,8 @@ static struct dtags *new_dtags(void)
 {
     struct dtags *r = (struct dtags *) xmalloc(sizeof(struct dtags));
 
-    r->comptag = r->relation = -1;
-    r->pattern = r->priority = NULL;
+    r->comptag = r->priority= r->relation = -1;
+    r->pattern  = NULL;
 
     return r;
 }
