@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.147.2.4.2.4 2001/07/08 16:00:00 ken3 Exp $
+ * $Id: mboxlist.c,v 1.147.2.4.2.5 2001/07/10 01:46:36 ken3 Exp $
  */
 
 #include <config.h>
@@ -1384,7 +1384,8 @@ static int find_cb(void *rockp,
 		r = (*rock->proc)(rock->namespace->prefix[NAMESPACE_SHARED],
 				  strlen(rock->namespace->prefix[NAMESPACE_SHARED])-1,
 				  1, rock->procrock);
-		/* FIXME: short-circuit this */
+		/* short-circuit the foreach - one mailbox is sufficient */
+		r = CYRUSDB_DONE;
 	    }
 	    else {
 		r = (*rock->proc)(namebuf+rock->inboxoffset, matchlen, 
