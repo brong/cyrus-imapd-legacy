@@ -1,6 +1,6 @@
 /* bytecode.c -- sieve bytecode functions
  * Rob Siemborski
- * $Id: bytecode.c,v 1.1.2.12 2002/08/29 16:32:28 jsmith2 Exp $
+ * $Id: bytecode.c,v 1.1.2.13 2002/09/03 16:11:39 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -55,7 +55,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  
 
 
-#define DUMPCODE 1  
+/*#define DUMPCODE 1  */
 
 #if DUMPCODE
 void dump(bytecode_info_t *d);
@@ -174,8 +174,7 @@ static int bc_testlist_generate(int codep, bytecode_info_t *retval,
 
 static int bc_relation_generate(int codep, bytecode_info_t *retval, int relat)
 {
-  printf("whee!");
-
+ 
   switch (relat)
     {
     case GT:
@@ -656,7 +655,6 @@ static int emit_stringlist(int fd, int *codep, bytecode_info_t *bc)
     lseek(fd,begin,SEEK_SET);
     if(write(fd, &end, sizeof(int)) == -1) return 0;
     lseek(fd,end,SEEK_SET);
-    /*  printf("wrote %d @ %d\n",end, begin);*/
     return wrote;
 }
 
@@ -700,31 +698,20 @@ static int emit_bytecode_test(int fd, int codep, bytecode_info_t *bc)
  
 
   int ret; /* Temporary Return Value Variable */
-  /*
-    int location;
-    location=lseek(fd,0,SEEK_CUR);
-    printf("***filelen %d \n", filelen);
-    printf("***location %d \n", location); 
-    
-  */
+ 
   /* Output this opcode */
   if(write(fd, &bc->data[codep].op, sizeof(bc->data[codep].op)) == -1)
 	return -1;
     filelen += sizeof(int);
     
-    /*    printf("%d\n",bc->data[codep].op);*/
-    switch(bc->data[codep++].op) {
+     switch(bc->data[codep++].op) {
         case BC_TRUE:
         case BC_FALSE:
 	    /* No parameter opcodes */
 	    break;
 
         case BC_NOT:
-	  { /*write return value*/  
-	    /*  if(write(fd, &bc->data[codep].value,
-		sizeof(bc->data[codep].value)) == -1)
-		return -1;*/
-	    codep++;
+	  { codep++;
 	    /* Single parameter: another test */
 	    ret = emit_bytecode_test(fd, codep, bc);
 	    if(ret != -1)
@@ -873,11 +860,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    case B_IF: 
 	    {
 		int teststart, testend, realend, testdist, enddist;
-		/*
-		  location=lseek(fd,0,SEEK_CUR);
-		  printf("***filelen %d \n", filelen);
-		  printf("***location %d \n", location);
-		*/
+		
 		/* first skip 2 words so we can write in offsets later */
 		ret = lseek(fd, 2 * sizeof(int), SEEK_CUR);
 		if(ret == -1) return ret;
@@ -924,11 +907,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 	    {
 		int teststart, testend, thenend, realend,
 		               testdist, thendist, enddist;
-		/*
-		  location=lseek(fd,0,SEEK_CUR);
-		  printf("***filelen %d \n", filelen);
-		  printf("***location %d \n", location);
-		*/
+		
 		/* first skip 3 words so we can write in offsets later */
 		ret = lseek(fd, 3 * sizeof(int), SEEK_CUR);
 		if(ret == -1) return ret;
@@ -982,12 +961,7 @@ static int emit_bytecode_act(int fd, int codep, int stopcodep,
 		 * then code, plus the 3 offsets we need. */
 		filelen += testdist  +thendist + enddist + 3*sizeof(int);
 	
-		/*
-		  location=lseek(fd,0,SEEK_CUR);
-		  printf("***filelen %d \n", filelen);
-		  printf("***location %d \n", location);
-		*/
-		break;
+       		break;
 	    }
 
 	    case B_REJECT:
@@ -1283,8 +1257,7 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
       free_address(&data, &marker);
     }  
   }  
-   printf("%s\n",myaddr);
-
+  
   if (l == SIEVE_OK) {
     strcpy(buf, "from");
     l = interp->getenvelope(m, buf, &body);
@@ -1296,8 +1269,7 @@ int shouldRespond(void * m, sieve_interp_t *interp, int numaddresses, bytecode_t
     tmp = get_address(ADDRESS_ALL, &data, &marker, 1);
     reply_to = (tmp != NULL) ? xstrdup(tmp) : NULL;
     free_address(&data, &marker);
-    printf("%s\n",reply_to);
-    /* first, is there a reply-to address? */
+      /* first, is there a reply-to address? */
     if (reply_to == NULL) {
       l = SIEVE_DONE;
     }
@@ -1358,7 +1330,6 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
   comparator_t * comp=NULL;
   void * comprock=NULL;
 
-  printf("\n%d ",bc[i].value); 
   switch(bc[i].value)
     {
     case BC_FALSE:res=0; break;
@@ -1390,7 +1361,6 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
       res=0;
 	if (interp->getsize(m, &s) != SIEVE_OK)
 	    break;
-	printf("size=%d compared to %d\n", s, bc[i+2].value);
       if (bc[i+1].value==B_OVER)
 	    {res=s>bc[i+2].value;}
 	  else /*under*/
@@ -1557,7 +1527,6 @@ int eval_bc_test(sieve_interp_t *interp, void* m, bytecode_t * bc, int * ip)
 	      currd=datai+2;
 	      for (z=0; z<numdata && !res; z++)
 		{ 	
-		  printf("WERT-comparing  %s &  %s \n", scount, (char*)&(bc[currd+1].str));
 		  if (comp !=NULL)
 		    res |= comp(scount,(char*)&(bc[currd+1].str), comprock);
 		  currd+=1+((ROUNDUP(bc[currd].len+1))/sizeof(bytecode_t));
@@ -1588,20 +1557,22 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
     
     if(!bc) return SIEVE_FAIL;
 
-    printf("version number %d\n",bc[0].op); 
+    /* printf("version number %d\n",bc[0].op); */
 
     for(ip=1; ip<=bc_len; ) { 
-      printf("\n%d ",bc[ip].op);
       if (needtojump)
 	{if (jumpat==ip)
-	  {printf("jumping from %d to %d\n",ip, jumpto);
+	  {/*printf("jumping from %d to %d\n",ip, jumpto);*/
 	    ip=jumpto;
 	  jumpto=-1;
 	  jumpat=-1;
 	  needtojump=0;
 	  }
 	else if (ip>jumpat)
-	  {printf("ip=%d jumpat=%d WERT, this should never have happened\n", ip, jumpat);}
+	  {res= -1; /*if this ever happens there is somethign wrong with teh bytecode*/
+	  *errmsg ="Bytecode Error in IF statement."; 
+	  return res;
+	  /*printf("ip=%d jumpat=%d WERT, this should never have happened\n", ip, jumpat);*/}
 	}
       switch(bc[ip].op) {
       case B_STOP:/*0*/
@@ -1611,12 +1582,10 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	  res = do_keep(actions, imapflags);
 	  if (res == SIEVE_RUN_ERROR)
 	    *errmsg = "Keep can not be used with Reject";
-	  /* return res;*/
 	  ip++;
 	  break;
       case B_DISCARD:/*2*/
 	  res=do_discard(actions);
-	  /*	  return res;*/
 	  ip++;
 	  break;
       case B_REJECT:/*3*/
@@ -1625,73 +1594,54 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	if (res == SIEVE_RUN_ERROR)
 	    *errmsg = "Reject can not be used with any other action";  
 	  printf("\n  %s\n", *errmsg);
-	  /* Skip length + string, then move on??? */
+	  /* Skip length + string */
 	  ip+=1+(ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t);
 	  ip++;
 	  break;
       case B_FILEINTO:/*4*/
 	  {
-	    /*	    int x;
-		    int l=bc[ip+1].len;
-		    ip+=3;
-		    for (x=0; x<l; x++)\
-		    {*/
 	    res = do_fileinto(actions,(char*)&(bc[ip+2].str), imapflags);
 	    if (res == SIEVE_RUN_ERROR)
 	      *errmsg = "Fileinto can not be used with Reject";
 	    ip+=1+((ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t));
-	    /*{*/  
 	    ip++;
 	    break;
 	  }
       case B_REDIRECT:/*5*/
 	  {
-	    /*	    int x;
-	    int l=bc[ip+1].len;
-	    ip+=3;
-	    for (x=0; x<l; x++)\
-	    {*/
-		res = do_redirect(actions,(char*)&( bc[ip+2].str));
-		if (res == SIEVE_RUN_ERROR)
-		  *errmsg = "Redirect can not be used with Reject";
-		ip+=1+((ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t));
-		/* }*/
-		ip++;
+	    res = do_redirect(actions,(char*)&( bc[ip+2].str));
+	    if (res == SIEVE_RUN_ERROR)
+	      *errmsg = "Redirect can not be used with Reject";
+	    ip+=1+((ROUNDUP(bc[ip+1].len+1))/sizeof(bytecode_t));
+	    ip++;
 	    break;
 	  }
       case B_IF:/*6*/
-	  {int testtemp=ip;
-	  printf("if");
-       
-	  ip+=3;
-	  if (eval_bc_test(i,m, bc, &ip))
-	    {printf("(if returned true)");    
-	    ip=bc[testtemp+1].jump/4;
-	    }	  
-	  else
-	    {printf("(if returned false-continue)");
-	    ip=bc[testtemp+2].jump/4;
-	    }
-	  break;
-	    }
+	  {
+	    int testtemp=ip;
+	    ip+=3;
+	    if (eval_bc_test(i,m, bc, &ip))
+	      {ip=bc[testtemp+1].jump/4;}	  
+	    else
+	      {ip=bc[testtemp+2].jump/4;}
+	    break;
+	  }
       case B_IFELSE:/*7*/
-	  {int testtemp=ip;
-	  printf("ifelse");
-	  ip+=4;
-	  needtojump=1;
-	  jumpto=bc[testtemp+3].jump/4;
-	  
-	  if(eval_bc_test(i,m,bc, &ip))
-	    {printf("(if returned true)");    
-	    ip=bc[testtemp+1].jump/4;
-	    jumpat=(bc[testtemp+2].jump/4);
-	    }	  
-	  else
-	    {printf("(if returned false-doelse)");
-	    ip=bc[testtemp+2].jump/4;
-	    jumpat=(bc[testtemp+3].jump/4);
-	    printf("(%d %d)", ip, jumpat);
-	    }
+	  {
+	    int testtemp=ip;
+	    ip+=4;
+	    needtojump=1;
+	    jumpto=bc[testtemp+3].jump/4;
+	    
+	    if(eval_bc_test(i,m,bc, &ip))
+	      {ip=bc[testtemp+1].jump/4;
+	       jumpat=(bc[testtemp+2].jump/4);
+	      }	  
+	    else
+	      {ip=bc[testtemp+2].jump/4;
+	       jumpat=(bc[testtemp+3].jump/4);
+	       printf("(%d %d)", ip, jumpat);
+	      }
 	  }
 	  break;
       case B_MARK:/*8*/
@@ -1812,48 +1762,38 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    ip++;
 	    respond=shouldRespond(m,i, bc[ip].len, bc, ip+2, &fromaddr, &toaddr);
 	    
-	    printf("\nFROM:%s\n", fromaddr);
-	    printf("TO:%s\n", toaddr);
-	    printf("Before:%d", ip);
 	    ip=bc[ip+1].value/4;	
 	    if (respond==SIEVE_OK)
 	      {	 
-		/*ip=bc[ip+1].value/4;*/	
-		printf("After:%d\n", ip);
+		if ((bc[ip].value) == -1) 
+		  {
+		    /* we have to generate a subject */
+		    const char **s;	    
+		    strcpy(buf, "subject");
+		    if (i->getheader(m, buf, &s) != SIEVE_OK || s[0] == NULL) 
+		      {strcpy(buf, "Automated reply");}
+		    else 
+		      {
+			/* s[0] contains the original subject */
+			const char *origsubj = s[0];
+			while (!strncasecmp(origsubj, "Re: ", 4)) 
+			  {origsubj += 4;}
+			snprintf(buf, sizeof(buf), "Re: %s", origsubj);
+		      }
+		  } 
+		else 
+		  { /* user specified subject */
+		    strncpy(buf, (char *)&(bc[ip+1].str), sizeof(buf));}
 		
-		if ((bc[ip].value) == -1) {
-		/* we have to generate a subject */
-		const char **s;
-		
-		strcpy(buf, "subject");
-		if (i->getheader(m, buf, &s) != SIEVE_OK ||
-		    s[0] == NULL) {
-		  strcpy(buf, "Automated reply");
-		} else {
-		  /* s[0] contains the original subject */
-		  const char *origsubj = s[0];
-		  
-		  while (!strncasecmp(origsubj, "Re: ", 4)) {
-		    origsubj += 4;
-		  }
-		  snprintf(buf, sizeof(buf), "Re: %s", origsubj);
-		}
-	      } else {
-		/* user specified subject */
-		strncpy(buf, (char *)&(bc[ip+1].str), sizeof(buf));
-	      }
-		printf ("%d Subject:%s\n ", ip,buf);
-	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	      messageip=ip+1;
-	      printf("%d Message%s\n", ip, &(bc[ip+1].str));
-	      printf ("From: To: %s", toaddr);
-	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
-	      res = do_vacation(actions, toaddr, strdup(fromaddr),
-				strdup(buf),strdup((char *)&(bc[messageip].str)),
-				bc[ip].value, bc[ip+1].value);
-	      ip+=2;		
-	      if (res == SIEVE_RUN_ERROR)
-	      *errmsg = "Vacation can not be used with Reject or Vacation";
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+		messageip=ip+1;
+		ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));
+		res = do_vacation(actions, toaddr, strdup(fromaddr),
+				  strdup(buf),strdup((char *)&(bc[messageip].str)),
+				  bc[ip].value, bc[ip+1].value);
+		ip+=2;		
+		if (res == SIEVE_RUN_ERROR)
+		  *errmsg = "Vacation can not be used with Reject or Vacation";
 	      }
 	    else if (respond == SIEVE_DONE) {
 	      ip+=1+((ROUNDUP(bc[ip].len+1))/sizeof(bytecode_t));/*skip subj*/
@@ -1861,10 +1801,10 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	      ip+=2;/*skip days and mime flag*/
 	    }
 	    else res = -1; /* something is bad */ 
-	  break;
+	    break;
 	  }
       default:
-	 printf("bytecode bad, or not yet implemented\n");
+	
 	 if(errmsg) *errmsg = "Invalid sieve bytecode";
 	 return SIEVE_FAIL;
       }
