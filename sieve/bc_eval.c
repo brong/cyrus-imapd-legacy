@@ -1,6 +1,6 @@
 /* bc_generate.c -- sieve bytecode- almost flattened bytecode
  * Rob Siemborski
- * $Id: bc_eval.c,v 1.1.2.5 2003/01/23 01:15:31 jsmith2 Exp $
+ * $Id: bc_eval.c,v 1.1.2.6 2003/01/23 21:27:49 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 2001 by Carnegie Mellon University
@@ -747,8 +747,12 @@ int sieve_eval_bc(sieve_interp_t *i, void *bc_in, unsigned int bc_len,
 	    break;
 	}
 	case B_DENOTIFY:
-	{/* i really have no idea what the count matchtype should do here.  so i'm going to
-	    just ignore it and hope it figures somehting out*/
+	{/* i really have no idea what the count matchtype should do here.
+	  * the sanest thing would be to use 1.
+	  * however that would require passing on the match type to do_notify.
+	  * it is also a completly stupid idea to use count for denotify, so i doubt it will
+	  * ever be used.   if it is it will work approximately the same as value
+	  */
 	    comparator_t * comp=NULL;
 	    
 	    char * pattern;

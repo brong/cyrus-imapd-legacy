@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12.2.8 2003/01/22 22:54:30 jsmith2 Exp $
+ * $Id: sieve.y,v 1.12.2.9 2003/01/23 21:27:50 jsmith2 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -422,7 +422,11 @@ test:     ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 	;
 
 addrorenv: ADDRESS		 { $$ = ADDRESS; }
-	| ENVELOPE		 { $$ = ENVELOPE; }
+	| ENVELOPE		 {if (!parse_script->support.envelope)
+	                              {yyerror("envelope not required"); YYERROR;}
+	                          else{$$ = ENVELOPE; }
+	                         }
+
 	;
 
 aetags: /* empty */              { $$ = new_aetags(); }
