@@ -1,6 +1,6 @@
 /* imtest.c -- imap test client
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.62.6.1 2001/07/31 17:15:21 rjs3 Exp $
+ * $Id: imtest.c,v 1.62.6.2 2001/07/31 17:39:45 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -101,6 +101,14 @@ static char *realm = NULL;
 extern int _sasl_debug;
 
 extern char *optarg;
+
+struct stringlist 
+{
+    char *str;
+    struct stringlist *next;
+};
+
+struct stringlist *strlist_head = NULL;
 
 /* callbacks we support */
 static sasl_callback_t callbacks[] = {
@@ -690,11 +698,25 @@ void interaction (int id, const char *prompt,
 		  char **tresult, unsigned int *tlen)
 {
     char result[1024];
+
+    struct stringlist *cur;
+
+    cur = malloc(sizeof(struct stringlist));
+    if(!cur) {
+	*tlen=0;
+	*tresult=NULL;
+	return;
+    }
+  
+    cur->str = NULL;
+    cur->next = strlist_head;
+    strlist_head = cur;
     
     if (id==SASL_CB_PASS) {
 	printf("%s: ", prompt);
-	*tresult=strdup(getpass(""));
-	*tlen=strlen(*tresult);
+	cur->str=strdup(getpass(""));
+	*tlen=strlen(cur->str);
+	*tresult = cur->str;
 	return;
     } else if (id==SASL_CB_USER) {
 	if (username != NULL) {
@@ -722,9 +744,14 @@ void interaction (int id, const char *prompt,
     }
 
     *tlen = strlen(result);
-    *tresult = (char *) malloc(*tlen+1);
-    memset(*tresult, 0, *tlen+1);
-    memcpy((char *) *tresult, result, *tlen);
+    cur->str = (char *) malloc(*tlen+1);
+    if(!cur->str) {
+	*tresult = NULL;
+	return;
+    }
+    memset(cur->str, 0, *tlen+1);
+    memcpy(cur->str, result, *tlen);
+    *tresult  = cur->str;
 }
 
 void fillin_interactions(sasl_interact_t *tlist)
@@ -1201,6 +1228,8 @@ int main(int argc, char **argv)
   int dotls=0;
   int server_supports_tls;
 
+  struct stringlist *cur, *cur_next;
+
   /* do not buffer */
   setbuf(stdin, NULL);
   setbuf(stdout, NULL);
@@ -1370,5 +1399,11 @@ int main(int argc, char **argv)
       interactive(filename);
   }
 
+  for(cur=strlist_head; cur; cur=cur_next) {
+      cur_next = cur->next;
+      free(cur->str);
+      free(cur);
+  }
+  
   exit(0);
 }

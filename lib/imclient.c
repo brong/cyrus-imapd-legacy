@@ -1,6 +1,6 @@
 /* imclient.c -- Streaming IMxP client library
- $Id: imclient.c,v 1.58.2.1 2001/07/31 17:15:35 rjs3 Exp $
- 
+ * $Id: imclient.c,v 1.58.2.2 2001/07/31 17:39:47 rjs3 Exp $
+ *
  * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -103,6 +103,12 @@ struct imclient_callback {
     void *rock;			/* Callback rock */
 };
 
+struct stringlist 
+{
+    char *str;
+    struct stringlist *next;
+};
+
 /* Connection data */
 struct imclient {
     /* TCP stream */
@@ -125,7 +131,7 @@ struct imclient {
     int alloc_replybuf;
     
     /* Protection mechanism data */
-  /*    struct sasl_client *mech;
+    /* struct sasl_client *mech;
     sasl_encodefunc_t *encodefunc;
     sasl_decodefunc_t *decodefunc;*/
     void *state;
@@ -146,8 +152,10 @@ struct imclient {
     int callback_alloc;
     struct imclient_callback *callback;
 
-  sasl_conn_t *saslconn;
-  int saslcompleted;
+    struct stringlist *interact_results;
+
+    sasl_conn_t *saslconn;
+    int saslcompleted;
 
 #ifdef HAVE_SSL
   SSL_CTX *tls_ctx;
@@ -253,6 +261,7 @@ int imclient_connect(struct imclient **imclient,
     (*imclient)->servername = xstrdup(hp->h_name);
     (*imclient)->outptr = (*imclient)->outstart = (*imclient)->outbuf;
     (*imclient)->outleft = (*imclient)->maxplain = sizeof((*imclient)->outbuf);
+    (*imclient)->interact_results = NULL;
     imclient_addcallback(*imclient,
 		 "", 0, (imclient_proc_t *) 0, (void *)0,
 		 "OK", CALLBACK_NOLITERAL, (imclient_proc_t *)0, (void *)0,
@@ -295,7 +304,8 @@ imclient_close(imclient)
 struct imclient *imclient;
 {
     int i;
-
+    struct stringlist *cur, *cur_next;
+    
     imclient_eof(imclient);
     close(imclient->fd);
     free(imclient->servername);
@@ -306,6 +316,13 @@ struct imclient *imclient;
 	free(imclient->callback[i].keyword);
     }
     if (imclient->callback) free((char *)imclient->callback);
+
+    for(cur=imclient->interact_results; cur; cur=cur_next) {
+	cur_next = cur->next;
+	free(cur->str);
+	free(cur);
+    }
+
     free((char *)imclient);
 }
 
@@ -1136,14 +1153,26 @@ static sasl_security_properties_t *make_secprops(int min,int max)
   return ret;
 }
 
-void interaction (sasl_interact_t *t, char *user)
+void interaction (struct imclient *context, sasl_interact_t *t, char *user)
 {
   char result[1024];
+  struct stringlist *cur;
+  
+  cur = malloc(sizeof(struct stringlist));
+  if(!cur) {
+      t->len=0;
+      t->result=NULL;
+      return;
+  }
+
+  cur->str = NULL;
+  cur->next = context->interact_results;
+  context->interact_results = cur;
 
   if ((t->id == SASL_CB_USER || t->id == SASL_CB_AUTHNAME) 
             && user && user[0]) {
       t->len = strlen(user);
-      t->result = xstrdup(user);
+      cur->str = xstrdup(user);
   } else {
       printf("%s: ", t->prompt);
       if (t->id == SASL_CB_PASS) {
@@ -1155,17 +1184,20 @@ void interaction (sasl_interact_t *t, char *user)
       }
 
       t->len = strlen(result);
-      t->result = (char *) xmalloc(t->len+1);
-      memset(t->result, 0, t->len+1);
-      memcpy((char *) t->result, result, t->len);
+      cur->str = (char *) xmalloc(t->len+1);
+      memset(cur->str, 0, t->len+1);
+      memcpy(cur->str, result, t->len);
   }
+
+  t->result = cur->str;
 }
 
-void fillin_interactions(sasl_interact_t *tlist, char *user)
+void fillin_interactions(struct imclient *context,
+			 sasl_interact_t *tlist, char *user)
 {
   while (tlist->id!=SASL_CB_LIST_END)
   {
-    interaction(tlist, user);
+    interaction(context, tlist, user);
     tlist++;
   }
 }
@@ -1267,7 +1299,8 @@ static int imclient_authenticate_sub(struct imclient *imclient,
 				 &out, &outlen,
 				 mechusing);
     if (saslresult==SASL_INTERACT) {
-	fillin_interactions(client_interact, user); /* fill in prompts */
+	fillin_interactions(imclient,
+			    client_interact, user); /* fill in prompts */
     }
   }
 
@@ -1312,7 +1345,8 @@ static int imclient_authenticate_sub(struct imclient *imclient,
 	    
 	    if (saslresult == SASL_INTERACT) {
 		/* fill in prompts */
-		fillin_interactions(client_interact, user); 
+		fillin_interactions(imclient,
+				    client_interact, user); 
 	    }
 	}
     }
