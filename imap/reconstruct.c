@@ -25,7 +25,7 @@
  *  tech-transfer@andrew.cmu.edu
  */
 
-/* $Id: reconstruct.c,v 1.42 1999/08/20 19:05:30 leg Exp $ */
+/* $Id: reconstruct.c,v 1.42.4.1 2000/01/14 23:47:49 leg Exp $ */
 
 #include <stdio.h>
 #include <string.h>
@@ -740,7 +740,7 @@ do_mboxlist()
     int i;
 
     /* Lock mailbox list */
-    r = mboxlist_openlock();
+    r = mboxlist_open();
     if (r) {
 	fprintf(stderr, "reconstruct: cannot open/lock mailboxes file\n");
 	exit(1);

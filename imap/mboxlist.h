@@ -2,12 +2,13 @@
  * 
  * Copyright 1999 Carnegie Mellon University
  * 
- * $Id: mboxlist.h,v 1.1.2.6 2000/01/13 01:29:16 leg Exp $
+ * $Id: mboxlist.h,v 1.1.2.7 2000/01/14 23:47:49 leg Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
 #define INCLUDED_MBOXLIST_H
 
+#include <db.h>
 #include "auth.h"
 
 /*

@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $
+ * $Id: deliver.c,v 1.105.4.5 2000/01/14 23:47:43 leg Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.105.4.5 2000/01/14 23:47:43 leg Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -41,15 +41,6 @@ static char _rcsid[] = "$Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $
 #include <syslog.h>
 #include <com_err.h>
 #include <errno.h>
-#ifdef HAVE_LIBDB
-#ifdef HAVE_DB_185_H
-#include <db_185.h>
-#else
-#include <db.h>
-#endif
-#else
-#include <ndbm.h>
-#endif
 
 #ifdef USE_SIEVE
 #include <sieve_interface.h>
@@ -84,6 +75,7 @@ static char _rcsid[] = "$Id: deliver.c,v 1.105.4.4 2000/01/13 01:29:09 leg Exp $
 #include "mailbox.h"
 #include "xmalloc.h"
 #include "version.h"
+#include "duplicate.h"
 
 struct protstream *deliver_out, *deliver_in;
 
@@ -154,11 +146,6 @@ void savemsg();
 char *convert_lmtp();
 void clean822space();
 
-static time_t checkdelivered();
-static void markdelivered(char *, int, char *, int, time_t);
-
-static char *_get_db_name();
-static int _lock_delivered_db();
 static void logdupelem();
 static void usage();
 static void setup_sieve();
@@ -413,7 +400,7 @@ char **argv;
 	    break;
 
 	case 'E':
-	    exit(prunedelivered(atoi(optarg)));
+	    exit(duplicate_prune(atoi(optarg)));
 
 	case 'l':
 	    lmtpflag = 1;
@@ -862,6 +849,7 @@ int open_sendmail(char *argv[], FILE **sm)
 
 int send_rejection(char *origid,
 		   char *rejto,
+		   char *origreceip, 
 		   char *mailreceip, 
 		   char *reason, 
 		   struct protstream *file)
@@ -890,7 +878,7 @@ int send_rejection(char *origid,
 	     global_outgoing_count++, hostname);
     
     namebuf = make_sieve_db(mailreceip);
-    markdelivered(buf, strlen(buf), namebuf, strlen(namebuf), t);
+    duplicate_mark(buf, strlen(buf), namebuf, strlen(namebuf), t);
     fprintf(sm, "Message-ID: %s\r\n", buf);
 
     tm = localtime(&t);
@@ -928,9 +916,8 @@ int send_rejection(char *origid,
 	    p, hostname);
     fprintf(sm, "Reporting-UA: %s; Cyrus %s/%s\r\n",
 	    hostname, CYRUS_VERSION, sieve_version);
-#if 0
-    fprintf(sm, "Original-Recipient: rfc822; %s\r\n", mailreceip);
-#endif
+    if (origreceip)
+	fprintf(sm, "Original-Recipient: rfc822; %s\r\n", origreceip);
     fprintf(sm, "Final-Recipient: rfc822; %s\r\n", mailreceip);
     fprintf(sm, "Original-Message-ID: %s\r\n", origid);
     fprintf(sm, "Disposition: "
@@ -1018,13 +1005,23 @@ int sieve_reject(char *msg, void *ic, void *sc, void *mc)
 {
     script_data_t *sd = (script_data_t *) sc;
     message_data_t *m = (message_data_t *) mc;
+    char buf[8192];
+    char **body;
+    char *origreceip;
 
     if (m->return_path == NULL) {
 	/* return message to who?!? */
 	return SIEVE_FAIL;
     }
     
-    if (send_rejection(m->id, m->return_path, sd->username,
+    if (strcpy(buf, "original-recipient"),
+	getheader((void *) m, buf, &body) == SIEVE_OK) {
+	origreceip = xstrdup(body[0]);
+    } else {
+	origreceip = NULL;		/* no original-recipient */
+    }
+
+    if (send_rejection(m->id, m->return_path, origreceip, sd->username,
 		       msg, m->data) == 0) {
 	return SIEVE_OK;
     } else {
@@ -1100,7 +1097,7 @@ int autorespond(unsigned char *hash, int len, int days,
     now = time(NULL);
 
     /* ok, let's see if we've responded before */
-    if (t = checkdelivered(hash, len, sd->username, strlen(sd->username))) {
+    if (t = duplicate_check(hash, len, sd->username, strlen(sd->username))) {
 	if (now >= t) {
 	    /* yay, we can respond again! */
 	    ret = SIEVE_OK;
@@ -1113,9 +1110,9 @@ int autorespond(unsigned char *hash, int len, int days,
     }
 
     if (ret == SIEVE_OK) {
-	markdelivered((char *) hash, len, 
-		      sd->username, strlen(sd->username), 
-		      now + days * (24 * 60 * 60));
+	duplicate_mark((char *) hash, len, 
+		       sd->username, strlen(sd->username), 
+		       now + days * (24 * 60 * 60));
     }
 
     return ret;
@@ -1197,7 +1194,8 @@ int send_response(char *addr, char *fromaddr,
     if (i == 0) { /* i is sendmail exit value */
 	sievedb = make_sieve_db(sdata->username);
 
-	markdelivered(outmsgid, strlen(outmsgid), sievedb, strlen(sievedb), t);
+	duplicate_mark(outmsgid, strlen(outmsgid), 
+		       sievedb, strlen(sievedb), t);
 	return SIEVE_OK;
     } else {
 	return SIEVE_FAIL;
@@ -2183,7 +2181,7 @@ deliver_mailbox(struct protstream *msg,
     }
 
     if (dupelim && id && 
-	checkdelivered(id, strlen(id), namebuf, strlen(namebuf))) {
+	duplicate_check(id, strlen(id), namebuf, strlen(namebuf))) {
 	/* duplicate message */
 	logdupelem(id, namebuf);
 	return 0;
@@ -2210,10 +2208,10 @@ deliver_mailbox(struct protstream *msg,
 	notify(user, mailboxname, notifyheader ? notifyheader : "");
     }
 
-    if (!r && dupelim && id) markdelivered(id, strlen(id), 
-					   namebuf, strlen(namebuf),
-					   now);
-
+    if (!r && dupelim && id) duplicate_mark(id, strlen(id), 
+					    namebuf, strlen(namebuf),
+					    now);
+    
     return r;
 }
 
@@ -2293,8 +2291,8 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 	    if (msgdata->id) {
 		char *sdb = make_sieve_db(namebuf);
 		
-		if (checkdelivered(msgdata->id, strlen(msgdata->id),
-				   sdb, strlen(sdb))) {
+		if (duplicate_check(msgdata->id, strlen(msgdata->id),
+				    sdb, strlen(sdb))) {
 		    logdupelem(msgdata->id, sdb);
 		    /* done it before ! */
 		    return 0;
@@ -2321,8 +2319,8 @@ int deliver(deliver_opts_t *delopts, message_data_t *msgdata,
 		/* ok, we've run the script */
 		char *sdb = make_sieve_db(namebuf);
 
-		markdelivered(msgdata->id, strlen(msgdata->id), 
-			      sdb, strlen(sdb), time(NULL));
+		duplicate_mark(msgdata->id, strlen(msgdata->id), 
+			       sdb, strlen(sdb), time(NULL));
 	    }
 
 	    /* free everything */
@@ -2547,415 +2545,4 @@ char *buf;
 	    break;
 	}
     }
-}
-
-#ifdef HAVE_LIBDB
-static DB	*DeliveredDBptr;
-#else
-static DBM	*DeliveredDBptr;
-#endif
-
-
-
-/* too many processes are contending for single locks on delivered.db 
- * so we use this function to generate a specific delivered.db for a mailbox
- * First pass will be to just have 26 db files based on the first letter of 
- * the mailbox name. As distribution goes, this really blows but, hey, what do 
- * you expect from something quick and dirty?
- */
-static char *
-_get_db_name (mbox) 
-     char *mbox;
-{
-  static char buf[MAX_MAILBOX_PATH];
-  char *idx;
-  char c;
-  
-  idx = strchr(mbox,'.');   /* skip past user. */
-  if (idx == NULL) {         /* no '.' so just use mbox */
-      idx = mbox;
-  } else {
-      idx++;                   /* skip past '.' */
-  }
-  c = (char) tolower((int) *idx);
-  if (!islower(c)) {
-      c = 'q';
-  }
-
-  sprintf(buf, "%s/deliverdb/deliver-%c", config_dir, c);
-
-  return buf;
-}
-
-
-static int
-_lock_delivered_db(to, write_lock) 
-     char *to;
-     int write_lock;
-{
-  char buf[MAX_MAILBOX_PATH];
-  int lockfd;
-
-  (void)strcpy(buf, _get_db_name(to));
-  (void)strcat(buf, ".lock");
-  lockfd = open(buf, O_RDWR|O_CREAT, 0666);
-  if (lockfd < 0) {
-    syslog(LOG_ERR, "Unable to open lock file: %s: %m", buf);
-    return -1;
-  }
-  if (write_lock) {
-    if (lock_blocking(lockfd)) {
-      syslog(LOG_ERR, "Unable to write lock lock file: %s: %m", buf);
-      close(lockfd);
-      return -1;
-    }
-  } else {
-    if (lock_shared(lockfd)) {
-      syslog(LOG_ERR, "Unable to read lock lock file: %s: %m", buf);
-      close(lockfd);
-      return -1;
-    }
-  }
-  
-  return lockfd;
-}
-
-/* id: message id
- * to: name of mailbox
- * returns: 0 if not there
- *          time of delivery if there
- */
-static time_t
-checkdelivered(id, idlen, to, tolen)
-char *id, *to;
-int idlen, tolen;
-{
-#ifdef HAVE_LIBDB
-    char buf[MAX_MAILBOX_PATH];
-    char fname[MAX_MAILBOX_PATH];
-    DBT date, delivery;
-    HASHINFO info;
-    int i, lockfd;
-    time_t mark;
-
-    (void)memset(&info, 0, sizeof(info));
-    (void)memset(&date, 0, sizeof(date));
-    (void)memset(&delivery, 0, sizeof(delivery));
-
-    (void)strcpy(fname, _get_db_name(to));
-    (void)strcat(fname, ".db");
-
-    memcpy(buf, id, idlen);
-    buf[idlen] = '\0';
-    memcpy(buf + idlen + 1, to, tolen);
-    buf[idlen + tolen + 1] = '\0';
-    delivery.data = buf;
-    delivery.size = idlen + tolen + 2;
-          /* +2 b/c 1 for the center null; +1 for the terminating null */
-
-    if ((lockfd = _lock_delivered_db(to, 0)) < 0) {
-      return 0;
-    }
-
-    DeliveredDBptr = dbopen(fname, O_RDONLY, 0666, DB_HASH, &info);
-    if (!DeliveredDBptr) {
-      close(lockfd);
-      syslog(LOG_ERR,"checkdelivered: Unable to open delivered db: %s: %m", 
-	     fname);
-      return 0;
-    }
-
-    if ((i = DeliveredDBptr->get(DeliveredDBptr, &delivery, &date, 0)) < 0) {
-      syslog(LOG_ERR, "checkdelivered: error looking up %s/%d: %m", id, to);
-    }
-
-    if (logdebug) {
-      syslog(LOG_DEBUG, "checkdelivered: checking %s %s - result = %d", id, to, i);
-    }
-
-    if (i == 0) {
-	/* found the record */
-	memcpy(&mark, date.data, sizeof(time_t));
-    } else {
-	mark = 0;
-    }
-
-    if (DeliveredDBptr->close(DeliveredDBptr) < 0) {
-      syslog(LOG_ERR, "checkdelivered: error closing db: %m");
-    }
-    close(lockfd);
-
-    return mark;
-#else /* HAVE_LIBDB */
-    static int initialized = 0;
-    char buf[MAX_MAILBOX_PATH];
-    datum date, delivery;
-    int lockfd;
-    time_t mark;
-
-    /* The whole locking situation with dbm should be examined in some
-     * more detail (but since we are using db and not dbm I'm just going
-     * to leave this comment).
-     * The right thing to do (with db too) is to keep the write lock 
-     * active unless a duplicate is found. If a duplicate is found, then
-     * the lock can be released. Otherwise, the lock should probably be
-     * held until markdelivered() finishes updating the db.
-     * The performance impact of holding the lock for that length of
-     * time needs to also be examined.
-     */
-
-    if ((lockfd = _lock_delivered_db(to, 1)) <0)
-      return 0;
-	
-    if (!initialized) {
-      initialized++;
-
-      (void)strcpy(buf, _get_db_name(to));
-      (void)strcat(buf, ".db");
-
-      DeliveredDBptr = dbm_open(buf, O_RDWR|O_CREAT, 0666);
-      if (!DeliveredDBptr) {
-	syslog(LOG_ERR, "checkdelivered: error opening delivered database: %s: %m",
-	       buf);
-	close(lockfd);
-	return 0;
-      }
-    }
-    if (!DeliveredDBptr) {
-      close(lockfd);
-      return 0;
-    }
-
-    sprintf(buf, "%s%c%s", id, '\0', to);
-    delivery.dptr = buf;
-    delivery.dsize = strlen(id) + strlen(to) + 2;
-    date = dbm_fetch(DeliveredDBptr, delivery);
-    if (date.dptr == NULL) {
-	/* syslog(LOG_INFO, "unable to fetch entry for %s/%s: %m", id, to); */
-	close(lockfd);
-	return 0;
-    }
-    close(lockfd);
-    if (date.dptr != 0) {
-	mark = *(time_t *)date.dptr;
-    } else {
-	mark = (time_t)0;
-    }
-    dbm_close(DeliveredDBptr);
-
-    return mark;
-#endif /* HAVE_LIBDB */
-}
-
-static void
-markdelivered(char *id, int idlen, char *to, int tolen, time_t mark)
-{
-  char buf[MAX_MAILBOX_PATH];
-  char fname[MAX_MAILBOX_PATH];
-  int lockfd;
-#ifdef HAVE_LIBDB
-  DBT date, delivery;
-  HASHINFO info;
-#else /* HAVE_LIBDB */
-  datum date, delivery;
-#endif
-
-  memcpy(buf, id, idlen);
-  buf[idlen] = '\0';
-  memcpy(buf + idlen + 1, to, tolen);
-  buf[idlen + tolen + 1] = '\0';
-  if (mark == 0) { mark = time(0); }
-    
-#ifdef HAVE_LIBDB
-  (void)memset(&info, 0, sizeof(info));
-  (void)memset(&date, 0, sizeof(date));
-  (void)memset(&delivery, 0, sizeof(delivery));
-
-  delivery.data = buf;
-  delivery.size = idlen + tolen + 2;
-          /* +2 b/c 1 for the center null; +1 for the terminating null */
-
-  date.data = &mark;
-  date.size = sizeof(mark);
-
-  (void)strcpy(fname, _get_db_name(to));
-  (void)strcat(fname, ".db");
-
-  if ((lockfd = _lock_delivered_db(to, 1)) < 0)
-    return;
-    
-  DeliveredDBptr = dbopen(fname, O_RDWR|O_CREAT, 0666, DB_HASH, &info);
-  if (!DeliveredDBptr) {
-    syslog(LOG_ERR, "markdelivered: error opening delivered.db: %s: %m", buf);
-    close(lockfd);
-    return;
-  }
-
-  if (DeliveredDBptr->put(DeliveredDBptr, &delivery, &date, 0) < 0) {
-    syslog(LOG_ERR, "markdelivered: error storing data: %m");
-  }
-  if (DeliveredDBptr->close(DeliveredDBptr) < 0) {
-    syslog(LOG_ERR, "markdelivered: closing database :m");
-  }
-  close(lockfd);
-#else /* don't HAVE_LIBDB */
-
-  delivery.dptr = buf;
-  delivery.dsize = idlen + tolen + 2;
-
-  date.dptr = &mark;
-  date.dsize = sizeof(mark);
-
-  /* dbm_open is called in checkdelivered. This assumes that checkdelivered
-     * gets called first */
-
-  if ((lockfd = _lock_delivered_db(to, 1)) < 0)
-    return;
-
-  if (dbm_store(DeliveredDBptr, delivery, date, DBM_REPLACE) < 0) {
-    syslog(LOG_ERR, "markdelivered: dbm_store: %m");
-  }
-  close(lockfd);
-#endif /* HAVE_LIBDB */
-
-  if (logdebug)
-    syslog(LOG_DEBUG, "deliver: delivered %s to %s at %d", id, to, mark);
-}
-
-static int
-_prune_actual_db(fname, mark) 
-     char *fname;
-     time_t mark;
-{
-  int rcode = 0;
-  int count = 1;
-
-#ifdef HAVE_LIBDB
-  int rc, mode;
-  DBT date, delivery;
-  DBT *deletions = 0;
-  HASHINFO info;
-  int num_deletions = 0, alloc_deletions = 0;
-#else /* HAVE_LIBDB */
-  datum date, delivery;
-#endif
-
-
-#ifdef HAVE_LIBDB
-  (void)memset(&info, 0, sizeof(info));
-  (void)memset(&date, 0, sizeof(date));
-  (void)memset(&delivery, 0, sizeof(delivery));
-
-  (void)memset(&info, 0, sizeof(info));
-  DeliveredDBptr = dbopen(fname, O_RDWR|O_CREAT, 0666, DB_HASH, &info);
-  if (!DeliveredDBptr) {
-    syslog(LOG_ERR,  "prunedelivered: error opening %s: %m");
-    return -1;
-  }
-    
-  mode = R_FIRST;
-  while ((rc = DeliveredDBptr->seq(DeliveredDBptr, &delivery, &date, mode)) == 0) {
-    mode = R_NEXT;
-    count++;
-    if ((date.size > 0) && ((*(time_t *)date.data) < mark)) {
-      if (num_deletions >= alloc_deletions) {
-	alloc_deletions += 1000;
-	deletions = (DBT *) xrealloc((char *)deletions,
-				     alloc_deletions * sizeof(DBT));
-      }
-      deletions[num_deletions].size = delivery.size;
-      deletions[num_deletions].data = xmalloc(delivery.size);
-      (void)memcpy(deletions[num_deletions].data, delivery.data, delivery.size);
-      num_deletions++;
-      if (logdebug) {
-	/* delivery.data should be a string the form of  "<msgid>\0<to>\0" 
-	 * but <msgid> and <to> may now be binary & contain nulls!!!
-	 * eh, you asked for debugging
-	 */
-	char *ptr;
-	      
-	ptr = ((char *)delivery.data + (strlen(delivery.data) + 1)); 
-	syslog(LOG_NOTICE, "prunedelivered: marking %s/%s at %d for deletion\n",
-	       delivery.data, ptr, *(time_t *)date.data);
-      }
-    }
-  }
-  if (rc < 0) {
-    syslog(LOG_ERR, "prunedelivered: error detected looking up %d entry: %m", count);
-    syslog(LOG_ERR, "prunedelivered: will try to purge %d entries", num_deletions);
-  }
-  if (logdebug)
-    syslog(LOG_DEBUG, "prunedelivered: will try to purge %d entries", num_deletions);
-      
-  while (num_deletions--) {
-    if (DeliveredDBptr->del(DeliveredDBptr, &deletions[num_deletions], 0) < 0) {
-      syslog(LOG_ERR, "prunedelivered: error deleting entry %d", num_deletions);
-    }
-  }
-
-  if (DeliveredDBptr->close(DeliveredDBptr) < 0) {
-    syslog(LOG_ERR, "prunedelivered: error closing database: %m");
-  }
-#else /* HAVE_LIBDB */
-
-  /* initialize database */
-  checkdelivered("", 0, "", 0);
-
-  if (!DeliveredDBptr) return 1;
-
-  for (delivery = dbm_firstkey(DeliveredDBptr); delivery.dptr;
-						delivery = dbm_nextkey(DeliveredDBptr)) {
-    date = dbm_fetch(DeliveredDBptr, delivery);
-    if (!date.dptr) continue;
-    if ((date.dsize > 0) && ((*(time_t *)date.dptr) < mark)) {
-      if (dbm_delete(DeliveredDBptr, delivery)) {
-	rcode = 1;
-      }
-    }
-  }
-  dbm_close(DeliveredDBptr);
-
-#endif /* HAVE_LIBDB */
-
-  return rcode;
-}
-
-
-int
-prunedelivered(age)
-int age;
-{
-  char c[2];
-  int lockfd;
-  int rc;
-  char fname[MAX_MAILBOX_PATH];
-  time_t mark;
-
-  /* we allow age == 0 to nuke all current entries */
-  if (age < 0)
-    fatal("must specify positive number of days", EC_USAGE);
-
-  mark = time(0) - (age*60*60*24);
-  syslog(LOG_NOTICE, "prunedelivered: pruning back %d days", age);
-  c[1] = '\0';
-  for (c[0] = 'a' ; c[0] <= 'z'; c[0]++) {
-      (void)strcpy(fname, _get_db_name(c));
-      (void)strcat(fname, ".db");
-      
-      if (logdebug) {
-	  syslog(LOG_DEBUG, "prunedelivered: pruning %s", fname);
-      }
-      
-      if ((lockfd = _lock_delivered_db(c, 1)) < 0) {
-	  return -1;
-      }
-      rc = _prune_actual_db(fname, mark);
-      close(lockfd);
-      if (rc < 0) {
-	  syslog(LOG_ERR, "prunedelivered: error exit", age);
-	  return(rc);
-      }
-  }
-  syslog(LOG_NOTICE, "prunedelivered: done");
-  return 0;
 }
