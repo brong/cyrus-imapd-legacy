@@ -1,6 +1,6 @@
 /* lmtpproxyd.c -- Program to sieve and proxy mail delivery
  *
- * $Id: lmtpproxyd.c,v 1.15.6.2 2001/08/09 19:40:57 rjs3 Exp $
+ * $Id: lmtpproxyd.c,v 1.15.6.3 2001/08/14 17:45:43 rjs3 Exp $
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,7 @@
  *
  */
 
-/*static char _rcsid[] = "$Id: lmtpproxyd.c,v 1.15.6.2 2001/08/09 19:40:57 rjs3 Exp $";*/
+/*static char _rcsid[] = "$Id: lmtpproxyd.c,v 1.15.6.3 2001/08/14 17:45:43 rjs3 Exp $";*/
 
 #include <config.h>
 
@@ -1336,7 +1336,7 @@ int deliver(message_data_t *msgdata, char *authuser,
 
 	/* case 3: ordinary user, no Sieve script */
 	else {
-	    *--plus = '+';
+	    if(plus) *--plus = '+';
 	    adddest(&mydata, rcpt, authuser);
 	    mydata.pend[n] = nosieve;
 	}
