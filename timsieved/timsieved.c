@@ -72,7 +72,7 @@
 #include "imapconf.h"
 #include "xmalloc.h"
 #include "exitcodes.h"
-
+#include "iptostring.h"
 #include "codes.h"
 #include "actions.h"
 #include "parser.h"
@@ -128,38 +128,23 @@ void fatal(const char *s, int code)
     exit(EC_TEMPFAIL);
 }
 
+
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
-static int mysasl_authproc(void *context,
-			   const char *auth_identity,
-			   const char *requested_user,
-			   const char **user,
-			   const char **errstr)
+static int mysasl_authproc(sasl_conn_t *conn,
+			   void *context,
+			   const char *requested_user, unsigned rlen,
+			   const char *auth_identity, unsigned alen,
+			   const char *def_realm, unsigned urlen,
+			   struct propctx *propctx)
 {
     const char *val;
-    char *canon_authuser, *canon_requser;
     char *realm;
-    static char replybuf[100];
-
-    canon_authuser = (char *) auth_canonifyid(auth_identity,0);
-    if (!canon_authuser) {
-	*errstr = "bad userid authenticated";
-	return SASL_BADAUTH;
-    }
-    canon_authuser = xstrdup(canon_authuser);
-
-    if (!requested_user) requested_user = auth_identity;
-    canon_requser = (char *) auth_canonifyid(requested_user,0);
-    if (!canon_requser) {
-	*errstr = "bad userid requested";
-	return SASL_BADAUTH;
-    }
-    canon_requser = xstrdup(canon_requser);
 
     /* check if remote realm */
-    if ((realm = strchr(canon_authuser, '@'))!=NULL) {
+    if ((realm = strchr(auth_identity, '@'))!=NULL) {
 	realm++;
-	val = (const char *) config_getstring("loginrealms", "");
+	val = config_getstring("loginrealms", "");
 	while (*val) {
 	    if (!strncasecmp(val, realm, strlen(realm)) &&
 		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
@@ -170,47 +155,87 @@ static int mysasl_authproc(void *context,
 	    while (*val && isspace((int) *val)) val++;
 	}
 	if (!*val) {
-	    snprintf(replybuf, 100, "cross-realm login %s denied", 
-		     canon_authuser);
-	    *errstr = replybuf;
+	    sasl_seterror(conn, 0, "cross-realm login %s denied",
+			  auth_identity);
 	    return SASL_BADAUTH;
 	}
     }
 
-    sieved_authstate = auth_newstate(canon_authuser, NULL);
+    sieved_authstate = auth_newstate(auth_identity, NULL);
 
     /* ok, is auth_identity an admin? */
     sieved_userisadmin = authisa(sieved_authstate, "sieve", "admins");
 
-    /* we want to authenticate as a different user: ok if we're an admin or
-     a proxy server */
-    if (strcmp(canon_authuser, canon_requser)) {
-	if (sieved_userisadmin || authisa(sieved_authstate, "sieve", 
-					  "proxyservers")) {
+    /* we want to authenticate as a different user; we'll allow this
+       if we're an admin or if we're a proxy server */
+    if (strcmp(auth_identity, requested_user)) {
+	if (sieved_userisadmin
+	    || authisa(sieved_authstate, "sieve", "proxyservers")) {
+	    /* proxy ok! */
+
 	    sieved_userisadmin = 0; /* no longer admin */
 	    auth_freestate(sieved_authstate);
 	    
-	    sieved_authstate = auth_newstate(canon_requser, NULL);
+	    sieved_authstate = auth_newstate(requested_user, NULL);
 	} else {
-	    *errstr = "user is not allowed to proxy";
+	    sasl_seterror(conn, 0, "user is not allowed to proxy");
 	    
-	    free(canon_authuser);
-	    free(canon_requser);
 	    auth_freestate(sieved_authstate);
-
+	    
 	    return SASL_BADAUTH;
 	}
     }
 
-    free(canon_authuser);
-    *user = canon_requser;
-    *errstr = NULL;
+    return SASL_OK;
+}
+
+int mysasl_canon_user(sasl_conn_t *conn,
+		      void *context,
+		      const char *user, unsigned ulen,
+		      const char *authid, unsigned alen,
+		      unsigned flags,
+		      const char *user_realm,
+		      char *out_user,
+		      unsigned out_max, unsigned *out_ulen,
+		      char *out_authid,
+		      unsigned out_amax, unsigned *out_alen) 
+{
+    char *canon_authuser = NULL, *canon_requser = NULL;
+
+    canon_authuser = auth_canonifyid(authid, alen);
+    if (!canon_authuser) {
+	sasl_seterror(conn, 0, "bad userid %s authenticated", canon_authuser);
+	return SASL_BADAUTH;
+    }
+    *out_alen = strlen(canon_authuser);
+    if(*out_alen > strlen(canon_authuser) > out_amax+1) {
+	sasl_seterror(conn, 0, "buffer overflow while canonicalizing");
+	return SASL_BUFOVER;
+    }
+    
+    strncpy(out_authid, canon_authuser, out_amax);
+    
+    if (!user) user = authid;
+    canon_requser = auth_canonifyid(user, ulen);
+    if (!canon_requser) {
+	sasl_seterror(conn, 0, "bad userid requested");
+	return SASL_BADAUTH;
+    }
+    *out_ulen = strlen(canon_requser);
+    if(*out_ulen > out_max+1) {
+	sasl_seterror(conn, 0, "buffer overflow while canonicalizing");
+	return SASL_BUFOVER;
+    }
+    
+    strncpy(out_user, canon_requser, out_max);
+
     return SASL_OK;
 }
 
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
     { SASL_CB_PROXY_POLICY, &mysasl_authproc, NULL },
+    { SASL_CB_CANON_USER, &mysasl_canon_user, NULL },
     { SASL_CB_LIST_END, NULL, NULL }
 };
 
@@ -222,30 +247,6 @@ int service_init(int argc, char **argv, char **envp)
 void service_abort(void)
 {
     return;
-}
-
-/* FIXME: This only parses IPV4 addresses */
-static int iptostring(const struct sockaddr_in *addr,
-		      char *out, unsigned outlen) {
-    unsigned char a[4];
-    int i;
-    
-    /* FIXME: Weak bounds check, are we less than the largest possible size? */
-    /* (21 = 4*3 for address + 3 periods + 1 semicolon + 5 port digits */
-    if(outlen <= 21) return SASL_BUFOVER;
-    if(!addr || !out) return SASL_BADPARAM;
-
-    memset(out, 0, outlen);
-
-    for(i=3; i>=0; i--) {
-	a[i] = (addr->sin_addr.s_addr & (0xFF << (8*i))) >> (i*8);
-    }
-    
-    snprintf(out,outlen,"%d.%d.%d.%d;%d",(int)a[3],(int)a[2],
-	                                 (int)a[1],(int)a[0],
-	                                 (int)addr->sin_port);
-
-    return SASL_OK;
 }
 
 int service_main(int argc, char **argv, char **envp)
@@ -309,9 +310,11 @@ int service_main(int argc, char **argv, char **envp)
 	   != SASL_OK)
 	fatal("SASL failed initializing: sasl_server_new()", -1); 
 
-    if(iptostring(&sieved_remoteaddr, remoteip, 60) == SASL_OK)
+    if(iptostring((struct sockaddr *)&sieved_remoteaddr,
+		  sizeof(struct sockaddr_in), remoteip, 60) == SASL_OK)
 	sasl_setprop(sieved_saslconn, SASL_IPREMOTEPORT, remoteip);  
-    if(iptostring(&sieved_remoteaddr, localip, 60) == SASL_OK)
+    if(iptostring((struct sockaddr *)&sieved_remoteaddr,
+		  sizeof(struct sockaddr_in), localip, 60) == SASL_OK)
 	sasl_setprop(sieved_saslconn, SASL_IPLOCALPORT, localip);
 
     /* will always return something valid */
