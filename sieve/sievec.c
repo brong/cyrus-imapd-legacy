@@ -1,6 +1,6 @@
-/* scripttest.c -- test wheather the sieve script is valid
- * Tim Martin
- * $Id: scripttest.c,v 1.18.12.1 2001/12/18 23:09:59 rjs3 Exp $
+/* sievec.c -- compile a sieve script to bytecode manually
+ * Rob Siemborski
+ * $Id: sievec.c,v 1.1.2.1 2001/12/18 23:09:57 rjs3 Exp $
  */
 /*
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
@@ -50,28 +50,84 @@
 #include <sieve_interface.h>
 #include <syslog.h>
 
-#include "codes.h"
-
-#include "mystring.h"
 
 #include "xmalloc.h"
+#include "script.h"
 #include <string.h>
 #include <stdlib.h>
+#include <sys/file.h>
+#include <unistd.h>
+#include <stdio.h>
+
+int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret);
+
+#define TIMSIEVE_FAIL -1
+#define TIMSIEVE_OK 0
+
+int main(int argc, char **argv) 
+{
+    FILE *instream;
+    char *err = NULL;
+    sieve_script_t *s;
+    bytecode_info_t *bc;
+    int fd;
+    
+    if(argc < 3) {
+	printf("Syntax: %s <filename> <outputfile>\n", argv[0]);
+	exit(1);
+    }
+
+    instream = fopen(argv[1],"r");
+    if(instream == NULL) {
+	printf("Unable to open %s for reading\n", argv[1]);
+	exit(1);
+    }
+    
+    if(is_script_parsable(instream, &err, &s) == TIMSIEVE_FAIL) {
+	if(err) {
+	    printf("Unable to parse script: %s\n", err);
+	} else {
+	    printf("Unable to parse script.\n");
+	}
+	 
+	exit(1);
+    }
+    
+    /* Now, generate the bytecode */
+    if(sieve_generate_bytecode(&bc, s) == -1) {
+	printf("bytecode generate failed\n");
+	exit(1);
+    }
+
+    /* Now, open the new file */
+    fd = open(argv[2], O_CREAT | O_TRUNC | O_WRONLY);
+    if(fd < 0) {
+	printf("couldn't open bytecode output file\n");
+	exit(1);
+    }  
+
+    /* Now, emit the bytecode */
+    if(sieve_emit_bytecode(fd, bc) == -1) {
+	printf("bytecode emit failed\n");
+	exit(1);
+    }
+
+    close(fd);
+    
+    return 0;
+}
 
 /* to make larry's stupid functions happy :) */ 
 void foo(void)
 {
     fatal("stub function called", 0);
 }
-
-
 sieve_vacation_t vacation = {
     0,				/* min response */
     0,				/* max response */
     (sieve_callback *) &foo,	/* autorespond() */
     (sieve_callback *) &foo	/* send_response() */
 };
-
 static int sieve_notify(void *ac, 
 			void *interp_context, 
 			void *script_context,
@@ -81,7 +137,6 @@ static int sieve_notify(void *ac,
     fatal("stub function called", 0);
     return SIEVE_FAIL;
 }
-
 int mysieve_error(int lineno, const char *msg,
 		  void *i, void *s)
 {
@@ -95,6 +150,13 @@ int mysieve_error(int lineno, const char *msg,
 
     return SIEVE_OK;
 }
+void fatal(const char *s, int code)
+{  
+    printf("Fatal error: %s (%d)\r\n", s, code);
+                           
+    exit(1);
+}
+/* end the happiness functions */
 
 /* returns TRUE or FALSE */
 int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret)

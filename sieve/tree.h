@@ -1,6 +1,6 @@
 /* tree.h -- abstract syntax tree
  * Larry Greenfield
- * $Id: tree.h,v 1.3 2000/02/03 06:51:11 tmartin Exp $
+ * $Id: tree.h,v 1.3.14.1 2001/12/18 23:09:58 rjs3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -44,11 +44,6 @@ struct Stringlist {
     stringlist_t *next;
 };
 
-struct Patternlist {
-    void *p;
-    patternlist_t *next;
-};
-
 struct Tag {
     int type;
     char *arg;
@@ -67,14 +62,14 @@ struct Test {
 	struct { /* it's a header test */
 	    int comptag;
 	    comparator_t *comp;
-	    stringlist_t *sl;
-	    patternlist_t *pl;
+	    stringlist_t *sl; /* headers */
+	    stringlist_t *pl; /* patterns */
 	} h;
 	struct { /* it's an address or envelope test */
 	    int comptag;
 	    comparator_t *comp;
 	    stringlist_t *sl;
-	    patternlist_t *pl;
+	    stringlist_t *pl;
             int addrpart;
 	} ae; 
 	test_t *t; /* not */

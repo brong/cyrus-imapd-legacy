@@ -1,5 +1,5 @@
 /* sieve_interface.h -- interface for deliver
- * $Id: sieve_interface.h,v 1.15 2001/10/02 21:08:14 ken3 Exp $
+ * $Id: sieve_interface.h,v 1.15.2.1 2001/12/18 23:09:57 rjs3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -39,6 +39,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 /* external sieve types */
 typedef struct sieve_interp sieve_interp_t;
 typedef struct sieve_script sieve_script_t;
+typedef struct bytecode_info bytecode_info_t;
 
 typedef int sieve_callback(void *action_context, void *interp_context, 
 			   void *script_context,
@@ -148,5 +149,14 @@ int sieve_execute_script(sieve_script_t *script,
 
 /* Get space separated list of extensions supported by the implementation */
 const char *sieve_listextensions(void);
+
+/* Create a bytecode structure given a parsed commandlist */
+int sieve_generate_bytecode(bytecode_info_t **retval, sieve_script_t *s);
+
+/* Emit bytecode to a file descriptor */
+int sieve_emit_bytecode(int fd, bytecode_info_t *bc);
+
+/* Free a bytecode_info_t */
+void sieve_free_bytecode(bytecode_info_t **p);
 
 #endif

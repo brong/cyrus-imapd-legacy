@@ -1,6 +1,6 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.43 2001/10/23 00:53:09 ken3 Exp $
+ * $Id: script.c,v 1.43.2.1 2001/12/18 23:09:57 rjs3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -256,6 +256,8 @@ static char* look_for_me(char *myaddr, stringlist_t *myaddrs, const char **body)
  */
 static int evaltest(sieve_interp_t *i, test_t *t, void *m)
 {
+#if 0
+/* FIXME, relies on old-style pattern lists */
     testlist_t *tl;
     stringlist_t *sl;
     patternlist_t *pl;
@@ -360,6 +362,8 @@ static int evaltest(sieve_interp_t *i, test_t *t, void *m)
     }
 
     return res;
+#endif
+    return 0;
 }
 
 /* evaluate the script c.  returns negative if error was encountered,

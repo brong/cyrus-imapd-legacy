@@ -1,7 +1,7 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.12 2001/10/03 13:43:46 ken3 Exp $
+ * $Id: sieve.y,v 1.12.2.1 2001/12/18 23:09:57 rjs3 Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -67,9 +67,9 @@ static commandlist_t *ret;
 static sieve_script_t *parse_script;
 static int check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, patternlist_t *pl);
+			     stringlist_t *sl, stringlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, patternlist_t *pl);
+			    stringlist_t *sl, stringlist_t *pl);
 static commandlist_t *build_vacation(int t, struct vtags *h, char *s);
 static struct aetags *new_aetags(void);
 static struct aetags *canon_aetags(struct aetags *ae);
@@ -85,7 +85,7 @@ static int verify_mailboxes(stringlist_t *sl);
 static int verify_addresses(stringlist_t *sl);
 static int verify_flags(stringlist_t *sl);
 #ifdef ENABLE_REGEX
-static patternlist_t *verify_regexs(stringlist_t *sl, char *comp);
+static int verify_regexs(stringlist_t *sl, char *comp);
 #endif
 static int ok_header(char *s);
 
@@ -301,32 +301,30 @@ test: ANYOF testlist		 { $$ = new_test(ANYOF); $$->u.tl = $2; }
 	| SFALSE		 { $$ = new_test(SFALSE); }
 	| STRUE			 { $$ = new_test(STRUE); }
 	| HEADER htags stringlist stringlist
-				 { patternlist_t *pl;
+				 { 
 				   $2 = canon_htags($2);
 #ifdef ENABLE_REGEX
+				   /* Just verify them, we can't compile
+				      them until we reinterpret the bytecode */
 				   if ($2->comptag == REGEX) {
-				     pl = verify_regexs($4, $2->comparator);
-				     if (!pl) { YYERROR; }
+				     if(!verify_regexs($4, $2->comparator))
+				     { YYERROR; }
 				   }
-				   else
 #endif
-				     pl = (patternlist_t *) $4;
-				       
-				   $$ = build_header(HEADER, $2, $3, pl);
+				   $$ = build_header(HEADER, $2, $3, $4);
 				   if ($$ == NULL) { YYERROR; } }
 	| addrorenv aetags stringlist stringlist
-				 { patternlist_t *pl;
+				 {
 				   $2 = canon_aetags($2);
 #ifdef ENABLE_REGEX
+				   /* Just verify them, we can't compile
+				      them until we reinterpret the bytecode */
 				   if ($2->comptag == REGEX) {
-				     pl = verify_regexs($4, $2->comparator);
-				     if (!pl) { YYERROR; }
+				     if(!verify_regexs($4, $2->comparator))
+				     { YYERROR; }
 				   }
-				   else
 #endif
-				     pl = (patternlist_t *) $4;
-				       
-				   $$ = build_address($1, $2, $3, pl);
+				   $$ = build_address($1, $2, $3, $4);
 				   if ($$ == NULL) { YYERROR; } }
 	| NOT test		 { $$ = new_test(NOT); $$->u.t = $2; }
 	| SIZE sizetag NUMBER    { $$ = new_test(SIZE); $$->u.sz.t = $2;
@@ -451,7 +449,7 @@ static int check_reqs(stringlist_t *sl)
 }
 
 static test_t *build_address(int t, struct aetags *ae,
-			     stringlist_t *sl, patternlist_t *pl)
+			     stringlist_t *sl, stringlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be either ADDRESS or ENVELOPE */
 
@@ -473,7 +471,7 @@ static test_t *build_address(int t, struct aetags *ae,
 }
 
 static test_t *build_header(int t, struct htags *h,
-			    stringlist_t *sl, patternlist_t *pl)
+			    stringlist_t *sl, stringlist_t *pl)
 {
     test_t *ret = new_test(t);	/* can be HEADER */
 
@@ -656,44 +654,36 @@ static int verify_flags(stringlist_t *sl)
 
 
 #ifdef ENABLE_REGEX
-static regex_t *verify_regex(char *s, int cflags)
+static int verify_regex(char *s, int cflags)
 {
     int ret;
+    regex_t reg;
     char errbuf[100];
-    regex_t *reg = (regex_t *) xmalloc(sizeof(regex_t));
 
-    if ((ret = regcomp(reg, s, cflags)) != 0) {
-	(void) regerror(ret, reg, errbuf, sizeof(errbuf));
+    if ((ret = regcomp(&reg, s, cflags)) != 0) {
+	(void) regerror(ret, &reg, errbuf, sizeof(errbuf));
 	yyerror(errbuf);
-	free(reg);
-	return NULL;
+	return 0;
     }
-    return reg;
+    return 1;
 }
 
-static patternlist_t *verify_regexs(stringlist_t *sl, char *comp)
+static int verify_regexs(stringlist_t *sl, char *comp)
 {
-    stringlist_t *sl2;
-    patternlist_t *pl = NULL;
+    stringlist_t *cur;
     int cflags = REG_EXTENDED | REG_NOSUB;
-    regex_t *reg;
 
     if (!strcmp(comp, "i;ascii-casemap")) {
 	cflags |= REG_ICASE;
     }
 
-    for (sl2 = sl; sl2 != NULL; sl2 = sl2->next) {
-	if ((reg = verify_regex(sl2->s, cflags)) == NULL) {
-	    free_pl(pl, REGEX);
-	    break;
+    for (cur = sl; cur != NULL; cur = cur->next) {
+	if (!verify_regex(cur->s, cflags)) {
+	    return 0;
 	}
-	pl = (patternlist_t *) new_pl(reg, pl);
     }
-    if (sl2 == NULL) {
-	free_sl(sl);
-	return pl;
-    }
-    return NULL;
+
+    return 1;
 }
 #endif
 
