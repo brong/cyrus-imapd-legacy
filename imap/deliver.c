@@ -1,6 +1,6 @@
 /* deliver.c -- Program to deliver mail to a mailbox
  * Copyright 1999 Carnegie Mellon University
- * $Id: deliver.c,v 1.105.4.5 2000/01/14 23:47:43 leg Exp $
+ * $Id: deliver.c,v 1.105.4.6 2000/01/14 23:52:56 leg Exp $
  * 
  * No warranties, either expressed or implied, are made regarding the
  * operation, use, or results of the software.
@@ -26,7 +26,7 @@
  *
  */
 
-static char _rcsid[] = "$Id: deliver.c,v 1.105.4.5 2000/01/14 23:47:43 leg Exp $";
+static char _rcsid[] = "$Id: deliver.c,v 1.105.4.6 2000/01/14 23:52:56 leg Exp $";
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1060,25 +1060,27 @@ int sieve_keep(char *arg, void *ic, void *sc, void *mc)
     script_data_t *sd = (script_data_t *) sc;
     message_data_t *md = (message_data_t *) mc;
     char namebuf[MAX_MAILBOX_PATH];
-    int ret;
-
-    /* we're now the user who owns the script */
-
-    if (!sd->authstate)
-	return SIEVE_FAIL;
+    int ret = 1;
 
     if (sd->mailboxname) {
 	strcpy(namebuf, "INBOX.");
 	strcat(namebuf, sd->mailboxname);
-    }
-    else {
-	strcpy(namebuf, "INBOX");
-    }
 
-    ret = deliver_mailbox(md->data, &md->stage, md->size, 0, 0,
-			  sd->username, sd->authstate, md->id,
-			  sd->username, md->notifyheader,
-			  namebuf, dop->quotaoverride, 1);
+	ret = deliver_mailbox(md->data, &md->stage, md->size, 0, 0,
+			      dop->authuser, dop->authstate, md->id,
+			      sd->username, md->notifyheader,
+			      namebuf, dop->quotaoverride, 0);
+    }
+    if (ret) {
+	/* we're now the user who owns the script */
+	if (!sd->authstate)
+	    return SIEVE_FAIL;
+
+	ret = deliver_mailbox(md->data, &md->stage, md->size, 0, 0,
+			      sd->username, sd->authstate, md->id,
+			      sd->username, md->notifyheader,
+			      "INBOX", dop->quotaoverride, 1);
+    }
 
     if (ret == 0) {
 	return SIEVE_OK;
