@@ -1,6 +1,6 @@
 /* pop3test.c -- pop3 test client
  * Tim Martin (SASL implementation)
- * $Id: pop3test.c,v 1.1.2.2 2001/08/10 15:40:57 rjs3 Exp $
+ * $Id: pop3test.c,v 1.1.2.3 2001/09/05 20:11:02 rjs3 Exp $
  *
  * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -80,9 +80,9 @@ static SSL *tls_conn = NULL;
 #include <sasl/md5global.h>
 #include <sasl/md5.h>
 
-#define MD5Init _sasl_MD5Init
-#define MD5Update _sasl_MD5Update
-#define MD5Final _sasl_MD5Final
+#define MD5_Init _sasl_MD5Init
+#define MD5_Update _sasl_MD5Update
+#define MD5_Final _sasl_MD5Final
 
 #endif /* HAVE_SSL */
 
@@ -830,10 +830,10 @@ static int auth_apop(void)
   interaction(SASL_CB_AUTHNAME,"Authname",&username,&userlen);
   interaction(SASL_CB_PASS,"Password",&pass,&passlen);
 
-  MD5Init(&ctx);
-  MD5Update(&ctx,apop_chal,strlen(apop_chal));
-  MD5Update(&ctx,pass,passlen);
-  MD5Final(digest, &ctx);
+  MD5_Init(&ctx);
+  MD5_Update(&ctx,apop_chal,strlen(apop_chal));
+  MD5_Update(&ctx,pass,passlen);
+  MD5_Final(digest, &ctx);
 
   /* convert digest from binary to ASCII hex */
   for (i = 0; i < 16; i++)
