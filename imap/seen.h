@@ -1,5 +1,5 @@
 /* seen.h -- abstract interface for /Recent and /Seen information
-   $Id: seen.h,v 1.5 2000/05/23 20:52:31 robeson Exp $
+   $Id: seen.h,v 1.5.2.1 2001/01/17 18:53:16 ken3 Exp $
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -81,6 +81,7 @@ int seen_copy(struct mailbox *oldmailbox,struct mailbox *newmailbox);
 /* called on user operations */
 int seen_create_user(const char *user);
 int seen_delete_user(const char *user);
+int seen_rename_user(const char *olduser, const char *newuser);
 
 int seen_reconstruct(struct mailbox *mailbox,
 		     time_t report_time,

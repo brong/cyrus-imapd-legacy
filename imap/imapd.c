@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.294 2001/01/16 00:59:56 leg Exp $ */
+/* $Id: imapd.c,v 1.294.2.1 2001/01/17 18:53:11 ken3 Exp $ */
 
 #include <config.h>
 
@@ -82,6 +82,7 @@
 #include "append.h"
 #include "mboxlist.h"
 #include "acapmbox.h"
+#include "user.h"
 #include "idle.h"
 
 #include "pushstats.h"		/* SNMP interface */
@@ -3325,7 +3326,7 @@ char *name;
 	l->alloc = 0;
 	l->num = 0;
 
-	strcat(name, ".*");
+	strcat(mailboxname, ".*");
 	mboxlist_findall(mailboxname, imapd_userisadmin, imapd_userid,
 			 imapd_authstate, addmbox, &l);
 
@@ -3340,6 +3341,9 @@ char *name;
 	}
 	    
 	free(l);
+
+	/* take care of deleting ACLs, subscriptions, seen state and quotas */
+	user_delete(name+5, imapd_userid, imapd_authstate);
     }
 
     if (imapd_mailbox) {
@@ -3367,6 +3371,7 @@ void cmd_rename(const char *tag,
     int omlen, nmlen;
     char *p;
     int recursive_rename;
+    int rename_user = 0;
 
     /* canonicalize names */
     if (partition && !imapd_userisadmin) {
@@ -3378,6 +3383,12 @@ void cmd_rename(const char *tag,
     /* if this is my inbox, don't do recursive renames */
     if (!strcasecmp(oldname, "inbox")) {
 	recursive_rename = 0;
+    }
+    /* check if we're an admin renaming a user */
+    else if (!strncmp(oldname, "user.", 5) && !strchr(oldname+5, '.') &&
+	     !strncmp(newname, "user.", 5) && !strchr(newname+5, '.') &&
+	     imapd_userisadmin) {
+	rename_user = 1;
     }
 
     if (!r) r = mboxname_tointernal(oldname, imapd_userid, oldmailboxname);
@@ -3410,6 +3421,12 @@ void cmd_rename(const char *tag,
 				   imapd_userisadmin, 
 				   imapd_userid, imapd_authstate);
     }
+
+    /* if we're renaming a user, take care of changing ACLs,
+       subscriptions, seen state and toplevel quota */
+    if (!r && rename_user)
+	user_rename(oldmailboxname, newmailboxname, imapd_userid,
+		    imapd_authstate);
 
     /* rename all mailboxes matching this */
     if (!r && recursive_rename) {
@@ -3446,10 +3463,16 @@ void cmd_rename(const char *tag,
 			    l->mb[i], newmailboxname, error_message(r2));
 		if (RENAME_STOP_ON_ERROR) break;
 	    }
+
+	    /* if we're renaming a user copy quota onto new mailbox */
+	    if (rename_user) user_copyquota(l->mb[i], newmailboxname);
 	}
 
 	free(l);
     }
+
+    /* delete quota files of old user */
+    if (!r && rename_user) user_deletequotas(oldname+5);
 
     if (imapd_mailbox) {
 	index_check(imapd_mailbox, 0, 0);

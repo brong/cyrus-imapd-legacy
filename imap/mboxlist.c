@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.146 2001/01/09 17:41:38 ken3 Exp $
+ * $Id: mboxlist.c,v 1.146.2.1 2001/01/17 18:53:13 ken3 Exp $
  */
 
 #include <config.h>
@@ -99,22 +99,7 @@ static void mboxlist_closesubs();
 static struct quota *mboxlist_newquota;
 static int mboxlist_changequota();
 
-static char *mboxlist_hash_usersubs(const char *userid);
-
 #define FNAME_SUBSSUFFIX ".sub"
-
-static int delete_user(const char *user)
-{
-    /* delete seen state */
-
-    /* delete subscriptions */
-    char *fname = mboxlist_hash_usersubs(user);
-	
-    (void) unlink(fname);
-    free(fname);
-
-    return 0;
-}
 
 /*
  * Convert a partition into a path
@@ -815,12 +800,6 @@ int mboxlist_deletemailbox(char *name, int isadmin, char *userid,
 	/* look for any other mailboxes in this quotaroot */
     }
 
-    if (!r && deleteuser) {
-	/* call the delete user function */
-	
-	delete_user(name + 5);
-    }
-
  done:
     return r;
 }
@@ -907,8 +886,16 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	      goto done;
 	    }
 	    isusermbox = 1;
+	} else if (!strncmp(newname, "user.", 5) && !strchr(newname+5, '.')) {
+	    /* Special case of renaming a user */
+	    access = cyrus_acl_myrights(auth_state, oldacl);
+	    if (!(access & ACL_CREATE) && !isadmin) {
+		r = (isadmin || (access & ACL_LOOKUP)) ?
+		    IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
+		goto done;
+	    }
 	} else {
-	    /* Even admins can't rename users */
+	    /* Only admins can rename users (INBOX to INBOX) */
 	    r = IMAP_MAILBOX_NOTSUPPORTED;
 	    goto done;
 	}
@@ -923,9 +910,11 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 
     /* Check ability to create new mailbox */
     if (!partitionmove) {
-	if (!strncmp(newname, "user.", 5) && !strchr(newname+5, '.')) {
-	    /* Even admins can't rename to user's inboxes */
-	    r = IMAP_MAILBOX_NOTSUPPORTED;
+	if (!strncmp(newname, "user.", 5) && !strchr(newname+5, '.') &&
+	    (strncmp(oldname, "user.", 5) || strchr(oldname+5, '.') ||
+	     !isadmin)) {
+	    /* Only admins can rename users (INBOX to INBOX) */
+	    r = isadmin ? IMAP_MAILBOX_NOTSUPPORTED : IMAP_PERMISSION_DENIED;
 	    goto done;
 	}
 	r = mboxlist_mycreatemailboxcheck(newname, 0, partition, isadmin, 
@@ -1763,7 +1752,7 @@ void mboxlist_done(void)
 }
 
 /* hash the userid to a file containing the subscriptions for that user */
-static char *mboxlist_hash_usersubs(const char *userid)
+char *mboxlist_hash_usersubs(const char *userid)
 {
     char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_USERDIR) +
 			  strlen(userid) + sizeof(FNAME_SUBSSUFFIX) + 10);

@@ -1,5 +1,5 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
-   $Id: seen_db.c,v 1.21 2001/01/05 06:00:03 leg Exp $
+   $Id: seen_db.c,v 1.21.2.1 2001/01/17 18:53:17 ken3 Exp $
  
  * Copyright (c) 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -458,11 +458,36 @@ int seen_delete_user(const char *user)
 
     /* erp! */
     r = unlink(fname);
-    if (r < 0) {
+    if (r < 0 && errno != ENOENT) {
 	syslog(LOG_ERR, "error unlinking %s: %m", fname);
 	r = IMAP_IOERROR;
     }
     free(fname);
+    
+    return r;
+}
+
+int seen_rename_user(const char *olduser, const char *newuser)
+{
+    char *oldfname = getpath(olduser);
+    char *newfname = getpath(newuser);
+    int r = 0;
+
+    if (SEEN_DEBUG) {
+	syslog(LOG_DEBUG, "seen_db: seen_rename_user(%s,%s)", 
+	       olduser, newuser);
+    }
+
+    r = mailbox_copyfile(oldfname, newfname);
+    if (!r) {
+	r = unlink(oldfname);
+	if (r < 0 && errno != ENOENT) {
+	    syslog(LOG_ERR, "error unlinking %s: %m", oldfname);
+	    r = IMAP_IOERROR;
+	}
+    }
+    free(oldfname);
+    free(newfname);
     
     return r;
 }
