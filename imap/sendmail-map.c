@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: sendmail-map.c,v 1.3.6.1 2001/08/02 21:41:45 rjs3 Exp $
+ * $Id: sendmail-map.c,v 1.3.6.2 2001/11/06 18:37:06 ken3 Exp $
  */
 
 #include <config.h>
@@ -61,7 +61,7 @@
 #include <signal.h>
 #include <fcntl.h>
 
-#include <sasl.h>
+#include <sasl/sasl.h>
 #include <acap.h>
 #include <db.h>
 

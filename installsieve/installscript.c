@@ -60,8 +60,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
-#include <sasl.h>
-#include <saslutil.h>
+#include <sasl/sasl.h>
+#include <sasl/saslutil.h>
 
 #include <pwd.h>
 
