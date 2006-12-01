@@ -42,7 +42,7 @@ dnl
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.297 2006/11/30 17:11:16 murch Exp $
+dnl $Id: configure.in,v 1.297.2.1 2006/12/01 17:46:39 murch Exp $
 dnl
 
 
@@ -933,12 +933,6 @@ AC_ARG_ENABLE(oldsievename,
 	fi,
 	AC_MSG_RESULT(no))
 
-AC_ARG_ENABLE(listext,
-	[  --enable-listext        enable IMAP List extensions],
-	if test "$enableval" = yes; then
-		AC_DEFINE(ENABLE_LISTEXT,[],[Enable the LISTEXT extension?])
-	fi)
-
 AC_ARG_ENABLE(netscapehack,
 	[  --enable-netscapehack   enable Netscape hack for the menu option
                           in Communicator to Administrate Mail],
@@ -1054,7 +1048,7 @@ AC_SUBST(PERL_DEPSUBDIRS)
 AC_SUBST(PERL)
 
 AH_TOP([
-/* $Id: configure.in,v 1.297 2006/11/30 17:11:16 murch Exp $ */
+/* $Id: configure.in,v 1.297.2.1 2006/12/01 17:46:39 murch Exp $ */
 /* 
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *

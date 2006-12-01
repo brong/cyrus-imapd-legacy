@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63 2006/11/30 17:11:18 murch Exp $
+ * $Id: imapd.h,v 1.63.2.1 2006/12/01 17:46:41 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -225,13 +225,39 @@ enum {
     STATUS_HIGHESTMODSEQ =	(1<<5)
 };
 
-/* Bitmask for list options */
 enum {
-    LIST_LSUB =			(1<<0),
-    LIST_EXT =			(1<<1),
-    LIST_SUBSCRIBED =		(1<<2),
-    LIST_CHILDREN =		(1<<3),
-    LIST_REMOTE =		(1<<4)
+    /* LIST selection options */
+    LIST_SEL_SUBSCRIBED =	(1<<0),
+    LIST_SEL_REMOTE =		(1<<1),
+    LIST_SEL_RECURSIVEMATCH =	(1<<2),
+
+    /* LIST return options */
+    LIST_RET_SUBSCRIBED =	(1<<8),
+    LIST_RET_CHILDREN =		(1<<9),
+
+    /* other options */
+    LIST_OPT_RLIST =		(1<<16),
+    LIST_OPT_LSUB =		(1<<17),
+    LIST_OPT_EXTENDED =		(1<<18)  /* Extended List command */
+};
+#define list_sel_opts (LIST_RET_SUBSCRIBED - 1)
+#define list_ret_opts ((LIST_OPT_RLIST - 1) & ~list_sel_opts)
+
+/* Name attributes that may be retuned by LIST */
+enum {
+    /* from RFC 3501 */
+    MBOX_ATTRIBUTE_NOINFERIORS =	(1<<0),
+    MBOX_ATTRIBUTE_NOSELECT =		(1<<1),
+    MBOX_ATTRIBUTE_MARKED =		(1<<2),
+    MBOX_ATTRIBUTE_UNMARKED =		(1<<3),
+
+    /* from draft-ietf-imapext-list-extensions-18.txt */
+    MBOX_ATTRIBUTE_NONEXISTENT =	(1<<4),
+    MBOX_ATTRIBUTE_SUBSCRIBED =		(1<<5),
+    MBOX_ATTRIBUTE_REMOTE =		(1<<6),
+    MBOX_ATTRIBUTE_HASCHILDREN =	(1<<7),
+    MBOX_ATTRIBUTE_HASNOCHILDREN =	(1<<8),
+    MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED = (1<<9)
 };
 
 extern struct protstream *imapd_out, *imapd_in;

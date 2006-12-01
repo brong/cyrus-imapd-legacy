@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: protocol.h,v 1.7 2006/11/30 17:11:19 murch Exp $ */
+/* $Id: protocol.h,v 1.7.2.1 2006/12/01 17:46:41 murch Exp $ */
 
 #ifndef _INCLUDED_PROTOCOL_H
 #define _INCLUDED_PROTOCOL_H
@@ -55,8 +55,8 @@ enum {
     CAPA_IDLE		= (1 << 2),
     CAPA_MUPDATE	= (1 << 3),
     CAPA_MULTIAPPEND	= (1 << 4),
-    CAPA_LISTSUBSCRIBED	= (1 << 5),
-    CAPA_ACLRIGHTS	= (1 << 6),
+    CAPA_ACLRIGHTS	= (1 << 5),
+    CAPA_LISTEXTENDED   = (1 << 6),
 
     /* LMTP capabilities */
     CAPA_PIPELINING	= (1 << 2),
