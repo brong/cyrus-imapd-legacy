@@ -1,7 +1,7 @@
 /* imtest.c -- IMAP/POP3/NNTP/LMTP/SMTP/MUPDATE/MANAGESIEVE test client
  * Ken Murchison (multi-protocol implementation)
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.110 2006/11/30 17:11:22 murch Exp $
+ * $Id: imtest.c,v 1.110.2.1 2006/12/05 16:05:58 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -71,6 +71,7 @@
 #include <sys/file.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <syslog.h>
 
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
@@ -172,7 +173,7 @@ struct protocol_t;
 struct banner_t {
     int is_capa;	/* banner is capability response */
     char *resp;		/* end of banner response */
-    void *(*parse_banner)(char *str);
+    void *(*parse_banner)(char *str, struct protocol_t *prot);
 			/* [OPTIONAL] parse banner, returns 'rock' */
 };
 
@@ -1472,7 +1473,8 @@ static char *ask_capability(struct protocol_t *prot,
 	if (prot_fgets(str, sizeof(str), pin) == NULL) {
 	    imtest_fatal("prot layer failure");
 	}
-	printf("S: %s", str);
+	/* 'automatic' is < 0 if we already parsed the string as the banner */
+	if (automatic >= 0) printf("S: %s", str);
 
 	/* check for starttls */
 	if (prot->capa_cmd.tls &&
@@ -1568,6 +1570,22 @@ static int generic_pipe(char *buf, int len, void *rock)
 }
 
 /*********************************** IMAP ************************************/
+
+static void *imap_parse_banner(char *str, struct protocol_t *prot)
+{
+    if (strstr(str, "[CAPABILITY ")) {
+	size_t len = strlen(str);
+
+	/* banner is capability string, adjust profile */
+	prot->banner.is_capa = -1;
+	prot->capa_cmd.resp = "* OK";
+
+	/* put the string back on the stream */
+	while (len) prot_ungetc(str[--len], pin);
+    }
+
+    return NULL;
+}
 
 /*
  * Parse a mech list of the form: ... AUTH=foo AUTH=bar ...
@@ -1837,7 +1855,8 @@ static void send_recv_test(void)
 
 /*********************************** POP3 ************************************/
 
-static void *pop3_parse_banner(char *str)
+static void *pop3_parse_banner(char *str,
+			       struct protocol_t *prot __attribute__((unused)))
 {
     char *cp, *start;
     char *chal = NULL;
@@ -2200,7 +2219,7 @@ void usage(char *prog, char *prot)
 
 static struct protocol_t protocols[] = {
     { "imap", "imaps", "imap",
-      { 0, "* OK", NULL },
+      { 0, "* OK", &imap_parse_banner },
       { "C01 CAPABILITY", "C01 ", " STARTTLS", " AUTH=", &imap_parse_mechlist },
       { "S01 STARTTLS", "S01 OK", "S01 NO", 0 },
       { "A01 AUTHENTICATE", 0, 0, "A01 OK", "A01 NO", "+ ", "*", NULL },
@@ -2483,6 +2502,8 @@ int main(int argc, char **argv)
 	fprintf(pf, "%d", getpid());
 	fclose(pf);
     } 
+
+    openlog(argv[0], LOG_PID, SYSLOG_FACILITY);
     
     /* attempt to start sasl */
     if (sasl_client_init(callbacks+(!dochallenge ? 2 : 0)) != IMTEST_OK) {
@@ -2525,11 +2546,9 @@ int main(int argc, char **argv)
 	}
 #endif /* HAVE_SSL */
 
-	if (protocol->banner.is_capa) {
-	    mechlist = ask_capability(protocol, &server_supports_tls, 1);
-	}
-	else {
-	    do { /* look for the banner response */
+	if (!protocol->banner.is_capa) {
+	    /* look for the banner response */
+	    do {
 		if (prot_fgets(str, sizeof(str), pin) == NULL) {
 		    imtest_fatal("prot layer failure");
 		}
@@ -2537,12 +2556,13 @@ int main(int argc, char **argv)
 		
 		/* parse it if need be */
 		if (protocol->banner.parse_banner)
-		    rock = protocol->banner.parse_banner(str);
+		    rock = protocol->banner.parse_banner(str, protocol);
 	    } while (strncasecmp(str, protocol->banner.resp,
 				 strlen(protocol->banner.resp)));
-	
-	    mechlist = ask_capability(protocol, &server_supports_tls, 0);
 	}
+	
+	mechlist = ask_capability(protocol, &server_supports_tls,
+				  protocol->banner.is_capa);
 	
 #ifdef HAVE_SSL
 	if ((dossl==0) && (dotls==1) && (server_supports_tls==1)) {
@@ -2630,6 +2650,8 @@ int main(int argc, char **argv)
     }
 
     free_hash_table(&confighash, free);
+
+    closelog();
     
     exit(0);
 }
