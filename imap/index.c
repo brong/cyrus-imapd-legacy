@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219 2006/11/30 17:11:18 murch Exp $
+ * $Id: index.c,v 1.219.2.1 2006/12/08 21:36:30 murch Exp $
  */
 #include <config.h>
 
@@ -1789,7 +1789,25 @@ int usinguid;
 	}
 	sequence++;
     }
-}    
+}
+
+/* Helper function to determine domain of data */
+enum {
+    DOMAIN_7BIT = 0,
+    DOMAIN_8BIT,
+    DOMAIN_BINARY
+};
+
+static int data_domain(const unsigned char *p, size_t n)
+{
+    while (n--) {
+	if (!*p) return DOMAIN_BINARY;
+	if (*p & 0x80) return DOMAIN_8BIT;
+	p++;
+    }
+
+    return DOMAIN_7BIT;
+}
 
 /*
  * Helper function to fetch data from a message file.  Writes a
@@ -1812,7 +1830,7 @@ unsigned start_octet;
 unsigned octet_count;
 struct protstream *pout;
 {
-    int n;
+    int n, domain;
 
     /* If no data, output NIL */
     if (!msg_base) {
@@ -1844,14 +1862,19 @@ struct protstream *pout;
 	n = msg_size - offset;
     }
 
-    /* Look for a NUL in the data */
-    if (memchr(msg_base + offset, 0, n)) {
+    /* Get domain of the data */
+    domain = data_domain(msg_base + offset, n);
+
+    if (domain == DOMAIN_BINARY) {
 	/* Write size of literal8 */
 	prot_printf(pout, "~{%u}\r\n", size);
     } else {
 	/* Write size of literal */
 	prot_printf(pout, "{%u}\r\n", size);
     }
+
+    /* Non-text literal -- tell the protstream about it */
+    if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
 
     prot_write(pout, msg_base + offset, n);
     while (n++ < size) {
@@ -1862,6 +1885,9 @@ struct protstream *pout;
 	 */
 	prot_putc(' ', pout);
     }
+
+    /* End of non-text literal -- tell the protstream about it */
+    if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
 }
 
 /*

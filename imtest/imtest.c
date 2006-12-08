@@ -1,7 +1,7 @@
 /* imtest.c -- IMAP/POP3/NNTP/LMTP/SMTP/MUPDATE/MANAGESIEVE test client
  * Ken Murchison (multi-protocol implementation)
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.110.2.1 2006/12/05 16:05:58 murch Exp $
+ * $Id: imtest.c,v 1.110.2.2 2006/12/08 21:36:30 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -182,6 +182,7 @@ struct capa_cmd_t {
     char *resp;		/* end of capability response */
     char *tls;		/* [OPTIONAL] TLS capability string */
     char *auth;		/* [OPTIONAL] AUTH capability string */
+    char *compress;	/* [OPTIONAL] COMPRESS capability string */
     char *(*parse_mechlist)(const char *str, struct protocol_t *prot);
 			/* [OPTIONAL] parse capability string,
 			   returns space-separated list of mechs */
@@ -208,6 +209,12 @@ struct sasl_cmd_t {
 			/* [OPTIONAL] parse response for success data */
 };
 
+struct compress_cmd_t {
+    char *cmd;		/* compress command string */
+    char *ok;		/* success response string */
+    char *fail;		/* failure response string */
+};
+
 struct logout_cmd_t {
     char *cmd;		/* logout command string */
     char *resp;		/* logout response */
@@ -221,6 +228,7 @@ struct protocol_t {
     struct capa_cmd_t capa_cmd;
     struct tls_cmd_t tls_cmd;
     struct sasl_cmd_t sasl_cmd;
+    struct compress_cmd_t compress_cmd;
     int (*do_auth)(struct sasl_cmd_t *sasl_cmd, void *rock,
 		   char *mech, char *mechlist);
 			/* [OPTIONAL] perform protocol-specific
@@ -1452,7 +1460,8 @@ static void interactive(struct protocol_t *protocol, char *filename)
 }
 
 static char *ask_capability(struct protocol_t *prot,
-			    int *supports_starttls, int automatic)
+			    int *supports_starttls, int *supports_compress,
+			    int automatic)
 {
     char str[1024];
     char *ret = NULL, *tmp;
@@ -1480,6 +1489,12 @@ static char *ask_capability(struct protocol_t *prot,
 	if (prot->capa_cmd.tls &&
 	    strstr(str, prot->capa_cmd.tls) != NULL) {
 	    *supports_starttls = 1;
+	}
+	
+	/* check for compress */
+	if (prot->capa_cmd.compress &&
+	    strstr(str, prot->capa_cmd.compress) != NULL) {
+	    *supports_compress = 1;
 	}
 	
 	/* check for auth */
@@ -2206,6 +2221,12 @@ void usage(char *prog, char *prot)
 	printf("  -t file  : Enable TLS. file has the TLS public and private keys\n"
 	       "             (specify \"\" to not use TLS for authentication)\n");
 #endif /* HAVE_SSL */
+#ifdef HAVE_ZLIB
+    if (!strcasecmp(prot, "imap")) {
+	printf("  -q       : Enable %s COMPRESSion"
+	       " (before last authentication attempt)\n", prot);
+    }
+#endif /* HAVE_ZLIB */
     printf("  -c       : enable challenge prompt callbacks\n"
 	   "             (enter one-time password instead of secret pass-phrase)\n");
     printf("  -n       : number of auth attempts (default=1)\n");
@@ -2220,68 +2241,78 @@ void usage(char *prog, char *prot)
 static struct protocol_t protocols[] = {
     { "imap", "imaps", "imap",
       { 0, "* OK", &imap_parse_banner },
-      { "C01 CAPABILITY", "C01 ", " STARTTLS", " AUTH=", &imap_parse_mechlist },
+      { "C01 CAPABILITY", "C01 ", " STARTTLS", " AUTH=", " COMPRESS=DEFLATE",
+	&imap_parse_mechlist },
       { "S01 STARTTLS", "S01 OK", "S01 NO", 0 },
       { "A01 AUTHENTICATE", 0, 0, "A01 OK", "A01 NO", "+ ", "*", NULL },
+      { "Z01 COMPRESS DEFLATE", "Z01 OK", "Z01 NO" },
       &imap_do_auth, { "Q01 LOGOUT", "Q01 " },
       &imap_init_conn, &generic_pipe, &imap_reset
     },
     { "pop3", "pop3s", "pop",
       { 0, "+OK ", &pop3_parse_banner },
-      { "CAPA", ".", "STLS", "SASL ", NULL },
+      { "CAPA", ".", "STLS", "SASL ", NULL, NULL },
       { "STLS", "+OK", "-ERR", 0 },
       { "AUTH", 255, 0, "+OK", "-ERR", "+ ", "*", NULL },
+      { NULL, NULL, NULL, },
       &pop3_do_auth, { "QUIT", "+OK" }, NULL, NULL, NULL
     },
     { "nntp", "nntps", "nntp",
       { 0, "20", NULL },
-      { "CAPABILITIES", ".", "STARTTLS", "SASL ", NULL },
+      { "CAPABILITIES", ".", "STARTTLS", "SASL ", NULL, NULL },
       { "STARTTLS", "382", "580", 0 },
       { "AUTHINFO SASL", 512, 0, "28", "48", "383 ", "*", &nntp_parse_success },
+      { NULL, NULL, NULL, },
       &nntp_do_auth, { "QUIT", "205" }, NULL, NULL, NULL
     },
     { "lmtp", NULL, "lmtp",
       { 0, "220 ", NULL },
-      { "LHLO example.com", "250 ", "STARTTLS", "AUTH ", NULL },
+      { "LHLO example.com", "250 ", "STARTTLS", "AUTH ", NULL, NULL },
       { "STARTTLS", "220", "454", 0 },
       { "AUTH", 512, 0, "235", "5", "334 ", "*", NULL },
+      { NULL, NULL, NULL, },
       &xmtp_do_auth, { "QUIT", "221" },
       &xmtp_init_conn, &generic_pipe, &xmtp_reset
     },
     { "smtp", "smtps", "smtp",
       { 0, "220 ", NULL },
-      { "EHLO example.com", "250 ", "STARTTLS", "AUTH ", NULL },
+      { "EHLO example.com", "250 ", "STARTTLS", "AUTH ", NULL, NULL },
       { "STARTTLS", "220", "454", 0 },
       { "AUTH", 512, 0, "235", "5", "334 ", "*", NULL },
+      { NULL, NULL, NULL, },
       &xmtp_do_auth, { "QUIT", "221" },
       &xmtp_init_conn, &generic_pipe, &xmtp_reset
     },
     { "mupdate", NULL, "mupdate",
       { 1, "* OK", NULL },
-      { NULL , "* OK", "* STARTTLS", "* AUTH ", NULL },
+      { NULL , "* OK", "* STARTTLS", "* AUTH ", NULL, NULL },
       { "S01 STARTTLS", "S01 OK", "S01 NO", 1 },
       { "A01 AUTHENTICATE", INT_MAX, 1, "A01 OK", "A01 NO", "", "*", NULL },
+      { NULL, NULL, NULL, },
       NULL, { "Q01 LOGOUT", "Q01 " }, NULL, NULL, NULL
     },
     { "sieve", NULL, SIEVE_SERVICE_NAME,
       { 1, "OK", NULL },
-      { "CAPABILITY", "OK", "\"STARTTLS\"", "\"SASL\" ", NULL },
+      { "CAPABILITY", "OK", "\"STARTTLS\"", "\"SASL\" ", NULL, NULL },
       { "STARTTLS", "OK", "NO", 0 },
       { "AUTHENTICATE", INT_MAX, 1, "OK", "NO", NULL, "*", &sieve_parse_success },
+      { NULL, NULL, NULL, },
       NULL, { "LOGOUT", "OK" }, NULL, NULL, NULL
     },
     { "csync", NULL, "csync",
       { 1, "* OK", NULL },
-      { NULL , "* OK", "* STARTTLS", "* SASL ", NULL },
+      { NULL , "* OK", "* STARTTLS", "* SASL ", NULL, NULL },
       { "STARTTLS", "OK", "NO", 1 },
       { "AUTHENTICATE", INT_MAX, 0, "OK", "NO", "+ ", "*", NULL },
+      { NULL, NULL, NULL, },
       NULL, { "EXIT", "OK" }, NULL, NULL, NULL
     },
     { NULL, NULL, NULL,
       { 0, NULL, NULL },
-      { NULL, NULL, NULL, NULL, NULL },
+      { NULL, NULL, NULL, NULL, NULL, NULL },
       { NULL, NULL, NULL, 0 },
       { NULL, 0, 0, NULL, NULL, NULL, NULL, NULL },
+      { NULL, NULL, NULL, },
       NULL, { NULL, NULL }, NULL, NULL, NULL
     }
 };
@@ -2306,8 +2337,8 @@ int main(int argc, char **argv)
     char *tls_keyfile="";
     char *port = "", *prot = "";
     int run_stress_test=0;
-    int dotls=0, dossl=0;
-    int server_supports_tls;
+    int dotls=0, dossl=0, docompress=0;
+    int server_supports_tls, server_supports_compress;
     char str[1024];
     const char *pidfile = NULL;
     void *rock = NULL;
@@ -2329,10 +2360,17 @@ int main(int argc, char **argv)
     prog = strrchr(argv[0], '/') ? strrchr(argv[0], '/')+1 : argv[0];
 
     /* look at all the extra args */
-    while ((c = getopt(argc, argv, "P:scizvk:l:p:u:a:m:f:r:t:n:I:x:X:w:o:?h")) != EOF)
+    while ((c = getopt(argc, argv, "P:qscizvk:l:p:u:a:m:f:r:t:n:I:x:X:w:o:?h")) != EOF)
 	switch (c) {
 	case 'P':
 	    prot = optarg;
+	    break;
+	case 'q':
+#ifdef HAVE_ZLIB
+	    docompress=1;
+#else
+	    imtest_fatal("imtest was not compiled with zlib support\n");
+#endif
 	    break;
 	case 's':
 #ifdef HAVE_SSL
@@ -2562,6 +2600,7 @@ int main(int argc, char **argv)
 	}
 	
 	mechlist = ask_capability(protocol, &server_supports_tls,
+				  &server_supports_compress,
 				  protocol->banner.is_capa);
 	
 #ifdef HAVE_SSL
@@ -2585,6 +2624,7 @@ int main(int argc, char **argv)
 			   "since they might have changed\n");
 		if (mechlist) free(mechlist);
 		mechlist = ask_capability(protocol, &server_supports_tls,
+					  &server_supports_compress,
 					  protocol->tls_cmd.auto_capa);
 	    }
 	    
@@ -2592,6 +2632,24 @@ int main(int argc, char **argv)
 	    imtest_fatal("STARTTLS not supported by the server!\n");
 	}
 #endif /* HAVE_SSL */
+
+#ifdef HAVE_ZLIB
+	if ((reauth == 1) && (docompress==1) && (server_supports_compress==1)) {
+	char *resp;
+
+	printf("C: %s\r\n", protocol->compress_cmd.cmd);
+	prot_printf(pout, "%s\r\n", protocol->compress_cmd.cmd);
+	prot_flush(pout);
+	    
+	resp = waitfor(protocol->compress_cmd.ok, protocol->compress_cmd.fail, 1);
+	    
+	if (!strncasecmp(resp, protocol->compress_cmd.ok,
+			 strlen(protocol->compress_cmd.ok))) {
+	    prot_setcompress(pin);
+	    prot_setcompress(pout);
+	}
+    }
+#endif /* HAVE_ZLIB */
 
 	if (noinitresp) {
 	    /* don't use an initial response, even if its supported */

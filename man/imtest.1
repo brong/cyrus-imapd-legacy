@@ -39,7 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
-.\" $Id: imtest.1,v 1.15 2006/11/30 17:11:23 murch Exp $
+.\" $Id: imtest.1,v 1.15.2.1 2006/12/08 21:36:30 murch Exp $
 .SH NAME
 imtest \- interactive IMAP test program
 .SH SYNOPSIS
@@ -90,10 +90,13 @@ imtest \- interactive IMAP test program
 .B \-s
 ]
 [
-.B \-c
+.B \-q
 ]
 .br
        [
+.B \-c
+]
+[
 .B \-i
 ]
 [
@@ -181,6 +184,9 @@ attempt to do SSL/TLS session reuse and/or fast reauth
 .TP
 .B -s
 Enable IMAP over SSL (imaps).
+.TP
+.B -q
+Enable IMAP COMPRESSion (before the last authentication attempt).
 .TP
 .B -c
 Enable challenge prompt callbacks.  This will cause the OTP mechanism

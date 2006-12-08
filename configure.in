@@ -42,7 +42,7 @@ dnl
 
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.297.2.1 2006/12/01 17:46:39 murch Exp $
+dnl $Id: configure.in,v 1.297.2.2 2006/12/08 21:36:28 murch Exp $
 dnl
 
 
@@ -729,9 +729,16 @@ if test -n "$EGD_SOCKET" ; then
 fi
 
 dnl
+dnl Test for zlib
+dnl
+CMU_HAVE_ZLIB
+AC_MSG_CHECKING(for zlib)
+AC_MSG_RESULT($with_zlib)
+
+dnl
 dnl Test for Zephyr
 dnl
-AC_ARG_WITH(zephyr,[  --with-zephyr[=PATH]    enable Zephyr notification (installed on PATH)],
+AC_ARG_WITH(zephyr,[  --with-zephyr[=PATH]      enable Zephyr notification (installed on PATH)],
 	with_zephyr="${withval}")
 if test -z "$with_zephyr"; then
      if test -f /usr/local/lib/libzephyr.a; then
@@ -762,7 +769,7 @@ fi
 dnl
 dnl Set pidfile location
 dnl
-AC_ARG_WITH(pidfile,[  --with-pidfile[=PATH]   pidfile in PATH (/var/run/cyrus-master.pid)],
+AC_ARG_WITH(pidfile,[  --with-pidfile[=PATH]     pidfile in PATH (/var/run/cyrus-master.pid)],
 	[MASTERPIDFILE="$withval"],
 	[MASTERPIDFILE="/var/run/cyrus-master.pid"])
 MASTERPIDFILE="\"$MASTERPIDFILE\""
@@ -1048,7 +1055,7 @@ AC_SUBST(PERL_DEPSUBDIRS)
 AC_SUBST(PERL)
 
 AH_TOP([
-/* $Id: configure.in,v 1.297.2.1 2006/12/01 17:46:39 murch Exp $ */
+/* $Id: configure.in,v 1.297.2.2 2006/12/08 21:36:28 murch Exp $ */
 /* 
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *

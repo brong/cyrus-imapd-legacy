@@ -1,7 +1,7 @@
 /* prot.h -- stdio-like module that handles buffering, SASL, and TLS
  *           details for I/O over sockets
  *
- * $Id: prot.h,v 1.43 2006/11/30 17:11:22 murch Exp $
+ * $Id: prot.h,v 1.43.2.1 2006/12/08 21:36:30 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -56,6 +56,10 @@
 #include <openssl/ssl.h>
 #endif /* HAVE_SSL */
 
+#ifdef HAVE_ZLIB
+#include <zlib.h>
+#endif /* HAVE_ZLIB */
+
 #define PROT_BUFSIZE 4096
 /* #define PROT_BUFSIZE 8192 */
 
@@ -87,6 +91,17 @@ struct protstream {
     SSL *tls_conn;
 #endif /* HAVE_SSL */
 
+#ifdef HAVE_ZLIB
+    /* (De)compress stream */
+    z_stream *zstrm;
+    /* (De)compress buffer */
+    unsigned char *zbuf;
+    unsigned int zbuf_size;
+    /* Compress parameters */
+    int zlevel;
+    int zflush;
+#endif /* HAVE_ZLIB */
+
     /* Big Buffer Information */
     const char *bigbuf_base;  /* Base Pointer */
     unsigned long bigbuf_siz; /* Overall Size of Buffer */
@@ -95,6 +110,7 @@ struct protstream {
 
     /* Status Flags */
     int eof;
+    int boundary; /* Type of data is about to change */
     char *error;
 
     /* Parameters */
@@ -177,6 +193,14 @@ extern int prot_setsasl(struct protstream *s, sasl_conn_t *conn);
  * negotiation */
 extern int prot_settls(struct protstream *s, SSL *tlsconn);
 #endif /* HAVE_SSL */
+
+#ifdef HAVE_ZLIB
+/* Enable (de)compression for a given protstream */
+int prot_setcompress(struct protstream *s);
+#endif /* HAVE_ZLIB */
+
+/* Tell the protstream that the type of data is about to change. */
+int prot_data_boundary(struct protstream *s);
 
 /* Set a timeout for the connection (in seconds) */
 extern int prot_settimeout(struct protstream *s, int timeout);

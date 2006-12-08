@@ -93,6 +93,7 @@ C,CHECK_COUNT,"Number of check", auto
 C,COPY_COUNT,"Number of copy", auto
 C,CREATE_COUNT,"Number of create", auto
 C,CLOSE_COUNT,"Number of close", auto
+C,COMPRESS_COUNT,"Number of compress", auto
 C,DELETE_COUNT,"Number of delete", auto
 C,DELETEACL_COUNT,"Number of deleteacl", auto
 C,EXPUNGE_COUNT,"Number of expunge", auto
