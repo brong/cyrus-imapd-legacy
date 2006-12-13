@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219.2.1 2006/12/08 21:36:30 murch Exp $
+ * $Id: index.c,v 1.219.2.2 2006/12/13 20:30:06 murch Exp $
  */
 #include <config.h>
 
@@ -990,7 +990,7 @@ static int _index_search(unsigned **msgno_list, struct mailbox *mailbox,
     unsigned msgno;
     struct mapfile msgfile;
     int n = 0;
-    int listindex;
+    int listindex, min;
     int listcount;
 
     if (imapd_exists <= 0) return 0;
@@ -1004,8 +1004,20 @@ static int _index_search(unsigned **msgno_list, struct mailbox *mailbox,
        already looked at. */
     listcount = search_prefilter_messages(*msgno_list, mailbox, searchargs);
 
-    for (listindex = 0; listindex < listcount; listindex++) {
-        msgno = (*msgno_list)[listindex];
+    if (searchargs->returnopts == SEARCH_RETURN_MAX) {
+	/* If we only want MAX, then skip forward search,
+	   and do complete reverse search */
+	listindex = listcount;
+	min = 0;
+    } else {
+	/* Otherwise use forward search, potentially skipping reverse search */
+	listindex = 0;
+	min = listcount;
+    }
+
+    /* Forward search.  Used for everything other than MAX-only */
+    for (; listindex < listcount; listindex++) {
+	msgno = (*msgno_list)[listindex];
 	msgfile.base = 0;
 	msgfile.size = 0;
 
@@ -1014,6 +1026,41 @@ static int _index_search(unsigned **msgno_list, struct mailbox *mailbox,
 	    if (highestmodseq && (MODSEQ(msgno) > *highestmodseq)) {
 		*highestmodseq = MODSEQ(msgno);
 	    }
+
+	    /* See if we should short-circuit
+	       (we want MIN, but NOT COUNT or ALL) */
+	    if ((searchargs->returnopts & SEARCH_RETURN_MIN) &&
+		!(searchargs->returnopts & SEARCH_RETURN_COUNT) &&
+		!(searchargs->returnopts & SEARCH_RETURN_ALL)) {
+
+		if (searchargs->returnopts & SEARCH_RETURN_MAX) {
+		    /* If we want MAX, setup for reverse search */
+		    min = listindex;
+		}
+		/* We're done */
+		listindex = listcount;
+		*highestmodseq = MODSEQ(msgno);
+	    }
+	}
+	if (msgfile.base) {
+	    mailbox_unmap_message(mailbox, UID(msgno),
+				  &msgfile.base, &msgfile.size);
+	}
+    }
+
+    /* Reverse search.  Stops at previously found MIN (if any) */
+    for (listindex = listcount; listindex > min; listindex--) {
+        msgno = (*msgno_list)[listindex-1];
+	msgfile.base = 0;
+	msgfile.size = 0;
+
+	if (index_search_evaluate(mailbox, searchargs, msgno, &msgfile)) {
+	    (*msgno_list)[n++] = msgno;
+	    if (highestmodseq && (MODSEQ(msgno) > *highestmodseq)) {
+		*highestmodseq = MODSEQ(msgno);
+	    }
+	    /* We only care about MAX, so we're done on first match */
+	    listindex = 0;
 	}
 	if (msgfile.base) {
 	    mailbox_unmap_message(mailbox, UID(msgno),
@@ -1071,17 +1118,62 @@ int index_search(struct mailbox *mailbox, struct searchargs *searchargs,
     n = _index_search(&msgno_list, mailbox, searchargs,
 		      searchargs->modseq ? &highestmodseq : NULL);
 
-    prot_printf(imapd_out, "* SEARCH");
+    if (searchargs->returnopts) {
+	prot_printf(imapd_out, "* ESEARCH");
+	if (searchargs->tag) {
+	    prot_printf(imapd_out, " (TAG \"%s\")", searchargs->tag);
+	}
+	if (n) {
+	    if (usinguid) prot_printf(imapd_out, " UID");
+	    if (searchargs->returnopts & SEARCH_RETURN_MIN) {
+		prot_printf(imapd_out, " MIN %u",
+			    usinguid ? UID(msgno_list[0]) : msgno_list[0]);
+	    }
+	    if (searchargs->returnopts & SEARCH_RETURN_MAX) {
+		prot_printf(imapd_out, " MAX %u",
+			    usinguid ? UID(msgno_list[n-1]) : msgno_list[n-1]);
+	    }
+	    if (highestmodseq) {
+		prot_printf(imapd_out, " MODSEQ " MODSEQ_FMT, highestmodseq);
+	    }
+	    if (searchargs->returnopts & SEARCH_RETURN_ALL) {
+		int j, c = ' ';
 
-    for (i = 0; i < n; i++)
-	prot_printf(imapd_out, " %u",
-		    usinguid ? UID(msgno_list[i]) : msgno_list[i]);
+		prot_printf(imapd_out, " ALL");
+		/* Create a sequence-set */
+		for (i = 0; i < n; i++) {
+		    prot_printf(imapd_out, "%c%u", c,
+				usinguid ? UID(msgno_list[i]) : msgno_list[i]);
+
+		    /* Check if we have a range */
+		    for (j = i; j+1 < n && msgno_list[j+1] == msgno_list[j]+1;
+			 j++);
+		    if (j > i) {
+			prot_printf(imapd_out, ":%u",
+				    usinguid ? UID(msgno_list[j]) : msgno_list[j]);
+			i = j;
+		    }
+		    c = ',';
+		}
+	    }
+	}
+	if (searchargs->returnopts & SEARCH_RETURN_COUNT) {
+	    prot_printf(imapd_out, " COUNT %u", n);
+	}
+    }
+    else {
+	prot_printf(imapd_out, "* SEARCH");
+
+	for (i = 0; i < n; i++)
+	    prot_printf(imapd_out, " %u",
+			usinguid ? UID(msgno_list[i]) : msgno_list[i]);
+
+	if (highestmodseq) {
+	    prot_printf(imapd_out, " (MODSEQ " MODSEQ_FMT ")", highestmodseq);
+	}
+    }
 
     if (n) free(msgno_list);
-
-    if (highestmodseq) {
-	prot_printf(imapd_out, " (MODSEQ " MODSEQ_FMT ")", highestmodseq);
-    }
 
     prot_printf(imapd_out, "\r\n");
 

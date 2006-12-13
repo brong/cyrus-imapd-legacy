@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.2 2006/12/08 21:36:29 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.3 2006/12/13 20:30:04 murch Exp $ */
 
 #include <config.h>
 
@@ -340,6 +340,7 @@ void annotate_response(struct entryattlist *l);
 int getlistselopts(char *tag, int *opts);
 int getlistretopts(char *tag, int *opts);
 
+int getsearchreturnopts(char *tag, struct searchargs *searchargs);
 int getsearchprogram(char *tag, struct searchargs *searchargs,
 			int *charset, int parsecharset);
 int getsearchcriteria(char *tag, struct searchargs *searchargs,
@@ -4505,6 +4506,7 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 void cmd_search(char *tag, int usinguid)
 {
     int c;
+    static struct buf arg;
     int charset = 0;
     struct searchargs *searchargs;
     clock_t start = clock();
@@ -4523,6 +4525,23 @@ void cmd_search(char *tag, int usinguid)
     /* local mailbox */
     searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
 
+    /* Check for and parse RETURN options */
+    c = getword(imapd_in, &arg);
+    if (!strcasecmp(arg.s, "return") && c == ' ') {
+	c = getsearchreturnopts(tag, searchargs);
+	if (c == EOF) {
+	    eatline(imapd_in, ' ');
+	    freesearchargs(searchargs);
+	    return;
+	}
+	if (!searchargs->returnopts) searchargs->returnopts = SEARCH_RETURN_ALL;
+	searchargs->tag = tag;
+    }
+    else {
+	prot_ungetc(c, imapd_in);
+	while (arg.len) prot_ungetc(arg.s[--arg.len], imapd_in);
+    }
+ 
     c = getsearchprogram(tag, searchargs, &charset, 1);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
@@ -7364,6 +7383,58 @@ void cmd_setannotation(char *tag, char *mboxpat)
 }
 
 /*
+ * Parse search return options
+ */
+int getsearchreturnopts(char *tag, struct searchargs *searchargs)
+{
+    int c;
+    static struct buf opt;
+
+    c = prot_getc(imapd_in);
+    if (c != '(') {
+        prot_printf(imapd_out,
+                    "%s BAD Missing return options in Search\r\n", tag);
+        return EOF;
+    }
+
+    do {
+        c = getword(imapd_in, &opt);
+        if (!opt.s[0]) break;
+
+        lcase(opt.s);
+        if (!strcmp(opt.s, "min")) {
+            searchargs->returnopts |= SEARCH_RETURN_MIN;
+        }
+        else if (!strcmp(opt.s, "max")) {
+            searchargs->returnopts |= SEARCH_RETURN_MAX;
+        }
+        else if (!strcmp(opt.s, "all")) {
+            searchargs->returnopts |= SEARCH_RETURN_ALL;
+        }
+        else if (!strcmp(opt.s, "count")) {
+            searchargs->returnopts |= SEARCH_RETURN_COUNT;
+        }
+        else {
+            prot_printf(imapd_out,
+			"%s BAD Invalid Search return option %s\r\n",
+                        tag, opt.s);
+            return EOF;
+        }
+
+    } while (c == ' ');
+
+    if (c != ')') {
+        prot_printf(imapd_out,
+                    "%s BAD Missing close parenthesis in Search\r\n", tag);
+        return EOF;
+    }
+
+    c = prot_getc(imapd_in);
+
+    return c;
+}
+
+/*
  * Parse a search program
  */
 int getsearchprogram(tag, searchargs, charset, parsecharset)
@@ -7619,7 +7690,14 @@ int parsecharset;
     case 'm':
 	if ((imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
 	    !strcmp(criteria.s, "modseq")) {
-	    if (c != ' ') goto missingarg;		
+	    if (c != ' ') goto missingarg;
+	    /* Check for optional search-modseq-ext */
+	    c = getqstring(imapd_in, imapd_out, &arg);
+	    if (c != EOF) {
+		if (c != ' ') goto missingarg;
+		c = getword(imapd_in, &arg);
+		if (c != ' ') goto missingarg;
+	    }
 	    c = getword(imapd_in, &arg);
 	    for (p = arg.s; *p && isdigit((int) *p); p++) {
 		searchargs->modseq = searchargs->modseq * 10 + *p - '0';

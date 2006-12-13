@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.1 2006/12/01 17:46:41 murch Exp $
+ * $Id: imapd.h,v 1.63.2.2 2006/12/13 20:30:06 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -150,12 +150,21 @@ struct searchsub {
     struct searchargs *sub2;
 };
 
+/* Bitmasks for search flags */
 enum {
     SEARCH_RECENT_SET =         (1<<0),
     SEARCH_RECENT_UNSET	=       (1<<1),
     SEARCH_SEEN_SET =           (1<<2),
     SEARCH_SEEN_UNSET =	        (1<<3)
 /*    SEARCH_UNCACHEDHEADER =	(1<<4) -- obsolete */
+};
+
+/* Bitmasks for search return options */
+enum {
+    SEARCH_RETURN_MIN =		(1<<0),
+    SEARCH_RETURN_MAX =		(1<<1),
+    SEARCH_RETURN_ALL =		(1<<2),
+    SEARCH_RETURN_COUNT =	(1<<3)
 };
 
 /* Things that may be searched for */
@@ -183,6 +192,10 @@ struct searchargs {
     modseq_t modseq;
 
     bit32 cache_atleast;
+
+    /* For ESEARCH */
+    const char *tag;
+    int returnopts;
 };
 
 /* Sort criterion */
