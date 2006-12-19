@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219.2.2 2006/12/13 20:30:06 murch Exp $
+ * $Id: index.c,v 1.219.2.3 2006/12/19 18:58:17 murch Exp $
  */
 #include <config.h>
 
@@ -3788,7 +3788,8 @@ static MsgData *index_msgdata_load(unsigned *msgno_list, int n,
 		break;
 	    case SORT_DATE:
 		cur->date = message_parse_date(envtokens[ENV_DATE],
-					       PARSE_TIME | PARSE_ZONE);
+					       PARSE_TIME | PARSE_ZONE
+					       | PARSE_NOCREATE);
 		break;
 	    case SORT_FROM:
 		cur->from = get_localpart_addr(from + CACHE_ITEM_SIZE_SKIP);
