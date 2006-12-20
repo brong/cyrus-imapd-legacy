@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.3 2006/12/13 20:30:04 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.4 2006/12/20 17:11:15 murch Exp $ */
 
 #include <config.h>
 
@@ -10461,12 +10461,12 @@ void cmd_compress(char *tag, char *alg)
 {
     if (imapd_compress_done) {
 	prot_printf(imapd_out,
-		    "%s BAD [COMPRESSIONACTVE] DEFLATE active via COMPRESS\r\n",
+		    "%s BAD [COMPRESSIONACTIVE] DEFLATE active via COMPRESS\r\n",
 		    tag);
     }
     else if (imapd_tls_comp) {
 	prot_printf(imapd_out,
-		    "%s NO [COMPRESSIONACTVE] %s active via TLS\r\n",
+		    "%s NO [COMPRESSIONACTIVE] %s active via TLS\r\n",
 		    tag, SSL_COMP_get_name(imapd_tls_comp));
     }
     else if (strcasecmp(alg, "DEFLATE")) {
