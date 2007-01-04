@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.5 2007/01/03 00:19:23 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.6 2007/01/04 15:07:00 murch Exp $ */
 
 #include <config.h>
 
@@ -7467,7 +7467,7 @@ int parsecharset;
     char *p, *str;
     int c, flag;
     unsigned size;
-    time_t start, end;
+    time_t start, end, now = time(0);
 
     c = getword(imapd_in, &criteria);
     lcase(criteria.s);
@@ -7748,6 +7748,15 @@ int parsecharset;
 	else if (!strcmp(criteria.s, "old")) {
 	    searchargs->flags |= SEARCH_RECENT_UNSET;
 	}
+	else if (!strcmp(criteria.s, "older")) {
+	    if (c != ' ') goto missingarg;		
+	    c = getword(imapd_in, &arg);
+	    if (c == EOF || !imparse_isnumber(arg.s)) goto badinterval;
+	    start = now - atoi(arg.s);
+	    if (!searchargs->before || searchargs->before > start) {
+		searchargs->before = start;
+	    }
+	}
 	else if (!strcmp(criteria.s, "on")) {
 	    if (c != ' ') goto missingarg;		
 	    c = getsearchdate(&start, &end);
@@ -7905,6 +7914,20 @@ int parsecharset;
 	else goto badcri;
 	break;
 
+    case 'y':
+	if (!strcmp(criteria.s, "younger")) {
+	    if (c != ' ') goto missingarg;		
+	    c = getword(imapd_in, &arg);
+	    if (c == EOF || !imparse_isnumber(arg.s)) goto badinterval;
+	    start = now - atoi(arg.s);
+	    if (!searchargs->after || searchargs->after < start) {
+		searchargs->after = start;
+	    }
+	}
+	else goto badcri;
+	break;
+
+
     default:
     badcri:
 	prot_printf(imapd_out, "%s BAD Invalid Search criteria\r\n", tag);
@@ -7933,6 +7956,11 @@ int parsecharset;
 
  badnumber:
     prot_printf(imapd_out, "%s BAD Invalid number in Search command\r\n", tag);
+    if (c != EOF) prot_ungetc(c, imapd_in);
+    return EOF;
+
+ badinterval:
+    prot_printf(imapd_out, "%s BAD Invalid interval in Search command\r\n", tag);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
 }
