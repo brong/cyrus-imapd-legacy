@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: prot.c,v 1.87.2.1 2006/12/08 21:36:30 murch Exp $
+ * $Id: prot.c,v 1.87.2.2 2007/01/04 14:50:56 murch Exp $
  */
 
 #include <config.h>
@@ -1442,7 +1442,7 @@ void protgroup_reset(struct protgroup *group)
 {
     if(group) {
 	memset(group->group, 0,
-	       group->next_element * sizeof(struct protstream *));
+	       group->nalloced * sizeof(struct protstream *));
 	group->next_element = 0;
     }
 }
@@ -1489,6 +1489,11 @@ void protgroup_delete(struct protgroup *group, struct protstream *item)
     /* find the protstream */
     for (i = 0; i < group->next_element; i++) {
 	if (group->group[i] == item) {
+	    /* slide all remaining elements down one slot */
+	    group->next_element--;
+	    for (; i < group->next_element; i++) {
+		group->group[i] = group->group[i+1];
+	    }
 	    group->group[i] = NULL;
 	    return;
 	}
