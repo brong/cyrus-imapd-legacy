@@ -1,7 +1,7 @@
 /* imtest.c -- IMAP/POP3/NNTP/LMTP/SMTP/MUPDATE/MANAGESIEVE test client
  * Ken Murchison (multi-protocol implementation)
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.110.2.3 2007/01/11 21:14:29 murch Exp $
+ * $Id: imtest.c,v 1.110.2.4 2007/01/11 21:27:25 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -1600,8 +1600,9 @@ static void *imap_parse_banner(char *str, struct protocol_t *prot)
 	prot->banner.is_capa = -1;
 
 	/* trim the banner to include just the capability string */
+	capa += 2;
 	p = strchr(capa, ']');
-	strcpy(p+1, "\r\n");
+	strcpy(p, "\r\n");
 
 	/* put the capability string back on the stream */
 	len = strlen(capa);
