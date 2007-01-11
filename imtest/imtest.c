@@ -1,7 +1,7 @@
 /* imtest.c -- IMAP/POP3/NNTP/LMTP/SMTP/MUPDATE/MANAGESIEVE test client
  * Ken Murchison (multi-protocol implementation)
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.110.2.2 2006/12/08 21:36:30 murch Exp $
+ * $Id: imtest.c,v 1.110.2.3 2007/01/11 21:14:29 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -1588,15 +1588,28 @@ static int generic_pipe(char *buf, int len, void *rock)
 
 static void *imap_parse_banner(char *str, struct protocol_t *prot)
 {
-    if (strstr(str, "[CAPABILITY ")) {
-	size_t len = strlen(str);
+    char *capa = strstr(str, " [CAPABILITY ");
 
-	/* banner is capability string, adjust profile */
+    if (capa) {
+	char *p;
+	size_t len;
+
+	/* banner is capability string - adjust profile and
+	 * put a parsable capability response back on the stream
+	 */
 	prot->banner.is_capa = -1;
-	prot->capa_cmd.resp = "* OK";
 
-	/* put the string back on the stream */
-	while (len) prot_ungetc(str[--len], pin);
+	/* trim the banner to include just the capability string */
+	p = strchr(capa, ']');
+	strcpy(p+1, "\r\n");
+
+	/* put the capability string back on the stream */
+	len = strlen(capa);
+	while (len) prot_ungetc(capa[--len], pin);
+
+	/* put capability response tag on the stream */
+	len = strlen(prot->capa_cmd.resp);
+	while (len) prot_ungetc(prot->capa_cmd.resp[--len], pin);
     }
 
     return NULL;
