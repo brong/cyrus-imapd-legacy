@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.6 2007/01/04 15:07:00 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.7 2007/01/30 17:10:56 murch Exp $ */
 
 #include <config.h>
 
@@ -103,6 +103,7 @@
 #include "util.h"
 #include "version.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
 
 #include "pushstats.h"		/* SNMP interface */
 
@@ -2040,6 +2041,7 @@ void cmd_login(char *tag, char *user)
 			 userbuf, sizeof(userbuf), &userlen);
 
     if (r) {
+	eatline(imapd_in, ' ');
 	syslog(LOG_NOTICE, "badlogin: %s plaintext %s invalid user",
 	       imapd_clienthost, beautify_string(user));
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, 
@@ -2350,6 +2352,7 @@ void cmd_noop(char *tag, char *cmd)
     if (backend_current) {
 	/* remote mailbox */
 	prot_printf(backend_current->out, "%s %s\r\n", tag, cmd);
+	pipe_including_tag(backend_current, tag, 0);
 
 	return;
     }
@@ -3115,7 +3118,7 @@ void cmd_append(char *tag, char *name, const char *cur_name)
 			    tag, strlen(name), name, 0, "");
 	    }
 	    if (!(r = pipe_command(s, 16384))) {
-		if (s != backend_current) pipe_including_tag(s, tag, 0);
+		pipe_including_tag(s, tag, 0);
 	    }
 	    s->context = NULL;
 	} else {
@@ -3421,6 +3424,10 @@ void cmd_select(char *tag, char *cmd, char *name)
 	mailbox_close(imapd_mailbox);
 	imapd_mailbox = 0;
     }
+    if (backend_current) {
+	/* remove backend_current from the protgroup */
+	protgroup_delete(protin, backend_current->in);
+    }
 
     if (cmd[0] == 'B') {
 	/* BBoard namespace is empty */
@@ -3451,9 +3458,6 @@ void cmd_select(char *tag, char *cmd, char *name)
 
 	if (backend_current && backend_current != backend_next) {
 	    char mytag[128];
-
-	    /* remove backend_current from the protgroup */
-	    protgroup_delete(protin, backend_current->in);
 
 	    /* switching servers; flush old server output */
 	    proxy_gentag(mytag, sizeof(mytag));
@@ -3495,9 +3499,6 @@ void cmd_select(char *tag, char *cmd, char *name)
     /* local mailbox */
     if (backend_current) {
       char mytag[128];
-
-      /* remove backend_current from the protgroup */
-      protgroup_delete(protin, backend_current->in);
 
       /* switching servers; flush old server output */
       proxy_gentag(mytag, sizeof(mytag));
@@ -3714,7 +3715,9 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
     if (backend_current) {
 	/* remote mailbox */
 	prot_printf(backend_current->out, "%s %s %s ", tag, cmd, sequence);
-	pipe_command(backend_current, 65536);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
@@ -4170,6 +4173,7 @@ void cmd_partial(const char *tag, const char *msgno, char *data,
 	/* remote mailbox */
 	prot_printf(backend_current->out, "%s Partial %s %s %s %s\r\n",
 		    tag, msgno, data, start, count);
+	pipe_including_tag(backend_current, tag, 0);
 	return;
     }
 
@@ -4299,7 +4303,9 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 	/* remote mailbox */
 	prot_printf(backend_current->out, "%s %s %s ",
 		    tag, cmd, sequence);
-	pipe_command(backend_current, 65536);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
@@ -4519,7 +4525,9 @@ void cmd_search(char *tag, int usinguid)
 	const char *cmd = usinguid ? "UID Search" : "Search";
 
 	prot_printf(backend_current->out, "%s %s ", tag, cmd);
-	pipe_command(backend_current, 65536);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
@@ -4594,7 +4602,9 @@ void cmd_sort(char *tag, int usinguid)
 	char *cmd = usinguid ? "UID Sort" : "Sort";
 
 	prot_printf(backend_current->out, "%s %s ", tag, cmd);
-	pipe_command(backend_current, 65536);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
@@ -4686,7 +4696,9 @@ void cmd_thread(char *tag, int usinguid)
 	const char *cmd = usinguid ? "UID Thread" : "Thread";
 
 	prot_printf(backend_current->out, "%s %s ", tag, cmd);
-	pipe_command(backend_current, 65536);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
@@ -4803,6 +4815,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 	prot_printf(backend_current->out, "%s %s %s {%d+}\r\n%s\r\n",
 		    tag, usinguid ? "UID Copy" : "Copy",
 		    sequence, strlen(name), name);
+	pipe_including_tag(backend_current, tag, 0);
 
 	return;
     }
@@ -4917,6 +4930,7 @@ void cmd_expunge(char *tag, char *sequence)
 	} else {
 	    prot_printf(backend_current->out, "%s Expunge\r\n", tag);
 	}
+	pipe_including_tag(backend_current, tag, 0);
 	return;
     }
 
@@ -5031,6 +5045,12 @@ void cmd_create(char *tag, char *name, char *partition, int localonly)
 	    }
 
 	    return;
+	}
+	else if (!r &&
+		 (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_STANDARD) &&
+		 !config_getstring(IMAPOPT_PROXYSERVERS)) {
+	    /* can't create maiilboxes on proxy-only servers */
+	    r = IMAP_PERMISSION_DENIED;
 	}
 
 	/* local mailbox -- fall through */
@@ -5997,8 +6017,7 @@ void cmd_changesub(char *tag, char *namespace, char *name, int add)
 			    tag, cmd, 
 			    strlen(name), name);
 	    }
-	    if (backend_inbox != backend_current)
-		pipe_including_tag(backend_inbox, tag, 0);
+	    pipe_including_tag(backend_inbox, tag, 0);
 	}
 	else {
 	    prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
@@ -6484,7 +6503,7 @@ void cmd_getquotaroot(const char *tag, const char *name)
 	    if (!r) {
 		prot_printf(s->out, "%s Getquotaroot {%d+}\r\n%s\r\n",
 			    tag, strlen(name), name);
-		if (s != backend_current) pipe_including_tag(s, tag, 0);
+		pipe_including_tag(s, tag, 0);
 	    } else {
 		prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
 	    }
@@ -6815,7 +6834,7 @@ void cmd_status(char *tag, char *name)
 		prot_printf(s->out, "%s Status {%d+}\r\n%s ", tag,
 			    strlen(name), name);
 		if (!pipe_command(s, 65536)) {
-		    if (s != backend_current) pipe_including_tag(s, tag, 0);
+		    pipe_including_tag(s, tag, 0);
 		}
 	    } else {
 		eatline(imapd_in, prot_getc(imapd_in));
