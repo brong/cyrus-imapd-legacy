@@ -39,7 +39,7 @@
  *
  * derived from chris newman's code */
 
-/* $Id: imapurl.c,v 1.12 2006/11/30 17:11:22 murch Exp $ */
+/* $Id: imapurl.c,v 1.12.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <stdio.h>
 #include <string.h>
@@ -385,7 +385,6 @@ int imapurl_fromURL(struct imapurl *url, const char *s)
 	char *se;
 	char *at;
 	char *mbox = NULL;
-	char *opt;
 	
 	if (!strncmp(src, "imap://", 7)) { /* absolute URL */
 	    src += 7; /* skip imap:// */

@@ -1,5 +1,5 @@
 /* mailbox.h -- Mailbox format definitions
- * $Id: mailbox.h,v 1.82 2006/11/30 17:11:19 murch Exp $
+ * $Id: mailbox.h,v 1.82.2.1 2007/11/01 14:39:33 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -49,7 +49,7 @@
 
 #include "auth.h"
 #include "quota.h"
-#include "message_uuid.h"
+#include "message_guid.h"
 #include "byteorder64.h"
 
 
@@ -86,7 +86,7 @@ typedef unsigned long int modseq_t;
 #define MAILBOX_FORMAT_NORMAL	0
 #define MAILBOX_FORMAT_NETNEWS	1
 
-#define MAILBOX_MINOR_VERSION	9
+#define MAILBOX_MINOR_VERSION	10
 #define MAILBOX_CACHE_MINOR_VERSION 2
 
 #define FNAME_HEADER "/cyrus.header"
@@ -186,7 +186,7 @@ struct index_record {
     bit32 user_flags[MAX_USER_FLAGS/32];
     unsigned long content_lines;
     unsigned long cache_version;
-    struct message_uuid uuid;
+    struct message_guid guid;
     modseq_t modseq;
 };
 
@@ -238,8 +238,8 @@ struct index_record {
 #define OFFSET_USER_FLAGS 36
 #define OFFSET_CONTENT_LINES (OFFSET_USER_FLAGS+MAX_USER_FLAGS/8) /* added for nntpd */
 #define OFFSET_CACHE_VERSION OFFSET_CONTENT_LINES+sizeof(bit32)
-#define OFFSET_MESSAGE_UUID OFFSET_CACHE_VERSION+sizeof(bit32)
-#define OFFSET_MODSEQ_64 (OFFSET_MESSAGE_UUID+MESSAGE_UUID_PACKED_SIZE) /* CONDSTORE (64-bit modseq) */
+#define OFFSET_MESSAGE_GUID OFFSET_CACHE_VERSION+sizeof(bit32)
+#define OFFSET_MODSEQ_64 (OFFSET_MESSAGE_GUID+MESSAGE_GUID_SIZE) /* CONDSTORE (64-bit modseq) */
 #define OFFSET_MODSEQ (OFFSET_MODSEQ_64+sizeof(bit32)) /* CONDSTORE (32-bit modseq) */
 
 #define INDEX_HEADER_SIZE (OFFSET_SPARE4+sizeof(bit32))
@@ -255,6 +255,8 @@ struct index_record {
 
 #define OPT_POP3_NEW_UIDL (1<<0)	/* added for Outlook stupidity */
 #define OPT_IMAP_CONDSTORE (1<<1)	/* added for CONDSTORE extension */
+#define OPT_IMAP_SHAREDSEEN (1<<2)	/* added for shared \Seen flag */
+#define OPT_IMAP_DUPDELIVER (1<<3)	/* added to allow duplicate delivery */
 
 
 struct mailbox_header_cache {
@@ -266,19 +268,31 @@ struct mailbox_header_cache {
 extern const struct mailbox_header_cache mailbox_cache_headers[];
 extern const int MAILBOX_NUM_CACHE_HEADERS;
 
+/* Aligned buffer for manipulating index header/record fields */
+typedef union {
+    unsigned char buf[INDEX_HEADER_SIZE > INDEX_RECORD_SIZE ?
+		      INDEX_HEADER_SIZE : INDEX_RECORD_SIZE];
+#ifdef HAVE_LONG_LONG_INT
+    bit64 align8; /* align on 8-byte boundary */
+#else
+    bit32 align4; /* align on 4-byte boundary */
+#endif
+} indexbuffer_t;
+
 /* Bitmasks for expunging */
 enum {
     EXPUNGE_FORCE =		(1<<0),
     EXPUNGE_CLEANUP =		(1<<1)
 };
 
-int mailbox_cached_header(const char *s);
-int mailbox_cached_header_inline(const char *text);
+unsigned mailbox_cached_header(const char *s);
+unsigned mailbox_cached_header_inline(const char *text);
 
 unsigned long mailbox_cache_size(struct mailbox *mailbox, unsigned msgno);
 
-typedef int mailbox_decideproc_t(struct mailbox *mailbox, void *rock,
-				 char *indexbuf, int expunge_flags);
+typedef unsigned mailbox_decideproc_t(struct mailbox *mailbox, void *rock,
+				      unsigned char *indexbuf,
+				      int expunge_flags);
 
 typedef void mailbox_notifyproc_t(struct mailbox *mailbox);
 
@@ -329,6 +343,11 @@ extern int mailbox_read_header_acl(struct mailbox *mailbox);
 extern int mailbox_read_acl(struct mailbox *mailbox, 
 			    struct auth_state *auth_state);
 extern int mailbox_read_index_header(struct mailbox *mailbox);
+extern int mailbox_read_index_record_from_mapped(struct mailbox *mailbox,
+						 const char *index_base,
+						 unsigned long index_len,
+						 unsigned msgno,
+						 struct index_record *record);
 extern int mailbox_read_index_record(struct mailbox *mailbox,
 				     unsigned msgno,
 				     struct index_record *record);
@@ -342,7 +361,8 @@ extern void mailbox_unlock_pop(struct mailbox *mailbox);
 
 extern int mailbox_write_header(struct mailbox *mailbox);
 extern int mailbox_write_index_header(struct mailbox *mailbox);
-extern void mailbox_index_record_to_buf(struct index_record *record, char *buf);
+extern void mailbox_index_record_to_buf(struct index_record *record,
+					unsigned char *buf);
 extern int mailbox_write_index_record(struct mailbox *mailbox,
 				      unsigned msgno,
 				      struct index_record *record, int sync);
@@ -367,7 +387,7 @@ extern int mailbox_delete(struct mailbox *mailbox, int delete_quota_root);
 extern int mailbox_rename_copy(struct mailbox *oldmailbox, 
 			       const char *newname, char *newpartition,
 			       bit32 *olduidvalidityp, bit32 *newuidvalidityp,
-			       struct mailbox *mailboxp);
+			       struct mailbox *mailboxp, char *userid);
 extern int mailbox_rename_cleanup(struct mailbox *oldmailbox, int isinbox);
 
 extern int mailbox_sync(const char *oldname, const char *oldpath, 

@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: unexpunge.c,v 1.2 2006/11/30 17:11:20 murch Exp $
+ * $Id: unexpunge.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -71,9 +71,15 @@
 #include "mboxlist.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
+#include "sync_log.h"
 
 /* global state */
 const int config_need_data = 0;
+
+/* current namespace */
+static struct namespace unex_namespace;
 
 int verbose = 0;
 
@@ -163,8 +169,8 @@ int restore_expunged(struct mailbox *mailbox,
 {
     int r = 0;
     const char *irec;
-    char buf[INDEX_HEADER_SIZE > INDEX_RECORD_SIZE ?
-	     INDEX_HEADER_SIZE : INDEX_RECORD_SIZE];
+    indexbuffer_t ibuf;
+    unsigned char *buf = ibuf.buf;
     char *path, fnamebuf[MAX_MAILBOX_PATH+1], fnamebufnew[MAX_MAILBOX_PATH+1];
     FILE *newindex = NULL, *newexpungeindex = NULL;
     unsigned emsgno, imsgno;
@@ -279,7 +285,7 @@ int restore_expunged(struct mailbox *mailbox,
     memcpy(buf, mailbox->index_base, mailbox->start_offset);
 
     /* Update uidvalidity */
-    *((bit32 *)(buf+OFFSET_UIDVALIDITY)) = now;
+    *((bit32 *)(buf+OFFSET_UIDVALIDITY)) = htonl(now);
 
     /* Fix up exists */
     newexists = ntohl(*((bit32 *)(buf+OFFSET_EXISTS))) + *numrestored;
@@ -322,7 +328,7 @@ int restore_expunged(struct mailbox *mailbox,
     memcpy(buf, expunge_index_base, mailbox->start_offset);
 
     /* Update uidvalidity */
-    *((bit32 *)(buf+OFFSET_UIDVALIDITY)) = now;
+    *((bit32 *)(buf+OFFSET_UIDVALIDITY)) = htonl(now);
 
     /* Fix up exists */
     newexists = ntohl(*((bit32 *)(buf+OFFSET_EXISTS))) - *numrestored;
@@ -417,6 +423,7 @@ int main(int argc, char *argv[])
     extern char *optarg;
     int opt, r = 0;
     char *alt_config = NULL;
+    char buf[MAX_MAILBOX_PATH+1];
     struct mailbox mailbox;
     int doclose = 0, mode = MODE_UNKNOWN, unsetdeleted = 0;
     char expunge_fname[MAX_MAILBOX_PATH+1];
@@ -426,7 +433,9 @@ int main(int argc, char *argv[])
     struct msg *msgs;
     unsigned numrestored = 0;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((opt = getopt(argc, argv, "C:laudv")) != EOF) {
 	switch (opt) {
@@ -475,8 +484,20 @@ int main(int argc, char *argv[])
     quotadb_init(0);
     quotadb_open(NULL);
 
+    sync_log_init();
+
+    /* Set namespace -- force standard (internal) */
+    if ((r = mboxname_init_namespace(&unex_namespace, 1)) != 0) {
+	syslog(LOG_ERR, error_message(r));
+	fatal(error_message(r), EC_CONFIG);
+    }
+
+    /* Translate mailboxname */
+    (*unex_namespace.mboxname_tointernal)(&unex_namespace, argv[optind],
+					  NULL, buf);
+
     /* Open/lock header */
-    r = mailbox_open_header(argv[optind], 0, &mailbox);
+    r = mailbox_open_header(buf, 0, &mailbox);
     if (!r && mailbox.header_fd != -1) {
 	doclose = 1;
 	(void) mailbox_lock_header(&mailbox);
@@ -522,7 +543,7 @@ int main(int argc, char *argv[])
 	const char *rec;
 	unsigned msgno;
 	unsigned long *uids = NULL;
-	unsigned nuids;
+	unsigned nuids = 0;
 
 	map_refresh(expunge_fd, 1, &expunge_index_base,
 		    &expunge_index_len, sbuf.st_size, "expunge",
@@ -534,7 +555,7 @@ int main(int argc, char *argv[])
 
 	/* Get UIDs of messages to restore */
 	if (mode == MODE_UID) {
-	    int i;
+	    unsigned i;
 
 	    nuids = argc - ++optind;
 	    uids = (unsigned long *) xmalloc(nuids * sizeof(unsigned long));
@@ -602,6 +623,8 @@ int main(int argc, char *argv[])
     mailbox_unlock_pop(&mailbox);
     mailbox_unlock_index(&mailbox);
     mailbox_unlock_header(&mailbox);
+
+    if (!r) sync_log_mailbox(mailbox.name);
     mailbox_close(&mailbox);
 
     quotadb_close();

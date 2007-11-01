@@ -41,7 +41,7 @@
  */
 
 static char rcsid[] =
-      "$Id: ldap.c,v 1.10 2006/11/30 17:11:24 murch Exp $";
+      "$Id: ldap.c,v 1.10.2.1 2007/11/01 14:39:38 murch Exp $";
 
 #include <config.h>
 #include "ptloader.h"
@@ -60,6 +60,9 @@ static char rcsid[] =
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/uio.h>
+
+/* Functions like ldap_bind() have been deprecated in OpenLDAP 2.3 */
+#define LDAP_DEPRECATED 1
 
 #include <ldap.h>
 #include <lber.h>
@@ -1064,11 +1067,12 @@ static int ptsmodule_make_authstate_filter(
             if (vals == NULL)
                 continue;
 
-	    int j;
 	    strcpy((*newstate)->groups[i].id, "group:");
-	    for(j =0; j < strlen(vals[i]); j++) {
-	      if(isupper(vals[i][j]))
-		vals[i][j]=tolower(vals[i][j]);
+
+	    int j;
+	    for(j =0; j < strlen(vals[0]); j++) {
+	      if(isupper(vals[0][j]))
+		vals[0][j]=tolower(vals[0][j]);
 	    }
 
             strlcat((*newstate)->groups[i].id, vals[0], 

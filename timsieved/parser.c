@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.41 2006/11/30 17:11:25 murch Exp $
+ * $Id: parser.c,v 1.41.2.1 2007/11/01 14:39:39 murch Exp $
  */
 /*
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
@@ -64,6 +64,7 @@
 #include "mboxname.h"
 #include "mboxlist.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
 #include "prot.h"
 #include "tls.h"
 #include "lex.h"
@@ -490,7 +491,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
   const char *serverout=NULL;
   unsigned int serveroutlen;
   const char *errstr=NULL;
-  const char *canon_user;
+  const void *canon_user;
   char *username;
   int ret = TRUE;
 
@@ -628,8 +629,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
   }
 
   /* get the userid from SASL */
-  sasl_result=sasl_getprop(sieved_saslconn, SASL_USERNAME,
-			   (const void **) &canon_user);
+  sasl_result=sasl_getprop(sieved_saslconn, SASL_USERNAME, &canon_user);
   if (sasl_result!=SASL_OK)
   {
     *errmsg = "Internal SASL error";
@@ -642,7 +642,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
 
     return FALSE;
   }
-  username = xstrdup(canon_user);
+  username = xstrdup((const char *) canon_user);
 
   verify_only = !strcmp(username, "anonymous");
 
@@ -690,11 +690,11 @@ static int cmd_authenticate(struct protstream *sieved_out,
 
 		  /* get a new copy of the userid */
 		  free(username);
-		  username = xstrdup(canon_user);
+		  username = xstrdup((const char *) canon_user);
 
 		  /* get the authid from SASL */
 		  sasl_result=sasl_getprop(sieved_saslconn, SASL_AUTHUSER,
-					   (const void **) &canon_user);
+					   &canon_user);
 		  if (sasl_result!=SASL_OK) {
 		      *errmsg = "Internal SASL error";
 		      syslog(LOG_ERR, "SASL: sasl_getprop SASL_AUTHUSER: %s",
@@ -707,7 +707,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
 		      ret = FALSE;
 		      goto cleanup;
 		  }
-		  authname = xstrdup(canon_user);
+		  authname = xstrdup((const char *) canon_user);
 
 		  if ((p = strchr(authname, '@'))) *p = '%';
 		  if ((p = strchr(username, '@'))) *p = '%';

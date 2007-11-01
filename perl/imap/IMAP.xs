@@ -39,7 +39,7 @@
  *
  */
 
-/* $Id: IMAP.xs,v 1.25 2006/11/30 17:11:23 murch Exp $ */
+/* $Id: IMAP.xs,v 1.25.2.1 2007/11/01 14:39:38 murch Exp $ */
 
 /*
  * Perl interface to the Cyrus imclient routines.  This enables the
@@ -115,7 +115,6 @@ void imclient_xs_cb(struct imclient *client, void *prock,
 		    struct imclient_reply *reply)
 {
   dSP;
-  dTARG;
   SV* rv;
   struct xsccb *rock = (struct xsccb *) prock;
 
@@ -138,7 +137,7 @@ void imclient_xs_cb(struct imclient *client, void *prock,
   if (reply->msgno != -1) {
     char tmp[100];
     XPUSHs(sv_2mortal(newSVpv("-msgno", 0)));
-    sprintf(tmp,"%d",reply->msgno);
+    sprintf(tmp,"%ld",reply->msgno);
     XPUSHs(sv_2mortal(newSVpv(tmp, 0)));
   }
   PUTBACK;
@@ -320,7 +319,7 @@ PREINIT:
 	struct xscb *nx;
 CODE:
 /* fprintf(stderr, "!DESTROY %p %d\n", client, client->cnt); */
-	if (!--client->cnt) {
+	if (!client->cnt--) {
 /* printf("closing\n"); */
 	  imclient_close(client->imclient);
 	  while (client->cb) {
@@ -440,7 +439,6 @@ imclient__starttls(client, tls_cert_file, tls_key_file, CAfile, CApath)
         char* CApath
 PREINIT:
 	int rc;
-	int tls_layer;
 CODE:
 	ST(0) = sv_newmortal();
 

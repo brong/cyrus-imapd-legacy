@@ -42,7 +42,7 @@
 
 #include <config.h>
 
-/* $Id: fud.c,v 1.54 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: fud.c,v 1.54.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -70,6 +70,8 @@
 #include "imap_err.h"
 #include "mailbox.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "acl.h"
 #include "seen.h"
 #include "mboxname.h"

@@ -69,7 +69,7 @@
 #include "lock.h"
 #include "xmalloc.h"
 
-static char rcsid[] = "$Id: ptexpire.c,v 1.19 2006/11/30 17:11:24 murch Exp $";
+static char rcsid[] = "$Id: ptexpire.c,v 1.19.2.1 2007/11/01 14:39:39 murch Exp $";
 
 /* global */
 time_t timenow;
@@ -112,7 +112,9 @@ int main(int argc, char *argv[])
     int r;
     char *alt_config = NULL;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
     
     openlog("ptexpire", LOG_PID, SYSLOG_FACILITY);
 
@@ -146,7 +148,7 @@ int main(int argc, char *argv[])
     /* open database */
     strcpy(fnamebuf, config_dir);
     strcat(fnamebuf, PTS_DBFIL);
-    r = config_ptscache_db->open(fnamebuf, CYRUSDB_CREATE, &ptdb);
+    r = (config_ptscache_db->open)(fnamebuf, CYRUSDB_CREATE, &ptdb);
     if(r != CYRUSDB_OK) {
 	syslog(LOG_ERR, "error opening %s (%s)", fnamebuf,
 	       cyrusdb_strerror(r));
@@ -156,7 +158,7 @@ int main(int argc, char *argv[])
     /* iterate through db, wiping expired entries */
     config_ptscache_db->foreach(ptdb, "", 0, expire_p, expire_cb, ptdb, NULL);
 
-    config_ptscache_db->close(ptdb);
+    (config_ptscache_db->close)(ptdb);
 
     cyrus_done();
 

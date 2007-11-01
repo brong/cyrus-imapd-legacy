@@ -41,7 +41,7 @@
  */
 
 /*
- * $Id: message.c,v 1.100.2.1 2006/12/19 18:58:18 murch Exp $
+ * $Id: message.c,v 1.100.2.2 2007/11/01 14:39:34 murch Exp $
  */
 
 #include <config.h>
@@ -65,11 +65,14 @@
 #include "map.h"
 #include "mailbox.h"
 #include "message.h"
+#include "message_guid.h"
 #include "parseaddr.h"
 #include "charset.h"
 #include "stristr.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "global.h"
 #include "retry.h"
 
@@ -101,6 +104,7 @@ struct body {
     char *disposition;
     struct param *disposition_params;
     struct param *language;
+    char *location;
 
     /* Location/size information */
     long header_offset;
@@ -135,6 +139,9 @@ struct body {
      * Cached headers.  Only filled in at top-level
      */
     struct ibuf cacheheaders;
+
+    /* Message GUID. Only filled in at top level */
+    struct message_guid guid;
 };
 
 /* List of Content-type parameters */
@@ -199,6 +206,7 @@ static void message_write_address P((struct ibuf *ibuf,
 				     struct address *addrlist));
 static void message_write_nstring P((struct ibuf *ibuf, char *s));
 static void message_write_text P((struct ibuf *ibuf, char *s));
+static void message_write_text_lcase P((struct ibuf *ibuf, char *s));
 static void message_write_number P((struct ibuf *ibuf, unsigned n));
 static void message_write_section P((struct ibuf *ibuf, struct body *body));
 static void message_write_charset P((struct ibuf *ibuf, struct body *body));
@@ -228,7 +236,7 @@ int allow_null;
     char buf[4096+1];
     unsigned char *p, *endp;
     int r = 0;
-    int n;
+    size_t n;
     int sawcr = 0, sawnl;
     int reject8bit = config_getswitch(IMAPOPT_REJECT8BIT);
     int munge8bit = config_getswitch(IMAPOPT_MUNGE8BIT);
@@ -324,12 +332,10 @@ int allow_null;
 }
 
 /*
- * Parse the message 'infile' in 'mailbox'.  Appends the message's
- * cache information to the mailbox's cache file and fills in
- * appropriate information in the index record pointed to by
- * 'message_index'.
+ * Parse the message 'infile'.
  *
  * The caller MUST free the allocated body struct.
+ *
  * If msg_base/msg_len are non-NULL, the file will remain memory-mapped
  * and returned to the caller.  The caller MUST unmap the file.
  */
@@ -368,10 +374,7 @@ int message_parse_file(FILE *infile,
 
 
 /*
- * Parse the message 'infile' in 'mailbox'.  Appends the message's
- * cache information to the mailbox's cache file and fills in
- * appropriate information in the index record pointed to by
- * 'message_index'.
+ * Parse the message 'infile'.
  *
  * The caller MUST free the allocated body struct.
  *
@@ -387,7 +390,7 @@ int message_parse_binary_file(FILE *infile, struct body **body)
     int fd = fileno(infile);
     struct stat sbuf;
     struct msg msg;
-    int n;
+    size_t n;
 
     if (fstat(fd, &sbuf) == -1) {
 	syslog(LOG_ERR, "IOERROR: fstat on new message in spool: %m");
@@ -425,10 +428,7 @@ int message_parse_binary_file(FILE *infile, struct body **body)
 
 
 /*
- * Parse the message at 'msg_base' of length 'msg_len' in 'mailbox'.
- * Appends the message's cache information to the mailbox's cache file
- * and fills in appropriate information in the index record pointed to
- * by 'message_index'.
+ * Parse the message at 'msg_base' of length 'msg_len'.
  */
 int message_parse_mapped(const char *msg_base, unsigned long msg_len,
 			 struct body *body)
@@ -442,6 +442,8 @@ int message_parse_mapped(const char *msg_base, unsigned long msg_len,
 
     message_parse_body(&msg, MAILBOX_FORMAT_NORMAL, body,
 		       DEFAULT_CONTENT_TYPE, (struct boundary *)0);
+
+    message_guid_generate(&body->guid, msg_base, msg_len);
 
     return 0;
 }
@@ -457,7 +459,7 @@ static void message_find_part(struct body *body, const char *section,
 
     for (match = 0, type = content_types; !match && *type; type++) {
 	const char *subtype = strchr(*type, '/');
-	size_t tlen = subtype ? (subtype++ - *type) : strlen(*type);
+	size_t tlen = subtype ? (size_t) (subtype++ - *type) : strlen(*type);
 
 	if ((!(*type)[0] || (tlen == strlen(body->type) &&
 			     !strncasecmp(body->type, *type, tlen))) &&
@@ -468,7 +470,7 @@ static void message_find_part(struct body *body, const char *section,
 
     if (match) {
 	/* matching part, sanity check the size against the mmap'd file */
-	if (body->content_offset + body->content_size > msg_len) {
+	if ((unsigned long) body->content_offset + body->content_size > msg_len) {
 	    syslog(LOG_ERR, "IOERROR: body part exceeds size of message file");
 	    fatal("body part exceeds size of message file", EC_OSFILE);
 	}
@@ -517,17 +519,19 @@ void message_fetch_part(struct message_content *msg,
 }
 
 /*
- * Appends the message's cache information to the mailbox's cache file
+ * Appends the message's cache information to the cache file
  * and fills in appropriate information in the index record pointed to
  * by 'message_index'.
  */
 int
-message_create_record(mailbox, message_index, body)
-struct mailbox *mailbox;
+message_create_record(cache_name, cache_fd, message_index, body)
+const char *cache_name;
+int cache_fd;
 struct index_record *message_index;
 struct body *body;
 {
     int n;
+    enum enum_value config_guidmode = config_getenum(IMAPOPT_GUID_MODE);
 
     message_index->sentdate = message_parse_date(body->date, 0);
     message_index->size = body->header_size + body->content_size;
@@ -535,60 +539,22 @@ struct body *body;
     message_index->content_offset = body->content_offset;
     message_index->content_lines = body->content_lines;
 
-    message_index->cache_offset = lseek(mailbox->cache_fd, 0, SEEK_CUR);
+    message_index->cache_offset = lseek(cache_fd, 0, SEEK_CUR);
 
     message_index->cache_version = MAILBOX_CACHE_MINOR_VERSION;
 
-    n = message_write_cache(mailbox->cache_fd, body);
+    n = message_write_cache(cache_fd, body);
 
     if (n == -1) {
-	syslog(LOG_ERR, "IOERROR: appending cache for %s: %m", mailbox->name);
+	syslog(LOG_ERR, "IOERROR: appending cache for %s: %m", cache_name);
 	return IMAP_IOERROR;
     }
 
-    return 0;
-}
-
-/* YYY Following used by sync_support.c. Should use message_create_record()
- *     instead now that is available?
- *
- * Parse the message at 'msg_base' of length 'msg_len' in 'mailbox'.
- * Appends the message's cache information to the mailbox's cache file
- * and fills in appropriate information in the index record pointed to
- * by 'message_index'.
- */
-int
-message_parse_mapped_async(msg_base, msg_len, format, cache_fd, message_index)
-const char *msg_base;
-unsigned long msg_len;
-int format;
-int cache_fd;
-struct index_record *message_index;
-{
-    struct body body;
-    struct msg msg;
-    int n;
-
-    msg.base = msg_base;
-    msg.len = msg_len;
-    msg.offset = 0;
-    msg.encode = 0;
-
-    message_parse_body(&msg, format, &body,
-		       DEFAULT_CONTENT_TYPE, (struct boundary *)0);
-    
-    message_index->sentdate = message_parse_date(body.date, 0);
-    message_index->size = body.header_size + body.content_size;
-    message_index->header_size = body.header_size;
-    message_index->content_offset = body.content_offset;
-
-    message_index->cache_offset = lseek(cache_fd, 0, SEEK_CUR);
-    n = message_write_cache(cache_fd, &body);
-    message_free_body(&body);
-
-    if (n == -1) {
-	syslog(LOG_ERR, "IOERROR: appending cache for sync_server: %m");
-	return IMAP_IOERROR;
+    /* Copy in GUID unless GUID already assigned to the message
+     * (allows parent to decide which source of GUIDs to use)
+     */
+    if (config_guidmode && message_guid_isnull(&message_index->guid)) {
+	message_guid_copy(&message_index->guid, &body->guid);
     }
 
     return 0;
@@ -780,6 +746,9 @@ struct boundary *boundaries;
 		    case 'L':
 			if (!strncasecmp(next+10, "anguage:", 8)) {
 			    message_parse_language(next+18, &body->language);
+			}
+			else if (!strncasecmp(next+10, "ocation:", 8)) {
+			    message_parse_string(next+18, &body->location);
 			}
 			break;
 
@@ -2164,6 +2133,8 @@ int newformat;
 		PUTIBUF(ibuf, ')');
 	    }
 	    else message_write_nstring(ibuf, (char *)0);
+	    PUTIBUF(ibuf, ' ');
+	    message_write_nstring(ibuf, body->location);
 	}
 
 	PUTIBUF(ibuf, ')');
@@ -2254,6 +2225,8 @@ int newformat;
 	    PUTIBUF(ibuf, ')');
 	}
 	else message_write_nstring(ibuf, (char *)0);
+	PUTIBUF(ibuf, ' ');
+	message_write_nstring(ibuf, body->location);
     }
 
     PUTIBUF(ibuf, ')');
@@ -2347,6 +2320,20 @@ char *s;
 
     message_ibuf_ensure(ibuf, strlen(s));
     for (p = s; *p; p++) *(ibuf->end)++ = *p;
+}
+
+/*
+ * Write the text 's' to 'ibuf', converting to lower case as we go.
+ */
+static void
+message_write_text_lcase(ibuf, s)
+struct ibuf *ibuf;
+char *s;
+{
+    char *p;
+
+    message_ibuf_ensure(ibuf, strlen(s));
+    for (p = s; *p; p++) *(ibuf->end)++ = TOLOWER(*p);
 }
 
 /*
@@ -2542,7 +2529,7 @@ struct ibuf *ibuf;
 bit32 val;
 {
     bit32 buf;
-    int i;
+    unsigned i;
     char *p = (char *)&buf;
     
     message_ibuf_ensure(ibuf, sizeof(bit32));
@@ -2597,17 +2584,14 @@ struct address *addrlist;
 
 	    PUTIBUF(ibuf, '<');
 	    if (addrlist->route) {
-		lcase(addrlist->route);
-		message_write_text(ibuf, addrlist->route);
+		message_write_text_lcase(ibuf, addrlist->route);
 		PUTIBUF(ibuf, ':');
 	    }
 
-	    lcase(addrlist->mailbox);
-	    message_write_text(ibuf, addrlist->mailbox);
+	    message_write_text_lcase(ibuf, addrlist->mailbox);
 	    PUTIBUF(ibuf, '@');
 
-	    lcase(addrlist->domain);
-	    message_write_text(ibuf, addrlist->domain);
+	    message_write_text_lcase(ibuf, addrlist->domain);
 	    PUTIBUF(ibuf, '>');
 	    prevaddr = 1;
 	}
@@ -2640,7 +2624,7 @@ message_ibuf_ensure(struct ibuf *ibuf,
     char *s;
     int size;
 
-    if (ibuf->last - ibuf->end >= len) return 0;
+    if ((unsigned) (ibuf->last - ibuf->end) >= len) return 0;
     if (len < IBUFGROWSIZE) len = IBUFGROWSIZE;
 
     s = ibuf->start - sizeof(bit32);
@@ -2727,6 +2711,7 @@ struct body *body;
 	free(param->value);
 	free(param);
     }
+    if (body->location) free(body->location);
     if (body->date) free(body->date);
     if (body->subject) free(body->subject);
     if (body->from) parseaddr_free(body->from);

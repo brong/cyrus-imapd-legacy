@@ -37,7 +37,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: squatter.c,v 1.16 2006/11/30 17:11:20 murch Exp $
+ * $Id: squatter.c,v 1.16.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 /*
@@ -88,12 +88,15 @@
 #include "imap_err.h"
 #include "mailbox.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "acl.h"
 #include "seen.h"
 #include "mboxname.h"
 #include "map.h"
 #include "squat.h"
 #include "imapd.h"
+#include "util.h"
 
 /* global state */
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
@@ -484,8 +487,9 @@ int main(int argc, char **argv)
     char buf[MAX_MAILBOX_PATH+1];
     int r;
 
-    if(geteuid() == 0)
-        fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     setbuf(stdout, NULL);
 

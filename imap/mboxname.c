@@ -1,5 +1,5 @@
 /* mboxname.c -- Mailbox list manipulation routines
- * $Id: mboxname.c,v 1.37 2006/11/30 17:11:19 murch Exp $
+ * $Id: mboxname.c,v 1.37.2.1 2007/11/01 14:39:34 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -599,13 +599,64 @@ int mboxname_userownsmailbox(const char *userid, const char *name)
 char *mboxname_isusermailbox(const char *name, int isinbox)
 {
     const char *p;
+    const char *start = name;
+    const char *deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX);
+    size_t len = strlen(deletedprefix);
+    int isdel = 0;
 
-    if (((!strncmp(name, "user.", 5) && (p = name+5)) ||
-	 ((p = strstr(name, "!user.")) && (p += 6))) &&
-	(!isinbox || !strchr(p, '.')))
-	return (char*) p;
+    /* step past the domain part */
+    if (config_virtdomains && (p = strchr(start, '!')))
+	start = p + 1;
+
+    /* step past any deletedprefix */
+    if (mboxlist_delayed_delete_isenabled() && strlen(start) > len+1 &&
+	!strncmp(start, deletedprefix, len) && start[len] == '.')  {
+	start += len + 1;
+	isdel = 1; /* there's an add'l sep + hextimestamp on isdel folders */
+    }
+
+    /* starts with "user." AND
+     * we don't care if it's an inbox OR
+     * there's no dots after the username OR 
+     * it's deleted and there's only one more dot
+     */
+    if (!strncmp(start, "user.", 5) &&
+	(!isinbox || !strchr(start+5, '.') ||
+	 (isdel && (p = strchr(start+5, '.')) && !strchr(p+1, '.'))))
+	return (char*) start+5; /* could have trailing bits if isinbox+isdel */
     else
 	return NULL;
+}
+
+/*
+ * Translate (internal) inboxname into corresponding userid.
+ */
+char *mboxname_inbox_touserid(const char *inboxname)
+{
+    static char userid[MAX_MAILBOX_NAME+1];
+    const char *domain = NULL, *cp;
+    size_t domainlen = 0;
+
+    if (config_virtdomains && (cp = strchr(inboxname, '!'))) {
+	/* locate, save, and skip domain */
+	domain = inboxname;
+	domainlen = cp++ - inboxname;
+    } else {
+	cp = inboxname;
+    }
+
+    cp += 5; /* skip "user." */
+
+    /* copy localpart of userid */
+    strcpy(userid, cp);
+
+    if (domain) {
+	/* append domain */
+	sprintf(userid+strlen(userid), "@%.*s",
+		domainlen, domain);
+    }
+
+    return(userid);
 }
 
 /*

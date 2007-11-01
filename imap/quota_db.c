@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: quota_db.c,v 1.3 2006/11/30 17:11:20 murch Exp $
+ * $Id: quota_db.c,v 1.3.2.1 2007/11/01 14:39:34 murch Exp $
  *
  */
 
@@ -62,6 +62,8 @@
 #include "quota.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #define QDB config_quota_db
 
@@ -89,7 +91,11 @@ int quota_read(struct quota *quota, struct txn **tid, int wrlock)
 
     switch (r) {
     case CYRUSDB_OK:
-	sscanf(data, UQUOTA_T_FMT " %d", &quota->used, &quota->limit);
+	if (!data ||
+	    sscanf(data, UQUOTA_T_FMT " %d",
+		   &quota->used, &quota->limit) != 2) {
+	    r = CYRUSDB_IOERROR;
+	}
 	break;
 
     case CYRUSDB_AGAIN:
@@ -99,12 +105,12 @@ int quota_read(struct quota *quota, struct txn **tid, int wrlock)
     case CYRUSDB_NOTFOUND:
 	return IMAP_QUOTAROOT_NONEXISTENT;
 	break;
+    }
 
-    default:
+    if (r) {
 	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
 	       quota->root, cyrusdb_strerror(r));
 	return IMAP_IOERROR;
-	break;
     }
 
     return 0;
@@ -245,7 +251,7 @@ void quotadb_open(char *fname)
 	strlcat(fname, FNAME_QUOTADB, fname_len);
     }
 
-    ret = QDB->open(fname, CYRUSDB_CREATE, &qdb);
+    ret = (QDB->open)(fname, CYRUSDB_CREATE, &qdb);
     if (ret != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 	       cyrusdb_strerror(ret));
@@ -264,7 +270,7 @@ void quotadb_close(void)
     int r;
 
     if (quota_dbopen) {
-	r = QDB->close(qdb);
+	r = (QDB->close)(qdb);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing quotas: %s",
 		   cyrusdb_strerror(r));

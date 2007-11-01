@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: annotate.c,v 1.34 2006/11/30 17:11:17 murch Exp $
+ * $Id: annotate.c,v 1.34.2.1 2007/11/01 14:39:31 murch Exp $
  */
 
 #include <config.h>
@@ -71,6 +71,8 @@
 #include "mboxlist.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #include "annotate.h"
 #include "sync_log.h"
@@ -251,7 +253,7 @@ void annotatemore_open(char *fname)
 	strcat(fname, FNAME_ANNOTATIONS);
     }
 
-    ret = DB->open(fname, CYRUSDB_CREATE, &anndb);
+    ret = (DB->open)(fname, CYRUSDB_CREATE, &anndb);
     if (ret != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 	       cyrusdb_strerror(ret));
@@ -268,7 +270,7 @@ void annotatemore_close(void)
     int r;
 
     if (annotate_dbopen) {
-	r = DB->close(anndb);
+	r = (DB->close)(anndb);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing annotations: %s",
 		   cyrusdb_strerror(r));
@@ -304,11 +306,12 @@ static int make_key(const char *mboxname, const char *entry,
 static int split_attribs(const char *data, int datalen __attribute__((unused)),
 			 struct annotation_data *attrib)
 {
-    unsigned long tmp;
+    unsigned long tmp; /* for alignment */
 
     /* xxx use datalen? */
     /* xxx sanity check the data? */
-    attrib->size = (size_t) ntohl(*(unsigned long *) data);
+    memcpy(&tmp, data, sizeof(unsigned long));
+    attrib->size = (size_t) ntohl(tmp);
     data += sizeof(unsigned long); /* skip to value */
 
     attrib->value = data;
@@ -710,7 +713,8 @@ static void annotation_get_size(const char *int_mboxname,
 {
     struct mailbox mailbox;
     struct index_record record;
-    int r = 0, msg;
+    int r = 0;
+    unsigned msg;
 #ifdef HAVE_LONG_LONG_INT
     unsigned long long totsize = 0;
 # define SIZE_FMT "%llu"
@@ -867,20 +871,20 @@ static void annotation_get_lastpop(const char *int_mboxname,
     output_entryatt(ext_mboxname, entry, "", &attrib, fdata);
 }
 
-static void annotation_get_condstore(const char *int_mboxname,
-				     const char *ext_mboxname,
-				     const char *entry,
-				     struct fetchdata *fdata,
-				     struct mailbox_annotation_rock *mbrock,
-				     void *rock __attribute__((unused)))
+static void annotation_get_mailboxopt(const char *int_mboxname,
+				      const char *ext_mboxname,
+				      const char *entry,
+				      struct fetchdata *fdata,
+				      struct mailbox_annotation_rock *mbrock,
+				      void *rock __attribute__((unused)))
 { 
     struct mailbox mailbox;
-    int r = 0;
+    int flag, r = 0;
     char value[40];
     struct annotation_data attrib;
   
-    if(!int_mboxname || !ext_mboxname || !fdata || !mbrock)
-      fatal("annotation_get_condstore called with bad parameters",
+    if(!int_mboxname || !ext_mboxname || !entry || !fdata || !mbrock)
+      fatal("annotation_get_mailboxopt called with bad parameters",
               EC_TEMPFAIL);
 
     get_mb_data(int_mboxname, mbrock);
@@ -888,6 +892,17 @@ static void annotation_get_condstore(const char *int_mboxname,
     /* Make sure its a local mailbox */
     if (mbrock->server) return;
 
+    /* Check entry */
+    if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/condstore")) {
+	flag = OPT_IMAP_CONDSTORE;
+    } else if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/sharedseen")) {
+	flag = OPT_IMAP_SHAREDSEEN;
+    } else if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/duplicatedeliver")) {
+	flag = OPT_IMAP_DUPDELIVER;
+    } else {
+	return;
+    }
+  
     /* Check ACL */
     if(!fdata->isadmin &&
        (!mbrock->acl ||
@@ -904,7 +919,7 @@ static void annotation_get_condstore(const char *int_mboxname,
     }
 
     if (!r) {
-      if (mailbox.options & OPT_IMAP_CONDSTORE) {
+      if (mailbox.options & flag) {
           strcpy(value, "true");
       } else {
           strcpy(value, "false");
@@ -1015,7 +1030,11 @@ const struct annotate_f_entry mailbox_ro_entries[] =
     { "/vendor/cmu/cyrus-imapd/lastpop", BACKEND_ONLY,
       annotation_get_lastpop, NULL },
     { "/vendor/cmu/cyrus-imapd/condstore", BACKEND_ONLY,
-      annotation_get_condstore, NULL },
+      annotation_get_mailboxopt, NULL },
+    { "/vendor/cmu/cyrus-imapd/sharedseen", BACKEND_ONLY,
+      annotation_get_mailboxopt, NULL },
+    { "/vendor/cmu/cyrus-imapd/duplicatedeliver", BACKEND_ONLY,
+      annotation_get_mailboxopt, NULL },
     { NULL, ANNOTATION_PROXY_T_INVALID, NULL, NULL }
 };
 
@@ -1692,14 +1711,27 @@ static int annotation_set_todb(const char *int_mboxname,
     return r;
 }
 
-static int annotation_set_condstore(const char *int_mboxname,
-				    struct annotate_st_entry_list *entry,
-				    struct storedata *sdata,
-				    struct mailbox_annotation_rock *mbrock,
-				    void *rock __attribute__((unused)))
+static int annotation_set_mailboxopt(const char *int_mboxname,
+				     struct annotate_st_entry_list *entry,
+				     struct storedata *sdata,
+				     struct mailbox_annotation_rock *mbrock,
+				     void *rock __attribute__((unused)))
 {
     struct mailbox mailbox;
-    int r = 0;
+    int flag, r = 0;
+
+    /* Check entry */
+    if (!strcmp(entry->entry->name, "/vendor/cmu/cyrus-imapd/condstore")) {
+	flag = OPT_IMAP_CONDSTORE;
+    } else if (!strcmp(entry->entry->name,
+		       "/vendor/cmu/cyrus-imapd/sharedseen")) {
+	flag = OPT_IMAP_SHAREDSEEN;
+    } else if (!strcmp(entry->entry->name,
+		       "/vendor/cmu/cyrus-imapd/duplicatedeliver")) {
+	flag = OPT_IMAP_DUPDELIVER;
+    } else {
+	return IMAP_PERMISSION_DENIED;
+    }
   
     /* Check ACL */
     if(!sdata->isadmin &&
@@ -1715,9 +1747,9 @@ static int annotation_set_condstore(const char *int_mboxname,
 
     if (!r) {
 	if (!strcmp(entry->shared.value, "true")) {
-	    mailbox.options |= OPT_IMAP_CONDSTORE;
+	    mailbox.options |= flag;
 	} else {
-	    mailbox.options &= ~OPT_IMAP_CONDSTORE;
+	    mailbox.options &= ~flag;
 	}
 
 	r = mailbox_write_index_header(&mailbox);
@@ -1791,7 +1823,13 @@ const struct annotate_st_entry mailbox_rw_entries[] =
       ACL_ADMIN, annotation_set_todb, NULL },
     { "/vendor/cmu/cyrus-imapd/condstore", ATTRIB_TYPE_BOOLEAN, BACKEND_ONLY,
       ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
-      ACL_ADMIN, annotation_set_condstore, NULL },
+      ACL_ADMIN, annotation_set_mailboxopt, NULL },
+    { "/vendor/cmu/cyrus-imapd/sharedseen", ATTRIB_TYPE_BOOLEAN, BACKEND_ONLY,
+      ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
+      ACL_ADMIN, annotation_set_mailboxopt, NULL },
+    { "/vendor/cmu/cyrus-imapd/duplicatedeliver", ATTRIB_TYPE_BOOLEAN, BACKEND_ONLY,
+      ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
+      ACL_ADMIN, annotation_set_mailboxopt, NULL },
     { NULL, 0, ANNOTATION_PROXY_T_INVALID, 0, 0, NULL, NULL }
 };
 

@@ -41,13 +41,14 @@
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
  *
- * $Id: sync_support.h,v 1.2 2006/11/30 17:11:20 murch Exp $
+ * $Id: sync_support.h,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #ifndef INCLUDED_SYNC_SUPPORT_H
 #define INCLUDED_SYNC_SUPPORT_H
 
 #include "prot.h"
+#include "mailbox.h"
 
 #define SYNC_MSGID_LIST_HASH_SIZE        (65536)
 #define SYNC_MESSAGE_LIST_HASH_SIZE      (65536)
@@ -97,11 +98,34 @@ void sync_flags_meta_to_list(struct sync_flags_meta *meta, char **flagname);
 
 /* ====================================================================== */
 
+/* sync_index_list records index records for upload */
+
+struct sync_index {
+    struct sync_index *next;
+    struct index_record record;
+    unsigned long msgno;
+};
+
+struct sync_index_list {
+    struct sync_index *head, *tail;
+    unsigned long count;
+    unsigned long last_uid;
+};
+
+struct sync_index_list *sync_index_list_create(void);
+
+void sync_index_list_add(struct sync_index_list *l,
+             unsigned long msgno, struct index_record *record);
+
+void sync_index_list_free(struct sync_index_list **lp);
+
+/* ====================================================================== */
+
 /* sync_msg_list records message lists in client */
 
 struct sync_msg {
     struct sync_msg *next;
-    struct message_uuid uuid;
+    struct message_guid guid;
     unsigned long uid;
     struct sync_flags flags;
 };
@@ -125,7 +149,7 @@ void sync_msg_list_free(struct sync_msg_list **lp);
 struct sync_msgid {
     struct sync_msgid *next;
     struct sync_msgid *hash_next;
-    struct message_uuid uuid;
+    struct message_guid guid;
     int count;
     int reserved;
 };
@@ -142,10 +166,13 @@ struct sync_msgid_list {
 struct sync_msgid_list *sync_msgid_list_create(int hash_size);
 
 struct sync_msgid *sync_msgid_add(struct sync_msgid_list *list,
-				  struct message_uuid *uuid);
+				  struct message_guid *guid);
+
+void sync_msgid_remove(struct sync_msgid_list *l,
+		       struct message_guid *guid);
 
 struct sync_msgid *sync_msgid_lookup(struct sync_msgid_list *list,
-				     struct message_uuid *uuid);
+				     struct message_guid *guid);
 
 void sync_msgid_list_free(struct sync_msgid_list **list);
 
@@ -158,6 +185,7 @@ struct sync_folder {
     char *name;
     char *acl;
     unsigned options;
+    unsigned long uidvalidity;
     struct quota quota;
     int   mark; 
     int   reserve;  /* Folder has been processed by reserve operation */
@@ -173,6 +201,7 @@ struct sync_folder_list *sync_folder_list_create(void);
 
 struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 char *id, char *name, char *acl,
+                                         unsigned long uidvalidity,
 					 unsigned long options,
 					 struct quota *quota);
 
@@ -249,7 +278,7 @@ struct sync_message {
     unsigned  long  cache_size;
     unsigned  long  content_lines;
     unsigned  long  cache_version;
-    struct message_uuid uuid;
+    struct message_guid guid;
     char           stagename[100];
 
     /* the msg_path buffer consists of
@@ -287,8 +316,10 @@ struct sync_message_list {
 
 struct sync_message_list *sync_message_list_create(int hash_size, int file_max);
 
+int sync_message_list_newstage(struct sync_message_list *l, char *mboxname);
+
 void sync_message_list_cache(struct sync_message_list *l,
-			     char *entry, int size);
+			     char *entry, unsigned size);
 
 int sync_message_list_cache_flush(struct sync_message_list *l);
 
@@ -296,7 +327,7 @@ unsigned long sync_message_list_cache_offset(struct sync_message_list *l);
 
 
 struct sync_message *sync_message_add(struct sync_message_list *l,
-				      struct message_uuid *uuid);
+				      struct message_guid *guid);
 
 char *sync_message_next_path(struct sync_message_list *l);
 
@@ -305,16 +336,17 @@ void sync_message_list_free(struct sync_message_list **lp);
 int sync_message_list_need_restart(struct sync_message_list *l);
 
 struct sync_message *sync_message_find(struct sync_message_list *l,
-				       struct message_uuid *uuid);
+				       struct message_guid *guid);
 
-void sync_message_fsync(struct sync_message_list *l);
+int sync_message_fsync(struct sync_message_list *l);
 
 FILE *sync_message_open(struct sync_message_list *l,
 			struct sync_message *message);
 
 int sync_message_copy_fromstage(struct sync_message *message,
 				struct mailbox *mailbox,
-				unsigned long uid);
+				unsigned long uid,
+				time_t internaldate);
 
 /* ====================================================================== */
 
@@ -325,7 +357,7 @@ struct sync_upload_item {
     time_t sentdate;    
     time_t last_updated;
     struct sync_flags    flags;
-    struct message_uuid  uuid;
+    struct message_guid  guid;
     modseq_t modseq;
     struct sync_message *message;
 };
@@ -342,6 +374,9 @@ struct sync_upload_list *sync_upload_list_create(unsigned long new_last_uid,
 						 char **flagname);
 
 struct sync_upload_item *sync_upload_list_add(struct sync_upload_list *l);
+
+void sync_upload_list_remove(struct sync_upload_list *l,
+			     struct sync_upload_item *i);
 
 void sync_upload_list_free(struct sync_upload_list **lp);
 
@@ -475,6 +510,8 @@ struct sync_lock {
 };
 
 void sync_lock_reset(struct sync_lock *sync_lock);
+
+int sync_unlock(struct sync_lock *lock);
 
 int sync_lock(struct sync_lock *lock);
 

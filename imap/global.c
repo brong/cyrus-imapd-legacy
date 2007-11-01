@@ -39,7 +39,7 @@
  *
  */
 
-/* $Id: global.c,v 1.20 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: global.c,v 1.20.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -72,6 +72,8 @@
 #include "prot.h" /* for PROT_BUFSIZE */
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 static enum {
     NOT_RUNNING = 0,
@@ -81,8 +83,9 @@ static enum {
 
 static int cyrus_init_nodb = 0;
 
-int config_implicitrights;        /* "lca" */
-unsigned long config_metapartition_files;    /* 0 */
+int config_fulldirhash;				/* 0 */
+int config_implicitrights;			/* "lca" */
+unsigned long config_metapartition_files;	/* 0 */
 struct cyrusdb_backend *config_mboxlist_db;
 struct cyrusdb_backend *config_quota_db;
 struct cyrusdb_backend *config_subscription_db;
@@ -158,6 +161,8 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 	val++;
     }
     umask(umaskval);
+
+    config_fulldirhash = config_getswitch(IMAPOPT_FULLDIRHASH);
 
     /* look up and canonify the implicit rights of mailbox owners */
     config_implicitrights =
@@ -308,7 +313,9 @@ sasl_security_properties_t *mysasl_secprops(int flags)
 				/* maximum allowable security strength */
 
     ret.security_flags = flags;
-    /* ret.security_flags |= SASL_SEC_NOPLAINTEXT; */
+    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
+	ret.security_flags |= SASL_SEC_NOPLAINTEXT;
+    }
     if (!config_getswitch(IMAPOPT_ALLOWANONYMOUSLOGIN)) {
 	ret.security_flags |= SASL_SEC_NOANONYMOUS;
     }
@@ -323,7 +330,7 @@ int global_authisa(struct auth_state *authstate, enum imapopt opt)
 {
     char buf[1024];
     const char *val = config_getstring(opt);
-    int len;
+    size_t len;
 
     /* Is the option defined? */
     if(!val) return 0;

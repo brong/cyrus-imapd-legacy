@@ -1,6 +1,6 @@
 /* message.c -- message parsing functions
  * Larry Greenfield
- * $Id: message.c,v 1.29 2006/11/30 17:11:24 murch Exp $
+ * $Id: message.c,v 1.29.2.1 2007/11/01 14:39:39 murch Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -45,6 +45,8 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "message.h"
 #include "parseaddr.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "util.h"
 
 /* reject message m with message msg
@@ -218,7 +220,7 @@ static int makehash(unsigned char hash[],
 
 int do_vacation(action_list_t *a, char *addr, char *fromaddr,
 		char *subj, const char *msg, int days,
-		int mime, char *handle)
+		int mime, const char *handle)
 {
     action_list_t *b = NULL;
 
@@ -513,7 +515,7 @@ char *get_address(address_part_t addrpart,
 	case ADDRESS_USER:
 	    if (a->mailbox) {
 		char *p = strchr(a->mailbox, '+');
-		int len = p ? p - a->mailbox : strlen(a->mailbox);
+		int len = p ? p - a->mailbox : (int)strlen(a->mailbox);
 
 		am->freeme = (char *) xmalloc(len + 1);
 		strncpy(am->freeme, a->mailbox, len);

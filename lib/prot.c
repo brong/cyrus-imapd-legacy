@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: prot.c,v 1.87.2.2 2007/01/04 14:50:56 murch Exp $
+ * $Id: prot.c,v 1.87.2.3 2007/11/01 14:39:36 murch Exp $
  */
 
 #include <config.h>
@@ -67,6 +67,7 @@
 
 #include "assert.h"
 #include "exitcodes.h"
+#include "libcyr_cfg.h"
 #include "map.h"
 #include "nonblock.h"
 #include "prot.h"
@@ -171,7 +172,7 @@ int prot_setsasl(s, conn)
 struct protstream *s;
 sasl_conn_t *conn;
 {
-    const int *ssfp;
+    const void *ssfp;
     int result;
 
     if (s->write && s->ptr != s->buf) {
@@ -182,20 +183,20 @@ sasl_conn_t *conn;
    
     s->conn = conn;
 
-    result = sasl_getprop(conn, SASL_SSF, (const void **) &ssfp);
+    result = sasl_getprop(conn, SASL_SSF, &ssfp);
     if (result != SASL_OK) {
 	return -1;
     }
-    s->saslssf = *ssfp;
+    s->saslssf = *((const int *) ssfp);
 
     if (s->write) {
 	int result;
-	const unsigned int *maxp;
+	const void *maxp;
 	unsigned int max;
 
 	/* ask SASL for layer max */
-	result = sasl_getprop(conn, SASL_MAXOUTBUF, (const void **) &maxp);
-	max = *maxp;
+	result = sasl_getprop(conn, SASL_MAXOUTBUF, &maxp);
+	max = *((const unsigned int *) maxp);
 	if (result != SASL_OK) {
 	    return -1;
 	}
@@ -274,20 +275,20 @@ int prot_setcompress(struct protstream *s)
 
 /* Table of incompressible file type signatures */
 static struct file_sig {
-    char *type;
-    int len;
-    unsigned char *sig;
+    const char *type;
+    size_t len;
+    const char *sig;
 } sig_tbl[] = {
-    "GIF87a",	6, "GIF87a",
-    "GIF89a",	6, "GIF89a",
-    "GZIP",	2, "\x1F\x8B",
-    "JPEG",	4, "\xFF\xD8\xFF\xE0",
-    "PNG",	8, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A",
-    NULL,	0, NULL
+    { "GIF87a",	6, "GIF87a" },
+    { "GIF89a",	6, "GIF89a" },
+    { "GZIP",	2, "\x1F\x8B" },
+    { "JPEG",	4, "\xFF\xD8\xFF\xE0" },
+    { "PNG",	8, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A" },
+    { NULL,	0, NULL }
 };
 
 /* Check if a chunk of data is incompressible */
-static int is_incompressible(const unsigned char *p, size_t n)
+static int is_incompressible(const char *p, size_t n)
 {
     struct file_sig *sig = sig_tbl;
 
@@ -749,7 +750,7 @@ static int prot_flush_encode(struct protstream *s,
 	     * Oversize the buffer, so we (hopefully) eliminate
 	     * multiple small incremental reallocations.
 	     */
-	    syslog(LOG_DEBUG, "growing compress buffer from %d to %d bytes",
+	    syslog(LOG_DEBUG, "growing compress buffer from %u to %lu bytes",
 		   s->zbuf_size, def_size + PROT_BUFSIZE);
 
 	    s->zbuf_size = def_size + PROT_BUFSIZE;
@@ -836,7 +837,6 @@ int prot_flush_internal(struct protstream *s, int force)
     unsigned left = s->ptr - s->buf;
 
     assert(s->write);
-    assert(s->cnt >= 0);
 
     /* Is this protstream finished? */
     if (s->eof || s->error) {
@@ -967,7 +967,7 @@ int prot_flush_internal(struct protstream *s, int force)
 	    
 	    if(s->big_buffer == PROT_NO_FD) {
 		/* open new bigbuffer */
-		int fd = create_tempfile();
+		int fd = create_tempfile(libcyrus_config_getstring(CYRUSOPT_TEMP_PATH));
 		if(fd == -1) {
 		    s->error = xstrdup(strerror(errno));
 		    goto done;
@@ -1241,7 +1241,7 @@ int prot_select(struct protgroup *readstreams, int extra_read_fd,
     struct protstream *s, *timeout_prot = NULL;
     struct protgroup *retval = NULL;
     int max_fd, found_fds = 0;
-    int i;
+    unsigned i;
     fd_set rfds;
     int have_readtimeout = 0;
     struct timeval my_timeout;
@@ -1458,7 +1458,7 @@ void protgroup_free(struct protgroup *group)
 
 void protgroup_insert(struct protgroup *group, struct protstream *item) 
 {
-    int i, empty;
+    unsigned i, empty;
 
     assert(group);
     assert(item);
@@ -1481,7 +1481,7 @@ void protgroup_insert(struct protgroup *group, struct protstream *item)
 
 void protgroup_delete(struct protgroup *group, struct protstream *item) 
 {
-    int i;
+    unsigned i;
 
     assert(group);
     assert(item);
@@ -1498,6 +1498,7 @@ void protgroup_delete(struct protgroup *group, struct protstream *item)
 	    return;
 	}
     }
+    syslog(LOG_ERR, "protgroup_delete(): can't find protstream in group");
 }
 
 struct protstream *protgroup_getelement(struct protgroup *group,
@@ -1517,7 +1518,8 @@ int prot_getc(struct protstream *s)
 {
     assert(!s->write);
 
-    if (s->cnt-- > 0) {
+    if (s->cnt > 0) {
+	--s->cnt;
 	return *(s->ptr)++;
     } else {
 	return prot_fill(s);

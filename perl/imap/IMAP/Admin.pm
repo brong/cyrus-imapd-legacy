@@ -37,7 +37,7 @@
 # AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 # OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
-# $Id: Admin.pm,v 1.49 2006/11/30 17:11:23 murch Exp $
+# $Id: Admin.pm,v 1.49.2.1 2007/11/01 14:39:38 murch Exp $
 
 package Cyrus::IMAP::Admin;
 use strict;
@@ -785,8 +785,9 @@ sub mboxconfig {
 
   my %values = ( "comment" => "/comment",
 		 "condstore" => "/vendor/cmu/cyrus-imapd/condstore",
-		 "news2mail" => "/vendor/cmu/cyrus-imapd/news2mail",
 		 "expire" => "/vendor/cmu/cyrus-imapd/expire",
+		 "news2mail" => "/vendor/cmu/cyrus-imapd/news2mail",
+		 "sharedseen" => "/vendor/cmu/cyrus-imapd/sharedseen",
 		 "sieve" => "/vendor/cmu/cyrus-imapd/sieve",
 		 "squat" => "/vendor/cmu/cyrus-imapd/squat" );
 

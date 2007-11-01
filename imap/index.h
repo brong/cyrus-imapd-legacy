@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.h,v 1.11 2006/11/30 17:11:18 murch Exp $
+ * $Id: index.h,v 1.11.2.1 2007/11/01 14:39:33 murch Exp $
  */
 
 /* Header for internal usage of index.c + programs that make raw access
@@ -64,6 +64,7 @@
 
 #include "annotate.h" /* for strlist functionality */
 #include "mailbox.h" /* for bit32 */
+#include "message_guid.h"
 
 /* Access macros for the memory-mapped index file data */
 #define INDEC_OFFSET(msgno) (index_base+start_offset+(((msgno)-1)*record_size))
@@ -84,6 +85,7 @@
 #else
 #define MODSEQ(msgno) ntohl(*((bit32 *)(INDEC_OFFSET(msgno)+OFFSET_MODSEQ)))
 #endif
+#define GUID(msgno) message_guid_import(NULL, (unsigned char *)(INDEC_OFFSET(msgno)+OFFSET_MESSAGE_GUID))
 
 /* Access assistance macros for memory-mapped cache file data */
 /* CACHE_ITEM_BIT32: Convert to host byte order */
@@ -178,9 +180,22 @@ struct nntp_overview {
     unsigned long lines;
 };
 
+struct seq_range {
+    unsigned low;
+    unsigned high;
+};
+
+struct seq_set {
+    struct seq_range *set;
+    unsigned len;
+    unsigned alloc;
+    unsigned mark;
+    struct seq_set *next;
+};
+
 extern void index_operatemailbox(struct mailbox *mailbox);
-extern int index_finduid(unsigned uid);
-extern int index_getuid(unsigned msgno);
+extern unsigned index_finduid(unsigned uid);
+extern unsigned index_getuid(unsigned msgno);
 extern int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 			  const char *section,
 			  unsigned long start_octet, unsigned long octet_count,
@@ -194,5 +209,11 @@ extern unsigned long index_getsize(struct mailbox *mailbox, unsigned msgno);
 extern unsigned long index_getlines(struct mailbox *mailbox, unsigned msgno);
 extern int index_copy_remote(struct mailbox *mailbox, char *sequence, 
 			     int usinguid, struct protstream *pout);
+
+void appendsequencelist(struct seq_set **l, char *sequence, int usinguid);
+void freesequencelist(struct seq_set *l);
+
+extern struct seq_set *index_parse_sequence(const char *sequence, int usinguid,
+					    struct seq_set *set);
 
 #endif /* INDEX_H */

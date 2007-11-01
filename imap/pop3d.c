@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.169 2006/11/30 17:11:19 murch Exp $
+ * $Id: pop3d.c,v 1.169.2.1 2007/11/01 14:39:34 murch Exp $
  */
 #include <config.h>
 
@@ -79,6 +79,8 @@
 #include "mailbox.h"
 #include "version.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "mboxlist.h"
 #include "idle.h"
 #include "telemetry.h"
@@ -496,7 +498,7 @@ int service_main(int argc __attribute__((unused)),
 	fatal("SASL failed initializing: sasl_server_new()",EC_TEMPFAIL); 
 
     /* will always return something valid */
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(0);
     sasl_setprop(popd_saslconn, SASL_SEC_PROPS, secprops);
     sasl_setprop(popd_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
     
@@ -801,7 +803,7 @@ static void cmdloop(void)
 		        int pollpadding =config_getint(IMAPOPT_POPPOLLPADDING);
 			int minpollsec = config_getint(IMAPOPT_POPMINPOLL)*60;
 		        if ((minpollsec > 0) && (pollpadding > 1)) { 
-			    int mintime = popd_login_time - (minpollsec*(pollpadding));
+			    unsigned mintime = popd_login_time - (minpollsec*(pollpadding));
 			    if (popd_mailbox->pop3_last_login < mintime) {
 			        popd_mailbox->pop3_last_login = mintime + minpollsec; 
 			    } else {
@@ -1123,7 +1125,7 @@ static void cmd_starttls(int pop3s __attribute__((unused)))
 static void cmd_apop(char *response)
 {
     int sasl_result;
-    char *canon_user;
+    const void *canon_user;
 
     assert(response != NULL);
 
@@ -1166,9 +1168,7 @@ static void cmd_apop(char *response)
      * get the userid from SASL --- already canonicalized from
      * mysasl_proxy_policy()
      */
-    sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
-			       (const void **) &canon_user);
-    popd_userid = xstrdup(canon_user);
+    sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME, &canon_user);
     if (sasl_result != SASL_OK) {
 	prot_printf(popd_out, 
 		    "-ERR [AUTH] weird SASL error %d getting SASL_USERNAME\r\n", 
@@ -1179,6 +1179,7 @@ static void cmd_apop(char *response)
 	}
 	return;
     }
+    popd_userid = xstrdup((const char *) canon_user);
     
     syslog(LOG_NOTICE, "login: %s %s%s APOP%s %s", popd_clienthost,
 	   popd_userid, popd_subfolder ? popd_subfolder : "",
@@ -1228,8 +1229,6 @@ void cmd_user(char *user)
 
 void cmd_pass(char *pass)
 {
-    int plaintextloginpause;
-
     if (!popd_userid) {
 	prot_printf(popd_out, "-ERR [AUTH] Must give USER command\r\n");
 	return;
@@ -1249,7 +1248,9 @@ void cmd_pass(char *pass)
 	    return;
 	}
 
-	syslog(LOG_NOTICE, "login: %s %s kpop", popd_clienthost, popd_userid);
+	syslog(LOG_NOTICE, "login: %s %s%s KPOP%s %s", popd_clienthost,
+	       popd_userid, popd_subfolder ? popd_subfolder : "",
+	       popd_starttls_done ? "+TLS" : "", "User logged in");
 
 	openinbox();
 	return;
@@ -1288,6 +1289,29 @@ void cmd_pass(char *pass)
 	return;
     }
     else {
+	/* successful authentication */
+	int sasl_result, plaintextloginpause;
+	const void *val;
+
+	free(popd_userid);
+	popd_userid = 0;
+
+	/* get the userid from SASL --- already canonicalized from
+	 * mysasl_proxy_policy()
+	 */
+	sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME, &val);
+	if (sasl_result != SASL_OK) {
+	    prot_printf(popd_out, 
+			"-ERR [AUTH] weird SASL error %d getting SASL_USERNAME\r\n", 
+			sasl_result);
+	    if (popd_subfolder) {
+		free(popd_subfolder);
+		popd_subfolder = 0;
+	    }
+	    return;
+	}
+	popd_userid = xstrdup((const char *) val);
+
 	syslog(LOG_NOTICE, "login: %s %s%s plaintext%s %s", popd_clienthost,
 	       popd_userid, popd_subfolder ? popd_subfolder : "",
 	       popd_starttls_done ? "+TLS" : "", "User logged in");
@@ -1359,7 +1383,8 @@ void cmd_auth(char *arg)
 {
     int r, sasl_result;
     char *authtype;
-    char *canon_user;
+    const void *val;
+    const char *canon_user;
 
     /* if client didn't specify an argument we give them the list
      *
@@ -1455,14 +1480,14 @@ void cmd_auth(char *arg)
     /* get the userid from SASL --- already canonicalized from
      * mysasl_proxy_policy()
      */
-    sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME,
-			       (const void **) &canon_user);
+    sasl_result = sasl_getprop(popd_saslconn, SASL_USERNAME, &val);
     if (sasl_result != SASL_OK) {
 	prot_printf(popd_out, 
 		    "-ERR [AUTH] weird SASL error %d getting SASL_USERNAME\r\n", 
 		    sasl_result);
 	return;
     }
+    canon_user = (const char *) val;
 
     /* If we're proxying, the authzid may contain a subfolder,
        so re-canonify it */
@@ -1580,7 +1605,7 @@ int openinbox(void)
     }
     else {
 	/* local mailbox */
-	int msg;
+	unsigned msg;
 	struct index_record record;
 	int minpoll;
 	int doclose = 0;
@@ -1624,10 +1649,6 @@ int openinbox(void)
 	    prot_printf(popd_out,
 			"-ERR [LOGIN-DELAY] Logins must be at least %d minute%s apart\r\n",
 			minpoll, minpoll > 1 ? "s" : "");
-	    if (!mailbox_lock_index(&mboxstruct)) {
-		mboxstruct.pop3_last_login = popd_login_time;
-		mailbox_write_index_header(&mboxstruct);
-	    }
 	    mailbox_close(&mboxstruct);
 	    goto fail;
 	}
@@ -1745,12 +1766,13 @@ static int parsenum(char **ptr)
     return result;
 }
 
-static int expungedeleted(struct mailbox *mailbox __attribute__((unused)),
-			  void *rock __attribute__((unused)), char *index,
-			  int expunge_flags __attribute__((unused)))
+static unsigned expungedeleted(struct mailbox *mailbox __attribute__((unused)),
+			       void *rock __attribute__((unused)),
+			       unsigned char *index,
+			       int expunge_flags __attribute__((unused)))
 {
-    int msg;
-    int uid = ntohl(*((bit32 *)(index+OFFSET_UID)));
+    unsigned msg;
+    unsigned uid = ntohl(*((bit32 *)(index+OFFSET_UID)));
 
     for (msg = 1; msg <= popd_exists; msg++) {
 	if (popd_msg[msg].uid == uid) {
@@ -1782,7 +1804,7 @@ static int reset_saslconn(sasl_conn_t **conn)
        ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
                           saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(0);
     ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;
     /* end of service_main initialization excepting SSF */

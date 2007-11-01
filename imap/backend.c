@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: backend.c,v 1.43 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: backend.c,v 1.43.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -70,6 +70,8 @@
 #include "backend.h"
 #include "global.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "iptostring.h"
 #include "util.h"
 
@@ -146,6 +148,7 @@ static int do_starttls(struct backend *s, struct tls_cmd_t *tls_cmd)
     if (r != SASL_OK) return -1;
 
     r = sasl_setprop(s->saslconn, SASL_AUTH_EXTERNAL, auth_id);
+    if (auth_id) free(auth_id);
     if (r != SASL_OK) return -1;
 
     prot_settls(s->in,  s->tlsconn);
@@ -204,7 +207,7 @@ static int backend_authenticate(struct backend *s, struct protocol_t *prot,
 	return r;
     }
 
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(0);
     r = sasl_setprop(s->saslconn, SASL_SEC_PROPS, secprops);
     if (r != SASL_OK) {
 	return r;
@@ -283,8 +286,7 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
     struct backend *ret;
 
     if (!ret_backend) {
-	ret = xmalloc(sizeof(struct backend));
-	memset(ret, 0, sizeof(struct backend));
+	ret = xzmalloc(sizeof(struct backend));
 	strlcpy(ret->hostname, server, sizeof(ret->hostname));
 	ret->timeout = NULL;
     }
@@ -387,8 +389,10 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
 			      prot->banner.is_capa);
 
     /* now need to authenticate to backend server,
-       unless we're doing LMTP on a UNIX socket (deliver) */
-    if ((server[0] != '/') || strcmp(prot->sasl_service, "lmtp")) {
+       unless we're doing LMTP/CSYNC on a UNIX socket (deliver/sync_client) */
+    if ((server[0] != '/') ||
+	(strcmp(prot->sasl_service, "lmtp") &&
+	 strcmp(prot->sasl_service, "csync"))) {
 	if ((r = backend_authenticate(ret, prot, &mechlist, userid,
 				      cb, auth_status))) {
 	    syslog(LOG_ERR, "couldn't authenticate to backend server: %s",
@@ -486,4 +490,7 @@ void backend_disconnect(struct backend *s)
 	sasl_dispose(&(s->saslconn));
 	s->saslconn = NULL;
     }
+
+    /* free last_result buffer */
+    freebuf(&s->last_result);
 }

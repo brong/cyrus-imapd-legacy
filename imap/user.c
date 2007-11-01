@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: user.c,v 1.21 2006/11/30 17:11:20 murch Exp $
+ * $Id: user.c,v 1.21.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -128,16 +128,16 @@ static int user_deletesieve(char *user)
     if(config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR)) return 0;
     
     if (config_virtdomains && (domain = strchr(user, '@'))) {
-	char d = (char) dir_hash_c(domain+1);
+	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
-	hash = (char) dir_hash_c(user);
+	hash = (char) dir_hash_c(user, config_fulldirhash);
 	snprintf(sieve_path, sizeof(sieve_path), "%s%s%c/%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR),
 		 FNAME_DOMAINDIR, d, domain+1, hash, user);
 	*domain = '@';  /* reassemble user@domain */
     }
     else {
-	hash = (char) dir_hash_c(user);
+	hash = (char) dir_hash_c(user, config_fulldirhash);
 
 	snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR), hash, user);
@@ -252,32 +252,32 @@ static int user_renamesieve(char *olduser, char *newuser)
     if(config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR)) return 0;
     
     if (config_virtdomains && (domain = strchr(olduser, '@'))) {
-	char d = (char) dir_hash_c(domain+1);
+	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
-	hash = (char) dir_hash_c(olduser);
+	hash = (char) dir_hash_c(olduser, config_fulldirhash);
 	snprintf(oldpath, sizeof(oldpath), "%s%s%c/%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR),
 		 FNAME_DOMAINDIR, d, domain+1, hash, olduser);
 	*domain = '@';  /* reassemble user@domain */
     }
     else {
-	hash = (char) dir_hash_c(olduser);
+	hash = (char) dir_hash_c(olduser, config_fulldirhash);
 
 	snprintf(oldpath, sizeof(oldpath), "%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR), hash, olduser);
     }
 
     if (config_virtdomains && (domain = strchr(newuser, '@'))) {
-	char d = (char) dir_hash_c(domain+1);
+	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
-	hash = (char) dir_hash_c(newuser);
+	hash = (char) dir_hash_c(newuser, config_fulldirhash);
 	snprintf(newpath, sizeof(newpath), "%s%s%c/%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR),
 		 FNAME_DOMAINDIR, d, domain+1, hash, newuser);
 	*domain = '@';  /* reassemble user@domain */
     }
     else {
-	hash = (char) dir_hash_c(newuser);
+	hash = (char) dir_hash_c(newuser, config_fulldirhash);
 
 	snprintf(newpath, sizeof(newpath), "%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR), hash, newuser);
@@ -423,7 +423,7 @@ static int find_p(void *rockp,
     char *inboxname = ((struct find_rock *) rockp)->inboxname;
 
     return (!strncmp(key, inboxname, strlen(inboxname)) &&
-	    (keylen == strlen(inboxname) || key[strlen(inboxname)] == '.'));
+	    (keylen == (int) strlen(inboxname) || key[strlen(inboxname)] == '.'));
 }
 
 static int find_cb(void *rockp,

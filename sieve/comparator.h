@@ -1,6 +1,6 @@
 /* comparator.h
  * Larry Greenfield
- * $Id: comparator.h,v 1.12 2006/11/30 17:11:24 murch Exp $
+ * $Id: comparator.h,v 1.12.2.1 2007/11/01 14:39:39 murch Exp $
  */
 /***********************************************************
         Copyright 1999 by Carnegie Mellon University
@@ -29,13 +29,17 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #define COMPARATOR_H
 
 #ifdef ENABLE_REGEX
-#ifdef HAVE_RX
-#include <rxposix.h>
-#else
-#include <sys/types.h>
-#include <regex.h>
-#endif
-#endif
+# ifdef HAVE_PCREPOSIX_H
+#  include <pcreposix.h>
+# else /* !HAVE_PCREPOSIX_H */
+#  ifdef HAVE_RXPOSIX_H
+#   include <rxposix.h>
+#  else /* !HAVE_RXPOSIX_H */
+#   include <sys/types.h>
+#   include <regex.h>
+#  endif /* HAVE_RXPOSIX_H */
+# endif /* HAVE_PCREPOSIX_H */
+#endif /* ENABLE_REGEX */
 
 /* compares pat to text; returns 1 if it's true, 0 otherwise 
    first arg is text, second arg is pat, third arg is rock */
@@ -45,4 +49,4 @@ typedef int comparator_t(const char *, size_t, const char *, void *);
 comparator_t *lookup_comp(int comp, int mode,
 			  int relation, void **rock);
 
-#endif
+#endif /* COMPARATOR_H */

@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: mboxlist.c,v 1.243 2006/11/30 17:11:19 murch Exp $
+ * $Id: mboxlist.c,v 1.243.2.1 2007/11/01 14:39:33 murch Exp $
  */
 
 #include <config.h>
@@ -74,12 +74,15 @@
 #include "exitcodes.h"
 #include "imap_err.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #include "mboxname.h"
 #include "mupdate-client.h"
 
 #include "mboxlist.h"
 #include "quota.h"
+#include "sync_log.h"
 
 #define DB config_mboxlist_db
 #define SUBDB config_subscription_db
@@ -764,7 +767,7 @@ int mboxlist_insertremote(const char *name, int mbtype,
 
     if ((p = strchr(host, '!'))) {
       /* remote mailbox */
-      int len = (p - host);
+      size_t len = (p - host);
       if (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_UNIFIED &&
 	  len == strlen(config_servername) &&
 	  !strncasecmp(host, config_servername, len)) {
@@ -873,6 +876,101 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
 }
 	
 /*
+ * Delayed Delete a mailbox: translate delete into rename
+ *
+ * XXX local_only?
+ */
+int
+mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid, 
+                               struct auth_state *auth_state, int checkacl,
+                               int local_only __attribute__((unused)),
+			       int force)
+{
+    char newname[MAX_MAILBOX_PATH+1];
+    char *path, *mpath;
+    char *acl;
+    char *partition;
+    int r;
+    long access;
+    int isremote = 0;
+    int mbtype;
+    const char *p;
+    const char *deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX);
+    size_t domainlen = 0;
+    struct timeval tv;
+
+    if(!isadmin && force) return IMAP_PERMISSION_DENIED;
+
+    /* Check for request to delete a user:
+       user.<x> with no dots after it */
+    if ((p = mboxname_isusermailbox(name, 1))) {
+	/* Can't DELETE INBOX (your own inbox) */
+	if (userid) {
+	    size_t len = config_virtdomains ?
+                strcspn(userid, "@") : strlen(userid);
+	    if ((len == strlen(p)) && !strncmp(p, userid, len)) {
+		return(IMAP_MAILBOX_NOTSUPPORTED);
+	    }
+	}
+
+	/* Only admins may delete user */
+	if (!isadmin) return(IMAP_PERMISSION_DENIED);
+    }
+
+    do {
+        r = mboxlist_mylookup(name, &mbtype,
+                              &path, &mpath, &partition, &acl, NULL, 1);
+    } while (r == IMAP_AGAIN);
+
+    if (r) return(r);
+
+    isremote = mbtype & MBTYPE_REMOTE;
+
+    /* are we reserved? (but for remote mailboxes this is okay, since
+     * we don't touch their data files at all) */
+    if(!isremote && (mbtype & MBTYPE_RESERVE) && !force) {
+	return(IMAP_MAILBOX_RESERVED);
+    }
+
+    /* check if user has Delete right (we've already excluded non-admins
+     * from deleting a user mailbox) */
+    if (checkacl) {
+	access = cyrus_acl_myrights(auth_state, acl);
+	if(!(access & ACL_DELETEMBOX)) {
+	    /* User has admin rights over their own mailbox namespace */
+	    if (mboxname_userownsmailbox(userid, name) &&
+		(config_implicitrights & ACL_ADMIN)) {
+		isadmin = 1;
+	    }
+	    
+	    /* Lie about error if privacy demands */
+	    r = (isadmin || (access & ACL_LOOKUP)) ?
+		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
+	    return(r);
+	}
+    }
+
+    if (config_virtdomains && (p = strchr(name, '!')))
+        domainlen = p - name + 1;    
+
+    gettimeofday( &tv, NULL );
+
+    if (domainlen && domainlen < sizeof(newname))
+	strncpy(newname, name, domainlen);
+    snprintf(newname+domainlen, sizeof(newname)-domainlen, "%s.%s.%X",
+             deletedprefix, name+domainlen, (unsigned) tv.tv_sec);
+
+    /* Get mboxlist_renamemailbox to do the hard work. No ACL checks needed */
+    r = mboxlist_renamemailbox((char *)name, newname, partition,
+                               1 /* isadmin */, userid,
+                               auth_state, force);
+
+    /* don't forget to log the rename! */
+    sync_log_mailbox_double((char *)name, newname);
+    return r;
+}
+
+/*
  * Delete a mailbox.
  * Deleting the mailbox user.FOO may only be performed by an admin.
  *
@@ -909,7 +1007,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
     if ((p = mboxname_isusermailbox(name, 1))) {
 	/* Can't DELETE INBOX (your own inbox) */
 	if (userid) {
-	    int len = config_virtdomains ? strcspn(userid, "@") : strlen(userid);
+	    size_t len = config_virtdomains ? strcspn(userid, "@") : strlen(userid);
 	    if ((len == strlen(p)) && !strncmp(p, userid, len)) {
 		r = IMAP_MAILBOX_NOTSUPPORTED;
 		goto done;
@@ -1246,7 +1344,8 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     if (!r && !(mbtype & MBTYPE_REMOTE)) {
 	/* Rename the actual mailbox */
 	r = mailbox_rename_copy(&oldmailbox, newname, newpartition,
-				NULL, NULL, &newmailbox);
+				NULL, NULL, &newmailbox,
+				isusermbox ? userid : NULL);
 	if (r) {
 	    goto done;
 	} else {
@@ -1267,7 +1366,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
 		   oldname, cyrusdb_strerror(r));
 	    r = IMAP_IOERROR;
-	    mailbox_close(&newmailbox);
+	    if (newopen) mailbox_close(&newmailbox);
 	    goto done;
 	    break;
 	}
@@ -1436,7 +1535,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
     int r;
     int access;
     int mode = ACL_MODE_SET;
-    int isusermbox = 0;
+    int isusermbox = 0, anyoneuseracl = 1;
     struct mailbox mailbox;
     int mailbox_open = 0;
     char *acl, *newacl = NULL;
@@ -1493,6 +1592,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
 	 name[domainlen+5+useridlen] == '.')) {
 	isusermbox = 1;
     }
+    anyoneuseracl = config_getswitch(IMAPOPT_ANYONEUSERACL);
 
     /* 1. Start Transaction */
     /* lookup the mailbox to make sure it exists and get its acl */
@@ -1542,11 +1642,18 @@ int mboxlist_setacl(const char *name, const char *identifier,
 	}
     }
 
+    /* 2.1 Only admin user can set 'anyone' rights if config says so */
+    if (!r && !isadmin && !anyoneuseracl && !strncmp(identifier, "anyone", 6)) {
+      r = IMAP_PERMISSION_DENIED;
+      goto done;
+    }
+
     /* 3. Set DB Entry */
     if(!r) {
 	/* Make change to ACL */
 	newacl = xstrdup(acl);
-	if (rights) {
+	if (rights && *rights) {
+	    /* rights are present and non-empty */
 	    mode = ACL_MODE_SET;
 	    if (*rights == '+') {
 		rights++;
@@ -1815,7 +1922,7 @@ static int find_p(void *rockp,
     if (rock->inboxoffset) {
 	char namebuf[MAX_MAILBOX_NAME+1];
 
-	if(keylen >= sizeof(namebuf)) {
+	if(keylen >= (int) sizeof(namebuf)) {
 	    syslog(LOG_ERR, "oversize keylen in mboxlist.c:find_p()");
 	    return 0;
 	}
@@ -1856,6 +1963,18 @@ static int find_p(void *rockp,
 	/* this would've been output with the user stuff, so skip it */
 	return 0;
     }
+
+    /* Suppress deleted hierarchy unless admin: overrides ACL_LOOKUP test */
+    if (!rock->isadmin) {
+	char namebuf[MAX_MAILBOX_NAME+1];
+
+	memcpy(namebuf, key, keylen);
+	namebuf[keylen] = '\0';
+	if (mboxlist_delayed_delete_isenabled() && 
+	        mboxlist_in_deletedhierarchy(namebuf))
+	    return 0;
+    }
+
 
     /* check acl */
     if (!rock->isadmin) {
@@ -1913,7 +2032,7 @@ static int find_cb(void *rockp,
     while (minmatch >= 0) {
 	long matchlen;
 	
-	if(keylen >= sizeof(namebuf)) {
+	if(keylen >= (int) sizeof(namebuf)) {
 	    syslog(LOG_ERR, "oversize keylen in mboxlist.c:find_cb()");
 	    return 0;
 	}
@@ -2713,7 +2832,7 @@ void mboxlist_open(char *fname)
 	flags |= CYRUSDB_MBOXSORT;
     }
 
-    ret = DB->open(fname, flags, &mbdb);
+    ret = (DB->open)(fname, flags, &mbdb);
     if (ret != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 	       cyrusdb_strerror(ret));
@@ -2732,7 +2851,7 @@ void mboxlist_close(void)
     int r;
 
     if (mboxlist_dbopen) {
-	r = DB->close(mbdb);
+	r = (DB->close)(mbdb);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing mailboxes: %s",
 		   cyrusdb_strerror(r));
@@ -2755,15 +2874,15 @@ char *mboxlist_hash_usersubs(const char *userid)
     char c, *domain;
 
     if (config_virtdomains && (domain = strchr(userid, '@'))) {
-	char d = (char) dir_hash_c(domain+1);
+	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
-	c = (char) dir_hash_c(userid);
+	c = (char) dir_hash_c(userid, config_fulldirhash);
 	sprintf(fname, "%s%s%c/%s%s%c/%s%s", config_dir, FNAME_DOMAINDIR, d,
 		domain+1, FNAME_USERDIR, c, userid, FNAME_SUBSSUFFIX);
 	*domain = '@';  /* replace '@' */
     }
     else {
-	c = (char) dir_hash_c(userid);
+	c = (char) dir_hash_c(userid, config_fulldirhash);
 	sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
 		FNAME_SUBSSUFFIX);
     }
@@ -2792,7 +2911,7 @@ mboxlist_opensubs(const char *userid,
 	flags |= CYRUSDB_MBOXSORT;
     }
 
-    r = SUBDB->open(subsfname, flags, ret);
+    r = (SUBDB->open)(subsfname, flags, ret);
     if (r != CYRUSDB_OK) {
 	r = IMAP_IOERROR;
     }
@@ -2806,7 +2925,7 @@ mboxlist_opensubs(const char *userid,
  */
 static void mboxlist_closesubs(struct db *sub)
 {
-    SUBDB->close(sub);
+    (SUBDB->close)(sub);
 }
 
 /*
@@ -3251,4 +3370,32 @@ int mboxlist_abort(struct txn *tid)
     assert(tid);
 
     return DB->abort(mbdb, tid);
+}
+
+int mboxlist_delayed_delete_isenabled(void)
+{
+    enum enum_value config_delete_mode = config_getenum(IMAPOPT_DELETE_MODE);
+
+    return(config_delete_mode == IMAP_ENUM_DELETE_MODE_DELAYED);
+}
+
+int mboxlist_in_deletedhierarchy(const char *mailboxname)
+{
+    static const char *deletedprefix = NULL;
+    static int deletedprefix_len = 0;
+    int domainlen = 0;
+    char *p;
+
+    if (!mboxlist_delayed_delete_isenabled()) return(0);
+
+    if (!deletedprefix) {
+        deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX);
+	deletedprefix_len = strlen(deletedprefix);
+    }
+
+    if (config_virtdomains && (p = strchr(mailboxname, '!')))
+        domainlen = p - mailboxname + 1;    
+
+    return ((!strncmp(mailboxname + domainlen, deletedprefix, deletedprefix_len) &&
+             mailboxname[domainlen + deletedprefix_len] == '.') ? 1 : 0);
 }

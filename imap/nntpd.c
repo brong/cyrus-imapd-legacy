@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: nntpd.c,v 1.53 2006/11/30 17:11:19 murch Exp $
+ * $Id: nntpd.c,v 1.53.2.1 2007/11/01 14:39:34 murch Exp $
  */
 
 /*
@@ -106,6 +106,8 @@
 #include "version.h"
 #include "wildmat.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
 extern int optind;
 extern char *optarg;
@@ -569,7 +571,7 @@ int service_main(int argc __attribute__((unused)),
 	fatal("SASL failed initializing: sasl_server_new()",EC_TEMPFAIL); 
 
     /* will always return something valid */
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(0);
     sasl_setprop(nntp_saslconn, SASL_SEC_PROPS, secprops);
     sasl_setprop(nntp_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
     
@@ -734,7 +736,7 @@ static int reset_saslconn(sasl_conn_t **conn)
        ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
                           saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(0);
     ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;
     /* end of service_main initialization excepting SSF */
@@ -1504,10 +1506,6 @@ static void cmdloop(void)
       nocurrent:
 	prot_printf(nntp_out, "420 Current article number is invalid\r\n");
 	continue;
-
-      noarticle:
-	prot_printf(nntp_out, "423 No such article(s) in this newsgroup\r\n");
-	continue;
     }
 }
 
@@ -2053,9 +2051,9 @@ static void cmd_authinfo_sasl(char *cmd, char *mech, char *resp)
 {
     int r, sasl_result;
     char *success_data;
-    const int *ssfp;
+    sasl_ssf_t ssf;
     char *ssfmsg = NULL;
-    const char *canon_user;
+    const void *val;
 
     if (nntp_userid) {
 	prot_printf(nntp_out, "502 Already authenticated\r\n");
@@ -2149,9 +2147,7 @@ static void cmd_authinfo_sasl(char *cmd, char *mech, char *resp)
     /* get the userid from SASL --- already canonicalized from
      * mysasl_proxy_policy()
      */
-    sasl_result = sasl_getprop(nntp_saslconn, SASL_USERNAME,
-			       (const void **) &canon_user);
-    nntp_userid = xstrdup(canon_user);
+    sasl_result = sasl_getprop(nntp_saslconn, SASL_USERNAME, &val);
     if (sasl_result != SASL_OK) {
 	prot_printf(nntp_out, "481 weird SASL error %d SASL_USERNAME\r\n", 
 		    sasl_result);
@@ -2160,24 +2156,26 @@ static void cmd_authinfo_sasl(char *cmd, char *mech, char *resp)
 	reset_saslconn(&nntp_saslconn);
 	return;
     }
+    nntp_userid = xstrdup((const char *) val);
 
     proc_register("nntpd", nntp_clienthost, nntp_userid, (char *)0);
 
     syslog(LOG_NOTICE, "login: %s %s %s%s %s", nntp_clienthost, nntp_userid,
 	   mech, nntp_starttls_done ? "+TLS" : "", "User logged in");
 
-    sasl_getprop(nntp_saslconn, SASL_SSF, (const void **) &ssfp);
+    sasl_getprop(nntp_saslconn, SASL_SSF, &val);
+    ssf = *((sasl_ssf_t *) val);
 
     /* really, we should be doing a sasl_getprop on SASL_SSF_EXTERNAL,
        but the current libsasl doesn't allow that. */
     if (nntp_starttls_done) {
-	switch(*ssfp) {
+	switch(ssf) {
 	case 0: ssfmsg = "tls protection"; break;
 	case 1: ssfmsg = "tls plus integrity protection"; break;
 	default: ssfmsg = "tls plus privacy protection"; break;
 	}
     } else {
-	switch(*ssfp) {
+	switch(ssf) {
 	case 0: ssfmsg = "no protection"; break;
 	case 1: ssfmsg = "integrity protection"; break;
 	default: ssfmsg = "privacy protection"; break;
@@ -2232,11 +2230,11 @@ static void cmd_hdr(char *cmd, char *hdr, char *pat, char *msgid,
 			    size + strlen(xref) + 2); /* +2 for \r\n */
 	    }
 	    else if (!strcasecmp(":lines", hdr))
-		prot_printf(nntp_out, "%lu %lu\r\n",
+		prot_printf(nntp_out, "%u %lu\r\n",
 			    by_msgid ? 0 : index_getuid(msgno),
 			    index_getlines(nntp_group, msgno));
 	    else
-		prot_printf(nntp_out, "%lu \r\n",
+		prot_printf(nntp_out, "%u \r\n",
 			    by_msgid ? 0 : index_getuid(msgno));
 	}
 	else if (!strcmp(hdr, "xref") && !pat /* [X]HDR only */) {
@@ -2246,13 +2244,13 @@ static void cmd_hdr(char *cmd, char *hdr, char *pat, char *msgid,
 	    build_xref(msgid, xref, sizeof(xref), 1);
 	    if (!by_msgid) free(msgid);
 
-	    prot_printf(nntp_out, "%lu %s\r\n",
+	    prot_printf(nntp_out, "%u %s\r\n",
 			by_msgid ? 0 : index_getuid(msgno), xref);
 	}
 	else if ((body = index_getheader(nntp_group, msgno, hdr)) &&
 		 (!pat ||			/* [X]HDR */
 		  wildmat(body, pat))) {	/* XPAT with match */
-		prot_printf(nntp_out, "%lu %s\r\n",
+		prot_printf(nntp_out, "%u %s\r\n",
 			    by_msgid ? 0 : index_getuid(msgno), body);
 	}
     }
@@ -2386,7 +2384,7 @@ int list_cb(char *name, int matchlen, int maycreate __attribute__((unused)),
 	return 0;
 
     /* don't repeat */
-    if (matchlen == strlen(lastname) &&
+    if (matchlen == (int) strlen(lastname) &&
 	!strncmp(name, lastname, matchlen)) return 0;
 
     strncpy(lastname, name, matchlen);
@@ -2770,7 +2768,7 @@ static void cmd_newnews(char *wild, time_t tstamp)
 
 static void cmd_over(char *msgid, unsigned long uid, unsigned long last)
 {
-    int msgno, last_msgno;
+    unsigned msgno, last_msgno;
     struct nntp_overview *over;
     int found = 0;
 
@@ -3320,7 +3318,6 @@ static int newgroup(message_data_t *msg)
     int r;
     char *group;
     char mailboxname[MAX_MAILBOX_NAME+1];
-    int sync_lockfd = (-1);
 
     /* isolate newsgroup */
     group = msg->control + 8; /* skip "newgroup" */
@@ -3344,7 +3341,6 @@ static int rmgroup(message_data_t *msg)
     int r;
     char *group;
     char mailboxname[MAX_MAILBOX_NAME+1];
-    int sync_lockfd = (-1);
 
     /* isolate newsgroup */
     group = msg->control + 7; /* skip "rmgroup" */
@@ -3369,7 +3365,6 @@ static int mvgroup(message_data_t *msg)
     char *group;
     char oldmailboxname[MAX_MAILBOX_NAME+1];
     char newmailboxname[MAX_MAILBOX_NAME+1];
-    int sync_lockfd = (-1);
 
     /* isolate old newsgroup */
     group = msg->control + 7; /* skip "mvgroup" */
@@ -3400,11 +3395,12 @@ static int mvgroup(message_data_t *msg)
 /*
  * mailbox_exchange() callback function to delete cancelled articles
  */
-static int expunge_cancelled(struct mailbox *mailbox __attribute__((unused)),
-			     void *rock, char *index,
-			     int expunge_flags __attribute__((unused)))
+static unsigned expunge_cancelled(struct mailbox *mailbox __attribute__((unused)),
+				  void *rock,
+				  unsigned char *index,
+				  int expunge_flags __attribute__((unused)))
 {
-    int uid = ntohl(*((bit32 *)(index+OFFSET_UID)));
+    unsigned uid = ntohl(*((bit32 *)(index+OFFSET_UID)));
 
     /* only expunge the UID that we obtained from the msgid */
     return (uid == *((unsigned long *) rock));

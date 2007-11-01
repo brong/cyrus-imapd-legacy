@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.117 2006/11/30 17:11:18 murch Exp $
+ * $Id: lmtpengine.c,v 1.117.2.1 2007/11/01 14:39:33 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -81,6 +81,8 @@
 #include "imap_err.h"
 #include "mupdate_err.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "version.h"
 
 #include "lmtpengine.h"
@@ -670,10 +672,11 @@ static int savemsg(struct clientdata *cd,
     p += sprintf(p, "from %s (%s)", cd->lhlo_param, cd->clienthost);
     fold[nfold++] = p;
     if (m->authuser) {
-	const int *ssfp;
-	sasl_getprop(cd->conn, SASL_SSF, (const void **) &ssfp);
-	p += sprintf(p, " (authenticated user=%s bits=%d)",
-		     m->authuser, *ssfp);
+	const void *ssfp;
+	sasl_ssf_t ssf;
+	sasl_getprop(cd->conn, SASL_SSF, &ssfp);
+	ssf = *((sasl_ssf_t *) ssfp);
+	p += sprintf(p, " (authenticated user=%s bits=%d)", m->authuser, ssf);
 	fold[nfold++] = p;
     }
 
@@ -934,7 +937,7 @@ static struct sasl_callback localauth_override_cb[] = {
 /* Reset the given sasl_conn_t to a sane state */
 static int reset_saslconn(sasl_conn_t **conn) 
 {
-    int ret, secflags;
+    int ret;
     sasl_security_properties_t *secprops = NULL;
 
     sasl_dispose(conn);
@@ -954,12 +957,7 @@ static int reset_saslconn(sasl_conn_t **conn)
                           saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
     
-    secflags = SASL_SEC_NOANONYMOUS;
-    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
-
-    secprops = mysasl_secprops(secflags);
+    secprops = mysasl_secprops(SASL_SEC_NOANONYMOUS);
     ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;
     /* end of service_main initialization excepting SSF */
@@ -1001,7 +999,6 @@ void lmtpmode(struct lmtp_func *func,
     sasl_ssf_t ssf;
     char *auth_id;
 
-    int secflags = 0;
     sasl_security_properties_t *secprops = NULL;
 
     /* setup the clientdata structure */
@@ -1096,12 +1093,7 @@ void lmtpmode(struct lmtp_func *func,
 
     /* set my allowable security properties */
     /* ANONYMOUS is silly because we allow that anyway */
-    secflags = SASL_SEC_NOANONYMOUS;
-    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
-
-    secprops = mysasl_secprops(secflags);
+    secprops = mysasl_secprops(SASL_SEC_NOANONYMOUS);
     sasl_setprop(cd.conn, SASL_SEC_PROPS, secprops);
 
     if (func->preauth) {
@@ -1156,6 +1148,7 @@ void lmtpmode(struct lmtp_func *func,
 	  if (!strncasecmp(buf, "auth ", 5)) {
 	      char mech[128];
 	      int sasl_result;
+	      const void *val;
 	      const char *user;
 	      
 	      if (cd.authenticated > 0) {
@@ -1240,12 +1233,13 @@ void lmtpmode(struct lmtp_func *func,
 		  reset_saslconn(&cd.conn);
 		  continue;
 	      }
-	      r = sasl_getprop(cd.conn, SASL_USERNAME, (const void **) &user);
+	      r = sasl_getprop(cd.conn, SASL_USERNAME, &val);
 	      if (r != SASL_OK) {
 		  prot_printf(pout, "501 5.5.4 SASL Error\r\n");
 		  reset_saslconn(&cd.conn);
 		  goto nextcmd;
 	      }
+	      user = (const char *) val;
 
 	      /* Create telemetry log */
 	      deliver_logfd = telemetry_log(user, pin, pout, 0);

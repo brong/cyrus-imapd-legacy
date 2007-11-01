@@ -1,6 +1,6 @@
 /* imclient.c -- Streaming IMxP client library
  *
- * $Id: imclient.c,v 1.87 2006/11/30 17:11:22 murch Exp $
+ * $Id: imclient.c,v 1.87.2.1 2007/11/01 14:39:36 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -78,6 +78,8 @@
 
 #include "exitcodes.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "imparse.h"
 #include "imclient.h"
 #include "nonblock.h"
@@ -1420,10 +1422,12 @@ int imclient_authenticate(struct imclient *imclient,
     } while ((r != 0) && (mtried));
 
     if (r == 0) {
-	const int *ptr;
+	const void *maxp;
+	unsigned int max;
 
-	sasl_getprop(imclient->saslconn, SASL_MAXOUTBUF, (const void **) &ptr);
-	imclient->maxplain = *ptr < IMCLIENT_BUFSIZE ? *ptr : IMCLIENT_BUFSIZE;
+	sasl_getprop(imclient->saslconn, SASL_MAXOUTBUF, &maxp);
+	max = *((const unsigned int *) maxp);
+	imclient->maxplain = max < IMCLIENT_BUFSIZE ? max : IMCLIENT_BUFSIZE;
     }
 
     free(mlist);

@@ -1,6 +1,6 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.40 2006/11/30 17:11:25 murch Exp $
+ * $Id: actions.c,v 1.40.2.1 2007/11/01 14:39:39 murch Exp $
  */
 /*
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
@@ -69,6 +69,8 @@
 #include "global.h"
 #include "libconfig.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 #include "sieve_interface.h"
 
 #include "codes.h"
@@ -83,7 +85,7 @@
 extern int sieved_userisadmin;
 char *sieve_dir = NULL;
 
-const static char *sieved_userid = NULL;
+static const char *sieved_userid = NULL;
 
 int actions_init(void)
 {
@@ -124,7 +126,7 @@ int actions_setuser(const char *userid)
   len = strlcpy(sieve_dir, foo, size);
 
   if (domain) {
-      char dhash = (char) dir_hash_c(domain);
+      char dhash = (char) dir_hash_c(domain, config_fulldirhash);
       len += snprintf(sieve_dir+len, size-len, "%s%c/%s",
 		      FNAME_DOMAINDIR, dhash, domain);
   }
@@ -133,7 +135,7 @@ int actions_setuser(const char *userid)
       strlcat(sieve_dir, "/global", size);
   }
   else {
-      char hash = (char) dir_hash_c(user);
+      char hash = (char) dir_hash_c(user, config_fulldirhash);
       snprintf(sieve_dir+len, size-len, "/%c/%s", hash, user);
   }
 
@@ -277,7 +279,7 @@ static int countscripts(char *name)
 {
     DIR *dp;
     struct dirent *dir;
-    int length;
+    size_t length;
     int number=0;
     char myname[1024];
     
@@ -519,7 +521,7 @@ int listscripts(struct protstream *conn)
 {
     DIR *dp;
     struct dirent *dir;
-    int length;
+    size_t length;
 
     /* open the directory */
     dp=opendir(".");

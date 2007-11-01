@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: master.c,v 1.104 2006/11/30 17:11:23 murch Exp $ */
+/* $Id: master.c,v 1.104.2.1 2007/11/01 14:39:37 murch Exp $ */
 
 #include <config.h>
 
@@ -48,7 +48,6 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <grp.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #ifdef HAVE_UNISTD_H
@@ -59,7 +58,6 @@
 #endif
 #include <fcntl.h>
 #include <signal.h>
-#include <pwd.h>
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <syslog.h>
@@ -110,10 +108,8 @@
 #include "service.h"
 
 #include "lock.h"
-
+#include "util.h"
 #include "xmalloc.h"
-
-#include "message_uuid_master.h"
 
 enum {
     become_cyrus_early = 1,
@@ -124,7 +120,6 @@ enum {
 static int verbose = 0;
 static int listen_queue_backlog = 32;
 static int pidfd = -1;
-static int have_uuid = 0;
 
 const char *MASTER_CONFIG_FILENAME = DEFAULT_MASTER_CONFIG_FILENAME;
 
@@ -188,45 +183,6 @@ void event_free(struct event *a)
     if(a->exec) free((char**)a->exec);
     if(a->name) free((char*)a->name);
     free(a);
-}
-
-int become_cyrus(void)
-{
-    struct passwd *p;
-    int newuid, newgid;
-    int result;
-    static int uid = 0;
-
-    if (uid) return setuid(uid);
-
-    p = getpwnam(CYRUS_USER);
-    if (p == NULL) {
-	syslog(LOG_ERR, "no entry in /etc/passwd for user %s", CYRUS_USER);
-	return -1;
-    }
-
-    /* Save these in case initgroups does a getpw*() */
-    newuid = p->pw_uid;
-    newgid = p->pw_gid;
-
-    if (initgroups(CYRUS_USER, newgid)) {
-        syslog(LOG_ERR, "unable to initialize groups for user %s: %s",
-	       CYRUS_USER, strerror(errno));
-        return -1;
-    }
-
-    if (setgid(newgid)) {
-        syslog(LOG_ERR, "unable to set group id to %d for user %s: %s",
-              newgid, CYRUS_USER, strerror(errno));
-        return -1;
-    }
-
-    result = setuid(newuid);
-
-    /* Only set static uid if successful, else future calls won't reset gid */
-    if (result == 0)
-        uid = newuid;
-    return result;
 }
 
 void get_prog(char *path, unsigned size, char *const *cmd)
@@ -601,9 +557,6 @@ void spawn_service(const int si)
     struct centry *c;
     struct service * const s = &Services[si];
     time_t now = time(NULL);
-    struct message_uuid uuid_prefix;
-    char *uuid_prefix_text;
-    static char uuid_env[100];
 
     if (!s->name) {
 	fatal("Serious software bug found: spawn_service() called on unnamed service!",
@@ -650,21 +603,6 @@ void spawn_service(const int si)
 	return;
     }
 
-    if (s->provide_uuid) {
-        if (!message_uuid_master_next_child(&uuid_prefix)) {
-            syslog(LOG_ERR, "Failed to generate UUID for %s", s->name);
-            message_uuid_set_null(&uuid_prefix);
-        }
-
-        if (!message_uuid_master_checksum(&uuid_prefix)) {
-            syslog(LOG_ERR, "Failed to checksum UUID for %s", s->name);
-            message_uuid_set_null(&uuid_prefix);
-        }
-
-        uuid_prefix_text = message_uuid_text(&uuid_prefix);
-    } else
-        uuid_prefix_text = NULL;
-
     switch (p = fork()) {
     case -1:
 	syslog(LOG_ERR, "can't fork process to run service %s: %m", s->name);
@@ -707,13 +645,6 @@ void spawn_service(const int si)
 	putenv(name_env);
 	snprintf(name_env2, sizeof(name_env2), "CYRUS_ID=%d", s->associate);
 	putenv(name_env2);
-
-	/* add UUID prefix to environment */
-	if (s->provide_uuid) {
-	    snprintf(uuid_env, sizeof(uuid_env), "CYRUS_UUID_PREFIX=%s",
-		     uuid_prefix_text);
-	    putenv(uuid_env);
-	}
 
 	execv(path, s->exec);
 	syslog(LOG_ERR, "couldn't exec %s: %m", path);
@@ -929,6 +860,9 @@ void reap_child(void)
 		    syslog(LOG_WARNING,
 			   "service %s pid %d in UNKNOWN state: exited",
 			   SERVICENAME(s->name), pid);
+		    break;
+		default:
+		    /* Shouldn't get here */
 		    break;
 		} 
 	    } else {
@@ -1187,6 +1121,9 @@ void process_msg(const int si, struct notify_message *msg)
 	    c->service_state = SERVICE_STATE_READY;
 	    s->ready_workers++;
 	    break;
+	default:
+	    /* Shouldn't get here */
+	    break;
 	}
 	break;
 
@@ -1213,6 +1150,9 @@ void process_msg(const int si, struct notify_message *msg)
 		       SERVICENAME(s->name), c->pid);
 	    c->service_state = SERVICE_STATE_BUSY;
 	    s->ready_workers--;
+	    break;
+	default:
+	    /* Shouldn't get here */
 	    break;
 	}
 	break;
@@ -1244,6 +1184,9 @@ void process_msg(const int si, struct notify_message *msg)
 	    c->service_state = SERVICE_STATE_BUSY;
 	    s->nconnections++;
 	    s->ready_workers--;
+	default:
+	    /* Shouldn't get here */
+	    break;
 	}
 	break;
 	
@@ -1274,6 +1217,9 @@ void process_msg(const int si, struct notify_message *msg)
 	    syslog(LOG_ERR,
 		   "service %s pid %d in UNKNOWN state: serving one more multi-threaded connection, forced to READY state",
 		   SERVICENAME(s->name), c->pid);
+	    break;
+	default:
+	    /* Shouldn't get here */
 	    break;
 	}
 	break;
@@ -1347,7 +1293,6 @@ void add_service(const char *name, struct entry *e, void *rock)
     rlim_t maxfds = (rlim_t) masterconf_getint(e, "maxfds", 256);
     int reconfig = 0;
     int i, j;
-    int provide_uuid = have_uuid && masterconf_getswitch(e, "provide_uuid", 0);
 
     if(babysit && prefork == 0) prefork = 1;
     if(babysit && maxforkrate == 0) maxforkrate = 10; /* reasonable safety */
@@ -1427,7 +1372,6 @@ void add_service(const char *name, struct entry *e, void *rock)
 
     Services[i].maxforkrate = maxforkrate;
     Services[i].maxfds = maxfds;
-    Services[i].provide_uuid = provide_uuid;
 
     if (!strcmp(Services[i].proto, "tcp") ||
 	!strcmp(Services[i].proto, "tcp4") ||
@@ -1456,7 +1400,6 @@ void add_service(const char *name, struct entry *e, void *rock)
 		Services[j].desired_workers = Services[i].desired_workers;
 		Services[j].babysit = Services[i].babysit;
 		Services[j].max_workers = Services[i].max_workers;
-		Services[j].provide_uuid = Services[i].provide_uuid;
 	    }
 	}
     }
@@ -1954,12 +1897,6 @@ int main(int argc, char **argv)
 	}
     }
 
-    have_uuid = (config_getint(IMAPOPT_SYNC_MACHINEID) >= 0);
-    if (have_uuid && !message_uuid_master_init()) {
-        syslog(LOG_ERR, "Couldn't initialise UUID subsystem");
-        exit(EX_OSERR);
-    }
-    
     /* init ctable janitor */
     init_janitor();
     
@@ -2016,7 +1953,6 @@ int main(int argc, char **argv)
 		Services[i].nactive = 0;
 		Services[i].nconnections = 0;
 		Services[i].associate = 0;
-                Services[i].provide_uuid = 0;
 
 		if (Services[i].stat[0] > 0) close(Services[i].stat[0]);
 		if (Services[i].stat[1] > 0) close(Services[i].stat[1]);

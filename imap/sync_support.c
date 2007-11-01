@@ -41,7 +41,7 @@
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
  *
- * $Id: sync_support.c,v 1.2 2006/11/30 17:11:20 murch Exp $
+ * $Id: sync_support.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -71,6 +71,8 @@
 #include "mailbox.h"
 #include "quota.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 #include "acl.h"
 #include "seen.h"
 #include "mboxname.h"
@@ -82,6 +84,8 @@
 #include "retry.h"
 #include "lock.h"
 #include "prot.h"
+
+#include "message_guid.h"
 #include "sync_support.h"
 #include "sync_commit.h"
 
@@ -183,7 +187,7 @@ void sync_printstring(struct protstream *out, const char *s)
 
     /* if it's too long, literal it */
     if (*p || len >= 1024) {
-	prot_printf(out, "{%lu+}\r\n%s", strlen(s), s);
+	prot_printf(out, "{%u+}\r\n%s", strlen(s), s);
     } else {
 	prot_printf(out, "\"%s\"", s);
     }
@@ -216,7 +220,7 @@ void sync_printastring(struct protstream *out, const char *s)
 
     /* if it's too long, literal it */
     if (*p || len >= 1024) {
-	prot_printf(out, "{%lu+}\r\n%s", strlen(s), s);
+	prot_printf(out, "{%u+}\r\n%s", strlen(s), s);
     } else {
 	prot_printf(out, "\"%s\"", s);
     }
@@ -413,6 +417,56 @@ int sync_getflags(struct protstream *input,
 
 /* ====================================================================== */
 
+/* sync_index stuff */
+
+struct sync_index_list *sync_index_list_create()
+{
+    struct sync_index_list *l = xzmalloc(sizeof (struct sync_index_list));
+
+    l->head     = NULL;
+    l->tail     = NULL;
+    l->count    = 0;
+    l->last_uid = 0;
+
+    return l;
+}
+
+void sync_index_list_add(struct sync_index_list *l,
+        unsigned long msgno, struct index_record *record)
+{
+    struct sync_index *result = xzmalloc(sizeof(struct sync_index));
+
+    result->msgno = msgno;
+    memcpy(&(result->record), record, sizeof(struct index_record));
+
+    if (l->tail)
+        l->tail = l->tail->next = result;
+    else
+        l->head = l->tail = result;
+
+    l->count++;
+    l->last_uid = record->uid;
+}
+
+void sync_index_list_free(struct sync_index_list **lp)
+{
+    struct sync_index_list *l = *lp;
+    struct sync_index *current, *next;
+
+    current = l->head;
+    while (current) {
+        next = current->next;
+        free(current);
+        current = next;
+    }
+    free(l);
+
+    *lp = NULL;
+}
+
+
+/* ====================================================================== */
+
 /* sync_msg stuff */
 
 struct sync_msg_list *sync_msg_list_create(char **flagname,
@@ -485,18 +539,18 @@ struct sync_msgid_list *sync_msgid_list_create(int hash_size)
 }
 
 struct sync_msgid *sync_msgid_add(struct sync_msgid_list *l,
-				  struct message_uuid *uuid)
+				  struct message_guid *guid)
 {
     struct sync_msgid *result;
     int offset;
 
-    if (message_uuid_isnull(uuid))
+    if (message_guid_isnull(guid))
         return(NULL);
 
     result = xzmalloc(sizeof(struct sync_msgid));
-    offset = message_uuid_hash(uuid, l->hash_size);
+    offset = message_guid_hash(guid, l->hash_size);
 
-    message_uuid_copy(&result->uuid, uuid);
+    message_guid_copy(&result->guid, guid);
 
     l->count++;
     if (l->tail)
@@ -509,6 +563,22 @@ struct sync_msgid *sync_msgid_add(struct sync_msgid_list *l,
     l->hash[offset]   = result;
 
     return(result);
+}
+
+void sync_msgid_remove(struct sync_msgid_list *l,
+		       struct message_guid *guid)
+{
+    int offset = message_guid_hash(guid, l->hash_size);
+    struct sync_msgid *msgid;
+
+    if (message_guid_isnull(guid)) return;
+
+    for (msgid = l->hash[offset] ; msgid ; msgid = msgid->hash_next) {
+	if (message_guid_compare(&msgid->guid, guid)) {
+	    message_guid_set_null(&msgid->guid);
+	    return;
+	}
+    }
 }
 
 void sync_msgid_list_free(struct sync_msgid_list **lp)
@@ -529,16 +599,16 @@ void sync_msgid_list_free(struct sync_msgid_list **lp)
 }
 
 struct sync_msgid *sync_msgid_lookup(struct sync_msgid_list *l,
-				     struct message_uuid *uuid)
+				     struct message_guid *guid)
 {
-    int offset = message_uuid_hash(uuid, l->hash_size);
+    int offset = message_guid_hash(guid, l->hash_size);
     struct sync_msgid *msgid;
 
-    if (message_uuid_isnull(uuid))
+    if (message_guid_isnull(guid))
         return(NULL);
 
     for (msgid = l->hash[offset] ; msgid ; msgid = msgid->hash_next) {
-        if (message_uuid_compare(&msgid->uuid, uuid))
+        if (message_guid_compare(&msgid->guid, guid))
             return(msgid);
     }
     return(NULL);
@@ -559,6 +629,7 @@ struct sync_folder_list *sync_folder_list_create(void)
 
 struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 char *id, char *name, char *acl,
+                                         unsigned long uidvalidity,
 					 unsigned long options,
 					 struct quota *quota)
 {
@@ -576,6 +647,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->id      = (id)   ? xstrdup(id)   : NULL;
     result->name    = (name) ? xstrdup(name) : NULL;
     result->acl     = (acl)  ? xstrdup(acl)  : NULL;
+    result->uidvalidity = uidvalidity;
     result->options = options;
     if (quota) {
 	result->quota.root = result->name;
@@ -856,7 +928,8 @@ int sync_message_list_newstage(struct sync_message_list *l, char *mboxname)
     return 0;
 }
 
-void sync_message_list_cache(struct sync_message_list *l, char *entry, int size)
+void sync_message_list_cache(struct sync_message_list *l,
+			     char *entry, unsigned size)
 {
     if ((l->cache_buffer_size + size) > l->cache_buffer_alloc) {
         if (size > l->cache_buffer_alloc)
@@ -872,7 +945,7 @@ void sync_message_list_cache(struct sync_message_list *l, char *entry, int size)
 
 int sync_message_list_cache_flush(struct sync_message_list *l)
 {
-    int n;
+    unsigned n;
 
     if (l->cache_buffer_size == 0)
         return(0);
@@ -906,17 +979,17 @@ char *sync_message_next_path(struct sync_message_list *l)
 }
 
 struct sync_message *sync_message_add(struct sync_message_list *l,
-				      struct message_uuid *uuid)
+				      struct message_guid *guid)
 {
     struct sync_message *result;
     int offset;
 
     result = xzmalloc(sizeof(struct sync_message));
-    message_uuid_set_null(&result->uuid);
+    message_guid_set_null(&result->guid);
     
-    result->msg_path = xzmalloc(5 * (MAX_MAILBOX_PATH+1) * sizeof(char));
+    result->msg_path = xzmalloc((MAX_MAILBOX_PATH+1) * sizeof(char));
     result->msg_path_end = result->msg_path +
-	5 * (MAX_MAILBOX_PATH+1) * sizeof(char);
+	(MAX_MAILBOX_PATH+1) * sizeof(char);
 
     snprintf(result->stagename, sizeof(result->stagename), "%lu.", l->count);
 
@@ -931,10 +1004,10 @@ struct sync_message *sync_message_add(struct sync_message_list *l,
     else
         l->head = l->tail = result;
 
-    if (uuid && !message_uuid_isnull(uuid)) {
-        /* Messages with UUIDs get fast hash lookup for duplicate copies */
-        message_uuid_copy(&result->uuid, uuid);
-        offset = message_uuid_hash(uuid, l->hash_size);
+    if (guid && !message_guid_isnull(guid)) {
+        /* Messages with GUIDs get fast hash lookup for duplicate copies */
+        message_guid_copy(&result->guid, guid);
+        offset = message_guid_hash(guid, l->hash_size);
 
         /* Insert at start of list */
         result->hash_next = l->hash[offset];
@@ -943,21 +1016,25 @@ struct sync_message *sync_message_add(struct sync_message_list *l,
     return(result);
 }
 
-void sync_message_fsync(struct sync_message_list *l)
+int sync_message_fsync(struct sync_message_list *l)
 {
     int i;
+    int r = 0;
 
-    if (l->file_count == 0)
-        return;
+    if (l->file_count == 0) return(0);
 
     /* fsync() files in reverse order: ReiserFS FAQ indicates that this
      * gives best potential for optimisation */
     for (i = (l->file_count-1) ; i >= 0 ; i--) {
-        fsync(fileno(l->file[i]));
-        fclose(l->file[i]);
+        if ((fflush(l->file[i]) != 0) ||
+            (fsync(fileno(l->file[i])) < 0) ||
+            (fclose(l->file[i]) != 0))
+            r = IMAP_IOERROR;  /* Aggregate to single error */
         l->file[i] = NULL;
     }
     l->file_count = 0;
+
+    return(r);
 }
 
 FILE *sync_message_open(struct sync_message_list *l,
@@ -965,8 +1042,21 @@ FILE *sync_message_open(struct sync_message_list *l,
 {
     FILE *file;
 
-    if (l->file_count == l->file_max)
-        sync_message_fsync(l);
+    if (l->file_count == l->file_max) {
+        if (sync_message_fsync(l) != 0) {
+            syslog(LOG_ERR, "sync_message_open(): Unable to flush files");
+            return(NULL);
+        }
+    }
+
+    /* unlink just in case a previous crash left a file 
+     * hard linked into someone else's mailbox! */
+    if (unlink(message->msg_path) == -1 && errno != ENOENT) {
+	syslog(LOG_ERR,
+	       "sync_message_open(): failed to unlink stale file %s: %m",
+	       message->msg_path);
+	return(NULL);
+    }
 
     /* Open read/write so file can later be mmap()ed if needed */
     if ((file=fopen(message->msg_path, "w+")) == NULL) {
@@ -982,13 +1072,15 @@ FILE *sync_message_open(struct sync_message_list *l,
 
 int sync_message_copy_fromstage(struct sync_message *message,
 				struct mailbox *mailbox,
-				unsigned long uid)
+				unsigned long uid,
+				time_t internaldate)
 {
     int r;
     const char *root;
     char *partition, stagefile[MAX_MAILBOX_PATH+1], *p;
     size_t sflen;
     char  target[MAX_MAILBOX_PATH+1];
+    struct utimbuf settime;
  
     /* Find mailbox partition */
     r = mboxlist_detail(mailbox->name, NULL, NULL, NULL, &partition, NULL, NULL);
@@ -1067,7 +1159,12 @@ int sync_message_copy_fromstage(struct sync_message *message,
 
     snprintf(target, MAX_MAILBOX_PATH, "%s/%lu.", mailbox->path, uid);
 
-    return mailbox_copyfile(p, target, 0);
+    r = mailbox_copyfile(p, target, 0);
+    if (!r) {
+	settime.actime = settime.modtime = internaldate;
+	utime(target, &settime);
+    }
+    return (r);
 }
 
 void sync_message_list_free(struct sync_message_list **lp)
@@ -1105,16 +1202,16 @@ void sync_message_list_free(struct sync_message_list **lp)
 }
 
 struct sync_message *sync_message_find(struct sync_message_list *l,
-				       struct message_uuid *uuid)
+				       struct message_guid *guid)
 {
     struct sync_message *current;
-    int offset = message_uuid_hash(uuid, l->hash_size);
+    int offset = message_guid_hash(guid, l->hash_size);
 
-    if (message_uuid_isnull(uuid))
+    if (message_guid_isnull(guid))
         return(NULL);
 
     for (current = l->hash[offset] ; current ; current = current->hash_next) {
-        if (message_uuid_compare(&current->uuid, uuid))
+        if (message_guid_compare(&current->guid, guid))
             return(current);
     }
     return(NULL);
@@ -1252,8 +1349,7 @@ int sync_getsimple(struct protstream *input, struct protstream *output,
     FILE         *file;
     int           r = 0;
     unsigned long size;
-    const char *msg_base = 0;
-    unsigned long msg_len = 0;
+    struct body *body = NULL;
     struct index_record record;
     char buf[8192+1];
     int n;
@@ -1261,8 +1357,10 @@ int sync_getsimple(struct protstream *input, struct protstream *output,
     /* If switching from PARSED to SIMPLE, need to flush cache.  This is
      * redundant as it duplicates code in cmd_upload() (which is the
      * logical place for the code to go), but better safe than sorry. */
-    if (list->cache_buffer_size > 0)
-        sync_message_list_cache_flush(list);
+    if (list->cache_buffer_size > 0) {
+        if ((r = sync_message_list_cache_flush(list)))
+            return(r);
+    }
 
     if ((r = sync_getliteral_size(input, output, &message->msg_size)))
         return(r);
@@ -1306,16 +1404,16 @@ int sync_getsimple(struct protstream *input, struct protstream *output,
         return(IMAP_IOERROR);
     }
 
-    map_refresh(fileno(file), 1, &msg_base, &msg_len, message->msg_size,
-		"new message", "unknown");
-
-    r = message_parse_mapped_async(msg_base, msg_len,
-                                   MAILBOX_FORMAT_NORMAL,
-                                   list->cache_fd, &record);
-    map_free(&msg_base, &msg_len);
+    r = message_parse_file(file, NULL, NULL, &body);
+    if (!r) r = message_create_record(list->cache_name,
+				      list->cache_fd,
+				      &record, body);
+    if (body) message_free_body(body);
 
     message->hdr_size     = record.header_size;
     message->cache_offset = record.cache_offset;
+    message->content_lines = record.content_lines;
+    message->cache_version = record.cache_version;
     message->cache_size 
         = lseek(list->cache_fd, 0, SEEK_CUR) - record.cache_offset;
 
@@ -1354,6 +1452,27 @@ struct sync_upload_item *sync_upload_list_add(struct sync_upload_list *l)
     l->count++;
 
     return(result);
+}
+
+void sync_upload_list_remove(struct sync_upload_list *l,
+			     struct sync_upload_item *i)
+{
+    struct sync_upload_item *prev, *current, *next;
+
+    prev = NULL;
+    current = l->head;
+    while (current) {
+	next = current->next;
+	if (current == i) {
+	    l->count--;
+	    free(current);
+	    if (prev) prev->next = next;
+	    else l->head = next;
+	    return;
+	}
+	prev = current;
+	current = next;
+    }
 }
 
 void sync_upload_list_free(struct sync_upload_list **lp)
@@ -1423,16 +1542,18 @@ char *sync_sieve_get_path(char *userid, char *sieve_path, size_t psize)
     char *domain;
 
     if (config_getenum(IMAPOPT_VIRTDOMAINS) && (domain = strchr(userid, '@'))) {
-	char d = (char) dir_hash_c(domain+1);
+	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
 	snprintf(sieve_path, psize, "%s%s%c/%s/%c/%s",
 		 config_getstring(IMAPOPT_SIEVEDIR),
-		 FNAME_DOMAINDIR, d, domain+1, dir_hash_c(userid), userid);
+		 FNAME_DOMAINDIR, d, domain+1,
+		 dir_hash_c(userid, config_fulldirhash), userid);
 	*domain = '@';  /* reassemble user@domain */
     }
     else {
 	snprintf(sieve_path, psize, "%s/%c/%s",
-		 config_getstring(IMAPOPT_SIEVEDIR), dir_hash_c(userid), userid);
+		 config_getstring(IMAPOPT_SIEVEDIR),
+		 dir_hash_c(userid, config_fulldirhash), userid);
     }
 
     return sieve_path;

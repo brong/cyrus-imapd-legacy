@@ -39,7 +39,7 @@
  *
  */
 
-/* $Id: duplicate.c,v 1.42 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: duplicate.c,v 1.42.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -105,7 +105,7 @@ int duplicate_init(char *fname, int myflags __attribute__((unused)))
 	    strcat(fname, FNAME_DELIVERDB);
 	}
 
-	r = DB->open(fname, CYRUSDB_CREATE, &dupdb);
+	r = (DB->open)(fname, CYRUSDB_CREATE, &dupdb);
 	if (r != 0)
 	    syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 		   cyrusdb_strerror(r));
@@ -128,7 +128,7 @@ time_t duplicate_check(char *id, int idlen, const char *to, int tolen)
 
     if (!duplicate_dbopen) return 0;
 
-    if (idlen + tolen > sizeof(buf) - 30) return 0;
+    if (idlen + tolen > (int) sizeof(buf) - 30) return 0;
     memcpy(buf, id, idlen);
     buf[idlen] = '\0';
     memcpy(buf + idlen + 1, to, tolen);
@@ -164,17 +164,8 @@ time_t duplicate_check(char *id, int idlen, const char *to, int tolen)
 
 void duplicate_log(char *msgid, const char *name, char *action)
 {
-    if (strlen(msgid) < 80) {
-	char pretty[160];
-
-	beautify_copy(pretty, msgid);
-	syslog(LOG_INFO, "dupelim: eliminated duplicate message to %s id %s (%s)",
-	       name, msgid, action);
-    }
-    else {
-	syslog(LOG_INFO, "dupelim: eliminated duplicate message to %s (%s)",
-	       name, action);
-    }	
+    syslog(LOG_INFO, "dupelim: eliminated duplicate message to %s id %s (%s)",
+	   name, msgid, action);
 }
 
 void duplicate_mark(char *id, int idlen, const char *to, int tolen, time_t mark,
@@ -185,7 +176,7 @@ void duplicate_mark(char *id, int idlen, const char *to, int tolen, time_t mark,
 
     if (!duplicate_dbopen) return;
 
-    if (idlen + tolen > sizeof(buf) - 30) return;
+    if (idlen + tolen > (int) sizeof(buf) - 30) return;
     memcpy(buf, id, idlen);
     buf[idlen] = '\0';
     memcpy(buf + idlen + 1, to, tolen);
@@ -240,7 +231,7 @@ static int find_cb(void *rock, const char *id,
 
     /* grab the mark and uid */
     memcpy(&mark, data, sizeof(time_t));
-    if (datalen > sizeof(mark))
+    if (datalen > (int) sizeof(mark))
 	memcpy(&uid, data + sizeof(mark), sizeof(unsigned long));
 
     r = (*frock->proc)(id, rcpt, mark, uid, frock->rock);
@@ -355,7 +346,7 @@ static int dump_cb(void *rock,
     drock->count++;
 
     memcpy(&mark, data, sizeof(time_t));
-    if (datalen > sizeof(mark))
+    if (datalen > (int) sizeof(mark))
 	memcpy(&uid, data + sizeof(mark), sizeof(unsigned long));
     to = (char*) key + strlen(key) + 1;
     id = (char *) key;
@@ -404,7 +395,7 @@ int duplicate_done(void)
     int r = 0;
 
     if (duplicate_dbopen) {
-	r = DB->close(dupdb);
+	r = (DB->close)(dupdb);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing deliverdb: %s",
 		   cyrusdb_strerror(r));

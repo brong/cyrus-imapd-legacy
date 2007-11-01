@@ -39,7 +39,7 @@
  *
  */
 
-/* $Id: libconfig.c,v 1.11 2006/11/30 17:11:22 murch Exp $ */
+/* $Id: libconfig.c,v 1.11.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <config.h>
 
@@ -57,6 +57,8 @@
 #include "libconfig.h"
 #include "imapopts.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
 #define CONFIGHASHSIZE 30 /* relatively small,
 			   * because it is for overflow only */
@@ -158,6 +160,12 @@ const char *config_getoverflowstring(const char *key, const char *def)
 
     /* Return what we got or the default */
     return ret ? ret : def;
+}
+
+void config_foreachoverflowstring(void (*func)(const char *, const char *, void *),
+				  void *rock)
+{
+    hash_enumerate(&confighash, (void (*)(char *, void *, void *)) func, rock);
 }
 
 const char *config_partitiondir(const char *partition)

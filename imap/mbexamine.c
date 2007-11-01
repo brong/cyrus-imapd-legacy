@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: mbexamine.c,v 1.12 2006/11/30 17:11:19 murch Exp $ */
+/* $Id: mbexamine.c,v 1.12.2.1 2007/11/01 14:39:33 murch Exp $ */
 
 #include <config.h>
 
@@ -86,12 +86,15 @@
 #include "imparse.h"
 #include "mailbox.h"
 #include "message.h"
+#include "message_guid.h"
 #include "mboxname.h"
 #include "mboxlist.h"
 #include "seen.h"
 #include "retry.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 extern int optind;
 extern char *optarg;
@@ -109,8 +112,8 @@ void shut_down(int code);
 
 int code = 0;
 
-int wantuid = 0;
-int wantvalue = 0;
+unsigned wantuid = 0;
+unsigned wantvalue = 0;
 
 int main(int argc, char **argv)
 {
@@ -118,7 +121,9 @@ int main(int argc, char **argv)
     char buf[MAX_MAILBOX_PATH+1];
     char *alt_config = NULL;
 
-/*    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE); */
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     /* Ensure we're up-to-date on the index file format */
     assert(INDEX_HEADER_SIZE == (OFFSET_SPARE4+4));
@@ -196,7 +201,8 @@ int do_examine(char *name,
 	       int maycreate __attribute__((unused)),
 	       void *rock __attribute__((unused)))
 {
-    int i,r = 0;
+    unsigned i;
+    int r = 0;
     int flag = 0;
     char ext_name_buf[MAX_MAILBOX_PATH+1];
     struct mailbox mailbox;
@@ -285,6 +291,12 @@ int do_examine(char *name,
 	    if (mailbox.options & OPT_IMAP_CONDSTORE) {
 		printf(" IMAP_CONDSTORE");
 	    }
+	    if (mailbox.options & OPT_IMAP_SHAREDSEEN) {
+		printf(" IMAP_SHAREDSEEN");
+	    }
+	    if (mailbox.options & OPT_IMAP_DUPDELIVER) {
+		printf(" IMAP_DUPDELIVER");
+	    }
 	}
 	printf("\n");
     }
@@ -320,10 +332,14 @@ int do_examine(char *name,
 	printf("      > HDRSIZE:%-6d LASTUPD :%ld SYSFLAGS:%08X",
 	       HEADER_SIZE(i), LAST_UPDATED(i), SYSTEM_FLAGS(i));
 	if (mailbox.minor_version >= 5)
-	    printf("   LINES:%-6d", CONTENT_LINES(i));
+	    printf("   LINES:%-6d\n", CONTENT_LINES(i));
 
 	if (mailbox.minor_version >= 6)
-	    printf(" CACHEVER:%-6d", CACHE_VERSION(i));
+	    printf("      > CACHEVER:%-2d", CACHE_VERSION(i));
+
+	if (mailbox.minor_version >= 7) {
+	    printf(" GUID: %s", message_guid_encode(GUID(i)));
+	}
 
 	if (mailbox.minor_version >= 8) {
 	    printf(" MODSEQ:" MODSEQ_FMT, MODSEQ(i));

@@ -6,7 +6,7 @@
  *
  * includes support for ISPN virtual host extensions
  *
- * $Id: ipurge.c,v 1.26 2006/11/30 17:11:18 murch Exp $
+ * $Id: ipurge.c,v 1.26.2.1 2007/11/01 14:39:33 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -67,6 +67,8 @@
 #include "mailbox.h"
 #include "xmalloc.h"
 #include "mboxlist.h"
+#include "util.h"
+#include "sync_log.h"
 
 /* config.c stuff */
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
@@ -103,7 +105,7 @@ int verbose = 1;
 int forceall = 0;
 
 int purge_me(char *, int, int);
-int purge_check(struct mailbox *, void *, char *, int);
+unsigned purge_check(struct mailbox *, void *, unsigned char *, int);
 int usage(char *name);
 void print_stats(mbox_stats_t *stats);
 
@@ -113,7 +115,9 @@ int main (int argc, char *argv[]) {
   char *alt_config = NULL;
   int r;
 
-  if (geteuid() == 0) fatal("must run as the Cyrus user", EX_USAGE);
+  if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+      fatal("must run as the Cyrus user", EC_USAGE);
+  }
 
   while ((option = getopt(argc, argv, "C:hxd:b:k:m:fsXi")) != EOF) {
     switch (option) {
@@ -182,6 +186,8 @@ int main (int argc, char *argv[]) {
   /* open the quota db, we'll need it for expunge */
   quotadb_init(0);
   quotadb_open(NULL);
+
+  sync_log_init();
 
   if (optind == argc) { /* do the whole partition */
     strcpy(buf, "*");
@@ -266,6 +272,8 @@ int purge_me(char *name, int matchlen __attribute__((unused)),
   the_box.index_lock_count = 1;
 
   mailbox_expunge(&the_box, purge_check, &stats, EXPUNGE_FORCE);
+
+  sync_log_mailbox(the_box.name);
   mailbox_close(&the_box);
 
   print_stats(&stats);
@@ -281,9 +289,10 @@ void deleteit(bit32 msgsize, mbox_stats_t *stats)
 
 /* thumbs up routine, checks date & size and returns yes or no for deletion */
 /* 0 = no, 1 = yes */
-int purge_check(struct mailbox *mailbox __attribute__((unused)),
-		void *deciderock, char *buf,
-		int expunge_flags __attribute__((unused)))
+unsigned purge_check(struct mailbox *mailbox __attribute__((unused)),
+		     void *deciderock,
+		     unsigned char *buf,
+		     int expunge_flags __attribute__((unused)))
 {
   time_t my_time;
   mbox_stats_t *stats = (mbox_stats_t *) deciderock;
@@ -317,7 +326,7 @@ int purge_check(struct mailbox *mailbox __attribute__((unused)),
     }
     if (size >= 0) {
       /* check size */
-      if (msgsize == size) {
+	if ((int) msgsize == size) {
 	  if (invertmatch) return 0;
 	  deleteit(msgsize, stats);
 	  return 1;
@@ -343,11 +352,11 @@ int purge_check(struct mailbox *mailbox __attribute__((unused)),
     }
     if (size >= 0) {
       /* check size */
-      if (!invertmatch && (msgsize > size)) {
+	if (!invertmatch && ((int) msgsize > size)) {
 	  deleteit(msgsize, stats);
 	  return 1;
       }
-      if (invertmatch && (msgsize < size)) {
+	if (invertmatch && ((int) msgsize < size)) {
 	  deleteit(msgsize, stats);
 	  return 1;
       }

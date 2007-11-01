@@ -93,7 +93,7 @@
 *
 */
 
-/* $Id: tls.c,v 1.52 2006/11/30 17:11:20 murch Exp $ */
+/* $Id: tls.c,v 1.52.2.1 2007/11/01 14:39:35 murch Exp $ */
 
 #include <config.h>
 
@@ -119,6 +119,8 @@
 /* Application-specific. */
 #include "assert.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 #include "tls.h"
 
 /* Session caching/reuse stuff */
@@ -216,6 +218,49 @@ static RSA *tmp_rsa_cb(SSL * s __attribute__((unused)),
     }
     return (rsa_tmp);
 }
+
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+/* Logic copied from OpenSSL apps/s_server.c: give the TLS context
+ * DH params to work with DHE-* cipher suites. Hardcoded fallback
+ * in case no DH params in tls_key_file or tls_cert_file.
+ */
+static DH *get_dh1024(void)
+{
+    /* Second Oakley group 1024-bits MODP group from RFC2409 */
+    DH *dh=NULL;
+
+    if ((dh=DH_new()) == NULL) return(NULL);
+    dh->p=get_rfc2409_prime_1024(NULL);
+    dh->g=NULL;
+    BN_dec2bn(&(dh->g), "2");
+    if ((dh->p == NULL) || (dh->g == NULL)) return(NULL);
+
+    return(dh);
+	
+}
+static DH *load_dh_param(const char *keyfile, const char *certfile)
+{
+    DH *ret=NULL;
+    BIO *bio = NULL;
+
+    if (keyfile) bio = BIO_new_file(keyfile, "r");
+
+    if ((bio == NULL) && certfile) bio = BIO_new_file(certfile,"r");
+
+    if (bio) ret=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
+
+    if (ret == NULL) {
+	ret = get_dh1024();
+	syslog(LOG_NOTICE, "imapd:Loading hard-coded DH parameters");
+    } else {
+	syslog(LOG_NOTICE, "imapd:Loading DH parameters from file");
+    }
+
+    if (bio != NULL) BIO_free(bio);
+
+    return(ret);
+}
+#endif /* OPENSSL_VERSION_NUMBER >= 0x009080fL */
 
 /* taken from OpenSSL apps/s_cb.c */
 
@@ -388,7 +433,7 @@ static int new_session_cb(SSL *ssl __attribute__((unused)),
 			  SSL_SESSION *sess)
 {
     int len;
-    unsigned char *data = NULL, *asn;
+    unsigned char *data = NULL;
     time_t expire;
     int ret = -1;
 
@@ -407,7 +452,7 @@ static int new_session_cb(SSL *ssl __attribute__((unused)),
 
     /* transform the session into its ASN1 representation */
     if (data) {
-	asn = data + sizeof(time_t);
+	unsigned char *asn = data + sizeof(time_t);
 	len = i2d_SSL_SESSION(sess, &asn);
 	if (!len) syslog(LOG_ERR, "i2d_SSL_SESSION failed");
     }
@@ -648,7 +693,7 @@ int     tls_init_serverengine(const char *ident,
 	strlcpy(dbdir, config_dir, sizeof(dbdir));
 	strlcat(dbdir, FNAME_TLSSESSIONS, sizeof(dbdir));
 
-	r = DB->open(dbdir, CYRUSDB_CREATE, &sessdb);
+	r = (DB->open)(dbdir, CYRUSDB_CREATE, &sessdb);
 	if (r != 0) {
 	    syslog(LOG_ERR, "DBERROR: opening %s: %s",
 		   dbdir, cyrusdb_strerror(ret));
@@ -681,6 +726,12 @@ int     tls_init_serverengine(const char *ident,
 	return (-1);
     }
     SSL_CTX_set_tmp_rsa_callback(s_ctx, tmp_rsa_cb);
+
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+    /* Load DH params for DHE-* key exchanges */
+    SSL_CTX_set_tmp_dh(s_ctx, load_dh_param(s_key_file, s_cert_file));
+    /* FIXME: Load ECDH params for ECDHE suites when 0.9.9 is released */
+#endif
 
     verify_depth = verifydepth;
     if (askcert!=0)
@@ -929,7 +980,7 @@ int tls_shutdown_serverengine(void)
     int r;
 
     if (tls_serverengine && sess_dbopen) {
-	r = DB->close(sessdb);
+	r = (DB->close)(sessdb);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing tlsdb: %s",
 		   cyrusdb_strerror(r));
@@ -1006,7 +1057,7 @@ int tls_prune_sessions(void)
     strlcpy(dbdir, config_dir, sizeof(dbdir));
     strlcat(dbdir, FNAME_TLSSESSIONS, sizeof(dbdir));
 
-    ret = DB->open(dbdir, CYRUSDB_CREATE, &sessdb);
+    ret = (DB->open)(dbdir, CYRUSDB_CREATE, &sessdb);
     if (ret != CYRUSDB_OK) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s",
 	       dbdir, cyrusdb_strerror(ret));
@@ -1017,7 +1068,7 @@ int tls_prune_sessions(void)
 	sess_dbopen = 1;
 	prock.count = prock.deletions = 0;
 	DB->foreach(sessdb, "", 0, &prune_p, &prune_cb, &prock, NULL);
-	DB->close(sessdb);
+	(DB->close)(sessdb);
 	sessdb = NULL;
 	sess_dbopen = 0;
 
@@ -1216,7 +1267,7 @@ int tls_start_clienttls(int readfd, int writefd,
     if (layerbits != NULL)
 	*layerbits = tls_cipher_usebits;
     
-    syslog(LOG_NOTICE, "starttls: %s with cipher %s (%d/%d bits %s)"
+    syslog(LOG_DEBUG, "starttls: %s with cipher %s (%d/%d bits %s client)"
 	   " no authentication", 
 	   tls_protocol, tls_cipher_name,
 	   tls_cipher_usebits, tls_cipher_algbits,

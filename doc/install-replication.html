@@ -1,4 +1,4 @@
-<!-- $Id: install-replication.html,v 1.2 2006/11/30 17:11:16 murch Exp $ -->
+<!-- $Id: install-replication.html,v 1.2.2.1 2007/11/01 14:39:30 murch Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Cyrus replication
@@ -13,15 +13,23 @@ grand scheme of things, and if you choose to deploy you are doing so
 at your own risk.  The core of the replication code has been used
 successfully in production at <a
 href="http://www-uxsup.csx.cam.ac.uk/~dpc22/cyrus/replication.html">Cambridge 
-University</a> for about a year, but it has been rewritten extensively
+University</a> since the summer of 2003, but it has been rewritten extensively
 as part of the integration into the mainstream Cyrus codebase.
-</i></b><br><br>
-<b><i>Also note that the replication protocol currently does not have
+The replication code as integrated into Cyrus 2.3 has been running in
+production at Fastmail.fm and Columbia.edu since early 2006 and will
+be put into production at CMU in winter 2007.
+</i></b>
+<p><b><i>Also note that the replication protocol currently does not have
 the facility to support the IMAP CONDSTORE extension (modification
 sequences).  It is recommended that you do not try to use both
-CONDSTORE and replication at this time.  The deficiencies in the
-replication protocol will be fixed in version 2.3.8.
-</i></b><br>
+CONDSTORE and replication at this time.  The replication protocol will
+be augmented to support CONDSTORE at a later date.
+</i></b>
+
+<p><i>The Cyrus team owes a debt of gratitude to the kind folks at
+Cambridge, Columbia, and Fastmail for their considerable effort in
+helping to identify and correct the bugs the in Cyrus 2.3 replication
+code.</i>
 
 <h3>Introduction &amp; Assumptions</h3>
 <p>The Cyrus replication engine is designed to replicate the mailstore on
@@ -52,10 +60,12 @@ replication client/server applications and utilities.
 
 <h3>Configuring the "replica" server</h3>
 
-The "replica" server is a standalone server which listens for
+The "replica" server is a <i>standalone</i> server which listens for
 and processes synchronization messages from a "master" server.  The
 "replica" server needs to be configured to accept these synchonization
-messages.<p>
+messages.  The "replica" server <b>MUST NOT</b> be configured to be
+part of a Murder (it should only be configured into the Murder at the
+point at which it replaces a failed backend "master").<p>
 
 <ol>
 <p><li>Configure a standalone server as described in the rest
@@ -115,32 +125,16 @@ authentication.
 
 </ol>
 
-<h4>Universally Unique Identifiers (UUIDs)</h4>
+<h4>Globally Unique IDentifiers (GUIDs)</h4>
 
-An optional, but recommended step is to enable UUIDs for messages.
-Use of UUIDs improves efficiency by eliminating the synchronization
+An optional, but recommended step is to enable GUIDs for messages.
+Use of GUIDs improves efficiency by eliminating the synchronization
 of messages which the "replica" has already received from the
-"master".  Note that UUIDs can be safely enabled and disabled at any
+"master".  Note that GUIDs can be safely enabled and disabled at any
 time.
 
 <ol>
-<p><li>
-Define the <tt>sync_machineid</tt> option in imapd.conf.  This option
-specifies the numeric identifier (1 - 255) of the "master" machine
-which is used in constructing the UUID for each message on the server.
-This identifier MUST be unique across all active "backend" servers in
-a Murder.  Example:<p>
-
-<pre>
-sync_machineid: 1
-</pre>
-
-<p><li>For each IMAP, NNTP and LMTP service in cyrus.conf, enable the
-<tt>provide_uuid</tt> argument.  Example:<p>
-
-<pre>
-imap	cmd="imapd" listen="imap" prefork=5 provide_uuid=1
-</pre>
+<p><li>Set the <tt>guid_mode</tt> option in imapd.conf to <tt>sha1</tt>.
 </ol>
 
 <h4>"Rolling" replication</h4>
@@ -180,7 +174,7 @@ has been configured.
 <h3>Failover</h3>
 
 <P><HR>
-last modified: $Date: 2006/11/30 17:11:16 $
+last modified: $Date: 2007/11/01 14:39:30 $
 </BODY></HTML>
 
 

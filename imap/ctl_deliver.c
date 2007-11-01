@@ -1,5 +1,5 @@
 /* ctl_deliver.c -- Program to perform operations on duplicate delivery db
- * $Id: ctl_deliver.c,v 1.21 2006/11/30 17:11:17 murch Exp $
+ * $Id: ctl_deliver.c,v 1.21.2.1 2007/11/01 14:39:31 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -83,7 +83,9 @@ int main(int argc, char *argv[])
     int flag = 0;
     enum { DUMP, PRUNE, NONE } op = NONE;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((opt = getopt(argc, argv, "C:drE:f:")) != EOF) {
 	switch (opt) {
@@ -122,7 +124,7 @@ int main(int argc, char *argv[])
 		"using cyr_expire -E instead\n");
 
 	r = snprintf(buf, sizeof(buf), "%s/cyr_expire", SERVICE_PATH);
-	if(r < 0 || r >= sizeof(buf)) {
+	if(r < 0 || r >= (int) sizeof(buf)) {
 	    fatal("cyr_expire command buffer not sufficiently big", EC_CONFIG);
 	}
 

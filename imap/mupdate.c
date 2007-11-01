@@ -1,6 +1,6 @@
 /* mupdate.c -- cyrus murder database master 
  *
- * $Id: mupdate.c,v 1.93 2006/11/30 17:11:19 murch Exp $
+ * $Id: mupdate.c,v 1.93.2.1 2007/11/01 14:39:34 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -87,6 +87,8 @@
 #include "util.h"
 #include "version.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
 /* Sent to clients that we can't accept a connection for. */
 static const char SERVER_UNABLE_STRING[] = "* BYE \"Server Unable\"\r\n";
@@ -182,7 +184,7 @@ static pthread_mutex_t listener_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t listener_cond = PTHREAD_COND_INITIALIZER;
 static int listener_lock = 0;
 
-/* if you want to lick both listener and either of these two, you
+/* if you want to lock both listener and either of these two, you
  * must lock listener first.  You must have both listener_mutex and
  * idle_connlist_mutex locked to remove anything from the idle_connlist */
 static pthread_mutex_t idle_connlist_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -251,8 +253,7 @@ static struct conn *conn_new(int fd)
     struct sockaddr_storage localaddr, remoteaddr;
     int r;    
     int haveaddr = 0;
-    int salen;
-    int secflags;
+    socklen_t salen;
     char hbuf[NI_MAXHOST];
     int niflags;
 
@@ -337,11 +338,7 @@ static struct conn *conn_new(int fd)
     }
 
     /* set my allowable security properties */
-    secflags = SASL_SEC_NOANONYMOUS;
-    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
-    sasl_setprop(C->saslconn, SASL_SEC_PROPS, mysasl_secprops(secflags));
+    sasl_setprop(C->saslconn, SASL_SEC_PROPS, mysasl_secprops(SASL_SEC_NOANONYMOUS));
 
     /* Clear Buffers */
     memset(&(C->tag), 0, sizeof(struct buf));
@@ -707,6 +704,12 @@ mupdate_docmd_result_t docmd(struct conn *c)
     int was_blocking = prot_IS_BLOCKING(c->pin);
     char *p;
 
+    /* We know we have input, so skip the check below.
+     * Note that we MUST skip this nonblocking check in order to properly
+     * catch connections that have timed out.
+     */
+    goto cmd;
+
  nextcmd:
     /* First we do a check for input */
     prot_NONBLOCK(c->pin);
@@ -725,6 +728,7 @@ mupdate_docmd_result_t docmd(struct conn *c)
     /* Set it back to blocking so we don't get half a word */
     prot_BLOCK(c->pin);
 
+  cmd:
     ch = getword(c->pin, &(c->tag));
     if (ch == EOF) goto lost_conn;
     
@@ -1072,7 +1076,7 @@ static void dobanner(struct conn *c)
 {
     char slavebuf[4096];
     const char *mechs;
-    unsigned int mechcount;
+    int mechcount;
     int ret;
 
     /* send initial the banner + flush pout */
@@ -1172,12 +1176,13 @@ static void *thread_main(void *rock __attribute__((unused)))
 	pthread_mutex_unlock(&listener_mutex); /* UNLOCK */
 
 	if(ret == ETIMEDOUT) {
+	    pthread_mutex_lock(&idle_worker_mutex); /* LOCK */
 	    if(idle_worker_count <= config_getint(IMAPOPT_MUPDATE_WORKERS_MINSPARE)) {
+		pthread_mutex_unlock(&idle_worker_mutex); /* UNLOCK */
 		/* below number of spare workers, try to get the lock again */
 		goto retry_lock;
 	    } else {
 		/* Decrement Idle Worker Count */
-		pthread_mutex_lock(&idle_worker_mutex); /* LOCK */
 		idle_worker_count--;
 		pthread_mutex_unlock(&idle_worker_mutex); /* UNLOCK */
 		
@@ -1256,7 +1261,9 @@ static void *thread_main(void *rock __attribute__((unused)))
 	 
 	/* If we've been signaled to be unready, drop all current connections
 	 * in the idle list */
+	pthread_mutex_lock(&ready_for_connections_mutex); /* LOCK */
 	if(!ready_for_connections) {
+	    pthread_mutex_unlock(&ready_for_connections_mutex); /* UNLOCK */
 	    /* Free all connections on idle_connlist.  Note that
 	     * any connection not currently on the idle_connlist will
 	     * instead be freed when they drop out of their docmd() below */
@@ -1273,6 +1280,7 @@ static void *thread_main(void *rock __attribute__((unused)))
 
 	    goto nextlistener;
 	}
+	pthread_mutex_unlock(&ready_for_connections_mutex); /* UNLOCK */
 	
 	if(connflag) {
 	    /* read the fd from the pipe, if needed */
@@ -1340,7 +1348,9 @@ static void *thread_main(void *rock __attribute__((unused)))
 	    }
 
 	    /* Are we allowed to continue serving data? */
+	    pthread_mutex_lock(&ready_for_connections_mutex); /* LOCK */
 	    if(!ready_for_connections) {
+		pthread_mutex_unlock(&ready_for_connections_mutex); /* UNLOCK */
 		prot_printf(C->pout,
 			    "* BYE \"no longer ready for connections\"\r\n");
 		conn_free(currConn);
@@ -1348,11 +1358,12 @@ static void *thread_main(void *rock __attribute__((unused)))
 		 * this back to the idle list */
 		continue;
 	    }
+	    pthread_mutex_unlock(&ready_for_connections_mutex); /* UNLOCK */
 	} /* done handling command */
 
 	if(send_a_banner || do_a_command) {
 	    /* We did work in this thread, so we need to [re-]add the
-	     * connection to the idle list and signal the current listner */
+	     * connection to the idle list and signal the current listener */
 
 	    pthread_mutex_lock(&idle_connlist_mutex); /* LOCK */
 	    currConn->idle = 1;
@@ -1377,9 +1388,11 @@ static void *thread_main(void *rock __attribute__((unused)))
      * in the idle_worker_count */
     pthread_mutex_lock(&worker_count_mutex); /* LOCK */
     worker_count--;
+    pthread_mutex_lock(&idle_worker_mutex); /* LOCK */
     syslog(LOG_DEBUG,
 	   "Worker thread finished, for a total of %d (%d spare)",
 	   worker_count, idle_worker_count);
+    pthread_mutex_unlock(&idle_worker_mutex); /* UNLOCK */
     pthread_mutex_unlock(&worker_count_mutex); /* UNLOCK */
 
     protgroup_free(protin);
@@ -1461,6 +1474,7 @@ void cmd_authenticate(struct conn *C,
 		      const char *clientstart)
 {
     int r, sasl_result;
+    const void *val;
 
     r = saslserver(C->saslconn, mech, clientstart, "", "", "",
 		   C->pin, C->pout, &sasl_result, NULL);
@@ -1497,13 +1511,14 @@ void cmd_authenticate(struct conn *C,
     }
 
     /* Successful Authentication */
-    r = sasl_getprop(C->saslconn, SASL_USERNAME, (const void **)&C->userid);
+    r = sasl_getprop(C->saslconn, SASL_USERNAME, &val);
     if(r != SASL_OK) {
 	prot_printf(C->pout, "%s NO \"SASL Error\"\r\n", tag);
 	reset_saslconn(C);
 	return;
     }
 
+    C->userid = (char *) val;
     syslog(LOG_NOTICE, "login: %s %s %s%s %s", C->clienthost, C->userid,
 	   mech, C->tlsconn ? "+TLS" : "", "User logged in");
 
@@ -1983,7 +1998,7 @@ void shut_down(int code)
 /* Reset the given sasl_conn_t to a sane state */
 static int reset_saslconn(struct conn *c)
 {
-    int ret, secflags;
+    int ret;
     sasl_security_properties_t *secprops = NULL;
 
     sasl_dispose(&c->saslconn);
@@ -2003,11 +2018,7 @@ static int reset_saslconn(struct conn *c)
                           c->saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
     
-    secflags = SASL_SEC_NOANONYMOUS;
-    if (!config_getswitch(IMAPOPT_ALLOWPLAINTEXT)) {
-	secflags |= SASL_SEC_NOPLAINTEXT;
-    }
-    secprops = mysasl_secprops(secflags);
+    secprops = mysasl_secprops(SASL_SEC_NOANONYMOUS);
     ret = sasl_setprop(c->saslconn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;
     /* end of service_main initialization excepting SSF */
@@ -2228,6 +2239,7 @@ int mupdate_synchronize(mupdate_handle *handle)
     struct mpool *pool;
     struct sync_rock rock;
     char pattern[] = { '*', '\0' };
+    struct txn *tid = NULL;
     int ret = 0;    
 
     if(!handle || !handle->saslcompleted) return 1;
@@ -2290,21 +2302,24 @@ int mupdate_synchronize(mupdate_handle *handle)
 		mboxlist_insertremote(r->mailbox, 
 				     (r->t == SET_RESERVE ?
 				        MBTYPE_RESERVE : 0),
-				      r->server, r->acl, NULL);
+				      r->server, r->acl, &tid);
 	    }
 	    /* Okay, dump these two */
 	    local_boxes.head = l->next;
 	    remote_boxes.head = r->next;
 	} else if (ret < 0) {
 	    /* Local without corresponding remote, delete it */
-	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0, 0);
+	    if (config_mupdate_config != IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) {
+		/* But not for a unified configuration */
+		mboxlist_deleteremote(l->mailbox, &tid);
+	    }
 	    local_boxes.head = l->next;
 	} else /* (ret > 0) */ {
 	    /* Remote without corresponding local, insert it */
 	    mboxlist_insertremote(r->mailbox, 
 				  (r->t == SET_RESERVE ?
 				   MBTYPE_RESERVE : 0),
-				  r->server, r->acl, NULL);
+				  r->server, r->acl, &tid);
 	    remote_boxes.head = r->next;
 	}
     }
@@ -2312,7 +2327,10 @@ int mupdate_synchronize(mupdate_handle *handle)
     if(l && !r) {
 	/* we have more deletes to do */
 	while(l) {
-	    mboxlist_deletemailbox(l->mailbox, 1, "", NULL, 0, 0, 0);
+	    if (config_mupdate_config != IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) {
+		/* But not for a unified configuration */
+		mboxlist_deleteremote(l->mailbox, &tid);
+	    }
 	    local_boxes.head = l->next;
 	    l = local_boxes.head;
 	}
@@ -2322,11 +2340,13 @@ int mupdate_synchronize(mupdate_handle *handle)
 	    mboxlist_insertremote(r->mailbox, 
 				  (r->t == SET_RESERVE ?
 				   MBTYPE_RESERVE : 0),
-				  r->server, r->acl, NULL);
+				  r->server, r->acl, &tid);
 	    remote_boxes.head = r->next;
 	    r = remote_boxes.head;
 	}
     }
+
+    if (tid) mboxlist_commit(tid);
 
     /* All up to date! */
     syslog(LOG_NOTICE, "mailbox list synchronization complete");
@@ -2347,12 +2367,13 @@ void mupdate_signal_db_synced(void)
 
 void mupdate_ready(void) 
 {
+    pthread_mutex_lock(&ready_for_connections_mutex);
+
     if(ready_for_connections) {
 	syslog(LOG_CRIT, "mupdate_ready called when already ready");
 	fatal("mupdate_ready called when already ready", EC_TEMPFAIL);
     }
 
-    pthread_mutex_lock(&ready_for_connections_mutex);
     ready_for_connections = 1;
     pthread_cond_broadcast(&ready_for_connections_cond);
     pthread_mutex_unlock(&ready_for_connections_mutex);

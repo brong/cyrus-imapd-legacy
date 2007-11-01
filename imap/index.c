@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219.2.4 2006/12/19 19:33:22 murch Exp $
+ * $Id: index.c,v 1.219.2.5 2007/11/01 14:39:33 murch Exp $
  */
 #include <config.h>
 
@@ -54,6 +54,7 @@
 #include <syslog.h>
 #include <errno.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #include "acl.h"
 #include "annotate.h"
@@ -76,6 +77,8 @@
 #include "stristr.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #include "index.h"
 #include "sync_log.h"
@@ -101,7 +104,7 @@ static unsigned lastnotrecent;	/* Msgno of last non-\Recent message */
 static time_t *flagreport;	/* Array for each msgno of last_updated when
 				 * FLAGS data reported to client.
 				 * Zero if FLAGS data never reported */
-static char *seenflag;		/* Array for each msgno, nonzero if \Seen */
+static unsigned char *seenflag;	/* Array for each msgno, nonzero if \Seen */
 static time_t seen_last_change;	/* Last mod time of \Seen state change */
 static int flagalloced = -1;	/* Allocated size of above two arrays */
 struct seen *seendb;		/* Seen state database object */
@@ -115,7 +118,7 @@ static int index_forsequence(struct mailbox *mailbox, const char *sequence,
 			     int usinguid,
 			     index_sequenceproc_t *proc, void *rock,
 			     int* fetchedsomething);
-static int index_insequence(int num, char *sequence, int usinguid);
+static int index_insequence(unsigned num, struct seq_set *set, int use_mark);
 
 void index_fetchmsg(const char *msg_base, unsigned long msg_size,
 		    int format, unsigned offset, unsigned size,
@@ -302,7 +305,7 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 
 	    for (oldmsgno = msgno = 1; oldmsgno <= imapd_exists;
 		 oldmsgno++, msgno++) {
-		if (msgno <= mailbox->exists) {
+		if ((unsigned) msgno <= mailbox->exists) {
 		    mailbox_read_index_record(mailbox, msgno, &record);
 		}
 		else {
@@ -356,7 +359,7 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 	       mailbox->name);
 	fatal("failed to stat cache file", EC_IOERR);
     }
-    if (cache_end < sbuf.st_size) {
+    if (cache_end < (unsigned long) sbuf.st_size) {
 	cache_end = sbuf.st_size;
 	map_refresh(mailbox->cache_fd, 0, &cache_base, &cache_len,
 		    cache_end, "cache", mailbox->name);
@@ -365,7 +368,10 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 
     /* If opening mailbox, get \Recent info */
     if (oldexists == -1 && mailbox->keepingseen) {
-	r = seen_open(mailbox, imapd_userid, SEEN_CREATE, &seendb);
+	r = seen_open(mailbox,
+		      (mailbox->options & OPT_IMAP_SHAREDSEEN) ? "anyone" :
+		      imapd_userid,
+		      SEEN_CREATE, &seendb);
 	if (!r) {
 	    free(seenuids);
 	    seenuids = NULL;
@@ -443,7 +449,7 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 
     for (msgno = 1; msgno <= oldexists; msgno++) {
 	if (flagreport[msgno] < LAST_UPDATED(msgno)) {
-	    for (i = 0; i < VECTOR_SIZE(user_flags); i++) {
+	    for (i = 0; (unsigned) i < VECTOR_SIZE(user_flags); i++) {
 		user_flags[i] = USER_FLAGS(msgno, i);
 	    }
 	    index_fetchflags(mailbox, msgno, SYSTEM_FLAGS(msgno), user_flags,
@@ -452,6 +458,55 @@ void index_check(struct mailbox *mailbox, int usinguid, int checkseen)
 		imapd_condstore_client) {
 		prot_printf(imapd_out, " MODSEQ (" MODSEQ_FMT ")", MODSEQ(msgno));
 	    }
+	    if (usinguid) prot_printf(imapd_out, " UID %u", UID(msgno));
+	    prot_printf(imapd_out, ")\r\n");
+	}
+    }
+}
+
+/* Flush seen state (but only if anything changed) and check for flag/seen
+ * updates from other processes.  Bails out if the cyrus.index file has
+ * changed under our feet, which indicates an expunge from another process.
+ * In this case pending updates will be flushed on the next index_check()
+ */
+void
+index_check_existing(struct mailbox *mailbox, int usinguid, int checkseen)
+{
+    struct stat sbuf;
+    int msgno;
+    unsigned i;
+    bit32 user_flags[MAX_USER_FLAGS/32];
+
+    if (imapd_exists == -1)
+        return;
+
+    /* Check for expunge, just like index_check() */
+    if (index_len) {
+        char fnamebuf[MAX_MAILBOX_PATH+1], *path;
+
+	path = (mailbox->mpath &&
+		(config_metapartition_files &
+		 IMAP_ENUM_METAPARTITION_FILES_INDEX)) ?
+	    mailbox->mpath : mailbox->path;
+	strlcpy(fnamebuf, path, sizeof(fnamebuf));
+	strlcat(fnamebuf, FNAME_INDEX, sizeof(fnamebuf));
+
+	if ((stat(fnamebuf, &sbuf) != 0) ||
+            (sbuf.st_ino != mailbox->index_ino) ||
+	    (index_ino != mailbox->index_ino))
+            return;
+    }
+
+    if (checkseen)
+        index_checkseen(mailbox, 0, usinguid, imapd_exists);
+
+    for (msgno = 1; msgno <= imapd_exists; msgno++) {
+	if (flagreport[msgno] < LAST_UPDATED(msgno)) {
+	    for (i = 0; i < VECTOR_SIZE(user_flags); i++) {
+		user_flags[i] = USER_FLAGS(msgno, i);
+	    }
+	    index_fetchflags(mailbox, msgno, SYSTEM_FLAGS(msgno), user_flags,
+			     LAST_UPDATED(msgno));
 	    if (usinguid) prot_printf(imapd_out, " UID %u", UID(msgno));
 	    prot_printf(imapd_out, ")\r\n");
 	}
@@ -485,11 +540,11 @@ int oldexists;
     unsigned oldnext = 0, oldseen = 0;
     unsigned newnext = 0, newseen = 0;
     int neweof = 0;
-    unsigned msgno, uid, dirty = 0;
-    int i;
+    unsigned uid, dirty = 0, i;
+    int msgno;
     bit32 user_flags[MAX_USER_FLAGS/32];
     char *saveseenuids, *save;
-    int savealloced;
+    size_t savealloced;
     unsigned start, newallseen, inrange, usecomma;
     mailbox_notifyproc_t *updatenotifier;
     int dosync = 0;
@@ -516,8 +571,8 @@ int oldexists;
      */
     old = seenuids;
     new = newseenuids;
-    while (isdigit((int) *old)) oldnext = oldnext * 10 + *old++ - '0';
-    while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+    while (cyrus_isdigit((int) *old)) oldnext = oldnext * 10 + *old++ - '0';
+    while (cyrus_isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
 
     for (msgno = 1; msgno <= imapd_exists; msgno++) {
 	uid = UID(msgno);
@@ -531,7 +586,7 @@ int oldexists;
 		oldnext = 0;
 		if (!*old) oldnext = mailbox->last_uid+1;
 		else old++;
-		while (isdigit((int) *old)) {
+		while (cyrus_isdigit((int) *old)) {
 		    oldnext = oldnext * 10 + *old++ - '0';
 		}
 		oldnext += oldseen;
@@ -550,7 +605,7 @@ int oldexists;
 		    neweof++;
 		}
 		else new++;
-		while (isdigit((int) *new)) {
+		while (cyrus_isdigit((int) *new)) {
 		    newnext = newnext * 10 + *new++ - '0';
 		}
 		newnext += newseen;
@@ -658,7 +713,7 @@ int oldexists;
 		inrange = 1;
 	    }
 	}
-	if (save - saveseenuids > savealloced - 30) {
+	if ((size_t) (save - saveseenuids) > savealloced - 30) {
 	    savealloced += SAVEGROW;
 	    saveseenuids = xrealloc(saveseenuids, savealloced);
 	    save = saveseenuids + strlen(saveseenuids);
@@ -682,7 +737,7 @@ int oldexists;
 		neweof++;
 	    }
 	    else new++;
-	    while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+	    while (cyrus_isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
 	    newnext += newseen;
 	}
     }
@@ -700,7 +755,7 @@ int oldexists;
 		/* There's a ":M" after the ",N".  Parse/include that too. */
 		new++;
 		newnext = 0;
-		while (isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
+		while (cyrus_isdigit((int) *new)) newnext = newnext * 10 + *new++ - '0';
 	    }
 	    uid = newnext;
 	    newseen++;		/* Forget we parsed ",N" */
@@ -772,7 +827,8 @@ int oldexists;
      * imapd.c doesn't have enough context to work out where seen flags set.
      * Downside: we have to link sync_client, sync_server with sync_log */
     if (!r && dosync) {
-        sync_log_seen(imapd_userid, mailbox->name);
+        sync_log_seen((mailbox->options & OPT_IMAP_SHAREDSEEN) ? "anyone" :
+		      imapd_userid, mailbox->name);
     }
 
 #if TOIMSP
@@ -824,7 +880,8 @@ struct storeargs *storeargs;
 char **flag;
 int nflags;
 {
-    int i, r, userflag, emptyflag;
+    int i, r, emptyflag;
+    unsigned userflag;
     int writeheader = 0;
     int newflag[MAX_USER_FLAGS];
     long myrights = mailbox->myrights;
@@ -1077,7 +1134,7 @@ static int _index_search(unsigned **msgno_list, struct mailbox *mailbox,
     return n;
 }
 
-int index_getuid(unsigned msgno) {
+unsigned index_getuid(unsigned msgno) {
   return UID(msgno);
 }
 
@@ -1366,13 +1423,19 @@ index_copy(struct mailbox *mailbox,
 
     r = append_copy(mailbox, &append_mailbox, copyargs.nummsg,
 		    copyargs.copymsg, nolink);
-    if (!r) append_commit(&append_mailbox, totalsize,
-			  &uidvalidity, &startuid, &num);
-
     if (!r) {
-	sync_log_mailbox_double(mailbox->name, name);
-	/* if any messages are seen then we need to sync the seen state */
-	if (haveseen) sync_log_seen(imapd_userid, name);
+	int sharedseen = (append_mailbox.m.options & OPT_IMAP_SHAREDSEEN);
+
+	r = append_commit(&append_mailbox, totalsize,
+		      &uidvalidity, &startuid, &num);
+
+	if (!r) {
+	    sync_log_mailbox_double(mailbox->name, name);
+	    /* if any messages are seen then we need to sync the seen state */
+	    if (haveseen) {
+		sync_log_seen(sharedseen ? "anyone" : imapd_userid, name);
+	    }
+	}
     }
 
     if (!r && docopyuid) {
@@ -1519,11 +1582,15 @@ int statusitems;
     int num_recent = 0;
     int num_unseen = 0;
     int sepchar;
+    static struct seq_set seq_set = { NULL, 0, 0, 0 , NULL};
 
     if (mailbox->exists != 0 &&
 	(statusitems &
 	 (STATUS_RECENT | STATUS_UNSEEN))) {
-	r = seen_open(mailbox, imapd_userid, SEEN_CREATE, &status_seendb);
+	r = seen_open(mailbox,
+		      (mailbox->options & OPT_IMAP_SHAREDSEEN) ? "anyone" :
+		      imapd_userid,
+		      SEEN_CREATE, &status_seendb);
 	if (r) return r;
 
 	r = seen_lockread(status_seendb, &last_read, &last_uid,
@@ -1534,20 +1601,23 @@ int statusitems;
 	if (statusitems & (STATUS_RECENT | STATUS_UNSEEN)) {
 	    const char *base;
 	    unsigned long len = 0;
-	    int msg;
-	    unsigned uid;
+	    unsigned msg, uid;
 
 	    map_refresh(mailbox->index_fd, 0, &base, &len,
 			mailbox->start_offset +
 			mailbox->exists * mailbox->record_size,
 			"index", mailbox->name);
+
+	    seq_set.len = seq_set.mark = 0;
+	    index_parse_sequence(last_seenuids, 0, &seq_set);
+
 	    for (msg = 0; msg < mailbox->exists; msg++) {
 		uid = ntohl(*((bit32 *)(base + mailbox->start_offset +
 					msg * mailbox->record_size +
 					OFFSET_UID)));
 		if (uid > last_uid) num_recent++;
 		if ((statusitems & STATUS_UNSEEN) &&
-		    !index_insequence(uid, last_seenuids, 0)) num_unseen++;
+		    !index_insequence(uid, &seq_set, 1)) num_unseen++;
 		/* NB: The value of the third argument to index_insequence()
 		 * above does not matter.
 		 */
@@ -1594,133 +1664,13 @@ int statusitems;
 }
 
 /*
- * Performs a GETUIDS command
- */
-int
-index_getuids(mailbox, lowuid)
-struct mailbox *mailbox __attribute__((unused));
-unsigned lowuid;
-{
-    int msgno;
-    unsigned firstuid = 0, lastuid = 0;
-
-
-    prot_printf(imapd_out, "* GETUIDS");
-
-    for (msgno = 1; msgno <= imapd_exists; msgno++) {
-	if (firstuid == 0) {
-	    if (UID(msgno) >= lowuid) {
-		prot_printf(imapd_out, " %u %u", msgno, UID(msgno));
-		firstuid = lastuid = UID(msgno);
-	    }
-	}
-	else {
-	    if (UID(msgno) != ++lastuid) {
-		if (lastuid-1 != firstuid) {
-		    prot_printf(imapd_out, ":%u", lastuid-1);
-		}
-		firstuid = lastuid = UID(msgno);
-		prot_printf(imapd_out, ",%u", firstuid);
-	    }
-	}
-    }
-    if (lastuid != firstuid) {
-	prot_printf(imapd_out, ":%u", lastuid);
-    }
-    prot_printf(imapd_out, "\r\n");
-
-    return 0;
-}
-
-/*
- * Performs a XGETSTATE command
- */
-int
-index_getstate(mailbox)
-struct mailbox *mailbox;
-{    
-
-    prot_printf(imapd_out, "* XSTATE %lu %lu\r\n", mailbox->index_mtime,
-		seen_last_change);
-
-    return 0;
-}
-
-#if 0
-/* What's this for?  Might as well keep it around. */
-/*
- * Performs a XCHECKSTATE command
- */
-int
-index_checkstate(mailbox, indexdate, seendate)
-struct mailbox *mailbox;
-unsigned indexdate;
-unsigned seendate;
-{
-    int r;
-    int msgno;
-    unsigned int startmsgno = 0;
-    int sepchar = ' ';
-
-    /* No messages == everything OK */
-    if (imapd_exists < 1) {
-	prot_printf(imapd_out, "* XCHECKSTATE\r\n");
-	return 0;
-    }
-	
-    /* If \Seen data changed, we don't know anything */
-    if (seendate != seen_last_change) {
-	if (imapd_exists == 1) {
-	    prot_printf(imapd_out,
-			"* XCHECKSTATE %u\r\n", UID(1));
-	}
-	else {
-	    prot_printf(imapd_out,
-			"* XCHECKSTATE %u:%u\r\n", UID(1), UID(imapd_exists));
-	}
-	return 0;
-    }
-
-    prot_printf(imapd_out, "* XCHECKSTATE");
-    for (msgno = 1; msgno <= imapd_exists; msgno++) {
-	/*
-	 * Below is >= instead of > because we can get
-	 * two STORE commands within the same second.
-	 */
-	if (LAST_UPDATED(msgno) >= indexdate) {
-	    if (startmsgno == 0) {
-		prot_printf(imapd_out, "%c%u", sepchar, UID(msgno));
-		sepchar = ',';
-		startmsgno = msgno;
-	    }
-	}
-	else {
-	    if (startmsgno != 0 && startmsgno < msgno - 1) {
-		prot_printf(imapd_out, ":%u", UID(msgno-1));
-	    }
-	    startmsgno = 0;
-	}
-    }
-
-    if (startmsgno != 0 && startmsgno < imapd_exists) {
-	prot_printf(imapd_out, ":%u", UID(imapd_exists));
-    }
-
-    prot_printf(imapd_out, "\r\n");
-    return 0;
-}
-#endif
-
-/*
  * Returns the msgno of the message with UID 'uid'.
  * If no message with UID 'uid', returns the message with
  * the higest UID not greater than 'uid'.
  */
-int
-index_finduid(uid)
-unsigned uid;
+unsigned index_finduid(unsigned uid)
 {
-    int low=1, high=imapd_exists, mid;
+    unsigned low=1, high=imapd_exists, mid;
     unsigned miduid;
 
     while (low <= high) {
@@ -1743,18 +1693,20 @@ unsigned uid;
  * Expunge decision procedure to get rid of articles
  * both \Deleted and listed in the sequence under 'rock'.
  */
-int index_expungeuidlist(struct mailbox *mailbox __attribute__((unused)),
-			 void *rock, char *indexbuf,
-			 int expunge_flags __attribute__((unused)))
+unsigned index_expungeuidlist(struct mailbox *mailbox __attribute__((unused)),
+			      void *rock,
+			      unsigned char *indexbuf,
+			      int expunge_flags __attribute__((unused)))
 {
-    char *sequence = (char *)rock;
+    struct seq_set *sequence = (struct seq_set *)rock;
     unsigned uid = ntohl(*((bit32 *)(indexbuf+OFFSET_UID)));
 
     /* Don't expunge if not \Deleted */
     if (!(ntohl(*((bit32 *)(indexbuf+OFFSET_SYSTEM_FLAGS))) & FLAG_DELETED))
 	return 0;
 
-    return index_insequence(uid, sequence, 1);
+    /* XXX  Can we use the previous range marker? */
+    return index_insequence(uid, sequence, 0);
 }
 
 /*
@@ -1772,115 +1724,37 @@ index_forsequence(struct mailbox* mailbox,
 		  void* rock,
 		  int* fetchedsomething)
 {
-    unsigned i, start = 0, end;
+    struct seq_set *seq;
+    unsigned i, j;
     int r, result = 0;
 
-    /* no messages, no calls.  dumps core otherwise */
-    if (! imapd_exists) {
-	return 0;
+    /* no messages, no calls. */
+    if (!imapd_exists) return 0;
+
+    seq = index_parse_sequence(sequence, usinguid, NULL);
+
+    for (i = 0; i < seq->len; i++) {
+	unsigned start = seq->set[i].low;
+	unsigned end = seq->set[i].high;
+
+	if (usinguid) {
+	    j = index_finduid(start);
+	    if (!j || start != UID(j)) j++;
+	    start = j;
+	    end = index_finduid(end);
+	}
+	if (start < 1) start = 1;
+	if (end > (unsigned) imapd_exists) end = imapd_exists;
+
+	for (j = start; j <= end; j++) {
+	    if (fetchedsomething) *fetchedsomething = 1;
+	    r = (*proc)(mailbox, j, rock);
+	    if (r && !result) result = r;
+	}
     }
 
-    for (;;) {
-	if (isdigit((int) *sequence)) {
-	    start = start*10 + *sequence - '0';
-	}
-	else if (*sequence == '*') {
-	    start = usinguid ? UID(imapd_exists) : imapd_exists;
-	}
-	else if (*sequence == ':') {
-	    end = 0;
-	    sequence++;
-	    while (isdigit((int) *sequence)) {
-		end = end*10 + *sequence++ - '0';
-	    }
-	    if (*sequence == '*') {
-		sequence++;
-		end = usinguid ? UID(imapd_exists) : imapd_exists;
-	    }
-	    if (start > end) {
-		i = end;
-		end = start;
-		start = i;
-	    }
-	    if (usinguid) {
-		i = index_finduid(start);
-		if (!i || start != UID(i)) i++;
-		start = i;
-		end = index_finduid(end);
-	    }
-	    if (start < 1) start = 1;
-	    if (end > imapd_exists) end = imapd_exists;
-	    for (i = start; i <= end; i++) {
-		if (fetchedsomething) *fetchedsomething = 1;
-		r = (*proc)(mailbox, i, rock);
-		if (r && !result) result = r;
-	    }
-	    start = 0;
-	    if (!*sequence) return result;
-	}
-	else {
-	    if (start && usinguid) {
-		i = index_finduid(start);
-		if (!i || start != UID(i)) i = 0;
-		start = i;
-	    }
-	    if (start > 0 && start <= imapd_exists) {
-		if (fetchedsomething) *fetchedsomething = 1;
-		r = (*proc)(mailbox, start, rock);
-		if (r && !result) result = r;
-	    }
-	    start = 0;
-	    if (!*sequence) return result;
-	}
-	sequence++;
-    }
-}
-
-/*
- * Return nonzero iff 'num' is included in 'sequence'
- */
-static int
-index_insequence(num, sequence, usinguid)
-int num;
-char *sequence;
-int usinguid;
-{
-    unsigned i, start = 0, end;
-
-    for (;;) {
-	if (isdigit((int) *sequence)) {
-	    start = start*10 + *sequence - '0';
-	}
-	else if (*sequence == '*') {
-	    sequence++;
-	    start = usinguid ? UID(imapd_exists) : imapd_exists;
-	}
-	else if (*sequence == ':') {
-	    end = 0;
-	    sequence++;
-	    while (isdigit((int) *sequence)) {
-		end = end*10 + *sequence++ - '0';
-	    }
-	    if (*sequence == '*') {
-		sequence++;
-		end = usinguid ? UID(imapd_exists) : imapd_exists;
-	    }
-	    if (start > end) {
-		i = end;
-		end = start;
-		start = i;
-	    }
-	    if (num >= start && num <= end) return 1;
-	    start = 0;
-	    if (!*sequence) return 0;
-	}
-	else {
-	    if (num == start) return 1;
-	    start = 0;
-	    if (!*sequence) return 0;
-	}
-	sequence++;
-    }
+    freesequencelist(seq);
+    return result;
 }
 
 /* Helper function to determine domain of data */
@@ -1890,7 +1764,7 @@ enum {
     DOMAIN_BINARY
 };
 
-static int data_domain(const unsigned char *p, size_t n)
+static int data_domain(const char *p, size_t n)
 {
     while (n--) {
 	if (!*p) return DOMAIN_BINARY;
@@ -1922,7 +1796,8 @@ unsigned start_octet;
 unsigned octet_count;
 struct protstream *pout;
 {
-    int n, domain;
+    unsigned n;
+    int domain;
 
     /* If no data, output NIL */
     if (!msg_base) {
@@ -1992,7 +1867,7 @@ static int index_fetchsection(const char *resp,
 			      unsigned start_octet, unsigned octet_count)
 {
     char *p;
-    int skip = 0;
+    unsigned skip = 0;
     int fetchmime = 0;
     unsigned offset = 0;
     char *decbuf = NULL;
@@ -2015,7 +1890,7 @@ static int index_fetchsection(const char *resp,
     while (*p != ']' && *p != 'M') {
 	/* Generate the actual part number */
 	skip = 0;
-	while (isdigit((int) *p)) {
+	while (cyrus_isdigit((int) *p)) {
             skip = skip * 10 + *p++ - '0';
             /* xxx overflow */
         }
@@ -2068,7 +1943,8 @@ static int index_fetchsection(const char *resp,
 
     cacheitem += skip * 5 * 4 + CACHE_ITEM_SIZE_SKIP + (fetchmime ? 0 : 2 * 4);
     
-    if (CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP) == -1) goto badpart;
+    if (CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP) == (bit32) -1)
+	goto badpart;
 
     offset = CACHE_ITEM_BIT32(cacheitem);
     size = CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP);
@@ -2126,7 +2002,7 @@ static void index_fetchfsection(const char *msg_base,
 				unsigned start_octet, unsigned octet_count)
 {
     char *p;
-    int skip = 0;
+    unsigned skip = 0;
     int fields_not = 0;
     unsigned crlf_start = 0;
     unsigned crlf_size = 2;
@@ -2144,7 +2020,7 @@ static void index_fetchfsection(const char *msg_base,
 
     while (*p != 'H') {
 	skip = 0;
-	while (isdigit((int) *p)) {
+	while (cyrus_isdigit((int) *p)) {
             skip = skip * 10 + *p++ - '0';
             /* xxx overflow */
         }
@@ -2168,7 +2044,8 @@ static void index_fetchfsection(const char *msg_base,
 
     cacheitem += 4;
 
-    if (CACHE_ITEM_BIT32(cacheitem+CACHE_ITEM_SIZE_SKIP) == -1) goto badpart;
+    if (CACHE_ITEM_BIT32(cacheitem+CACHE_ITEM_SIZE_SKIP) == (bit32) -1)
+	goto badpart;
 	
     if (p[13]) fields_not++;	/* Check for "." after "HEADER.FIELDS" */
 
@@ -2238,7 +2115,7 @@ unsigned offset;
 unsigned size;
 {
     static char *buf;
-    static int bufsize;
+    static unsigned bufsize;
 
     if (offset + size > msg_size) {
 	/* Message file is too short, truncate request */
@@ -2283,7 +2160,7 @@ index_pruneheader(char *buf, struct strlist *headers,
 	if (colon && headers_not) {
 	    goodheader = 1;
 	    for (l = headers_not; l; l = l->next) {
-		if (colon - p == strlen(l->s) &&
+		if ((size_t) (colon - p) == strlen(l->s) &&
 		    !strncasecmp(p, l->s, colon - p)) {
 		    goodheader = 0;
 		    break;
@@ -2294,7 +2171,7 @@ index_pruneheader(char *buf, struct strlist *headers,
 	}
 	if (colon) {
 	    for (l = headers; l; l = l->next) {
-		if (colon - p == strlen(l->s) &&
+		if ((size_t) (colon - p) == strlen(l->s) &&
 		    !strncasecmp(p, l->s, colon - p)) {
 		    goodheader = 1;
 		    break;
@@ -2362,7 +2239,7 @@ index_fetchcacheheader(unsigned msgno, struct strlist *headers,
 		       unsigned start_octet, unsigned octet_count)
 {
     static char *buf;
-    static int bufsize;
+    static unsigned bufsize;
     const char *cacheitem;
     unsigned size;
     unsigned crlf_start = 0;
@@ -2426,7 +2303,7 @@ index_fetchcacheheader(unsigned msgno, struct strlist *headers,
  */
 static void index_listflags(struct mailbox *mailbox)
 {
-    int i;
+    unsigned i;
     int cancreate = 0;
     char sepchar = '(';
 
@@ -2530,7 +2407,7 @@ static void index_fetchflags(struct mailbox *mailbox,
     if (sepchar == '(') prot_putc('(', imapd_out);
     prot_putc(')', imapd_out);
 
-    assert(flagalloced > 0 || msgno < flagalloced);
+    assert(flagalloced > 0 || msgno < (unsigned) flagalloced);
 
     flagreport[msgno] = last_updated;
 }
@@ -2548,7 +2425,7 @@ static int index_fetchreply(struct mailbox *mailbox,
     struct octetinfo *oi = NULL;
     int sepchar = '(';
     int started = 0;
-    int i;
+    unsigned i;
     bit32 user_flags[MAX_USER_FLAGS/32];
     const char *cacheitem;
     struct strlist *section, *field;
@@ -2819,9 +2696,8 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
     const char *msg_base = 0;
     unsigned long msg_size = 0;
     const char *cacheitem;
-    int skip = 0;
     int fetchmime = 0;
-    unsigned size, offset = 0;
+    unsigned size, offset = 0, skip = 0;;
     int n, r = 0;
 
     if (outsize) *outsize = 0;
@@ -2850,7 +2726,7 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 	while (*p && *p != 'M') {
 	    /* Generate the actual part number */
 	    skip = 0;
-	    while (isdigit((int) *p)) {
+	    while (cyrus_isdigit((int) *p)) {
 		skip = skip * 10 + *p++ - '0';
 		/* xxx overflow */
 	    }
@@ -2907,7 +2783,7 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 	cacheitem += skip * 5 * 4 + CACHE_ITEM_SIZE_SKIP +
 	    (fetchmime ? 0 : 2 * 4);
     
-	if (CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP) == -1) {
+	if (CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP) == (bit32) -1) {
 	    r = IMAP_BADURL;
 	    goto done;
 	}
@@ -2948,7 +2824,7 @@ static int index_storeseen(struct mailbox *mailbox, unsigned msgno, void *rock)
 {
     struct storeargs *storeargs = (struct storeargs *)rock;
     int val = (storeargs->operation == STORE_ADD) ? 1 : 0;
-    int i;
+    unsigned i;
     bit32 user_flags[MAX_USER_FLAGS/32];
     
     if (seenflag[msgno] == val) return 0;
@@ -2976,11 +2852,11 @@ static int index_storeflag(struct mailbox *mailbox,
 			   unsigned msgno, void *rock)
 {
     struct storeargs *storeargs = (struct storeargs *)rock;
-    int i;
+    unsigned i;
     struct index_record record;
-    int uid = UID(msgno);
-    int low=1, high=mailbox->exists;
-    int mid = 0;
+    unsigned long uid = UID(msgno);
+    unsigned low=1, high=mailbox->exists;
+    unsigned mid = 0;
     int r;
     int firsttry = 1;
     int dirty = 0;
@@ -3175,11 +3051,12 @@ static int index_search_evaluate(struct mailbox *mailbox,
 				 unsigned msgno,
 				 struct mapfile *msgfile)
 {
-    int i;
+    unsigned i;
     struct strlist *l, *h;
     const char *cacheitem;
     int cachelen;
     struct searchsub *s;
+    struct seq_set *seq;
 
     if ((searchargs->flags & SEARCH_RECENT_SET) && msgno <= lastnotrecent) 
 	return 0;
@@ -3191,13 +3068,13 @@ static int index_search_evaluate(struct mailbox *mailbox,
     if (searchargs->smaller && SIZE(msgno) >= searchargs->smaller) return 0;
     if (searchargs->larger && SIZE(msgno) <= searchargs->larger) return 0;
 
-    if (searchargs->after && INTERNALDATE(msgno) < searchargs->after)
+    if (searchargs->after && (time_t) INTERNALDATE(msgno) < searchargs->after)
       return 0;
-    if (searchargs->before && INTERNALDATE(msgno) > searchargs->before)
+    if (searchargs->before && (time_t) INTERNALDATE(msgno) > searchargs->before)
       return 0;
-    if (searchargs->sentafter && SENTDATE(msgno) < searchargs->sentafter)
+    if (searchargs->sentafter && (time_t) SENTDATE(msgno) < searchargs->sentafter)
       return 0;
-    if (searchargs->sentbefore && SENTDATE(msgno) > searchargs->sentbefore)
+    if (searchargs->sentbefore && (time_t) SENTDATE(msgno) > searchargs->sentbefore)
       return 0;
 
     if (searchargs->modseq && MODSEQ(msgno) < searchargs->modseq) return 0;
@@ -3212,11 +3089,11 @@ static int index_search_evaluate(struct mailbox *mailbox,
 	  return 0;
     }
 
-    for (l = searchargs->sequence; l; l = l->next) {
-	if (!index_insequence(msgno, l->s, 0)) return 0;
+    for (seq = searchargs->sequence; seq; seq = seq->next) {
+	if (!index_insequence(msgno, seq, 1)) return 0;
     }
-    for (l = searchargs->uidsequence; l; l = l->next) {
-	if (!index_insequence(UID(msgno), l->s, 1)) return 0;
+    for (seq = searchargs->uidsequence; seq; seq = seq->next) {
+	if (!index_insequence(UID(msgno), seq, 1)) return 0;
     }
 
     if (searchargs->from || searchargs->to || searchargs->cc ||
@@ -3386,7 +3263,8 @@ index_searchmsg(char *substr,
 {
     int partsleft = 1;
     int subparts;
-    int start, len, charset, encoding;
+    unsigned long start;
+    int len, charset, encoding;
     char *p, *q;
     
     /* Won't find anything in a truncated file */
@@ -3475,7 +3353,7 @@ static int index_searchcacheheader(unsigned msgno,
     char *q;
     static struct strlist header;
     static char *buf;
-    static int bufsize;
+    static unsigned bufsize;
     const char *cacheitem;
     unsigned size;
     int r;
@@ -3522,7 +3400,8 @@ static void index_getsearchtextmsg(struct mailbox* mailbox,
   struct mapfile msgfile;
   int partsleft = 1;
   int subparts;
-  int start, len, charset, encoding;
+  unsigned long start;
+  int len, charset, encoding;
   int partcount = 0;
   char *p, *q;
   int format = mailbox->format;
@@ -3658,15 +3537,15 @@ void *rock;
     copyargs->copymsg[copyargs->nummsg].content_lines = CONTENT_LINES(msgno);
     copyargs->copymsg[copyargs->nummsg].cache_version = CACHE_VERSION(msgno);
     copyargs->copymsg[copyargs->nummsg].cache_begin = cache_base + CACHE_OFFSET(msgno);
-    message_uuid_unpack(&copyargs->copymsg[copyargs->nummsg].uuid,
+    message_guid_import(&copyargs->copymsg[copyargs->nummsg].guid,
                         (unsigned char *) /* YYY */
-                        INDEC_OFFSET(msgno)+OFFSET_MESSAGE_UUID);
+                        INDEC_OFFSET(msgno)+OFFSET_MESSAGE_GUID);
 
     if (mailbox->format != MAILBOX_FORMAT_NORMAL) {
 	/* Force copy and re-parse of message */
 	copyargs->copymsg[copyargs->nummsg].cache_len = 0;
     }
-    else if (msgno < imapd_exists) {
+    else if (msgno < (unsigned) imapd_exists) {
 	copyargs->copymsg[copyargs->nummsg].cache_len =
 	  CACHE_OFFSET(msgno+1) - CACHE_OFFSET(msgno);
     }
@@ -3874,7 +3753,7 @@ static void parse_cached_envelope(char *env, char *tokens[], int tokens_size)
 	case '{':			/* literal */
 	    c++;			/* skip open brace */
 	    len = 0;			/* determine length of literal */
-	    while (isdigit((int) *c)) {
+	    while (cyrus_isdigit((int) *c)) {
 		len = len*10 + *c - '0';
 		c++;
 	    }
@@ -4028,7 +3907,7 @@ static char *_index_extract_subject(char *s, int *is_refwd)
 			break;
 		    			/* if we have a digit, and we're still
 					   counting, keep building the count */
-		    } else if (isdigit((int) *x) && count != -1) {
+		    } else if (cyrus_isdigit((int) *x) && count != -1) {
 			count = count * 10 + *x - '0';
                         if (count < 0) {                /* overflow */
                             count = -1; /* abort counting */
@@ -4285,8 +4164,8 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	    ret = strcmp(md1->cc, md2->cc);
 	    break;
 	case SORT_DATE: {
-	    time_t d1 = md1->date ? md1->date : INTERNALDATE(md1->msgno);
-	    time_t d2 = md2->date ? md2->date : INTERNALDATE(md2->msgno);
+	    time_t d1 = md1->date ? md1->date : (time_t) INTERNALDATE(md1->msgno);
+	    time_t d2 = md2->date ? md2->date : (time_t) INTERNALDATE(md2->msgno);
 	    ret = numcmp(d1, d2);
 	    break;
 	}
@@ -5349,7 +5228,7 @@ extern char *index_getheader(struct mailbox *mailbox, unsigned msgno,
     static unsigned long msg_size = 0;
     struct strlist headers = { NULL, NULL, NULL, NULL };
     static char *alloc = NULL;
-    static int allocsize = 0;
+    static unsigned allocsize = 0;
     const char *cacheitem;
     unsigned size;
     char *buf;
@@ -5464,4 +5343,152 @@ extern unsigned long index_getlines(struct mailbox *mailbox, unsigned msgno)
     }
 
     return lines;
+}
+
+#define MAX(x, y) (x > y ? x : y)
+
+/* Comparator function that sorts ranges by the low value,
+   and coalesces intersecting ranges to have the same high value */
+static int comp_coalesce(const void *v1, const void *v2)
+{
+    struct seq_range *r1 = (struct seq_range *) v1;
+    struct seq_range *r2 = (struct seq_range *) v2;
+
+    /* If ranges don't intersect, we're done */
+    if (r1->high < r2->low) return -1;
+    if (r1->low > r2->high) return 1;
+
+    /* Ranges intersect, coalesce them */
+    r1->high = r2->high = MAX(r1->high, r2->high);
+
+    return r1->low - r2->low;;
+}
+
+#define SETGROWSIZE 100
+
+/*
+ * Parse a sequence into an array of sorted & merged ranges.
+ */
+struct seq_set *index_parse_sequence(const char *sequence, int usinguid,
+				     struct seq_set *set)
+{
+    unsigned i, j, start, end, *num;
+
+    if (!set) set = xzmalloc(sizeof(struct seq_set));
+
+    start = end = 0;
+    num = &start;
+    for (;;) {
+	if (cyrus_isdigit((int) *sequence)) {
+	    *num = (*num)*10 + *sequence - '0';
+	}
+	else if (*sequence == '*') {
+	    *num = usinguid ? UID(imapd_exists) : (unsigned) imapd_exists;
+	}
+	else if (*sequence == ':') {
+	    num = &end;
+	}
+	else {
+	    if (!end) end = start;
+	    else if (start > end) {
+		i = end;
+		end = start;
+		start = i;
+	    }
+
+	    if (set->len == set->alloc) {
+		set->alloc += SETGROWSIZE;
+		set->set =
+		    xrealloc(set->set, set->alloc * sizeof(struct seq_range));
+	    }
+	    set->set[set->len].low = start;
+	    set->set[set->len].high = end;
+	    set->len++;
+
+	    start = end = 0;
+	    num = &start;
+
+	    if (!*sequence) break;
+	}
+	sequence++;
+    }
+
+    /* Sort the ranges using our special comparator */
+    qsort(set->set, set->len, sizeof(struct seq_range), comp_coalesce);
+
+    /* Merge intersecting/adjacent ranges */
+    for (i = 0, j = 1; j < set->len; j++) {
+	if ((int)(set->set[j].low - set->set[i].high) <= 1) {
+	    set->set[i].high = set->set[j].high;
+	} else {
+	    i++;
+	    set->set[i].low = set->set[j].low;
+	    set->set[i].high = set->set[j].high;
+	}
+    }
+    set->len = i+1;
+
+    return set;
+}
+
+/* Comparator function that checks if r1 is a subset of r2 */
+static int comp_subset(const void *v1, const void *v2)
+{
+    struct seq_range *r1 = (struct seq_range *) v1;
+    struct seq_range *r2 = (struct seq_range *) v2;
+
+    if (r1->low < r2->low) return -1;
+    if (r1->high > r2->high) return 1;
+    return 0;
+}
+
+/*
+ * Return nonzero iff 'num' is included in 'sequence'
+ */
+static int index_insequence(unsigned num, struct seq_set *set, int use_mark)
+{
+    if (!use_mark) set->mark = 0;
+
+    /* Short circuit if we're outside all ranges */
+    if ((num < set->set[set->mark].low) || (num > set->set[set->len-1].high)) {
+	return 0;
+    }
+    else {
+	/* Otherwise create a dummy range from our data point,
+	   and see if it intersects with our set */
+	struct seq_range key = { num, num };
+	struct seq_range *found = bsearch(&key, set->set + set->mark,
+					  set->len - set->mark,
+					  sizeof(struct seq_range),
+					  comp_subset);
+
+	if (found) {
+	    /* Set the mark to the index of the inclusive range */
+	    set->mark = found - set->set;
+	    return 1;
+	}
+
+	return 0;
+    }
+}
+
+void appendsequencelist(struct seq_set **l, char *sequence, int usinguid)
+{
+    struct seq_set **tail = l;
+
+    while (*tail) tail = &(*tail)->next;
+
+    *tail = index_parse_sequence(sequence, usinguid, NULL);
+}
+
+void freesequencelist(struct seq_set *l)
+{
+    struct seq_set *n;
+
+    while(l) {
+	n = l->next;
+	free(l->set);
+	free(l);
+	l = n;
+    }
 }

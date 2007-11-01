@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: reconstruct.c,v 1.89 2006/11/30 17:11:20 murch Exp $ */
+/* $Id: reconstruct.c,v 1.89.2.1 2007/11/01 14:39:34 murch Exp $ */
 
 #include <config.h>
 
@@ -85,7 +85,10 @@
 #include "mailbox.h"
 #include "map.h"
 #include "message.h"
+#include "message_guid.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "global.h"
 #include "mboxname.h"
 #include "mboxlist.h"
@@ -131,6 +134,8 @@ extern cyrus_acl_canonproc_t mboxlist_ensureOwnerRights;
 int code = 0;
 int keepflag = 0;
 int syncflag = 0;
+int guid_clear = 0;
+int guid_set   = 0;
 
 int main(int argc, char **argv)
 {
@@ -148,13 +153,15 @@ int main(int argc, char **argv)
 
     memset(&head, 0, sizeof(head));
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     /* Ensure we're up-to-date on the index file format */
     assert(INDEX_HEADER_SIZE == (OFFSET_SPARE4+4));
     assert(INDEX_RECORD_SIZE == (OFFSET_MODSEQ+4));
 
-    while ((opt = getopt(argc, argv, "C:kp:rmfsx")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:kp:rmfsxgG")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -186,6 +193,14 @@ int main(int argc, char **argv)
 	    
 	case 'x':
 	    xflag = 1;
+	    break;
+	    
+	case 'g':
+	    guid_clear = 1;
+	    break;
+	    
+	case 'G':
+	    guid_set = 1;
 	    break;
 	    
 	default:
@@ -404,10 +419,10 @@ do_reconstruct(char *name,
     signals_poll();
 
     /* don't repeat */
-    if (matchlen == strlen(lastname) &&
+    if (matchlen == (int) strlen(lastname) &&
 	!strncmp(name, lastname, matchlen)) return 0;
 
-    if(matchlen >= sizeof(lastname))
+    if(matchlen >= (int) sizeof(lastname))
 	matchlen = sizeof(lastname) - 1;
     
     strncpy(lastname, name, matchlen);
@@ -415,7 +430,8 @@ do_reconstruct(char *name,
 
     r = reconstruct(lastname, rock);
     if (r) {
-	com_err(name, r, (r == IMAP_IOERROR) ? error_message(errno) : NULL);
+	com_err(lastname, r,
+		(r == IMAP_IOERROR) ? error_message(errno) : NULL);
 	code = convert_code(r);
     } else {
 	/* Convert internal name to external */
@@ -427,16 +443,15 @@ do_reconstruct(char *name,
     return 0;
 }
 
-int 
-reconstruct_expunge (char * path, struct mailbox * mailbox, 
-			unsigned long **expuid, int *expuid_num)
+int reconstruct_expunge (char * path, struct mailbox * mailbox, 
+			 unsigned long **expuid, unsigned *expuid_num)
 {
     char fnamebuf[MAX_MAILBOX_PATH+1];
     char newfnamebuf[MAX_MAILBOX_PATH+1];
     struct stat sbuf;
 
-    char buf[((INDEX_HEADER_SIZE > INDEX_RECORD_SIZE) ?
-             INDEX_HEADER_SIZE : INDEX_RECORD_SIZE)];
+    indexbuffer_t ibuf;
+    unsigned char *buf = ibuf.buf;
 
     int expunge_fd;
     FILE *fexpunge;
@@ -457,9 +472,9 @@ reconstruct_expunge (char * path, struct mailbox * mailbox,
     int   n;
 
     unsigned long *expuid_array = NULL;
-    int expuid_idx = 0;
-    int expuid_alloc = 0;
-    int expmsg;
+    unsigned expuid_idx = 0;
+    unsigned expuid_pos = 0;
+    unsigned expuid_alloc = 0;
 
     *expuid = NULL;
     *expuid_num = 0;
@@ -491,7 +506,7 @@ reconstruct_expunge (char * path, struct mailbox * mailbox,
 	(minor_version == 0) || (minor_version > MAILBOX_MINOR_VERSION) || 
 	(start_offset == 0)  ||  (start_offset > INDEX_HEADER_SIZE) ||
 	(record_size  == 0)  || (record_size > INDEX_RECORD_SIZE) ||
-	(sbuf.st_size < (start_offset + exists * record_size))) {
+	((unsigned) sbuf.st_size < (start_offset + exists * record_size))) {
 
 	syslog(LOG_ERR, "Unable to verify header - deleting: %s", fnamebuf);
 	close (expunge_fd);
@@ -575,39 +590,52 @@ reconstruct_expunge (char * path, struct mailbox * mailbox,
 	    free(expuid);
 	    return IMAP_IOERROR;
    	}
-	unsigned msgno;
-	const char *p = index_base + start_offset;
 
-	/* 
-	* verify the message files exist - 
-	* optionally deleting message files 
-	*/
-	for (msgno = 1; msgno <= exists; msgno++, p += record_size) {
-	    unsigned long fileuid = ntohl(*((bit32 *)(p + OFFSET_UID)));
-
-	    for (expmsg = 0; expmsg < expuid_idx; expmsg++) {
-		if (fileuid == expuid_array [expmsg]) {
-
-		    n = fwrite(buf, 1, INDEX_RECORD_SIZE, fexpunge);
-		    if (n != INDEX_RECORD_SIZE) {
-	    		syslog (LOG_ERR, 
-		"IOERROR: %m writing cyrus.expunge record: %s", newfnamebuf);
-			close(expunge_fd);
-			map_free(&index_base, &index_len);
-			free(expuid);
-			fclose(fexpunge);
-			
-			return IMAP_IOERROR;
-		    }
-		    break;
-		}
-	    }
-	}
-	rewind (fexpunge);
-	*((bit32 *)(buf+OFFSET_EXISTS)) = htonl(*expuid_num);	
+	memcpy(buf, index_base, INDEX_HEADER_SIZE);
+        /* may as well just update exists here,
+	 * since we ensure it's all good at the end anyway */
+	*((bit32 *)(buf+OFFSET_EXISTS)) = htonl(expuid_idx);
 	n = fwrite(buf, 1, INDEX_HEADER_SIZE, fexpunge);
 	if (n != INDEX_HEADER_SIZE || ferror(fexpunge) ) {
-	    syslog (LOG_ERR, "IOERROR: %m writing expunge header: %s", newfnamebuf);
+	    syslog (LOG_ERR,
+		    "IOERROR: %m writing expunge header: %s", newfnamebuf);
+	    close(expunge_fd);
+	    map_free(&index_base, &index_len);
+	    free(expuid);
+	    fclose(fexpunge);
+	    return IMAP_IOERROR;
+	}
+
+	/* 
+	 * copy records which are in the expuid_array to the new expunge file
+	*/
+	p = index_base + start_offset;
+	for (msgno = 1; msgno <= exists; msgno++, p += record_size) {
+	    unsigned long recorduid = ntohl(*((bit32 *)(p + OFFSET_UID)));
+
+            /* we know these records are in expunge file order */
+	    if (recorduid == expuid_array[expuid_pos]) {
+	        n = fwrite(p, 1, INDEX_RECORD_SIZE, fexpunge);
+		if (n != INDEX_RECORD_SIZE) {
+	    	    syslog(LOG_ERR,
+			   "IOERROR: %m writing cyrus.expunge record: %s",
+			   newfnamebuf);
+		    close(expunge_fd);
+		    map_free(&index_base, &index_len);
+		    free(expuid);
+		    fclose(fexpunge);
+
+		    return IMAP_IOERROR;
+	        }
+                if (++expuid_pos >= expuid_idx)
+                  break;
+	    }
+	}
+
+	if (expuid_pos != expuid_idx) {
+	    syslog (LOG_ERR,
+		    "IOERROR: %m failed to find all records for: %s",
+		    newfnamebuf);
 	    close(expunge_fd);
 	    map_free(&index_base, &index_len);
 	    free(expuid);
@@ -638,7 +666,6 @@ char *
 getmailname (char * mailboxname) 
 {
     static char   namebuf[MAX_MAILBOX_PATH + 1];
-    static int    namebuflen;
 
     char * pname;
 
@@ -690,8 +717,8 @@ add_uniqid ( char * mailboxname, char * mailboxid)
  */
 int reconstruct(char *name, struct discovered *found)
 {
-    char buf[((INDEX_HEADER_SIZE > INDEX_RECORD_SIZE) ?
-	     INDEX_HEADER_SIZE : INDEX_RECORD_SIZE)];
+    indexbuffer_t ibuf;
+    unsigned char *buf = ibuf.buf;
     char quota_root[MAX_MAILBOX_PATH+1];
     bit32 valid_user_flags[MAX_USER_FLAGS/32];
 
@@ -711,13 +738,13 @@ int reconstruct(char *name, struct discovered *found)
     int newcache_fd;
 
     unsigned long *uid;
-    int uid_num, uid_alloc;
+    unsigned uid_num, uid_alloc;
 
     unsigned long *expuid;
-    int expuid_num;
-    int expmsg;
+    unsigned expuid_num;
+    unsigned expmsg;
 
-    int msg, old_msg = 0;
+    unsigned msg, old_msg = 0;
     int new_exists = 0, 
 	new_answered = 0,
 	new_flagged = 0,
@@ -970,8 +997,8 @@ int reconstruct(char *name, struct discovered *found)
 		message_index.user_flags[i] =
 		  old_index.user_flags[i] & valid_user_flags[i];
 	    }
-            /* Copy across MessageUUID if confident that data on disk */
-            message_uuid_copy(&message_index.uuid, &old_index.uuid);
+            /* Copy across MessageGUID if confident that data on disk */
+            message_guid_copy(&message_index.guid, &old_index.guid);
 	}
 	else {
 	    /* Message file write time is good estimate of internaldate */
@@ -979,8 +1006,8 @@ int reconstruct(char *name, struct discovered *found)
 	    /* If we are recovering a message, assume new UIDL
 	       so that stupid clients will retrieve this message */
 	    mailbox.options |= OPT_POP3_NEW_UIDL;
-            /* Wipe the Message UUID */
-            message_uuid_set_null(&message_index.uuid);
+            /* Wipe the Message GUID */
+            message_guid_set_null(&message_index.guid);
 	    /* If we are recovering a message, reset MODSEQ */
 	    message_index.modseq = 1;
 	}
@@ -989,10 +1016,15 @@ int reconstruct(char *name, struct discovered *found)
 	if (message_index.modseq > mailbox.highestmodseq) {
 	    mailbox.highestmodseq = message_index.modseq;
 	}
-	
-	}	
+	}
+
+	/* Force rebuild from message_create_record() */
+	if (guid_set) message_guid_set_null(&message_index.guid);
+
+	/* NB: message_create_record() will reconstruct GUID if NULL */
 	if (((r = message_parse_file(msgfile, NULL, NULL, &body)) != 0) ||
-	    ((r = message_create_record(&mailbox, &message_index, body)) != 0)) {
+	    ((r = message_create_record(mailbox.name, mailbox.cache_fd,
+					&message_index, body)) != 0)) {
 	    fclose(msgfile);
 	    fclose(newindex);
 	    mailbox_close(&mailbox);
@@ -1005,6 +1037,9 @@ int reconstruct(char *name, struct discovered *found)
 	fclose(msgfile);
 	if (body) message_free_body(body);
 	
+        /* Clear out existing or regenerated GUID */
+        if (guid_clear) message_guid_set_null(&message_index.guid);
+
 	if (expunge_found == 0) {	
 	/* Write out new entry in index file */
 	mailbox_index_record_to_buf(&message_index, buf);
@@ -1040,7 +1075,7 @@ int reconstruct(char *name, struct discovered *found)
     if (mailbox.last_appenddate == 0 || mailbox.last_appenddate > time(0)) {
 	mailbox.last_appenddate = time(0);
     }
-    if (mailbox.uidvalidity == 0 || mailbox.uidvalidity > time(0)) {
+    if (mailbox.uidvalidity == 0 || mailbox.uidvalidity > (unsigned) time(0)) {
 	mailbox.uidvalidity = time(0);
     }
 
@@ -1071,7 +1106,7 @@ int reconstruct(char *name, struct discovered *found)
     *((bit32 *)(buf+OFFSET_MAILBOX_OPTIONS)) = htonl(mailbox.options);
     *((bit32 *)(buf+OFFSET_LEAKED_CACHE)) = htonl(0);
 #ifdef HAVE_LONG_LONG_INT
-    *((bit64 *)(buf+OFFSET_HIGHESTMODSEQ_64)) = htonll(mailbox.highestmodseq);
+    align_htonll(buf+OFFSET_HIGHESTMODSEQ_64, mailbox.highestmodseq);
 #else
     /* zero the unused 32bits */
     *((bit32 *)(buf+OFFSET_HIGHESTMODSEQ_64)) = htonl(0);

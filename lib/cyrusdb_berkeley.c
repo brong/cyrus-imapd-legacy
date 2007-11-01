@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: cyrusdb_berkeley.c,v 1.15 2006/11/30 17:11:22 murch Exp $ */
+/* $Id: cyrusdb_berkeley.c,v 1.15.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <config.h>
 
@@ -56,6 +56,8 @@
 #include "exitcodes.h"
 #include "libcyr_cfg.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 extern void fatal(const char *, int);
 
@@ -174,7 +176,15 @@ static int init(const char *dbdir, int myflags)
 	syslog(LOG_WARNING,
 	       "DBERROR: invalid berkeley_locks_max value, using internal default");
     } else {
+#if DB_VERSION_MAJOR >= 4
+	r = dbenv->set_lk_max_locks(dbenv, opt);
+	if (!r)
+	    r = dbenv->set_lk_max_lockers(dbenv, opt);
+	if (!r)
+	    r = dbenv->set_lk_max_objects(dbenv, opt);
+#else
 	r = dbenv->set_lk_max(dbenv, opt);
+#endif
 	if (r) {
 	    dbenv->err(dbenv, r, "set_lk_max");
 	    syslog(LOG_ERR, "DBERROR: set_lk_max(): %s", db_strerror(r));
@@ -202,7 +212,7 @@ static int init(const char *dbdir, int myflags)
 	r = dbenv->set_cachesize(dbenv, 0, opt * 1024, 0);
 	if (r) {
 	    dbenv->err(dbenv, r, "set_cachesize");
-	    dbenv->close(dbenv, 0);
+	    (dbenv->close)(dbenv, 0);
 	    syslog(LOG_ERR, "DBERROR: set_cachesize(): %s", db_strerror(r));
 	    return CYRUSDB_IOERROR;
 	}
@@ -213,9 +223,9 @@ static int init(const char *dbdir, int myflags)
     flags |= DB_INIT_LOCK | DB_INIT_MPOOL | 
 	     DB_INIT_LOG | DB_INIT_TXN;
 #if (DB_VERSION_MAJOR > 3) || ((DB_VERSION_MAJOR == 3) && (DB_VERSION_MINOR > 0))
-    r = dbenv->open(dbenv, dbdir, flags, 0644); 
+    r = (dbenv->open)(dbenv, dbdir, flags, 0644); 
 #else
-    r = dbenv->open(dbenv, dbdir, NULL, flags, 0644); 
+    r = (dbenv->open)(dbenv, dbdir, NULL, flags, 0644); 
 #endif
     if (r) {
         if (do_retry && (r == ENOENT)) {
@@ -254,7 +264,7 @@ static int done(void)
 
     if (--dbinit) return 0;
 
-    r = dbenv->close(dbenv, 0);
+    r = (dbenv->close)(dbenv, 0);
     dbinit = 0;
     if (r) {
 	syslog(LOG_ERR, "DBERROR: error exiting application: %s",
@@ -377,7 +387,8 @@ static int myarchive(const char **fnames, const char *dirname)
     return 0;
 }
 
-static int mbox_compar(DB *db, const DBT *a, const DBT *b)
+static int mbox_compar(DB *db __attribute__((unused)),
+		       const DBT *a, const DBT *b)
 {
     return bsearch_ncompare((const char *) a->data, a->size,
 			    (const char *) b->data, b->size);
@@ -402,15 +413,15 @@ static int myopen(const char *fname, DBTYPE type, int flags, struct db **ret)
     if (flags & CYRUSDB_MBOXSORT) db->set_bt_compare(db, mbox_compar);
 
 #if DB_VERSION_MAJOR == 4 && DB_VERSION_MINOR >= 1
-    r = db->open(db, NULL, fname, NULL, type, dbflags | DB_AUTO_COMMIT, 0664);
+    r = (db->open)(db, NULL, fname, NULL, type, dbflags | DB_AUTO_COMMIT, 0664);
 #else
-    r = db->open(db, fname, NULL, type, dbflags, 0664);
+    r = (db->open)(db, fname, NULL, type, dbflags, 0664);
 #endif
 
     if (r != 0) {
 	int level = (flags & CYRUSDB_CREATE) ? LOG_ERR : LOG_DEBUG;
 	syslog(level, "DBERROR: opening %s: %s", fname, db_strerror(r));
-	r = db->close(db, DB_NOSYNC);
+	r = (db->close)(db, DB_NOSYNC);
         if (r != 0) {
             syslog(level, "DBERROR: closing %s: %s", fname, db_strerror(r));
         }
@@ -440,7 +451,7 @@ static int myclose(struct db *db)
     assert(dbinit && db);
 
     /* since we're using txns, we can supply DB_NOSYNC */
-    r = a->close(a, DB_NOSYNC);
+    r = (a->close)(a, DB_NOSYNC);
     if (r != 0) {
 	syslog(LOG_ERR, "DBERROR: error closing: %s", db_strerror(r));
 	r = CYRUSDB_IOERROR;

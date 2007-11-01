@@ -1,6 +1,6 @@
 /* lmtp_sieve.c -- Sieve implementation for lmtpd
  *
- * $Id: lmtp_sieve.c,v 1.13 2006/11/30 17:11:18 murch Exp $
+ * $Id: lmtp_sieve.c,v 1.13.2.1 2007/11/01 14:39:33 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -75,6 +75,8 @@
 #include "util.h"
 #include "version.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 static int sieve_usehomedir = 0;
 static const char *sieve_dir = NULL;
@@ -401,10 +403,10 @@ static int sieve_redirect(void *ac,
 
 static int sieve_discard(void *ac __attribute__((unused)), 
 			 void *ic __attribute__((unused)), 
-			 void *sc, void *mc, 
+			 void *sc __attribute__((unused)), 
+			 void *mc, 
 			 const char **errmsg __attribute__((unused)))
 {
-    script_data_t *sd = (script_data_t *) sc;
     message_data_t *md = ((deliver_data_t *) mc)->m;
 
     snmp_increment(SIEVE_DISCARD, 1);
@@ -499,7 +501,6 @@ static int sieve_keep(void *ac,
     sieve_keep_context_t *kc = (sieve_keep_context_t *) ac;
     script_data_t *sd = (script_data_t *) sc;
     deliver_data_t *mydata = (deliver_data_t *) mc;
-    message_data_t *md = mydata->m;
     int ret;
 
     ret = deliver_local(mydata, kc->imapflags->flag, kc->imapflags->nflags,
@@ -831,7 +832,7 @@ static int sieve_find_script(const char *user, const char *domain,
 	size_t len = strlcpy(fname, sieve_dir, size);
 
 	if (domain) {
-	    char dhash = (char) dir_hash_c(domain);
+	    char dhash = (char) dir_hash_c(domain, config_fulldirhash);
 	    len += snprintf(fname+len, size-len, "%s%c/%s",
 			    FNAME_DOMAINDIR, dhash, domain);
 	}
@@ -840,7 +841,7 @@ static int sieve_find_script(const char *user, const char *domain,
 	    len = strlcat(fname, "/global/", size);
 	}
 	else {
-	    char hash = (char) dir_hash_c(user);
+	    char hash = (char) dir_hash_c(user, config_fulldirhash);
 	    len += snprintf(fname+len, size-len, "/%c/%s/", hash, user);
 
 	    if (!script) { /* default script */

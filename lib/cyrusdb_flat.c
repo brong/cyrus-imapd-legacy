@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: cyrusdb_flat.c,v 1.36 2006/11/30 17:11:22 murch Exp $ */
+/* $Id: cyrusdb_flat.c,v 1.36.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <config.h>
 
@@ -65,6 +65,8 @@
 #include "retry.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 /* we have the file locked iff we have an outstanding transaction */
 
@@ -441,7 +443,7 @@ static int foreach(struct db *db,
 	else dontmove = 0;
 	
 	/* does it still match prefix? */
-	if (keylen < prefixlen) break;
+	if (keylen < (size_t) prefixlen) break;
 	if (prefixlen && memcmp(key, prefix, prefixlen)) break;
 
 	if (!goodp || goodp(rock, key, keylen, data, datalen)) {

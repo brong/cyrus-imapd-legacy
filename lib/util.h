@@ -1,5 +1,5 @@
 /* util.h -- general utility functions
- * $Id: util.h,v 1.19 2006/11/30 17:11:22 murch Exp $
+ * $Id: util.h,v 1.19.2.1 2007/11/01 14:39:36 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -89,12 +89,12 @@ extern keyvalue *kv_bsearch (const char *key, keyvalue *kv, int nelem,
  *  directory.  Caller is responsible for skipping any prefix
  *  of the name.
  */
-extern int dir_hash_c(const char *name);
+extern int dir_hash_c(const char *name, int full);
 
 /* 
  * create an [unlinked] temporary file and return the file descriptor.
  */
-extern int create_tempfile();
+extern int create_tempfile(const char *path);
 
 /* Close a network filedescriptor the "safe" way */
 extern int cyrus_close_sock(int fd);
@@ -106,5 +106,13 @@ extern void cyrus_reset_stdio();
  * up to but not including the basename.
  */
 extern int cyrus_mkdir(const char *path, mode_t mode);
+
+extern int become_cyrus(void);
+
+/* Some systems have very inefficient implementations of isdigit,
+ * and we use it in a lot of inner loops
+ */
+
+#define cyrus_isdigit(x) ((x) >= '0' && (x) <= '9')
 
 #endif /* INCLUDED_UTIL_H */

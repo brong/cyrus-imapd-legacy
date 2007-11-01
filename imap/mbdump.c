@@ -1,5 +1,5 @@
 /* mbdump.c -- Mailbox dump routines
- * $Id: mbdump.c,v 1.32 2006/11/30 17:11:19 murch Exp $
+ * $Id: mbdump.c,v 1.32.2.1 2007/11/01 14:39:33 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -74,6 +74,8 @@
 #include "quota.h"
 #include "seen.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "util.h"
 
 /* is this the active script? */
@@ -358,7 +360,7 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
     if (userid) {
 	char sieve_path[MAX_MAILBOX_PATH];
 	int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
-	char *fname, *ftag;
+	char *fname = NULL, *ftag = NULL;
 
 	/* Dump seen and subs files */
 	for (i = 0; i< NUM_USER_DATA_FILES; i++) {
@@ -403,20 +405,21 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 		*p = '\0'; /* separate domain!mboxname */
 		snprintf(sieve_path, sizeof(sieve_path), "%s%s%c/%s/%c/%s",
 			 config_getstring(IMAPOPT_SIEVEDIR),
-			 FNAME_DOMAINDIR, (char) dir_hash_c(mbname), mbname, 
-			 (char) dir_hash_c(p+6), p+6); /* unqualified userid */
+			 FNAME_DOMAINDIR,
+			 (char) dir_hash_c(mbname, config_fulldirhash), mbname, 
+			 (char) dir_hash_c(p+6, config_fulldirhash), p+6); /* unqualified userid */
 		*p = '!'; /* reassemble domain!mboxname */
 	    }
 	    else {
 		snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
 			 config_getstring(IMAPOPT_SIEVEDIR),
-			 (char) dir_hash_c(userid), userid);
+			 (char) dir_hash_c(userid, config_fulldirhash), userid);
 	    }
 	    mbdir = opendir(sieve_path);
 
 	    if (!mbdir) {
 		syslog(LOG_ERR,
-		       "could not dump sieve scripts in %s: %m)", mbpath);
+		       "could not dump sieve scripts in %s: %m)", sieve_path);
 	    } else {
 		char tag_fname[2048];
 	    
@@ -436,6 +439,10 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 			    snprintf(tag_fname, sizeof(tag_fname),
 				     "SIEVE-%s", next->d_name);
 			}
+
+			/* construct path/filename */
+			snprintf(filename, sizeof(filename), "%s/%s",
+				 sieve_path, next->d_name);
 
 			/* dump file */
 			r = dump_file(0, !tag, pin, pout, filename, tag_fname);
@@ -497,14 +504,15 @@ int undump_mailbox(const char *mbname, const char *mbpath,
 		*p = '\0'; /* separate domain!mboxname */
 		snprintf(sieve_path, sizeof(sieve_path), "%s%s%c/%s/%c/%s",
 			 config_getstring(IMAPOPT_SIEVEDIR),
-			 FNAME_DOMAINDIR, (char) dir_hash_c(mbname), mbname, 
-			 (char) dir_hash_c(p+6), p+6); /* unqualified userid */
+			 FNAME_DOMAINDIR,
+			 (char) dir_hash_c(mbname, config_fulldirhash), mbname, 
+			 (char) dir_hash_c(p+6, config_fulldirhash), p+6); /* unqualified userid */
 		*p = '!'; /* reassemble domain!mboxname */
 	    }
 	    else {
 		snprintf(sieve_path, sizeof(sieve_path), "%s/%c/%s",
 			 config_getstring(IMAPOPT_SIEVEDIR),
-			 (char) dir_hash_c(userid), userid);
+			 (char) dir_hash_c(userid, config_fulldirhash), userid);
 	    }
 	}
     }

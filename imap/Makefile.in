@@ -1,5 +1,5 @@
 # Makefile for cyrus imap server and associated programs
-# $Id: Makefile.in,v 1.185 2006/11/30 17:11:17 murch Exp $
+# $Id: Makefile.in,v 1.185.2.1 2007/11/01 14:39:31 murch Exp $
 # 
 # @configure_input@
 # 
@@ -101,7 +101,7 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	convert_code.o duplicate.o saslclient.o saslserver.o signals.o \
 	annotate.o search_engines.o squat.o squat_internal.o mbdump.o \
 	imapparse.o telemetry.o user.o notify.o protocol.o idle.o quota_db.o \
-	sync_log.o $(SEEN) mboxkey.o backend.o tls.o
+	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o version.o
 
@@ -114,7 +114,7 @@ SERVICE=../master/service.o
 SERVICETHREAD=../master/service-thread.o
 
 PROGS = imapd lmtpd pop3d \
-	fud smmapd reconstruct quota mbpath ipurge \
+	fud smmapd reconstruct quota mbpath ipurge cyr_dbtool cyr_synclog \
 	cyrdump chk_cyrus cvt_cyrusdb deliver ctl_mboxlist \
 	ctl_deliver ctl_cyrusdb squatter mbexamine cyr_expire arbitron \
 	unexpunge @IMAP_PROGS@
@@ -123,7 +123,7 @@ BUILTSOURCES = imap_err.c imap_err.h pushstats.c pushstats.h \
 	lmtpstats.c lmtpstats.h xversion.h mupdate_err.c mupdate_err.h \
 	nntp_err.c nntp_err.h
 
-all: $(BUILTSOURCES) $(PROGS) $(SUIDPROGS)
+all: xversion $(BUILTSOURCES) $(PROGS) $(SUIDPROGS)
 
 pure: imapd.pure lmtpd.pure mupdate.pure
 
@@ -151,11 +151,10 @@ libimap.a: $(LOBJS)
 
 ### Built Source Files
 
-xversion:
-	rm -f version.o
+xversion xversion.h:
 	AWK=$(AWK) $(srcdir)/xversion.sh
 
-xversion.h: xversion
+version.o: xversion.h
 
 pushstats.c: pushstats.snmp $(srcdir)/../snmp/snmpgen
 	$(srcdir)/../snmp/snmpgen $(srcdir)/pushstats.snmp
@@ -199,7 +198,7 @@ lmtpd.pure: lmtpd.o proxy.o $(LMTPOBJS) $(SIEVE_OBJS) \
 	 $(SERVICE) lmtpd.o proxy.o $(LMTPOBJS) $(SIEVE_OBJS) \
 	 mutex_fake.o libimap.a $(SIEVE_LIBS) $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-imapd: xversion $(IMAPDOBJS) mutex_fake.o libimap.a $(DEPLIBS) $(SERVICE)
+imapd: $(IMAPDOBJS) mutex_fake.o libimap.a $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o imapd \
 	 $(SERVICE) $(IMAPDOBJS) mutex_fake.o \
 	libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP)
@@ -256,6 +255,14 @@ sync_server: sync_server.o sync_support.o sync_commit.o \
 ### Command Line Utilities
 arbitron: arbitron.o $(CLIOBJS) libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o arbitron arbitron.o $(CLIOBJS) \
+	libimap.a $(DEPLIBS) $(LIBS)
+
+cyr_dbtool: cyr_dbtool.o mutex_fake.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o cyr_dbtool cyr_dbtool.o $(CLIOBJS) \
+	libimap.a $(DEPLIBS) $(LIBS)
+
+cyr_synclog: cyr_synclog.o mutex_fake.o libimap.a $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o cyr_synclog cyr_synclog.o $(CLIOBJS) \
 	libimap.a $(DEPLIBS) $(LIBS)
 
 cvt_cyrusdb: cvt_cyrusdb.o mutex_fake.o libimap.a $(DEPLIBS)
@@ -328,6 +335,9 @@ unexpunge: unexpunge.o $(CLIOBJS) libimap.a $(DEPLIBS)
 
 make_md5: make_md5.o libimap.a mutex_fake.o $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o make_md5 make_md5.o libimap.a mutex_fake.o $(DEPLIBS) $(LIBS)
+
+make_sha1: make_sha1.o libimap.a mutex_fake.o $(DEPLIBS)
+	$(CC) $(LDFLAGS) -o make_sha1 make_sha1.o libimap.a mutex_fake.o $(DEPLIBS) $(LIBS)
 
 sync_client: sync_client.o sync_support.o \
 	backend.o tls.o imapparse.o libimap.a mutex_fake.o $(DEPLIBS)

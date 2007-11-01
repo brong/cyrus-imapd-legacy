@@ -33,10 +33,13 @@ To make a release:
 - make sure the version number is correct (Makefile.in, imap/version.h)
 - add upgrade notes to doc/install-upgrade.html
 - add changes to doc/changes.html
+- make sure that contrib/drac_auth.patch applies cleanly
 - commit to repository
 - make dist
 
 - tag the CVS repository with cyrus-release-Major-Minor-Revision
+
+- upload tarball to /afs/andrew.cmu.edu/system/archive/cmu/anonftp/pub/cyrus
 
 - announce to:
     info-cyrus

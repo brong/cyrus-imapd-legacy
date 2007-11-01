@@ -67,7 +67,7 @@
 #include "ptloader.h"
 
 static char rcsid[] __attribute__((unused)) = 
-      "$Id: ptloader.c,v 1.42 2006/11/30 17:11:24 murch Exp $";
+      "$Id: ptloader.c,v 1.42.2.1 2007/11/01 14:39:39 murch Exp $";
 
 struct pts_module *pts_modules[] = {
 #ifdef HAVE_LDAP
@@ -148,7 +148,7 @@ int service_init(int argc, char *argv[], char **envp __attribute__((unused)))
     /* set signal handlers */
     signal(SIGPIPE, SIG_IGN);
 
-    syslog(LOG_NOTICE, "starting: $Id: ptloader.c,v 1.42 2006/11/30 17:11:24 murch Exp $");
+    syslog(LOG_NOTICE, "starting: $Id: ptloader.c,v 1.42.2.1 2007/11/01 14:39:39 murch Exp $");
 
     while ((opt = getopt(argc, argv, "d:")) != EOF) {
 	switch (opt) {
@@ -167,7 +167,7 @@ int service_init(int argc, char *argv[], char **envp __attribute__((unused)))
 
     strcpy(fnamebuf, config_dir);
     strcat(fnamebuf, PTS_DBFIL);
-    r = DB->open(fnamebuf, CYRUSDB_CREATE, &ptsdb);
+    r = (DB->open)(fnamebuf, CYRUSDB_CREATE, &ptsdb);
     if (r != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fnamebuf,
 	       cyrusdb_strerror(ret));
@@ -184,7 +184,7 @@ void service_abort(int error)
 {
     int r;
 
-    r = DB->close(ptsdb);
+    r = (DB->close)(ptsdb);
     if (r) {
 	syslog(LOG_ERR, "DBERROR: error closing ptsdb: %s",
 	       cyrusdb_strerror(r));
@@ -226,6 +226,12 @@ int service_main_fd(int c, int argc __attribute__((unused)),
 	goto sendreply;
     }
 
+    if (size == 0) {
+        syslog(LOG_ERR, "size sent is 0");
+        reply = "Error: zero request size";
+        goto sendreply;
+    }
+
     memset(&user, 0, sizeof(user));
     if (read(c, &user, size) < 0) {
         syslog(LOG_ERR, "socket(user; size = %d; key = %s): %m", 
@@ -238,6 +244,7 @@ int service_main_fd(int c, int argc __attribute__((unused)),
 	syslog(LOG_DEBUG, "user %s, cacheid %s", user, keyinhex);
     }
 
+
     newstate = ptsmodule_make_authstate(user, size, &reply, &dsize);
 
     if(newstate) {
@@ -247,6 +254,9 @@ int service_main_fd(int c, int argc __attribute__((unused)),
 	
 	/* and we're done */
 	reply = "OK";
+    } else {
+        /* Failure */
+        reply = "Error making authstate";
     }
 
  sendreply:

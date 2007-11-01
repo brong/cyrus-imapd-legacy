@@ -41,7 +41,7 @@
  */
 
 /*
- * $Id: auth_unix.c,v 1.40 2006/11/30 17:11:22 murch Exp $
+ * $Id: auth_unix.c,v 1.40.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -223,7 +223,12 @@ static struct auth_state *mynewstate(const char *identifier)
     struct auth_state *newstate;
     struct passwd *pwd;
     struct group *grp;
+#if defined(HAVE_GETGROUPLIST) && defined(__GLIBC__)
+    gid_t gid, *groupids = NULL;
+    int ret, ngroups = 10;
+#else
     char **mem;
+#endif
 
     identifier = mycanonifyid(identifier, 0);
     if (!identifier) return 0;
@@ -239,7 +244,45 @@ static struct auth_state *mynewstate(const char *identifier)
 	return newstate;
 
     pwd = getpwnam(identifier);
-	
+
+#if defined(HAVE_GETGROUPLIST) && defined(__GLIBC__)
+    gid = pwd ? pwd->pw_gid : (gid_t) -1;
+
+    /* get the group ids */
+    do {
+	groupids = (gid_t *)xrealloc((gid_t *)groupids,
+				     ngroups * sizeof(gid_t));
+
+	newstate->ngroups = ngroups; /* copy of ngroups for comparision */
+	ret = getgrouplist(identifier, gid, groupids, &ngroups);
+	/*
+	 * This is tricky. We do this as long as getgrouplist tells us to
+	 * realloc _and_ the number of groups changes. It tells us to realloc
+	 * also in the case of failure...
+	 */
+    } while (ret == -1 && ngroups != newstate->ngroups);
+
+    if (ret == -1) {
+	newstate->ngroups = 0;
+	newstate->group = NULL;
+	goto err;
+    }
+
+    newstate->ngroups = 0;
+    newstate->group = (char **)xmalloc(ngroups * sizeof(char *));
+    while (ngroups--) {
+	if (pwd || groupids[ngroups] != gid) {
+	    if ((grp = getgrgid(groupids[ngroups]))) {
+		newstate->ngroups++;
+		newstate->group[newstate->ngroups-1] = xstrdup(grp->gr_name);
+	    }
+	}
+    }
+
+err:
+    if (groupids) free(groupids);
+
+#else /* !HAVE_GETGROUPLIST */
     setgrent();
     while ((grp = getgrent())) {
 	for (mem = grp->gr_mem; *mem; mem++) {
@@ -254,13 +297,20 @@ static struct auth_state *mynewstate(const char *identifier)
 	}
     }
     endgrent();
+#endif /* HAVE_GETGROUPLIST */
+
     return newstate;
 }
 
 static void myfreestate(auth_state)
 struct auth_state *auth_state;
 {
-    if (auth_state->group) free((char *)auth_state->group);
+    if (auth_state->group) {
+	while (auth_state->ngroups) {
+	    free((char *)auth_state->group[--auth_state->ngroups]);
+	}
+	free((char *)auth_state->group);
+    }
     free((char *)auth_state);
 }
 

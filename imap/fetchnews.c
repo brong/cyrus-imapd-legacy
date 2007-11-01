@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: fetchnews.c,v 1.16 2006/11/30 17:11:17 murch Exp $
+ * $Id: fetchnews.c,v 1.16.2.1 2007/11/01 14:39:31 murch Exp $
  */
 
 #include <config.h>
@@ -63,7 +63,9 @@
 #include "gmtoff.h"
 #include "lock.h"
 #include "prot.h"
+#include "util.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
 
 /* global state */
 const int config_need_data = 0;
@@ -94,7 +96,7 @@ int newsrc_init(char *fname, int myflags __attribute__((unused)))
 	    strcat(fname, FNAME_NEWSRCDB);
 	}
 
-	r = DB->open(fname, CYRUSDB_CREATE, &newsrc_db);
+	r = (DB->open)(fname, CYRUSDB_CREATE, &newsrc_db);
 	if (r != 0)
 	    syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 		   cyrusdb_strerror(r));
@@ -112,7 +114,7 @@ int newsrc_done(void)
     int r = 0;
 
     if (newsrc_dbopen) {
-	r = DB->close(newsrc_db);
+	r = (DB->close)(newsrc_db);
 	if (r) {
 	    syslog(LOG_ERR, "DBERROR: error closing fetchnews.db: %s",
 		   cyrusdb_strerror(r));
@@ -267,7 +269,9 @@ int main(int argc, char *argv[])
     int newnews = 1;
     char *datefmt = "%y%m%d %H%M%S";
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((opt = getopt(argc, argv, "C:s:w:f:a:p:ny")) != EOF) {
 	switch (opt) {
@@ -411,7 +415,7 @@ int main(int argc, char *argv[])
 	    goto quit;
 	}
 
-	if (read(fd, &stamp, sizeof(stamp)) < sizeof(stamp)) {
+	if (read(fd, &stamp, sizeof(stamp)) < (int) sizeof(stamp)) {
 	    /* XXX do something better here */
 	    stamp = 0;
 	}
@@ -499,7 +503,7 @@ int main(int argc, char *argv[])
 
 	/* write the current timestamp */
 	lseek(fd, 0, SEEK_SET);
-	if (write(fd, &stamp, sizeof(stamp)) < sizeof(stamp))
+	if (write(fd, &stamp, sizeof(stamp)) < (int) sizeof(stamp))
 	    syslog(LOG_ERR, "error writing %s", sfile);
 	lock_unlock(fd);
 	close(fd);

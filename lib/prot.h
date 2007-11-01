@@ -1,7 +1,7 @@
 /* prot.h -- stdio-like module that handles buffering, SASL, and TLS
  *           details for I/O over sockets
  *
- * $Id: prot.h,v 1.43.2.1 2006/12/08 21:36:30 murch Exp $
+ * $Id: prot.h,v 1.43.2.2 2007/11/01 14:39:36 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -73,9 +73,9 @@ typedef void prot_readcallback_t(struct protstream *s, void *rock);
 struct protstream {
     /* The Buffer */
     unsigned char *buf;
-    int buf_size;
+    unsigned buf_size;
     unsigned char *ptr; /* The end of data in the buffer */
-    int cnt; /* Space Remaining in buffer */
+    unsigned cnt; /* Space Remaining in buffer */
 
     /* File Descriptors */
     int fd;         /* The Socket */
@@ -152,7 +152,7 @@ extern int prot_getc(struct protstream *s);
 extern int prot_ungetc(int c, struct protstream *s);
 extern int prot_putc(int c, struct protstream *s);
 
-#define prot_getc(s) ((s)->cnt-- > 0 ? (int)*(s)->ptr++ : prot_fill(s))
+#define prot_getc(s) ((s)->cnt > 0 ? (--(s)->cnt, (int)*(s)->ptr++) : prot_fill(s))
 #define prot_ungetc(c, s) ((s)->cnt++, (*--(s)->ptr = (c)))
 #define prot_putc(c, s) ((*(s)->ptr++ = (c)), --(s)->cnt == 0 ? prot_flush_internal(s,0) : 0)
 

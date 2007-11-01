@@ -1,6 +1,6 @@
 /* mupdate-slave.c -- cyrus murder database clients
  *
- * $Id: mupdate-slave.c,v 1.28 2006/11/30 17:11:19 murch Exp $
+ * $Id: mupdate-slave.c,v 1.28.2.1 2007/11/01 14:39:34 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -68,6 +68,8 @@
 
 #include "prot.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "global.h"
 #include "assert.h"
 #include "imparse.h"

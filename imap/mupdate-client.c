@@ -1,6 +1,6 @@
 /* mupdate-client.c -- cyrus murder database clients
  *
- * $Id: mupdate-client.c,v 1.48 2006/11/30 17:11:19 murch Exp $
+ * $Id: mupdate-client.c,v 1.48.2.1 2007/11/01 14:39:34 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -76,27 +76,19 @@
 #include "prot.h"
 #include "protocol.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 const char service_name[] = "mupdate";
 
-static sasl_security_properties_t *make_secprops(void)
-{
-  sasl_security_properties_t *ret =
-      (sasl_security_properties_t *) xzmalloc(sizeof(sasl_security_properties_t));
-
-  ret->maxbufsize = PROT_BUFSIZE;
-  ret->min_ssf = config_getint(IMAPOPT_SASL_MINIMUM_LAYER);	
-  ret->max_ssf = config_getint(IMAPOPT_SASL_MAXIMUM_LAYER);
-
-  return ret;
-}
-
-int mupdate_connect(const char *server, const char *port,
+int mupdate_connect(const char *server,
+		    const char *port __attribute__((unused)),
 		    mupdate_handle **handle,
 		    sasl_callback_t *cbs)
 {
     mupdate_handle *h = NULL;
     int local_cbs = 0;
+    const char *status = NULL;
     
     if(!handle)
 	return MUPDATE_BADPARAM;
@@ -121,12 +113,13 @@ int mupdate_connect(const char *server, const char *port,
     }
 
     h->conn = backend_connect(NULL, server, &protocol[PROTOCOL_MUPDATE],
-			      "", cbs, NULL);
+			      "", cbs, &status);
 
     /* xxx unclear that this is correct, but it prevents a memory leak */
     if (local_cbs) free_callbacks(cbs);
 
     if (!h->conn) {
+        syslog(LOG_ERR, "mupdate_connect failed: %s", status ? status : "unknown error");
 	return MUPDATE_NOCONN;
     }
     
@@ -304,7 +297,7 @@ static int mupdate_find_cb(struct mupdate_mailboxdata *mdata,
     strlcpy(h->server_buf, mdata->server, sizeof(h->server_buf));
 
     if(!strncmp(cmd, "MAILBOX", 7)) {
-	int len = strlen(mdata->acl) + 1;
+	size_t len = strlen(mdata->acl) + 1;
 	
 	h->mailboxdata_buf.t = ACTIVE;
 	

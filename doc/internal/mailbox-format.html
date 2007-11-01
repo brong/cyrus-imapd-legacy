@@ -4,7 +4,7 @@
 
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-<meta name="revision" content="$Id: mailbox-format.html,v 1.5 2006/11/30 17:11:16 murch Exp $" />
+<meta name="revision" content="$Id: mailbox-format.html,v 1.5.2.1 2007/11/01 14:39:30 murch Exp $" />
 <meta name="author" content="Rob Siemborski" />
 
 <title>mailbox format</title>
@@ -184,6 +184,16 @@ the output of the POP3 UIDL command.</dd>
 
 <dd> Flag signalling that we're supporting the IMAP CONDSTORE
 extension on the mailbox.</dd>
+
+<dt>IMAP_SHAREDSEEN</dt>
+
+<dd> Flag signalling that we're supporting a shared \Seen flag
+on the mailbox.</dd>
+
+<dt>IMAP_DUPDELIVER</dt>
+
+<dd> Flag signalling that we're allowing duplicate delivery of
+messages to the mailbox, overriding system-wide duplicate suppression.</dd>
 </dl>
 </dd>
 
@@ -245,8 +255,9 @@ of the message.</p>
 <dd>Indicates the version number of the cache record for the message
 (determines which headers are cached).</dd>
 
-<dt>UUID (MESSAGE_UUID_SIZE bytes)</dt>
-<dd>Universal UID of the message (used by replication code).</dd>
+<dt>GUID (MESSAGE_GUID_SIZE bytes)</dt>
+<dd>Globally Unique IDentifier of the message (used by replication
+engine).</dd>
 
 <dt>MODSEQ (8 bytes)</dt>
 <dd>Modification Sequence of the message (CONDSTORE).</dd>

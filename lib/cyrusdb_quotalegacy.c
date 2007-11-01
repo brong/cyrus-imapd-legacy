@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: cyrusdb_quotalegacy.c,v 1.13 2006/11/30 17:11:22 murch Exp $ */
+/* $Id: cyrusdb_quotalegacy.c,v 1.13.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <config.h>
 
@@ -67,19 +67,13 @@
 #include "retry.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #define FNAME_QUOTADIR "/quota/"
 #define MAX_QUOTA_PATH 4096
 
 /* we have the file locked iff we have an outstanding transaction */
-
-struct db {
-    char *path;
-
-    char *data;  /* allocated buffer for fetched data */
-
-    hash_table table;  /* transaction (hash table of sub-transactions) */
-};
 
 struct subtxn {
     int fd;
@@ -90,13 +84,31 @@ struct subtxn {
     int delete;
 };
 
-int abort_txn(struct db *db __attribute__((unused)), struct txn *tid);
+struct txn {
+    hash_table table;	/* hash table of sub-transactions */
+
+    int (*proc)(char *, struct subtxn *);  /* commit/abort procedure */
+
+    int result;		/* final result of the commit/abort */
+};
+
+struct db {
+    char *path;
+
+    char *data;		/* allocated buffer for fetched data */
+
+    struct txn txn;	/* transaction associated with this db handle */
+};
+
+static int abort_txn(struct db *db __attribute__((unused)), struct txn *tid);
+
 
 /* simple hash so it's easy to find these things in the filesystem;
    our human time is worth more than efficiency */
 static void hash_quota(char *buf, size_t size, const char *qr, char *path)
 {
     int config_virtdomains = libcyrus_config_getswitch(CYRUSOPT_VIRTDOMAINS);
+    int config_fulldirhash = libcyrus_config_getswitch(CYRUSOPT_FULLDIRHASH);
     const char *idx;
     char c, *p;
     unsigned len;
@@ -109,7 +121,7 @@ static void hash_quota(char *buf, size_t size, const char *qr, char *path)
 
     if (config_virtdomains && (p = strchr(qr, '!'))) {
 	*p = '\0';  /* split domain!qr */
-	c = (char) dir_hash_c(qr);
+	c = (char) dir_hash_c(qr, config_fulldirhash);
 	if ((len = snprintf(buf, size, "%s%c/%s",
 			    FNAME_DOMAINDIR, c, qr)) >= size) {
 	    fatal("insufficient buffer size in hash_quota", EC_TEMPFAIL);
@@ -121,7 +133,7 @@ static void hash_quota(char *buf, size_t size, const char *qr, char *path)
 
 	if (!*qr) {
 	    /* quota for entire domain */
-	    if (snprintf(buf, size, "%sroot", FNAME_QUOTADIR) >= size) {
+	    if (snprintf(buf, size, "%sroot", FNAME_QUOTADIR) >= (int) size) {
 		fatal("insufficient buffer size in hash_quota",
 		      EC_TEMPFAIL);
 	    }
@@ -135,9 +147,9 @@ static void hash_quota(char *buf, size_t size, const char *qr, char *path)
     } else {
 	idx++;
     }
-    c = (char) dir_hash_c(idx);
+    c = (char) dir_hash_c(idx, config_fulldirhash);
 
-    if (snprintf(buf, size, "%s%c/%s", FNAME_QUOTADIR, c, qr) >= size) {
+    if (snprintf(buf, size, "%s%c/%s", FNAME_QUOTADIR, c, qr) >= (int) size) {
 	fatal("insufficient buffer size in hash_quota", EC_TEMPFAIL);
     }
 }
@@ -236,7 +248,7 @@ static void free_db(struct db *db)
     if (db) {
 	if (db->path) free(db->path);
 	if (db->data) free(db->data);
-	free_hash_table(&db->table, NULL);
+	free_hash_table(&db->txn.table, NULL);
 	free(db);
     }
 }
@@ -285,7 +297,7 @@ static int myopen(const char *fname, int flags, struct db **ret)
     assert(fname && ret);
 
     db->path = xstrdup(fname);
-    construct_hash_table(&db->table, 200, 0);
+    construct_hash_table(&db->txn.table, 200, 0);
 
     /* strip any filename from the path */
     if ((p = strrchr(db->path, '/'))) *p = '\0';
@@ -343,9 +355,9 @@ static int myfetch(struct db *db, char *quota_path,
 
     if (tid) {
 	if (!*tid)
-	    *tid = (struct txn *) &db->table;
+	    *tid = &db->txn;
 	else
-	    mytid = (struct subtxn *) hash_lookup(quota_path, &db->table);
+	    mytid = (struct subtxn *) hash_lookup(quota_path, &db->txn.table);
     }
 
     /* open and lock file, if needed */
@@ -374,7 +386,7 @@ static int myfetch(struct db *db, char *quota_path,
 	    }
 
 	    mytid = new_subtxn(quota_path, quota_fd);
-	    hash_insert(quota_path, mytid, &db->table);
+	    hash_insert(quota_path, mytid, &db->txn.table);
 	}
     }
     else
@@ -476,7 +488,7 @@ static int foreach(struct db *db,
     int config_virtdomains = libcyrus_config_getswitch(CYRUSOPT_VIRTDOMAINS);
     char quota_path[MAX_QUOTA_PATH+1];
     glob_t globbuf;
-    int i;
+    size_t i;
     char *tmpprefix = NULL, *p = NULL;
 
     /* if we need to truncate the prefix, do so */
@@ -519,7 +531,7 @@ static int foreach(struct db *db,
     }
     if (tmpprefix) free(tmpprefix);
 
-    if (tid && !*tid) *tid = (struct txn *) &db->table;
+    if (tid && !*tid) *tid = &db->txn;
 
     /* sort the quotaroots (ignoring paths) */
     qsort(globbuf.gl_pathv, globbuf.gl_pathc, sizeof(char *), &compar_qr);
@@ -568,9 +580,9 @@ static int mystore(struct db *db,
 
     if (tid) {
 	if (!*tid)
-	    *tid = (struct txn *) &db->table;
+	    *tid = &db->txn;
 	else
-	    mytid = (struct subtxn *) hash_lookup(quota_path, &db->table);
+	    mytid = (struct subtxn *) hash_lookup(quota_path, &db->txn.table);
     }
 
     /* open and lock file, if needed */
@@ -601,8 +613,7 @@ static int mystore(struct db *db,
 
 	mytid = new_subtxn(quota_path, fd);
 
-	if (tid)
-	    hash_insert(quota_path, mytid, &db->table);
+	if (tid) hash_insert(quota_path, mytid, &db->txn.table);
     }
 
     if (!data) {
@@ -672,7 +683,8 @@ static int mystore(struct db *db,
 		syslog(LOG_ERR, "IOERROR: writing quota file %s: %m",
 		       new_quota_path);
 	    else
-		syslog(LOG_ERR, "IOERROR: writing quota file %s: failed to write %d bytes",
+		syslog(LOG_ERR,
+		       "IOERROR: writing quota file %s: failed to write %d bytes",
 		       new_quota_path, datalen+1);
 	    if (tid)
 		abort_txn(db, *tid);
@@ -716,47 +728,35 @@ static int delete(struct db *db,
     return mystore(db, key, keylen, NULL, 0, mytid, 1);
 }
 
-struct txn_rock {
-    hash_table *table;
-    int (*func)(char *, struct subtxn *);
-    int ret;
-};
-
-static void enum_func(char *fname, void *data, void *rock)
+static void txn_proc(char *fname, void *data, void *rock)
 {
-    struct txn_rock *trock = (struct txn_rock *) rock;
+    struct txn *tid = (struct txn *) rock;
     int r;
 
-    r = trock->func(fname, (struct subtxn *) data);
-    hash_del(fname, trock->table);
+    r = tid->proc(fname, (struct subtxn *) data);
+    hash_del(fname, &tid->table);
 
-    if (r && !trock->ret) trock->ret = r;
+    if (r && !tid->result) tid->result = r;
 }
 
-int commit_txn(struct db *db __attribute__((unused)), struct txn *tid)
+static int commit_txn(struct db *db __attribute__((unused)), struct txn *tid)
 {
-    struct txn_rock trock;
+    tid->proc = commit_subtxn;
+    tid->result = 0;
 
-    trock.table = (hash_table *) tid;
-    trock.func = commit_subtxn;
-    trock.ret = 0;
+    hash_enumerate(&tid->table, txn_proc, tid);
 
-    hash_enumerate((hash_table *) tid, enum_func, &trock);
-
-    return trock.ret;
+    return tid->result;
 }
 
-int abort_txn(struct db *db __attribute__((unused)), struct txn *tid)
+static int abort_txn(struct db *db __attribute__((unused)), struct txn *tid)
 {
-    struct txn_rock trock;
+    tid->proc = abort_subtxn;
+    tid->result = 0;
 
-    trock.table = (hash_table *) tid;
-    trock.func = abort_subtxn;
-    trock.ret = 0;
+    hash_enumerate(&tid->table, txn_proc, tid);
 
-    hash_enumerate((hash_table *) tid, enum_func, &trock);
-
-    return trock.ret;
+    return tid->result;
 }
 
 struct cyrusdb_backend cyrusdb_quotalegacy = 

@@ -1,6 +1,6 @@
 # Makefile.in - sieve makefile
 # @configure_input@
-# $Id: Makefile.in,v 1.39 2006/11/30 17:11:24 murch Exp $
+# $Id: Makefile.in,v 1.39.2.1 2007/11/01 14:39:39 murch Exp $
 ################################################################
 #        Copyright 1998 by Carnegie Mellon University
 #
@@ -27,6 +27,7 @@ srcdir = @srcdir@
 top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 
+prefix = @prefix@
 cyrus_prefix = @cyrus_prefix@
 service_path = @service_path@
 
@@ -115,9 +116,10 @@ sieve_err.h sieve_err.c: sieve_err.et
 	$(COMPILE_ET) $(srcdir)/sieve_err.et
 
 clean:
-	rm -f test *~ *.o *.a Makefile.bak makedepend.log
+	rm -f sievec sieved test *~ *.o *.a Makefile.bak makedepend.log
 
 distclean: clean
+	rm -f sieve_err.c sieve_err.h
 	rm -f Makefile
 
 clobber:

@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 /*
- * $Id: charset.c,v 1.46 2006/11/30 17:11:22 murch Exp $
+ * $Id: charset.c,v 1.46.2.1 2007/11/01 14:39:36 murch Exp $
  */
 #include <config.h>
 #include <ctype.h>
@@ -586,7 +586,7 @@ int charset_searchfile(const char *substr, comp_pat *pat,
      * Select buffer to hold canonical searching fomat data to
      * search
      */
-    if (substrlen < sizeof(smallbuf)/2) {
+    if (substrlen < (int) sizeof(smallbuf)/2) {
 	bufsize = sizeof(smallbuf);
 	buf = smallbuf;
     }

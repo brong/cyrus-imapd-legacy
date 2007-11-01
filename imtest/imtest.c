@@ -1,7 +1,7 @@
 /* imtest.c -- IMAP/POP3/NNTP/LMTP/SMTP/MUPDATE/MANAGESIEVE test client
  * Ken Murchison (multi-protocol implementation)
  * Tim Martin (SASL implementation)
- * $Id: imtest.c,v 1.110.2.4 2007/01/11 21:27:25 murch Exp $
+ * $Id: imtest.c,v 1.110.2.5 2007/11/01 14:39:35 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -83,6 +83,8 @@
 #include "imparse.h"
 #include "iptostring.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
 #ifdef HAVE_SSL
 #include <openssl/ssl.h>
@@ -1070,7 +1072,7 @@ int auth_sasl(struct sasl_cmd_t *sasl_cmd, char *mechlist)
 	    out = NULL;
 	}
 	else if (!sendliteral &&
-		 ((strlen(cmdbuf) + outlen + 3) > sasl_cmd->maxlen)) {
+		 ((int) (strlen(cmdbuf) + outlen + 3) > sasl_cmd->maxlen)) {
 	    /* initial response is too long for auth command,
 	       so wait for a server challenge before sending it */
 	    goto noinitresp;
@@ -2340,7 +2342,8 @@ int main(int argc, char **argv)
     
     char *mechlist;
     unsigned ext_ssf = 0;
-    const int *ssfp;
+    const void *ssfp;
+    sasl_ssf_t ssf;
     int maxssf = 128;
     int minssf = 0;
     int c;
@@ -2698,11 +2701,12 @@ int main(int argc, char **argv)
 	    printf("Authentication failed. %s\n", s);
 	}
 	
-	result = sasl_getprop(conn, SASL_SSF, (const void **)&ssfp);
+	result = sasl_getprop(conn, SASL_SSF, &ssfp);
+	ssf = *((sasl_ssf_t *) ssfp);
 	if (result != SASL_OK) {
 	    printf("SSF: unable to determine (SASL ERROR %d)\n", result);
 	} else {
-	    printf("Security strength factor: %d\n", ext_ssf + *ssfp);
+	    printf("Security strength factor: %d\n", ext_ssf + ssf);
 	}
 
     } while (--reauth);

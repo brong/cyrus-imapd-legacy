@@ -40,11 +40,29 @@
  *
  */
 
-/* $Id: ctl_mboxlist.c,v 1.51 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: ctl_mboxlist.c,v 1.51.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 /* currently doesn't catch signals; probably SHOULD */
 
 #include <config.h>
+
+#if HAVE_DIRENT_H
+# include <dirent.h>
+# define NAMLEN(dirent) strlen((dirent)->d_name)
+#else
+# define dirent direct
+# define NAMLEN(dirent) (dirent)->d_namlen
+# if HAVE_SYS_NDIR_H
+#  include <sys/ndir.h>
+# endif
+# if HAVE_SYS_DIR_H
+#  include <sys/dir.h>
+# endif
+# if HAVE_NDIR_H
+#  include <ndir.h>
+# endif
+#endif
+
 #include <sys/types.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -62,7 +80,12 @@
 #include "libcyr_cfg.h"
 #include "mboxlist.h"
 #include "mupdate.h"
+#include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
+
+#include "sync_log.h"
 
 /* config.c stuff */
 const int config_need_data = 0;
@@ -77,6 +100,7 @@ enum mboxop { DUMP,
 	      RECOVER,
 	      CHECKPOINT,
 	      UNDUMP,
+	      VERIFY,
 	      NONE };
 
 struct dumprock {
@@ -106,6 +130,7 @@ static struct mb_node *wipe_head = NULL, *unflag_head = NULL;
  * mupdate */
 static int local_authoritative = 0;
 static int warn_only = 0;
+static int interactive = 0;
 
 /* For each mailbox that this guy gets called for, check that
  * it is a mailbox that:
@@ -187,7 +212,7 @@ static int dump_cb(void *rockp,
     switch (d->op) {
     case DUMP:
 	if(!d->partition || !strcmp(d->partition, part)) {
-	    printf("%s\t%d %s\t%s\n", name, mbtype, part, acl);
+	    printf("%s\t%d %s %s\n", name, mbtype, part, acl);
 	    if(d->purge) {
 		config_mboxlist_db->delete(mbdb, key, keylen, &(d->tid), 0);
 	    }
@@ -262,14 +287,26 @@ static int dump_cb(void *rockp,
 	       !mupdate_find(d->h, name, &unused_mbdata)) {
 		/* since it lives on another server, schedule it for a wipe */
 		struct mb_node *next;
+
+		/*
+		 * Verify that what we found points at another host,
+		 * not back to this host.  Good idea, since if our assumption
+		 * if wrong, we'll end up removing the authoritative
+		 * mailbox.
+		 */
+		assert(strcmp(realpart, unused_mbdata->server));
 		
-		if(warn_only) {
-		    printf("Remove Local Mailbox: %s\n", name);
-		} else {
-		    next = xzmalloc(sizeof(struct mb_node));
-		    strlcpy(next->mailbox, name, sizeof(next->mailbox));
-		    next->next = wipe_head;
-		    wipe_head = next;
+		if (config_mupdate_config != 
+		    IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) {
+		    /* But not for a unified configuration */
+		    if(warn_only) {
+			printf("Remove Local Mailbox: %s\n", name);
+		    } else {
+			next = xzmalloc(sizeof(struct mb_node));
+			strlcpy(next->mailbox, name, sizeof(next->mailbox));
+			next->next = wipe_head;
+			wipe_head = next;
+		    }
 		}
 		
 		skip_flag = 1;		
@@ -334,6 +371,29 @@ static int dump_cb(void *rockp,
     free(acl);
 
     return 0;
+}
+
+/*
+ * True iff user types Y\n or y\n.  Anthing else is false.
+ */
+static int yes(void)
+{
+    int c, answer = 0;
+
+    c = getchar();
+    if (c == 'Y' || c == 'y') {
+	answer = 1;
+	
+	while ((c = getchar()) != EOF) {
+	    if (c == '\n') {
+		break;
+	    } else {
+		answer = 0;
+	    }
+	}
+    }
+
+    return(answer);
 }
 
 /* Resyncing with mupdate:
@@ -452,12 +512,26 @@ void do_dump(enum mboxop op, const char *part, int purge)
 	}
 
 	/* Delete local mailboxes where needed (wipe_head) */
+	if (interactive) {
+	    int count = 0;
+	    struct mb_node *me;
+
+	    for (me = wipe_head; me != NULL; me = me->next) count++;
+
+	    fprintf(stderr, "OK to delete %d local mailboxes? ", count);
+	    if (!yes()) {
+		fprintf(stderr, "Cancelled!\n");
+		exit(1);
+	    }
+	}
+
 	while(wipe_head) {
 	    struct mb_node *me = wipe_head;
 	    
 	    wipe_head = wipe_head->next;
 	    
 	    ret = mboxlist_deletemailbox(me->mailbox, 1, "", NULL, 0, 1, 1);
+	    if(!ret) sync_log_mailbox(me->mailbox);
 	    if(ret) {
 		fprintf(stderr, "couldn't delete defunct mailbox %s\n",
 			me->mailbox);
@@ -509,7 +583,7 @@ void do_undump(void)
 	    if (*p == ' ') p++;
 	}
 	partition = p;
-	for (; *p && *p != '\t'; p++) ;
+	for (; *p && (*p != ' ') && (*p != '\t'); p++) ;
 	if (!*p) {
 	    fprintf(stderr, "line %d: no acl found\n", line);
 	    continue;
@@ -582,6 +656,258 @@ void do_undump(void)
     return;
 }
 
+enum {
+    ROOT =	(1<<0), 
+    DOMAIN =	(1<<1),
+    MBOX =	(1<<2)
+};
+
+struct found_data {
+    int type;
+    char mboxname[MAX_MAILBOX_NAME+1];
+    char partition[MAX_MAILBOX_NAME+1];
+    char path[MAX_MAILBOX_PATH+1];
+};
+
+struct found_list {
+    int idx;
+    int size;
+    int alloc;
+    struct found_data *data;
+};
+
+void add_path(struct found_list *found, int type,
+	      const char *name, const char *part, const char *path)
+{
+    struct found_data *new;
+
+    if (found->size == found->alloc) {
+	/* reached the end of our allocated array, double it */
+	found->alloc *= 2;
+	found->data = xrealloc(found->data,
+			       found->alloc * sizeof(struct found_data));
+    }
+
+    /* add our new node to the end of the array */
+    new = &found->data[found->size++];
+    new->type = type;
+    strcpy(new->mboxname, name);
+    strcpy(new->partition, part);
+    strcpy(new->path, path);
+}
+
+void add_part(struct found_list *found,
+	      const char *part, const char *path, int override)
+{
+    int i;
+
+    /* see if we already added a partition having this name */
+    for (i = 0; i < found->size; i++){
+	if (!strcmp(found->data[i].partition, part)) {
+	    /* found it */
+	    if (override) {
+		/* replace the path with the one containing cyrus.header */
+		strcpy(found->data[i].path, path);
+	    }
+
+	    /* we already have the proper path, so we're done */
+	    return;
+	}
+    }
+
+    /* add the new partition path */
+    add_path(found, ROOT, "", part, path);
+}
+
+void get_partitions(const char *key, const char *value, void *rock)
+{
+    static int check_meta = -1;
+    struct found_list *found = (struct found_list *) rock;
+
+    if (check_meta == -1) {
+	/* see if cyrus.header might be contained in a metapartition */
+	check_meta = (config_metapartition_files &
+		      IMAP_ENUM_METAPARTITION_FILES_HEADER);
+    }
+
+    if (!strncmp(key, "partition-", 10)) {
+	add_part(found, key+10, value, 0);
+    }
+    else if (check_meta && !strncmp(key, "metapartition-", 14)) {
+	add_part(found, key+14, value, 1);
+    }
+    /* skip any other overflow strings */
+}
+
+int compar_mbox(const void *v1, const void *v2)
+{
+    struct found_data *d1 = (struct found_data *) v1;
+    struct found_data *d2 = (struct found_data *) v2;
+
+    /* non-mailboxes get pushed to the end of the array,
+       otherwise we do an ASCII sort */
+    if (d1->type & MBOX) {
+	if (d2->type & MBOX) return strcmp(d1->mboxname, d2->mboxname);
+	else return -1;
+    }
+    else if (d2->type & MBOX) return 1;
+    else return 0;
+}
+
+static int verify_cb(void *rockp,
+		     const char *key, int keylen,
+		     const char *data, int datalen __attribute__((unused)))
+{
+    struct found_list *found = (struct found_list *) rockp;
+    int r;
+    char *p;
+    char *name, *part, *acl;
+    int mbtype;
+
+    /* \0 terminate 'name' */
+    name = xstrndup(key, keylen);
+
+    /* Get mailbox type */
+    mbtype = strtol(data, &p, 10);
+
+    p = strchr(data, ' ');
+    if (p == NULL) {
+	abort();
+    }
+    p++;
+    acl = strchr(p, ' ');
+    if (acl == NULL) {
+	abort();
+    }
+    /* grab 'part', \0 terminate */
+    part = xstrndup(p, acl - p);
+
+    do {
+	r = -1;
+	if ((found->idx >= found->size) ||		/* end of array */
+	    !(found->data[found->idx].type & MBOX) ||	/* end of mailboxes */
+	    (r = strcmp(name, found->data[found->idx].mboxname)) < 0) {
+	    printf("'%s' has a DB entry but no directory on partition '%s'\n",
+		   name, part);
+	}
+	else if (r > 0) {
+	    printf("'%s' has a directory on partition '%s' but no DB entry\n",
+		   found->data[found->idx].mboxname,
+		   found->data[found->idx].partition);
+	    found->idx++;
+	}
+	else found->idx++;
+    } while (r > 0);
+
+    free(name);
+    free(part);
+
+    return 0;
+}
+
+void do_verify(void)
+{
+    struct found_list found;
+    int i;
+
+    found.idx = 0;
+    found.size = 0;
+    found.alloc = 10;
+    found.data = xmalloc(found.alloc * sizeof(struct found_data));
+
+    /* gather a list of partition paths to search */
+    config_foreachoverflowstring(get_partitions, &found);
+
+    /* scan all paths in our list, tagging valid mailboxes,
+       and adding paths as we find them */
+    for (i = 0; i < found.size; i++) {
+	DIR *dirp;
+	struct dirent *dirent;
+	char name[MAX_MAILBOX_NAME+1];
+	char part[MAX_MAILBOX_NAME+1]; 
+	char path[MAX_MAILBOX_PATH+1];
+	int type;
+
+	if (config_hashimapspool && (found.data[i].type & ROOT)) {
+	    /* need to add hashed directories */
+	    char *tail;
+	    int c;
+
+	    /* make the toplevel partition /a */
+	    strcat(found.data[i].path, "/a");
+	    type = (found.data[i].type &= ~ROOT);
+
+	    /* make a template path for /b - /z */
+	    strcpy(name, found.data[i].mboxname);
+	    strcpy(part, found.data[i].partition);
+	    strcpy(path, found.data[i].path);
+	    tail = path + strlen(path) - 1;
+
+	    for (c = 'b'; c <= 'z'; c++) {
+		*tail = c;
+		add_path(&found, type, name, part, path);
+	    }
+
+	    if (config_virtdomains && !type) {
+		/* need to add root domain directory */
+		strcpy(tail, "domain");
+		add_path(&found, DOMAIN | ROOT, name, part, path);
+	    }
+	}
+
+	if (!(dirp = opendir(found.data[i].path))) continue;
+	while ((dirent = readdir(dirp))) {
+	    struct mailbox mailbox;
+
+	    if (dirent->d_name[0] == '.') continue;
+	    else if (!strcmp(dirent->d_name, FNAME_HEADER+1) &&
+		     !mailbox_open_header_path(found.data[i].mboxname,
+					       found.data[i].path,
+					       found.data[i].path,
+					       "", NULL, &mailbox, 1)) {
+		mailbox_close(&mailbox);
+		found.data[i].type |= MBOX;
+	    }
+	    else if (!strchr(dirent->d_name, '.') ||
+		     (found.data[i].type & DOMAIN)) {
+		/* probably a directory, add it to the array */
+		type = 0;
+		strcpy(name, found.data[i].mboxname);
+
+		if (config_virtdomains &&
+		    (found.data[i].type == ROOT) &&
+		    !strcmp(dirent->d_name, "domain")) {
+		    /* root domain directory */
+		    type = DOMAIN | ROOT;
+		}
+		else if (!name[0] && found.data[i].type & DOMAIN) {
+		    /* toplevel domain directory */
+		    strcat(name, dirent->d_name);
+		    strcat(name, "!");
+		    type = DOMAIN | ROOT;
+		}
+		else {
+		    /* possibly a mailbox directory */
+		    if (name[0] && !(found.data[i].type & DOMAIN)) strcat(name, ".");
+		    strcat(name, dirent->d_name);
+		}
+
+		strcpy(part, found.data[i].partition);
+		strcpy(path, found.data[i].path);
+		strcat(path, "/");
+		strcat(path, dirent->d_name);
+		add_path(&found, type, name, part, path);
+	    }
+	}
+
+	closedir(dirp);
+    }
+
+    qsort(found.data, found.size, sizeof(struct found_data), compar_mbox);
+
+    config_mboxlist_db->foreach(mbdb, "", 0, NULL, &verify_cb, &found, NULL);
+}
+
 void usage(void)
 {
     fprintf(stderr, "DUMP:\n");
@@ -592,6 +918,8 @@ void usage(void)
 	    "    [< mboxlist.dump]\n");
     fprintf(stderr, "MUPDATE populate:\n");
     fprintf(stderr, "  ctl_mboxlist [-C <alt_config>] -m [-a] [-w] [-f filename]\n");
+    fprintf(stderr, "VERIFY:\n");
+    fprintf(stderr, "  ctl_mboxlist [-C <alt_config>] -v [-f filename]\n");
     exit(1);
 }
 
@@ -604,9 +932,11 @@ int main(int argc, char *argv[])
     enum mboxop op = NONE;
     char *alt_config = NULL;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
-    while ((opt = getopt(argc, argv, "C:awmdurcxf:p:")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:awmdurcxf:p:vi")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -671,6 +1001,15 @@ int main(int argc, char *argv[])
 	    warn_only = 1;
 	    break;
 
+	case 'v':
+	    if (op == NONE) op = VERIFY;
+	    else usage();
+	    break;
+
+	case 'i':
+	    interactive = 1;
+	    break;
+
 	default:
 	    usage();
 	    break;
@@ -730,6 +1069,16 @@ int main(int argc, char *argv[])
 	quotadb_close();
 	quotadb_done();
 	
+	mboxlist_close();
+	mboxlist_done();
+	break;
+
+    case VERIFY:
+	mboxlist_init(0);
+	mboxlist_open(mboxdb_fname);
+
+	do_verify();
+
 	mboxlist_close();
 	mboxlist_done();
 	break;

@@ -1,4 +1,4 @@
-/* $Id: cyrdump.c,v 1.17 2006/11/30 17:11:17 murch Exp $
+/* $Id: cyrdump.c,v 1.17.2.1 2007/11/01 14:39:31 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -60,7 +60,10 @@
 #include "mailbox.h"
 #include "mboxlist.h"
 #include "sysexits.h"
+#include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 
 /* config.c stuff */
@@ -88,7 +91,7 @@ char *imapd_userid = NULL;
 int imapd_condstore_client = 0;
 
 struct incremental_record {
-    int incruid;
+    unsigned incruid;
 };
 
 int main(int argc, char *argv[])
@@ -99,7 +102,9 @@ int main(int argc, char *argv[])
     char *alt_config = NULL;
     struct incremental_record irec;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EX_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((option = getopt(argc, argv, "v")) != EOF) {
 	switch (option) {

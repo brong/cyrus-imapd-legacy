@@ -40,7 +40,7 @@
  *
  */
 /*
- * $Id: util.c,v 1.31 2006/11/30 17:11:22 murch Exp $
+ * $Id: util.c,v 1.31.2.1 2007/11/01 14:39:36 murch Exp $
  */
 
 #include <config.h>
@@ -48,6 +48,8 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <errno.h>
+#include <grp.h>
+#include <pwd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <syslog.h>
@@ -61,7 +63,6 @@
 #include <errno.h>
 
 #include "exitcodes.h"
-#include "libcyr_cfg.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -249,11 +250,11 @@ keyvalue *kv_bsearch(const char* key, keyvalue* kv, int nelem,
  *  directory.  Stop before the first dot.  Caller is responsible
  *  for skipping any prefix of the name.
  */
-int dir_hash_c(const char *name)
+int dir_hash_c(const char *name, int full)
 {
     int c;
 
-    if (libcyrus_config_getswitch(CYRUSOPT_FULLDIRHASH)) {
+    if (full) {
 	unsigned char *pt;
 	unsigned int n;
 	enum {
@@ -315,14 +316,13 @@ void cyrus_reset_stdio()
  * directory listing (but you won't have to worry about cleaning up
  * after it)
  */
-int create_tempfile() 
+int create_tempfile(const char *path) 
 {
     int fd;
     char pattern[2048];
-    const char *path = libcyrus_config_getstring(CYRUSOPT_TEMP_PATH);
 
     if(snprintf(pattern, sizeof(pattern), "%s/cyrus_tmpfile_XXXXXX",
-		path) >= sizeof(pattern)){
+		path) >= (int) sizeof(pattern)){
 	fatal("temporary file pathname is too long in prot_flush",
 	      EC_TEMPFAIL);
     }
@@ -361,4 +361,43 @@ int cyrus_mkdir(const char *path, mode_t mode __attribute__((unused)))
     }
 
     return 0;
+}
+
+int become_cyrus(void)
+{
+    struct passwd *p;
+    int newuid, newgid;
+    int result;
+    static int uid = 0;
+
+    if (uid) return setuid(uid);
+
+    p = getpwnam(CYRUS_USER);
+    if (p == NULL) {
+	syslog(LOG_ERR, "no entry in /etc/passwd for user %s", CYRUS_USER);
+	return -1;
+    }
+
+    /* Save these in case initgroups does a getpw*() */
+    newuid = p->pw_uid;
+    newgid = p->pw_gid;
+
+    if (initgroups(CYRUS_USER, newgid)) {
+        syslog(LOG_ERR, "unable to initialize groups for user %s: %s",
+	       CYRUS_USER, strerror(errno));
+        return -1;
+    }
+
+    if (setgid(newgid)) {
+        syslog(LOG_ERR, "unable to set group id to %d for user %s: %s",
+              newgid, CYRUS_USER, strerror(errno));
+        return -1;
+    }
+
+    result = setuid(newuid);
+
+    /* Only set static uid if successful, else future calls won't reset gid */
+    if (result == 0)
+        uid = newuid;
+    return result;
 }

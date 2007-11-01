@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.2 2006/12/13 20:30:06 murch Exp $
+ * $Id: imapd.h,v 1.63.2.3 2007/11/01 14:39:33 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -129,8 +129,8 @@ struct storeargs {
     time_t update_time;
     int usinguid;
     /* private to index_storeflag() */
-    int last_msgno;
-    int last_found;
+    unsigned last_msgno;
+    unsigned last_found;
 };
 
 /* values for operation */
@@ -177,8 +177,8 @@ struct searchargs {
     bit32 system_flags_unset;
     bit32 user_flags_set[MAX_USER_FLAGS/32];
     bit32 user_flags_unset[MAX_USER_FLAGS/32];
-    struct strlist *sequence;
-    struct strlist *uidsequence;
+    struct seq_set *sequence;
+    struct seq_set *uidsequence;
     struct strlist *from;
     struct strlist *to;
     struct strlist *cc;
@@ -280,6 +280,8 @@ extern void index_newmailbox(struct mailbox *mailbox, int examine_mode);
 extern void index_operatemailbox(struct mailbox *mailbox);
 extern void index_check(struct mailbox *mailbox, int usinguid,
 			   int checkseen);
+extern void index_check_existing(struct mailbox *mailbox,
+                                 int usinguid, int checkseen);
 extern void index_checkseen(struct mailbox *mailbox, int quiet,
 			       int usinguid, int oldexists);
 
@@ -306,8 +308,8 @@ extern int index_getstate(struct mailbox *mailbox);
 extern int index_checkstate(struct mailbox *mailbox, unsigned indexdate,
 			       unsigned seendate);
 
-extern int index_finduid(unsigned uid);
-extern int index_getuid(unsigned msgno);
+extern unsigned index_finduid(unsigned uid);
+extern unsigned index_getuid(unsigned msgno);
 
 extern mailbox_decideproc_t index_expungeuidlist;
 

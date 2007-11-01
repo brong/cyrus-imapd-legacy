@@ -39,7 +39,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: arbitron.c,v 1.40 2006/11/30 17:11:17 murch Exp $ */
+/* $Id: arbitron.c,v 1.40.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -67,7 +67,10 @@
 #include "mboxlist.h"
 #include "convert_code.h"
 #include "seen.h"
+#include "util.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 /* config.c stuff */
 const int config_need_data = 0;
@@ -123,7 +126,9 @@ int main(int argc,char **argv)
 
     strcpy(pattern, "*");
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     report_end_time = now;
 
@@ -268,6 +273,8 @@ int do_mailbox(const char *name, int matchlen __attribute__((unused)),
     
 	d->nreaders = 0;
 	d->nsubscribers = 0;
+	d->readers = NULL;
+	d->subscribers = NULL;
 
 /*	printf("inserting %s (key %s)\n", name, mbox.uniqueid); */
 
@@ -413,14 +420,14 @@ void process_seen(const char *path, const char *user)
     int r;    
     struct db *tmp = NULL;
 
-    r = DB->open(path, 0, &tmp);
+    r = (DB->open)(path, 0, &tmp);
     if(r) goto done;
     
     DB->foreach(tmp, "", 0, process_user_p, process_user_cb,
 		(void *) user, NULL);
 
  done:
-    if(tmp) DB->close(tmp);
+    if(tmp) (DB->close)(tmp);
 }
 
 static int process_subs_cb(void *rockp __attribute__((unused)),
@@ -469,14 +476,14 @@ void process_subs(const char *path, const char *user)
     int r;    
     struct db *tmp = NULL;
 
-    r = SUBDB->open(path, 0, &tmp);
+    r = (SUBDB->open)(path, 0, &tmp);
     if(r) goto done;
     
     SUBDB->foreach(tmp, "", 0, process_subs_p, process_subs_cb,
 		   (void *) user, NULL);
 
  done:
-    if(tmp) SUBDB->close(tmp);
+    if(tmp) (SUBDB->close)(tmp);
 }
 
 void report_users(struct user_list *u)

@@ -1,5 +1,5 @@
 /* auth_pts.c -- PTLOADER authorization
- * $Id: auth_pts.c,v 1.10 2006/11/30 17:11:22 murch Exp $
+ * $Id: auth_pts.c,v 1.10.2.1 2007/11/01 14:39:35 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -62,6 +62,8 @@
 #include "retry.h"
 #include "strhash.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 static char *canonuser_id = NULL;
 static struct auth_state *canonuser_cache = NULL;
@@ -106,7 +108,7 @@ timeout_select (int sock, int op, int sec) {
   tv.tv_usec = 0;
 
   syslog(LOG_DEBUG, "timeout_select: sock = %d, rp = 0x%x, wp = 0x%x, sec = %d", 
-         sock, rp, wp, sec);
+         sock, (unsigned) rp, (unsigned) wp, sec);
 
   if ((r = select(sock+1, rp, wp, NULL, &tv)) == 0) {
     /* r == 0 then timed out. we change this into an error */
@@ -247,6 +249,12 @@ static char *mycanonifyid(const char *identifier,
 	return retbuf;
     }
 
+    if (!strcmp(identifier, "")) {
+        syslog(LOG_ERR, "unable to canonify empty identifier");
+        return NULL;
+    }
+
+
     canonuser_cache = NULL;
     if(ptload(identifier, &canonuser_cache) < 0) {
       if (canonuser_cache == NULL) {
@@ -351,7 +359,7 @@ static int ptload(const char *identifier, struct auth_state **state)
     
     strcpy(fnamebuf, config_dir);
     strcat(fnamebuf, PTS_DBFIL);
-    r = the_ptscache_db->open(fnamebuf, CYRUSDB_CREATE, &ptdb);
+    r = (the_ptscache_db->open)(fnamebuf, CYRUSDB_CREATE, &ptdb);
     if (r != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fnamebuf,
 	       cyrusdb_strerror(ret));
@@ -493,7 +501,7 @@ static int ptload(const char *identifier, struct auth_state **state)
     }
 
     /* close and unlock the database */
-    the_ptscache_db->close(ptdb);
+    (the_ptscache_db->close)(ptdb);
 
     return rc;
 }

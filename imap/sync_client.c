@@ -41,7 +41,7 @@
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
  *
- * $Id: sync_client.c,v 1.2 2006/11/30 17:11:20 murch Exp $
+ * $Id: sync_client.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -60,6 +60,9 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <ctype.h>
+#include <signal.h>
+
+#include <netinet/tcp.h>
 
 #include "global.h"
 #include "assert.h"
@@ -77,10 +80,13 @@
 #include "imparse.h"
 #include "util.h"
 #include "prot.h"
+#include "message_guid.h"
 #include "sync_support.h"
 #include "sync_commit.h"
 #include "lock.h"
 #include "backend.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
 /* signal to config.c */
 const int config_need_data = 0;  /* YYY */
@@ -91,12 +97,12 @@ struct protstream *imapd_out = NULL;
 struct auth_state *imapd_authstate = NULL;
 char *imapd_userid = NULL;
 
-void printastring(const char *s)
+void printastring(const char *s __attribute__((unused)))
 {
     fatal("not implemented", EC_SOFTWARE);
 }
 
-void printstring(const char *s)
+void printstring(const char *s __attribute__((unused)))
 {
     fatal("not implemented", EC_SOFTWARE);
 }
@@ -110,6 +116,7 @@ void printstring(const char *s)
 extern char *optarg;
 extern int optind;
 
+static const char *servername = NULL;
 static struct protstream *toserver   = NULL;
 static struct protstream *fromserver = NULL;
 
@@ -117,10 +124,10 @@ static struct protstream *fromserver = NULL;
 static struct sync_msgid_list *msgid_onserver = NULL;
 
 static struct namespace   sync_namespace;
-static struct auth_state *sync_authstate = NULL;
 
 static int verbose         = 0;
 static int verbose_logging = 0;
+static int connect_once    = 0;
 
 static int do_meta(char *user);
 
@@ -134,6 +141,7 @@ static void shut_down(int code)
     quotadb_done();
     mboxlist_close();
     mboxlist_done();
+    cyrus_done();
     exit(code);
 }
 
@@ -147,7 +155,8 @@ static int usage(const char *name)
 
 void fatal(const char *s, int code)
 {
-    fprintf(stderr, "sync_client: %s\n", s);
+    fprintf(stderr, "Fatal error: %s\n", s);
+    syslog(LOG_ERR, "Fatal error: %s", s);
     exit(code);
 }
 
@@ -224,16 +233,20 @@ static int find_reserve_messages(struct mailbox *mailbox,
             return(IMAP_IOERROR);
         }
 
-        if (msg && ((msg->uid < record.uid) ||
-                    ((msg->uid == record.uid) &&
-                     message_uuid_compare(&msg->uuid, &record.uuid)))) {
+        /* Skip over messages recorded on server which are missing on client
+         * (either will be expunged or have been expunged already) */
+        while (msg && (record.uid > msg->uid))
             msg = msg->next;
+
+        if (msg && (record.uid == msg->uid) &&
+            message_guid_compare_allow_null(&record.guid, &msg->guid)) {
+            msg = msg->next;  /* Ignore exact match */
             continue;
         }
 
         /* Want to upload this message; does the server have a copy? */
-        if (sync_msgid_lookup(server_msgid_list, &record.uuid))
-            sync_msgid_add(reserve_msgid_list, &record.uuid);
+        if (sync_msgid_lookup(server_msgid_list, &record.guid))
+            sync_msgid_add(reserve_msgid_list, &record.guid);
     }
     
     return(0);
@@ -261,8 +274,8 @@ static int reserve_all_messages(struct mailbox *mailbox,
         }
 
         /* Want to upload this message; does the server have a copy? */
-        if (sync_msgid_lookup(server_msgid_list, &record.uuid))
-            sync_msgid_add(reserve_msgid_list, &record.uuid);
+        if (sync_msgid_lookup(server_msgid_list, &record.guid))
+            sync_msgid_add(reserve_msgid_list, &record.guid);
     }
     
     return(0);
@@ -279,7 +292,7 @@ static int count_reserve_messages(struct sync_folder *server_folder,
     struct sync_msgid    *msgid;
 
     for (msg = msglist->head ; msg ; msg = msg->next) {
-        if ((msgid=sync_msgid_lookup(reserve_msgid_list, &msg->uuid)))
+        if ((msgid=sync_msgid_lookup(reserve_msgid_list, &msg->guid)))
             msgid->count++;
     }
     
@@ -293,7 +306,7 @@ static int reserve_check_folder(struct sync_msgid_list *reserve_msgid_list,
     struct sync_msgid *msgid;
 
     for (msg = folder->msglist->head ; msg ; msg = msg->next) {
-        msgid = sync_msgid_lookup(reserve_msgid_list, &msg->uuid);
+        msgid = sync_msgid_lookup(reserve_msgid_list, &msg->guid);
 
         if (msgid && !msgid->reserved)
             return(1);
@@ -313,12 +326,12 @@ static int reserve_folder(struct sync_msgid_list *reserve_msgid_list,
     sync_printastring(toserver, folder->name);
 
     for (msg = folder->msglist->head ; msg ; msg = msg->next) {
-        msgid = sync_msgid_lookup(reserve_msgid_list, &msg->uuid);
+        msgid = sync_msgid_lookup(reserve_msgid_list, &msg->guid);
 
         if (msgid && !msgid->reserved) {
             /* Attempt to Reserve message in this folder */
             prot_printf(toserver, " "); 
-            sync_printastring(toserver, message_uuid_text(&msgid->uuid));
+            sync_printastring(toserver, message_guid_encode(&msgid->guid));
         }
     }
     prot_printf(toserver, "\r\n"); 
@@ -329,7 +342,7 @@ static int reserve_folder(struct sync_msgid_list *reserve_msgid_list,
 
     /* Parse response to record successfully reserved messages */
     while (!r && unsolicited) {
-        struct message_uuid tmp_uuid;
+        struct message_guid tmp_guid;
 
         c = getword(fromserver, &arg);
 
@@ -342,16 +355,16 @@ static int reserve_folder(struct sync_msgid_list *reserve_msgid_list,
             return(IMAP_PROTOCOL_ERROR);
         }
  
-        if (!message_uuid_from_text(&tmp_uuid, arg.s)) {
+        if (!message_guid_decode(&tmp_guid, arg.s)) {
             syslog(LOG_ERR, "Illegal response to RESERVE: %s", arg.s);
             sync_eatlines_unsolicited(fromserver, c);
             return(IMAP_PROTOCOL_ERROR);
         }
 
-        if ((msgid = sync_msgid_lookup(reserve_msgid_list, &tmp_uuid))) {
+        if ((msgid = sync_msgid_lookup(reserve_msgid_list, &tmp_guid))) {
             msgid->reserved = 1;
             reserve_msgid_list->reserved++;
-            sync_msgid_add(msgid_onserver, &tmp_uuid);
+            sync_msgid_add(msgid_onserver, &tmp_guid);
         } else
             syslog(LOG_ERR, "RESERVE: Unexpected response MessageID %s in %s",
                    arg.s, folder->name);
@@ -398,8 +411,8 @@ static int reserve_messages(struct sync_folder_list *client_list,
     /* Generate fast lookup hash of all MessageIDs available on server */
     for (folder = server_list->head ; folder ; folder = folder->next) {
         for (msg = folder->msglist->head ; msg ; msg = msg->next) {
-            if (!sync_msgid_lookup(server_msgid_list, &msg->uuid))
-                sync_msgid_add(server_msgid_list, &msg->uuid);
+            if (!sync_msgid_lookup(server_msgid_list, &msg->guid))
+                sync_msgid_add(server_msgid_list, &msg->guid);
         }
     }
 
@@ -435,7 +448,8 @@ static int reserve_messages(struct sync_folder_list *client_list,
         if (r) {
             if (mailbox_open) mailbox_close(&m);
 
-            syslog(LOG_ERR, "IOERROR: %s", error_message(r));
+            syslog(LOG_ERR, "IOERROR: Failed to open %s: %s",
+                   folder->name, error_message(r));
             goto bail;
         }
 
@@ -467,7 +481,7 @@ static int reserve_messages(struct sync_folder_list *client_list,
      * (as they will definitely be needed) */
     for (folder = server_list->head ; folder ; folder = folder->next) {
         for (msg = folder->msglist->head ; msg ; msg = msg->next) {
-            msgid = sync_msgid_lookup(reserve_msgid_list, &msg->uuid);
+            msgid = sync_msgid_lookup(reserve_msgid_list, &msg->guid);
 
             if (msgid && (msgid->count == 1)) {
                 reserve_folder(reserve_msgid_list, folder);
@@ -488,7 +502,7 @@ static int reserve_messages(struct sync_folder_list *client_list,
         if (folder->reserve) continue;
 
         for (count = 0, msg = folder->msglist->head ; msg ; msg = msg->next) {
-            msgid = sync_msgid_lookup(reserve_msgid_list, &msg->uuid);
+            msgid = sync_msgid_lookup(reserve_msgid_list, &msg->guid);
 
             if (msgid && !msgid->reserved)
                 count++;
@@ -553,7 +567,7 @@ static int folders_get_uniqueid(struct sync_folder_list *client_list,
         /* Quietly ignore objects that we don't have access to.
          * Includes directory stubs, which have not underlying cyrus.*
          * files in the filesystem */
-        if (r == IMAP_MAILBOX_NONEXISTENT) {
+        if (r == IMAP_PERMISSION_DENIED) {
             r = 0;
             continue;
         }
@@ -564,7 +578,8 @@ static int folders_get_uniqueid(struct sync_folder_list *client_list,
 
        if (r) {
             if (mailbox_open) mailbox_close(&m);
-            syslog(LOG_ERR, "IOERROR: %s", error_message(r));
+            syslog(LOG_ERR, "IOERROR: Failed to open %s: %s",
+                   folder->name, error_message(r));
             return(r);
         }
 
@@ -732,6 +747,17 @@ static int folder_setannotation(char *name, char *entry, char *userid,
 
     return(sync_parse_code("SETANNOTATION", fromserver,
 			   SYNC_PARSE_EAT_OKLINE, NULL));
+}
+
+static int folder_setuidvalidity(char *name, unsigned long uidvalidity)
+{
+    prot_printf(toserver, "SETUIDVALIDITY "); 
+    sync_printastring(toserver, name);
+    prot_printf(toserver, " %lu\r\n", uidvalidity); 
+    prot_flush(toserver);
+
+    return(sync_parse_code("SETUIDVALIDITY",
+                           fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
 }
 
 /* ====================================================================== */
@@ -1089,7 +1115,7 @@ static int check_upload_messages(struct mailbox *mailbox,
             msg = msg->next;
 
         if (msg && (record.uid == msg->uid) &&
-            message_uuid_compare(&record.uuid, &msg->uuid)) {
+            message_guid_compare_allow_null(&record.guid, &msg->guid)) {
             msg = msg->next;  /* Ignore exact match */
             continue;
         }
@@ -1104,22 +1130,27 @@ static int check_upload_messages(struct mailbox *mailbox,
 /* Upload missing messages from folders (uses UPLOAD COPY where possible) */
 
 static int upload_message_work(struct mailbox *mailbox,
-			       unsigned long msgno,
+			       unsigned long msgno __attribute__((unused)),
 			       struct index_record *record)
 {
-    unsigned long cache_size;
     int flags_printed = 0;
     int r = 0, flag, need_body;
     static unsigned long sequence = 1;
     const char *msg_base = NULL;
     unsigned long msg_size = 0;
 
+    /* Protocol for SIMPLE items:
+     * C:  SIMPLE  <msgid> <uid> 
+     *             <internaldate> <sent-date> <last-updated> <modseq> <flags>
+     *             <msg literal (includes msg size!)>
+     */
+
     /* Protocol for PARSED items:
      * C:  PARSED  <msgid> <uid>
      *             <internaldate> <sent-date> <last-updated> <modseq> <flags>
-     *             <hdr size> <content_lines>
+     *             <hdr size> <content_lines> <cache_version>
      *             <cache literal (includes cache size!)>
-     * <msg literal (includes msg size!)>
+     *             <msg literal (includes msg size!)>
      */
 
     /* Protocol for COPY items:
@@ -1127,17 +1158,16 @@ static int upload_message_work(struct mailbox *mailbox,
      *           <internaldate> <sent-date> <last-updated> <modseq> <flags>
      */
 
-    if (sync_msgid_lookup(msgid_onserver, &record->uuid)) {
+    if (sync_msgid_lookup(msgid_onserver, &record->guid)) {
         prot_printf(toserver, " COPY");
         need_body = 0;
     } else {
-        sync_msgid_add(msgid_onserver, &record->uuid);
-        prot_printf(toserver, " PARSED");
+        prot_printf(toserver, " SIMPLE");
         need_body = 1;
     }
 
     prot_printf(toserver, " %s %lu %lu %lu %lu " MODSEQ_FMT " (",
-             message_uuid_text(&record->uuid),
+             message_guid_encode(&record->guid),
              record->uid, record->internaldate,
              record->sentdate, record->last_updated, record->modseq);
 
@@ -1162,15 +1192,6 @@ static int upload_message_work(struct mailbox *mailbox,
 
     if (need_body) {
         /* Server doesn't have this message yet */
-        cache_size = mailbox_cache_size(mailbox, msgno);
-
-        if (cache_size == 0) {
-            syslog(LOG_ERR,
-                   "upload_messages(): Empty cache entry for msgno %lu",
-                   msgno);
-            return(IMAP_INTERNAL);
-        }
-        
         r = mailbox_map_message(mailbox, record->uid, &msg_base, &msg_size);
         
         if (r) {
@@ -1178,167 +1199,14 @@ static int upload_message_work(struct mailbox *mailbox,
                    record->uid, mailbox->name);
             return(IMAP_IOERROR);
         }
+        sync_msgid_add(msgid_onserver, &record->guid);
 
-        prot_printf(toserver, " %lu %lu %lu {%lu+}\r\n",
-		    record->header_size, record->content_lines,
-		    record->cache_version, cache_size);
-
-        prot_write(toserver,
-		   (char *)(mailbox->cache_base + record->cache_offset),
-		   cache_size);
-                    
-        prot_printf(toserver, "{%lu+}\r\n", msg_size);
+        prot_printf(toserver, " {%lu+}\r\n", msg_size);
         prot_write(toserver, (char *)msg_base, msg_size);
         mailbox_unmap_message(mailbox, record->uid, &msg_base, &msg_size);
         sequence++;
     }
     return(r);
-}
-
-static int upload_messages_list(struct mailbox *mailbox,
-				struct sync_msg_list *list)
-{
-    unsigned long msgno;
-    int r = 0;
-    struct index_record record;
-    struct sync_msg *msg;
-    int count = 0;
-    int c = ' ';
-    static struct buf token;   /* BSS */
-
-    if (chdir(mailbox->path)) {
-        syslog(LOG_ERR, "Couldn't chdir to %s: %s",
-               mailbox->path, strerror(errno));
-        return(IMAP_IOERROR);
-    }
-
-    msg = list->head;
-    for (msgno = 1 ; msgno <= mailbox->exists ; msgno++) {
-        r = mailbox_read_index_record(mailbox, msgno, &record);
-
-        if (r) {
-            syslog(LOG_ERR,
-                   "IOERROR: reading index entry for nsgno %lu of %s: %m",
-                   record.uid, mailbox->name);
-            return(IMAP_IOERROR);
-        }
-
-        /* Skip over messages recorded on server which are missing on client
-         * (either will be expunged or have been expunged already) */
-        while (msg && (record.uid > msg->uid))
-            msg = msg->next;
-
-        if (msg && (record.uid == msg->uid) &&
-            message_uuid_compare(&record.uuid, &msg->uuid)) {
-            msg = msg->next;  /* Ignore exact match */
-            continue;
-        }
-
-        if (count++ == 0)
-            prot_printf(toserver, "UPLOAD %lu %lu",
-                     mailbox->last_uid, mailbox->last_appenddate); 
-
-        /* Message with this UUID exists on client but not server */
-        if ((r=upload_message_work(mailbox, msgno, &record)))
-            return(r);
-
-        if (msg && (msg->uid == record.uid))  /* Overwritten on server */
-            msg = msg->next;
-    }
-
-    if (count == 0)
-        return(r);
-
-    prot_printf(toserver, "\r\n"); 
-    prot_flush(toserver);
-
-    r = sync_parse_code("UPLOAD", fromserver, SYNC_PARSE_NOEAT_OKLINE, NULL);
-    if (r) return(r);
-
-    if ((c = getword(fromserver, &token)) != ' ') {
-        eatline(fromserver, c);
-        syslog(LOG_ERR, "Garbage on Upload response");
-        return(IMAP_PROTOCOL_ERROR);
-    }
-    eatline(fromserver, c);
-
-    /* Clear out msgid_on_server list if server restarted */
-    if (!strcmp(token.s, "[RESTART]")) {
-        int hash_size = msgid_onserver->hash_size;
-
-        sync_msgid_list_free(&msgid_onserver);
-        msgid_onserver = sync_msgid_list_create(hash_size);
-
-	syslog(LOG_INFO, "UPLOAD: received RESTART");
-    }
-
-    return(0);
-}
-
-static int upload_messages_from(struct mailbox *mailbox,
-				unsigned long old_last_uid)
-{
-    unsigned long msgno;
-    int r = 0;
-    struct index_record record;
-    int count = 0;
-    int c = ' ';
-    static struct buf token;   /* BSS */
-
-    if (chdir(mailbox->path)) {
-        syslog(LOG_ERR, "Couldn't chdir to %s: %s",
-               mailbox->path, strerror(errno));
-        return(IMAP_IOERROR);
-    }
-
-    for (msgno = 1 ; msgno <= mailbox->exists ; msgno++) {
-        r =  mailbox_read_index_record(mailbox, msgno, &record);
-
-        if (r) {
-            syslog(LOG_ERR,
-                   "IOERROR: reading index entry for nsgno %lu of %s: %m",
-                   record.uid, mailbox->name);
-            return(IMAP_IOERROR);
-        }
-
-        if (record.uid <= old_last_uid)
-            continue;
-
-        if (count++ == 0)
-            prot_printf(toserver, "UPLOAD %lu %lu",
-                     mailbox->last_uid, mailbox->last_appenddate); 
-
-        if ((r=upload_message_work(mailbox, msgno, &record)))
-            return(r);
-    }
-
-    if (count == 0)
-        return(r);
-
-    prot_printf(toserver, "\r\n"); 
-    prot_flush(toserver);
-
-    r = sync_parse_code("UPLOAD", fromserver, SYNC_PARSE_NOEAT_OKLINE, NULL);
-    if (r) return(r);
-
-    if ((c = getword(fromserver, &token)) != ' ') {
-        eatline(fromserver, c);
-        syslog(LOG_ERR, "Garbage on Upload response");
-        return(IMAP_PROTOCOL_ERROR);
-    }
-    eatline(fromserver, c);
-
-    /* Clear out msgid_on_server list if server restarted */
-    if (!strcmp(token.s, "[RESTART]")) {
-        int hash_size = msgid_onserver->hash_size;
-
-        sync_msgid_list_free(&msgid_onserver);
-        msgid_onserver = sync_msgid_list_create(hash_size);
-
-	syslog(LOG_INFO, "UPLOAD: received RESTART");
-    }
-
-    return(0);
 }
 
 /* upload_messages() null operations still requires UIDLAST update */
@@ -1349,6 +1217,191 @@ static int update_uidlast(struct mailbox *mailbox)
              mailbox->last_uid, mailbox->last_appenddate);
     prot_flush(toserver);
     return(sync_parse_code("UIDLAST",fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
+}
+
+static int index_list_work(struct mailbox *mailbox,
+			   struct sync_index_list *index_list)
+{
+    struct sync_index *index;
+    int r = 0;
+    int c = ' ';
+    static struct buf token;   /* BSS */
+
+    if (index_list->count == 0) return(0);
+
+    prot_printf(toserver, "UPLOAD %lu %lu",
+                index_list->last_uid, mailbox->last_appenddate); 
+
+    for (index = index_list->head; index; index = index->next) {
+        r = upload_message_work(mailbox, index->msgno, &(index->record));
+	      if (r) break;
+    }
+
+    prot_printf(toserver, "\r\n");
+    prot_flush(toserver);
+
+    if (r) {
+        sync_parse_code("UPLOAD", fromserver, SYNC_PARSE_EAT_OKLINE, NULL);
+        return(r);
+    }
+    r = sync_parse_code("UPLOAD", fromserver, SYNC_PARSE_NOEAT_OKLINE, NULL);
+    if (r) return(r);
+
+    if ((c = getword(fromserver, &token)) != ' ') {
+        eatline(fromserver, c);
+        syslog(LOG_ERR, "Garbage on Upload response");
+        return(IMAP_PROTOCOL_ERROR);
+    }
+    eatline(fromserver, c);
+
+    /* Clear out msgid_on_server list if server restarted */
+    if (!strcmp(token.s, "[RESTART]")) {
+        int hash_size = msgid_onserver->hash_size;
+
+        sync_msgid_list_free(&msgid_onserver);
+        msgid_onserver = sync_msgid_list_create(hash_size);
+
+        syslog(LOG_INFO, "UPLOAD: received RESTART");
+    }
+
+    return(0);
+}
+
+static int upload_messages_list(struct mailbox *mailbox,
+				struct sync_msg_list *list)
+{
+    unsigned long msgno;
+    int r = 0;
+    struct index_record record;
+    struct sync_msg *msg;
+    struct sync_index_list *index_list;
+    unsigned max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
+
+    if (max_count <= 0) max_count = INT_MAX;
+
+    if (chdir(mailbox->path)) {
+        syslog(LOG_ERR, "Couldn't chdir to %s: %s",
+               mailbox->path, strerror(errno));
+        return(IMAP_IOERROR);
+    }
+
+    msgno = 1;
+    msg = list->head;
+    do {
+	/* Break UPLOAD into chunks of <=max_count messages */
+	index_list = sync_index_list_create();
+
+	for (; (index_list->count < max_count) &&
+		 (msgno <= mailbox->exists); msgno++) {
+	    r = mailbox_read_index_record(mailbox, msgno, &record);
+
+	    if (r) {
+		syslog(LOG_ERR,
+		       "IOERROR: reading index entry for msgno %lu of %s: %m",
+		       record.uid, mailbox->name);
+		return(IMAP_IOERROR);
+	    }
+
+	    /* Skip over messages recorded on server which are missing on client
+	     * (either will be expunged or have been expunged already) */
+	    while (msg && (record.uid > msg->uid))
+		msg = msg->next;
+
+	    if (msg && (record.uid == msg->uid) &&
+		message_guid_compare_allow_null(&record.guid, &msg->guid)) {
+		msg = msg->next;  /* Ignore exact match */
+		continue;
+	    }
+
+	    /* Message with this GUID exists on client but not server */
+	    sync_index_list_add(index_list, msgno, &record);
+	}
+
+	if (index_list->count == 0) {
+	    /* Reached end of existing messages, with nothing in our list -
+	     * final UID might not be same as UIDLAST, force update */
+	    r = update_uidlast(mailbox);
+	}
+	else {
+	    /* We have a chunk of messages to UPLOAD */
+	    if (msgno > mailbox->exists) {
+		/* Last chunk - set final UID to be the same as UIDLAST */
+		index_list->last_uid = mailbox->last_uid;
+	    } else {
+		syslog(LOG_NOTICE,
+		       "Hit upload limit %d at UID %lu for %s, sending",
+		       max_count, index_list->last_uid, mailbox->name);
+	    }
+
+	    r = index_list_work(mailbox, index_list);
+	}
+	sync_index_list_free(&index_list);
+
+    } while (!r && (msgno <= mailbox->exists));
+
+    return(r);
+}
+
+static int upload_messages_from(struct mailbox *mailbox,
+				unsigned long old_last_uid)
+{
+    unsigned long msgno;
+    int r = 0;
+    struct index_record record;
+    struct sync_index_list *index_list;
+    unsigned max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
+
+    if (chdir(mailbox->path)) {
+        syslog(LOG_ERR, "Couldn't chdir to %s: %s",
+               mailbox->path, strerror(errno));
+        return(IMAP_IOERROR);
+    }
+
+    msgno = 1;
+    do {
+	/* Break UPLOAD into chunks of <=max_count messages */
+	index_list = sync_index_list_create();
+
+	for (; (index_list->count <= max_count) &&
+		 (msgno <= mailbox->exists); msgno++) {
+	    r = mailbox_read_index_record(mailbox, msgno, &record);
+
+	    if (r) {
+		syslog(LOG_ERR,
+		       "IOERROR: reading index entry for msgno %lu of %s: %m",
+		       record.uid, mailbox->name);
+		return(IMAP_IOERROR);
+	    }
+
+	    if (record.uid <= old_last_uid) continue;
+
+	    /* Message with this GUID exists on client but not server */
+	    sync_index_list_add(index_list, msgno, &record);
+	}
+
+	if (index_list->count == 0) {
+	    /* Reached end of existing messages, with nothing in our list -
+	     * final UID might not be same as UIDLAST, force update */
+	    r = update_uidlast(mailbox);
+	}
+	else {
+	    /* We have a chunk of messages to UPLOAD */
+	    if (msgno > mailbox->exists) {
+		/* Last chunk - set final UID to be the same as UIDLAST */
+		index_list->last_uid = mailbox->last_uid;
+	    } else {
+		syslog(LOG_NOTICE,
+		       "Hit upload limit %d at UID %lu for %s, sending",
+		       max_count, index_list->last_uid, mailbox->name);
+	    }
+
+	    r = index_list_work(mailbox, index_list);
+	}
+	sync_index_list_free(&index_list);
+
+    } while(!r && (msgno <= mailbox->exists));
+
+    return(r);
 }
 
 
@@ -1390,7 +1443,7 @@ static int do_seen(char *user, char *name)
     sync_printastring(toserver, user);
     prot_printf(toserver, " ");
     sync_printastring(toserver, m.name);
-    prot_printf(toserver, " %lu %lu %lu ",
+    prot_printf(toserver, " %lu %u %lu ",
 		lastread, last_recent_uid, lastchange);
     sync_printastring(toserver, seenuid);
     prot_printf(toserver, "\r\n");
@@ -1504,7 +1557,7 @@ static int do_annotation(char *name)
 
     prot_printf(toserver, "LIST_ANNOTATIONS ");
     sync_printastring(toserver, name);
-    prot_printf(toserver, "\r\n", name);
+    prot_printf(toserver, "\r\n");
     prot_flush(toserver);
     r=sync_parse_code("LIST_ANNOTATIONS", fromserver,
 		      SYNC_PARSE_EAT_OKLINE, &unsolicited);
@@ -1606,13 +1659,8 @@ static int do_annotation(char *name)
  */
 
 static int do_mailbox_work(struct mailbox *mailbox, 
-			   struct sync_msg_list *list, int just_created,
-			   char *uniqueid)
+			   struct sync_msg_list *list, int just_created)
 {
-    unsigned int last_recent_uid;
-    time_t lastread, lastchange;
-    struct seen *seendb;
-    char *seenuid;
     int r = 0;
     int selected = 0;
     int flag_lookup_table[MAX_USER_FLAGS];
@@ -1809,9 +1857,9 @@ int do_folders(struct sync_folder_list *client_list,
                 if (!r && do_contents) {
                     struct sync_msg_list *folder_msglist;
 
-                    /* 0L, 0L Forces last_uid and seendb push as well */
-                    folder_msglist = sync_msg_list_create(m.flagname, 0);
-                    r = do_mailbox_work(&m, folder_msglist, 1, m.uniqueid);
+                    /* 0L forces lastuid push */
+                    folder_msglist = sync_msg_list_create(m.flagname, 0L);
+                    r = do_mailbox_work(&m, folder_msglist, 1);
                     sync_msg_list_free(&folder_msglist);
                 }
             } else {
@@ -1819,7 +1867,11 @@ int do_folders(struct sync_folder_list *client_list,
                 if (!(folder2->acl && !strcmp(m.acl, folder2->acl)))
                     r = folder_setacl(folder->name, m.acl);
 
-                if ((folder2->options ^ m.options) & OPT_IMAP_CONDSTORE) {
+                if (!r && (m.uidvalidity != folder2->uidvalidity))
+                    r = folder_setuidvalidity(folder->name, m.uidvalidity);
+
+                if (!r &&
+                    (folder2->options ^ m.options) & OPT_IMAP_CONDSTORE) {
                     r = folder_setannotation(m.name,
 					     "/vendor/cmu/cyrus-imapd/condstore",
 					     "",
@@ -1833,7 +1885,7 @@ int do_folders(struct sync_folder_list *client_list,
 		if (!r) r = do_annotation(m.name);
 
                 if (!r && do_contents)
-                    r = do_mailbox_work(&m, folder2->msglist, 0, m.uniqueid);
+                    r = do_mailbox_work(&m, folder2->msglist, 0);
             }
         } else {
 	    char *userid, *part;
@@ -1852,9 +1904,9 @@ int do_folders(struct sync_folder_list *client_list,
             if (!r && do_contents) {
                 struct sync_msg_list *folder_msglist;
 
-                /* 0L, 0L Forces last_uid and seendb push as well */
-                folder_msglist = sync_msg_list_create(m.flagname, 0);
-                r = do_mailbox_work(&m, folder_msglist, 1, m.uniqueid);
+                /* 0L forces uidlast push */
+                folder_msglist = sync_msg_list_create(m.flagname, 0L);
+                r = do_mailbox_work(&m, folder_msglist, 1);
                 sync_msg_list_free(&folder_msglist);
             }
 
@@ -1893,6 +1945,7 @@ int do_mailboxes_work(struct sync_folder_list *client_list,
     static struct buf id;
     static struct buf acl;
     static struct buf name;
+    static struct buf uidvalidity;
     static struct buf lastuid;
     static struct buf options;
     static struct buf arg;
@@ -1926,6 +1979,9 @@ int do_mailboxes_work(struct sync_folder_list *client_list,
             if ((c = getastring(fromserver, toserver, &acl)) != ' ')
                 goto parse_err;
 
+            if ((c = getastring(fromserver, toserver, &uidvalidity)) != ' ')
+                goto parse_err;
+
             if ((c = getastring(fromserver, toserver, &lastuid)) != ' ')
                 goto parse_err;
 
@@ -1940,10 +1996,13 @@ int do_mailboxes_work(struct sync_folder_list *client_list,
 
             if (c == '\r') c = prot_getc(fromserver);
             if (c != '\n') goto parse_err;
-            if (!imparse_isnumber(lastuid.s))  goto parse_err;
+            if (!imparse_isnumber(uidvalidity.s)) goto parse_err;
+            if (!imparse_isnumber(lastuid.s))     goto parse_err;
 
             folder = sync_folder_list_add(server_list, id.s, name.s, acl.s,
-					  sync_atoul(options.s), quotap);
+					  sync_atoul(uidvalidity.s),
+					  sync_atoul(options.s),
+                                          quotap);
             folder->msglist = sync_msg_list_create(NULL, sync_atoul(lastuid.s));
             break;
         case 1:
@@ -1956,7 +2015,7 @@ int do_mailboxes_work(struct sync_folder_list *client_list,
             
             if (((c = getword(fromserver, &arg)) != ' ')) goto parse_err;
 
-            if (!message_uuid_from_text(&msg->uuid, arg.s))
+            if (!message_guid_decode(&msg->guid, arg.s))
                 goto parse_err;
 
             c = sync_getflags(fromserver, &msg->flags, &folder->msglist->meta);
@@ -2031,8 +2090,12 @@ static int addmbox(char *name,
 		   void *rock)
 {
     struct sync_folder_list *list = (struct sync_folder_list *) rock;
+    int mbtype;
 
-    sync_folder_list_add(list, NULL, name, NULL, 0, NULL);
+    mboxlist_detail(name, &mbtype, NULL, NULL, NULL, NULL, NULL);
+    if (!(mbtype & (MBTYPE_RESERVE | MBTYPE_MOVING | MBTYPE_REMOTE))) {
+	sync_folder_list_add(list, NULL, name, NULL, 0, 0, NULL);
+    }
     return(0);
 }
 
@@ -2043,7 +2106,7 @@ static int addmbox_sub(char *name,
 {
     struct sync_folder_list *list = (struct sync_folder_list *) rock;
 
-    sync_folder_list_add(list, name, name, NULL, 0, NULL);
+    sync_folder_list_add(list, name, name, NULL, 0, 0, NULL);
     return(0);
 }
 
@@ -2055,7 +2118,7 @@ int do_mailbox_preload(struct sync_folder *folder)
     int r = 0;
     unsigned long msgno;
     struct index_record record;
-    int lastuid = 0;
+    unsigned lastuid = 0;
 
     if ((r=mailbox_open_header(folder->name, 0, &m)))
         return(r);
@@ -2306,10 +2369,10 @@ int do_user_start(char *user)
     return(0);
 }
 
-int do_user_parse(char *user,
-		      struct sync_folder_list *server_list,
-		      struct sync_folder_list *server_sub_list,
-		      struct sync_sieve_list  *server_sieve_list)
+int do_user_parse(char *user __attribute__((unused)),
+		  struct sync_folder_list *server_list,
+		  struct sync_folder_list *server_sub_list,
+		  struct sync_sieve_list  *server_sieve_list)
 {
     int r = 0;
     int c = ' ';
@@ -2320,6 +2383,7 @@ int do_user_parse(char *user,
     static struct buf time;
     static struct buf flag;
     static struct buf acl;
+    static struct buf uidvalidity;
     static struct buf lastuid;
     static struct buf options;
     static struct buf arg;
@@ -2358,7 +2422,8 @@ int do_user_parse(char *user,
             c = getastring(fromserver, toserver, &name);
             if (c == '\r') c = prot_getc(fromserver);
             if (c != '\n') goto parse_err;
-            sync_folder_list_add(server_sub_list, name.s, name.s, NULL, 0, NULL);
+            sync_folder_list_add(server_sub_list, name.s, name.s,
+                                 NULL, 0, 0, NULL);
             break;
         case 2:
             /* New folder */
@@ -2369,6 +2434,9 @@ int do_user_parse(char *user,
                 goto parse_err;
 
             if ((c = getastring(fromserver, toserver, &acl)) != ' ')
+                goto parse_err;
+
+            if ((c = getastring(fromserver, toserver, &uidvalidity)) != ' ')
                 goto parse_err;
 
             if ((c = getastring(fromserver, toserver, &lastuid)) != ' ')
@@ -2385,10 +2453,13 @@ int do_user_parse(char *user,
 
             if (c == '\r') c = prot_getc(fromserver);
             if (c != '\n') goto parse_err;
-            if (!imparse_isnumber(lastuid.s)) goto parse_err;
+            if (!imparse_isnumber(uidvalidity.s)) goto parse_err;
+            if (!imparse_isnumber(lastuid.s))     goto parse_err;
 
             folder = sync_folder_list_add(server_list, id.s, name.s, acl.s,
-					  sync_atoul(options.s), quotap);
+					  sync_atoul(uidvalidity.s),
+					  sync_atoul(options.s),
+                                          quotap);
             folder->msglist = sync_msg_list_create(NULL, sync_atoul(lastuid.s));
             break;
         case 1:
@@ -2401,7 +2472,7 @@ int do_user_parse(char *user,
             
             if (((c = getword(fromserver, &arg)) != ' ')) goto parse_err;
 
-            if (!message_uuid_from_text(&msg->uuid, arg.s))
+            if (!message_guid_decode(&msg->guid, arg.s))
                 goto parse_err;
 
             c = sync_getflags(fromserver, &msg->flags, &folder->msglist->meta);
@@ -2505,7 +2576,6 @@ int do_user_work(char *user, int *vanishedp)
 
 static int do_user(char *user)
 {
-    struct sync_lock lock;
     int r = 0;
     int vanished = 0;
 
@@ -2540,10 +2610,7 @@ static int do_user(char *user)
          * Following just protects us against folder rename smack in the
          * middle of night or manual sys. admin inspired sync run */
 
-        sync_lock_reset(&lock);
-        sync_lock(&lock);
         r = do_user_work(user, &vanished);
-        sync_unlock(&lock);
     }
     return(r);
 }
@@ -2573,7 +2640,7 @@ static int do_meta_sub(char *user)
             r = IMAP_PROTOCOL_ERROR;
             break;
         }
-        sync_folder_list_add(server_list, name.s, name.s, NULL, 0, NULL);
+        sync_folder_list_add(server_list, name.s, name.s, NULL, 0, 0, NULL);
 
         r = sync_parse_code("LSUB", fromserver,
                             SYNC_PARSE_EAT_OKLINE, &unsolicited);
@@ -2707,7 +2774,6 @@ static void remove_folder(char *name, struct sync_action_list *list,
 static int do_sync(const char *filename)
 {
     struct sync_user_list   *user_folder_list = sync_user_list_create();
-    struct sync_user        *user;
     struct sync_action_list *user_list   = sync_action_list_create();
     struct sync_action_list *meta_list   = sync_action_list_create();
     struct sync_action_list *sieve_list  = sync_action_list_create();
@@ -2722,7 +2788,6 @@ static int do_sync(const char *filename)
     struct sync_folder_list *folder_list = sync_folder_list_create();
     static struct buf type, arg1, arg2;
     char *arg1s, *arg2s;
-    char *userid;
     struct sync_action *action;
     int c;
     int fd;
@@ -2760,13 +2825,11 @@ static int do_sync(const char *filename)
             continue;
         }
 
-	if ((c = getastring(input, 0, &arg1)) == EOF)
-            break;
+	if ((c = getastring(input, 0, &arg1)) == EOF) break;
         arg1s = arg1.s;
 
         if (c == ' ') {
-            if ((c = getastring(input, 0, &arg2)) == EOF)
-                break;
+            if ((c = getastring(input, 0, &arg2)) == EOF) break;
             arg2s = arg2.s;
 
         } else 
@@ -2981,8 +3044,8 @@ static int do_sync(const char *filename)
     for (action = mailbox_list->head ; action ; action = action->next) {
         if (!action->active)
             continue;
-
-	sync_folder_list_add(folder_list, NULL, action->name, NULL, 0, NULL);
+	sync_folder_list_add(folder_list, NULL, action->name,
+                             NULL, 0, 0, NULL);
     }
 
     if (folder_list->count) {
@@ -3079,6 +3142,12 @@ static int do_sync(const char *filename)
 
 /* ====================================================================== */
 
+enum {
+    RESTART_NONE = 0,
+    RESTART_NORMAL,
+    RESTART_RECONNECT
+};
+
 int do_daemon_work(const char *sync_log_file, const char *sync_shutdown_file,
 		   unsigned long timeout, unsigned long min_delta,
 		   int *restartp)
@@ -3090,68 +3159,95 @@ int do_daemon_work(const char *sync_log_file, const char *sync_shutdown_file,
     int    delta;
     struct stat sbuf;
 
-    *restartp = 0;
+    *restartp = RESTART_NONE;
 
+    /* Create a work log filename.  Use the parent PID so we can
+     * try to reprocess it if the child fails.
+     */
     work_file_name = xmalloc(strlen(sync_log_file)+20);
     snprintf(work_file_name, strlen(sync_log_file)+20,
-             "%s-%d", sync_log_file, getpid());
+             "%s-%d", sync_log_file, getppid());
 
     session_start = time(NULL);
 
     while (1) {
         single_start = time(NULL);
 
+	/* Check for shutdown file */
         if (sync_shutdown_file && !stat(sync_shutdown_file, &sbuf)) {
             unlink(sync_shutdown_file);
             break;
         }
 
-        if ((timeout > 0) && ((single_start - session_start) > timeout)) {
-            *restartp = 1;
+	/* See if its time to RESTART */
+        if ((timeout > 0) &&
+	    ((single_start - session_start) > (time_t) timeout)) {
+            *restartp = RESTART_NORMAL;
             break;
         }
 
-        if (stat(sync_log_file, &sbuf) < 0) {
-            if (min_delta > 0) {
-                sleep(min_delta);
-            } else {
-                usleep(100000);    /* 1/10th second */
-            }
-            continue;
-        }
+        if ((stat(work_file_name, &sbuf) == 0) &&
+	    (sbuf.st_mtime - single_start < 3600)) {
+	    /* Existing work log file from our parent < 1 hour old */
+	    /* XXX  Is 60 minutes a resonable timeframe? */
+	    syslog(LOG_NOTICE,
+		   "Reprocessing sync log file %s", work_file_name);
+	}
+	else {
+	    /* Check for sync_log file */
+	    if (stat(sync_log_file, &sbuf) < 0) {
+		if (min_delta > 0) {
+		    sleep(min_delta);
+		} else {
+		    usleep(100000);    /* 1/10th second */
+		}
+		continue;
+	    }
 
-        if (rename(sync_log_file, work_file_name) < 0) {
-            syslog(LOG_ERR, "Rename %s -> %s failed: %m",
-                   sync_log_file, work_file_name);
-            exit(1);
-        }
+	    /* Move sync_log to our work file */
+	    if (rename(sync_log_file, work_file_name) < 0) {
+		syslog(LOG_ERR, "Rename %s -> %s failed: %m",
+		       sync_log_file, work_file_name);
+		r = IMAP_IOERROR;
+		break;
+	    }
+	}
 
-        if ((r=do_sync(work_file_name)))
-            return(r);
-        
+	/* Process the work log */
+        if ((r=do_sync(work_file_name))) {
+	    syslog(LOG_ERR,
+		   "Processing sync log file %s failed: %s",
+		   work_file_name, error_message(r));
+	    break;
+	}
+
+	/* Remove the work log */
         if (unlink(work_file_name) < 0) {
             syslog(LOG_ERR, "Unlink %s failed: %m", work_file_name);
-            exit(1);
+	    r = IMAP_IOERROR;
+	    break;
         }
         delta = time(NULL) - single_start;
 
-        if ((delta < min_delta) && ((min_delta-delta) > 0))
+        if (((unsigned) delta < min_delta) && ((min_delta-delta) > 0))
             sleep(min_delta-delta);
     }
     free(work_file_name);
 
-    if (*restartp == 0)
-        return(0);
+    if (*restartp == RESTART_NORMAL) {
+	prot_printf(toserver, "RESTART\r\n"); 
+	prot_flush(toserver);
 
-    prot_printf(toserver, "RESTART\r\n"); 
-    prot_flush(toserver);
+	r = sync_parse_code("RESTART", fromserver, SYNC_PARSE_EAT_OKLINE, NULL);
 
-    r = sync_parse_code("RESTART", fromserver, SYNC_PARSE_EAT_OKLINE, NULL);
-
-    if (r)
-        syslog(LOG_ERR, "sync_client RESTART failed");
-    else
-        syslog(LOG_INFO, "sync_client RESTART succeeded");
+	if (r) {
+	    syslog(LOG_ERR, "sync_client RESTART failed: %s",
+		   error_message(r));
+	} else {
+	    syslog(LOG_INFO, "sync_client RESTART succeeded");
+	}
+	r = 0;
+    }
 
     return(r);
 }
@@ -3160,17 +3256,42 @@ struct backend *replica_connect(struct backend *be, const char *servername,
 				sasl_callback_t *cb)
 {
     int wait;
+    struct protoent *proto;
 
     for (wait = 15;; wait *= 2) {
 	be = backend_connect(be, servername, &protocol[PROTOCOL_CSYNC],
 			     "", cb, NULL);
 
-	if (be || wait > 1000) break;
+	if (be || connect_once || wait > 1000) break;
 
 	fprintf(stderr,
 		"Can not connect to server '%s', retrying in %d seconds\n",
 		servername, wait);
 	sleep(wait);
+    }
+
+    if (!be) {
+	fprintf(stderr, "Can not connect to server '%s'\n",
+		servername);
+	syslog(LOG_ERR, "Can not connect to server '%s'", servername);
+	_exit(1);
+    }
+
+    /* Disable Nagle's Algorithm => increase throughput
+     *
+     * http://en.wikipedia.org/wiki/Nagle's_algorithm
+     */ 
+    if (servername[0] != '/') {
+	if ((proto = getprotobyname("tcp")) != NULL) {
+	    int on = 1;
+
+	    if (setsockopt(be->sock, proto->p_proto, TCP_NODELAY,
+			   (void *) &on, sizeof(on)) != 0) {
+		syslog(LOG_ERR, "unable to setsocketopt(TCP_NODELAY): %m");
+	    }
+	} else {
+	    syslog(LOG_ERR, "unable to getprotobyname(\"tcp\"): %m");
+	}
     }
 
     return be;
@@ -3185,9 +3306,8 @@ void do_daemon(const char *sync_log_file, const char *sync_shutdown_file,
     int status;
     int restart;
 
-    /* for a child so we can release from master */
-    if ((pid=fork()) < 0)
-	fatal("fork failed", EC_SOFTWARE);
+    /* fork a child so we can release from master */
+    if ((pid=fork()) < 0) fatal("fork failed", EC_SOFTWARE);
 
     if (pid != 0) { /* parent */
 	cyrus_done();
@@ -3201,18 +3321,23 @@ void do_daemon(const char *sync_log_file, const char *sync_shutdown_file,
         return;
     }
 
-    do {
-        if ((pid=fork()) < 0)
-            fatal("fork failed", EC_SOFTWARE);
+    signal(SIGPIPE, SIG_IGN); /* don't fail on server disconnects */
 
-        if (pid == 0) {
+    do {
+	/* fork a child so we can RESTART (flush memory) */
+        if ((pid=fork()) < 0) fatal("fork failed", EC_SOFTWARE);
+
+        if (pid == 0) { /* child */
+
 	    if (be->sock == -1) {
 		/* Reopen up connection to server */
-		be = replica_connect(be, be->hostname, cb);
+		be = replica_connect(be, servername, cb);
 
 		if (!be) {
 		    fprintf(stderr, "Can not connect to server '%s'\n",
 			    be->hostname);
+		    syslog(LOG_ERR, "Can not connect to server '%s'",
+			   be->hostname);
 		    _exit(1);
 		}
 
@@ -3224,14 +3349,36 @@ void do_daemon(const char *sync_log_file, const char *sync_shutdown_file,
             r = do_daemon_work(sync_log_file, sync_shutdown_file,
                                timeout, min_delta, &restart);
 
-            if (r)       _exit(1);
+            if (r) {
+		/* See if we're still connected to the server.
+		 * If we are, we had some type of error, so we exit.
+		 * Otherwise, try reconnecting.
+		 */
+		if (!backend_ping(be)) _exit(1);
+
+		syslog(LOG_WARNING, "Lost connection to server. Reconnecting");
+		restart = 1;
+	    }
+
             if (restart) _exit(EX_TEMPFAIL);
             _exit(0);
         }
-        if (waitpid(pid, &status, 0) < 0)
-            fatal("waitpid failed", EC_SOFTWARE);
+
+	/* parent */
+        if (waitpid(pid, &status, 0) < 0) fatal("waitpid failed", EC_SOFTWARE);
+
 	backend_disconnect(be);
     } while (WIFEXITED(status) && (WEXITSTATUS(status) == EX_TEMPFAIL));
+
+    if (WIFEXITED(status)) {
+	syslog(LOG_ERR, "process %d exited, status %d\n", pid, 
+	       WEXITSTATUS(status));
+    }
+    if (WIFSIGNALED(status)) {
+	syslog(LOG_ERR, 
+	       "process %d exited, signaled to death by %d\n",
+	       pid, WTERMSIG(status));
+    }
 }
 
 /* ====================================================================== */
@@ -3255,14 +3402,12 @@ int main(int argc, char **argv)
     int   opt, i = 0;
     char *alt_config     = NULL;
     char *input_filename = NULL;
-    const char *servername = NULL;
     int   r = 0;
     int   exit_rc = 0;
     int   mode = MODE_UNKNOWN;
     int   wait     = 0;
     int   timeout  = 600;
     int   min_delta = 0;
-    const char *sync_host = NULL;
     char sync_log_file[MAX_MAILBOX_PATH+1];
     const char *sync_shutdown_file = NULL;
     char buf[512];
@@ -3270,19 +3415,25 @@ int main(int argc, char **argv)
     int len;
     struct backend *be = NULL;
     sasl_callback_t *cb;
+    int config_virtdomains;
 
     /* Global list */
     msgid_onserver = sync_msgid_list_create(SYNC_MSGID_LIST_HASH_SIZE);
 
-    if(geteuid() == 0)
-        fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     setbuf(stdout, NULL);
 
-    while ((opt = getopt(argc, argv, "C:vlS:F:f:w:t:d:rums")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:vlS:F:f:w:t:d:rumso")) != EOF) {
         switch (opt) {
         case 'C': /* alt config file */
             alt_config = optarg;
+            break;
+
+        case 'o': /* only try to connect once */
+            connect_once = 1;
             break;
 
         case 'v': /* verbose */
@@ -3364,6 +3515,7 @@ int main(int argc, char **argv)
     }
 
     /* Set namespace -- force standard (internal) */
+    config_virtdomains = config_getenum(IMAPOPT_VIRTDOMAINS);
     if ((r = mboxname_init_namespace(&sync_namespace, 1)) != 0) {
         fatal(error_message(r), EC_CONFIG);
     }
@@ -3427,6 +3579,9 @@ int main(int argc, char **argv)
 		    exit_rc = 1;
 		}
 		else {
+		    mboxname_hiersep_tointernal(&sync_namespace, buf,
+						config_virtdomains ?
+						strcspn(buf, "@") : 0);
 		    if (do_user(buf)) {
 			if (verbose)
 			    fprintf(stderr,
@@ -3449,10 +3604,13 @@ int main(int argc, char **argv)
 		exit_rc = 1;
 	    }
 	    else {
+		mboxname_hiersep_tointernal(&sync_namespace, argv[i],
+					    config_virtdomains ?
+					    strcspn(argv[i], "@") : 0);
 		if (do_user(argv[i])) {
 		    if (verbose)
 			fprintf(stderr, "Error from do_user(%s): bailing out!\n",
-				argv[1]);
+				argv[i]);
 		    syslog(LOG_ERR, "Error in do_user(%s): bailing out!", argv[i]);
 		    exit_rc = 1;
 		}
@@ -3464,8 +3622,7 @@ int main(int argc, char **argv)
     case MODE_MAILBOX:
     {
 	struct sync_folder_list *folder_list = sync_folder_list_create();
-	struct sync_user   *user;
-	char   *s, *t;
+	char mailboxname[MAX_MAILBOX_NAME+1];
 
 	if (input_filename) {
 	    if ((file=fopen(input_filename, "r")) == NULL) {
@@ -3480,14 +3637,19 @@ int main(int argc, char **argv)
 		if ((len == 0) || (buf[0] == '#'))
 		    continue;
 
-		if (!sync_folder_lookup_byname(folder_list, argv[i]))
+		(*sync_namespace.mboxname_tointernal)(&sync_namespace, buf,
+						      NULL, mailboxname);
+		if (!sync_folder_lookup_byname(folder_list, mailboxname))
 		    sync_folder_list_add(folder_list,
-					 NULL, argv[i], NULL, 0, NULL);
+					 NULL, mailboxname, NULL, 0, 0, NULL);
 	    }
 	    fclose(file);
 	} else for (i = optind; i < argc; i++) {
-	    if (!sync_folder_lookup_byname(folder_list, argv[i]))
-		sync_folder_list_add(folder_list, NULL, argv[i], NULL, 0, NULL);
+	    (*sync_namespace.mboxname_tointernal)(&sync_namespace, argv[i],
+						   NULL, mailboxname);
+	    if (!sync_folder_lookup_byname(folder_list, mailboxname))
+		sync_folder_list_add(folder_list, NULL, mailboxname,
+                                     NULL, 0, 0, NULL);
 	}
 
 	if ((r = send_lock())) {
@@ -3524,6 +3686,9 @@ int main(int argc, char **argv)
 		exit_rc = 1;
 	    }
 	    else {
+		mboxname_hiersep_tointernal(&sync_namespace, argv[i],
+					    config_virtdomains ?
+					    strcspn(argv[i], "@") : 0);
 		if (do_sieve(argv[i])) {
 		    if (verbose) {
 			fprintf(stderr,
@@ -3566,6 +3731,5 @@ int main(int argc, char **argv)
     sync_msgid_list_free(&msgid_onserver);
     backend_disconnect(be);
 
-  quit:
     shut_down(exit_rc);
 }

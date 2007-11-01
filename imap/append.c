@@ -1,5 +1,5 @@
 /* append.c -- Routines for appending messages to a mailbox
- * $Id: append.c,v 1.109 2006/11/30 17:11:17 murch Exp $
+ * $Id: append.c,v 1.109.2.1 2007/11/01 14:39:31 murch Exp $
  *
  * Copyright (c)1998, 2000 Carnegie Mellon University.  All rights reserved.
  *
@@ -61,12 +61,14 @@
 #include "global.h"
 #include "prot.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "mboxlist.h"
 #include "seen.h"
 #include "retry.h"
 #include "quota.h"
 
-#include "message_uuid.h"
+#include "message_guid.h"
 
 struct stagemsg {
     char fname[1024];
@@ -81,7 +83,7 @@ struct stagemsg {
     */
     char *parts; /* buffer of current stage parts */
     char *partend; /* end of buffer */
-    struct message_uuid uuid;
+    struct message_guid guid;
 };
 
 static int append_addseen(struct mailbox *mailbox, const char *userid,
@@ -414,9 +416,6 @@ FILE *append_newstage(const char *mailboxname, time_t internaldate,
     stage->parts = xzmalloc(5 * (MAX_MAILBOX_PATH+1) * sizeof(char));
     stage->partend = stage->parts + 5 * (MAX_MAILBOX_PATH+1) * sizeof(char);
 
-    /* Assign new, shared MessageID */
-    message_uuid_assign(&stage->uuid);
-
     snprintf(stage->fname, sizeof(stage->fname), "%d-%d-%d",
 	     (int) getpid(), (int) internaldate, msgnum);
 
@@ -574,7 +573,8 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	/* ok, we've successfully created the file */
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
-	if (!r) r = message_create_record(mailbox, &message_index, *body);
+	if (!r) r = message_create_record(mailbox->name, mailbox->cache_fd,
+					  &message_index, *body);
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -638,9 +638,6 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	    }
 	}
     }
-    /* Copy Message UUID from stage */
-    message_uuid_copy(&message_index.uuid, &stage->uuid);
-
     /* Write out index file entry */
     r = mailbox_append_index(mailbox, &message_index, 
 			     mailbox->exists + as->nummsg - 1, 1, 0);
@@ -739,7 +736,8 @@ int append_fromstream(struct appendstate *as, struct body **body,
     if (!r) {
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
-	if (!r) r = message_create_record(mailbox, &message_index, *body);
+	if (!r) r = message_create_record(mailbox->name, mailbox->cache_fd,
+					  &message_index, *body);
     }
     fclose(destfile);
     if (r) {
@@ -798,9 +796,6 @@ int append_fromstream(struct appendstate *as, struct body **body,
 	    }
 	}
     }
-
-    /* Assign new Message-UUID */
-    message_uuid_assign(&message_index.uuid);
 
     /* Write out index file entry; if we abort later, it's not
        important */
@@ -948,7 +943,8 @@ int append_copy(struct mailbox *mailbox,
 				  &src_base, &src_size);
 
 	    if (!r) r = message_parse_file(destfile, NULL, NULL, &body);
-	    if (!r) r = message_create_record(append_mailbox,
+	    if (!r) r = message_create_record(append_mailbox->name,
+					      append_mailbox->cache_fd,
 					      &message_index[msg], body);
 	    if (body) message_free_body(body);
 	    fclose(destfile);
@@ -1002,8 +998,8 @@ int append_copy(struct mailbox *mailbox,
 		  message_index[msg].uid);
 	}
 
-	/* Assign messageID for this message */
-	message_uuid_copy(&message_index[msg].uuid, &copymsg[msg].uuid);
+	/* Message is copy of existing GUID */
+	message_guid_copy(&message_index[msg].guid, &copymsg[msg].guid);
     }
 
     if (body) free(body);
@@ -1089,7 +1085,9 @@ static int append_addseen(struct mailbox *mailbox,
     /* what's the first uid in our new list? */
     start = atoi(msgrange);
 
-    r = seen_open(mailbox, userid, SEEN_CREATE, &seendb);
+    r = seen_open(mailbox,
+		  (mailbox->options & OPT_IMAP_SHAREDSEEN) ? "anyone" : userid,
+		  SEEN_CREATE, &seendb);
     if (r) return r;
     
     r = seen_lockread(seendb, &last_read, &last_uid, &last_change, &seenuids);

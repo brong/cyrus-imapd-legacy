@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: search_engines.c,v 1.6 2006/11/30 17:11:20 murch Exp $
+ * $Id: search_engines.c,v 1.6.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -56,6 +56,8 @@
 #include "imapd.h"
 #include "global.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 
 #include "squat.h"
 
@@ -88,7 +90,7 @@ static int parse_doc_name(SquatSearchResult* r, char const* doc_name) {
   int doc_UID, index;
 
   if (ch == 'v' && strncmp(doc_name, "validity.", 9) == 0) {
-    if (atoi(doc_name + 9) == r->mailbox->uidvalidity) {
+      if ((unsigned) atoi(doc_name + 9) == r->mailbox->uidvalidity) {
       r->found_validity = 1;
     }
     return -1;
@@ -113,7 +115,7 @@ static int parse_doc_name(SquatSearchResult* r, char const* doc_name) {
   
   /* now we need to convert the UID to the message sequence number */
   index = index_finduid(doc_UID);
-  if (index < 1 || index > imapd_exists || doc_UID != index_getuid(index)) {
+  if (index < 1 || index > imapd_exists || doc_UID != (int) index_getuid(index)) {
     return -1;
   }
 

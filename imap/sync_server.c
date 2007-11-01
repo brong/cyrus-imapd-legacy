@@ -41,7 +41,7 @@
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
  *
- * $Id: sync_server.c,v 1.2 2006/11/30 17:11:20 murch Exp $
+ * $Id: sync_server.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -63,6 +63,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <ctype.h>
 
@@ -90,10 +91,14 @@
 #include "spool.h"
 #include "telemetry.h"
 #include "tls.h"
+#include "user.h"
 #include "util.h"
 #include "version.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
+#include "xstrlcpy.h"
 
+#include "message_guid.h"
 #include "sync_support.h"
 #include "sync_commit.h"
 /*#include "cdb.h"*/
@@ -123,7 +128,7 @@ void printastring(const char *s __attribute__((unused)))
 static SSL *tls_conn;
 #endif /* HAVE_SSL */
 
-sasl_conn_t *sync_saslconn; /* the sasl connection context */
+sasl_conn_t *sync_saslconn = NULL; /* the sasl connection context */
 
 char *sync_userid = 0;
 struct namespace sync_namespace;
@@ -164,6 +169,7 @@ static void cmd_setseen(struct mailbox **mailboxp, char *user, char *mboxname,
 			time_t lastchange, char *seenuid);
 static void cmd_setseen_all(char *user, struct buf *data);
 static void cmd_setacl(char *name, char *acl);
+static void cmd_setuidvalidity(char *name, unsigned long uidvalidity);
 static void cmd_expunge(struct mailbox *mailbox);
 static void cmd_mailboxes();
 static void cmd_user(char *userid);
@@ -220,8 +226,6 @@ static struct sasl_callback mysasl_cb[] = {
 
 static void sync_reset(void)
 {
-    int i;
-
     proc_cleanup();
 
     if (sync_in) {
@@ -337,16 +341,19 @@ int service_init(int argc __attribute__((unused)),
 static void dobanner(void)
 {
     const char *mechlist;
-    unsigned int mechcount;
+    int mechcount;
 
-    if (sasl_listmech(sync_saslconn, NULL,
-		      "* SASL ", " ", "\r\n",
-		      &mechlist, NULL, &mechcount) == SASL_OK && mechcount > 0) {
-	prot_printf(sync_out, "%s", mechlist);
-    }
+    if (!sync_userid) {
+	if (sasl_listmech(sync_saslconn, NULL,
+			  "* SASL ", " ", "\r\n",
+			  &mechlist, NULL, &mechcount) == SASL_OK
+	    && mechcount > 0) {
+	    prot_printf(sync_out, "%s", mechlist);
+	}
 
-    if (tls_enabled() && !sync_starttls_done) {
-	prot_printf(sync_out, "* STARTTLS\r\n");
+	if (tls_enabled() && !sync_starttls_done) {
+	    prot_printf(sync_out, "* STARTTLS\r\n");
+	}
     }
 
     prot_printf(sync_out,
@@ -363,11 +370,11 @@ int service_main(int argc __attribute__((unused)),
 		 char **argv __attribute__((unused)),
 		 char **envp __attribute__((unused)))
 {
+    struct protoent *proto;
     socklen_t salen;
     char localip[60], remoteip[60];
     char hbuf[NI_MAXHOST];
     int niflags;
-    int timeout;
     sasl_security_properties_t *secprops = NULL;
 
     signals_poll();
@@ -403,28 +410,48 @@ int service_main(int argc __attribute__((unused)),
 	if (getsockname(0, (struct sockaddr *)&sync_localaddr, &salen) == 0) {
 	    sync_haveaddr = 1;
 	}
-    }
 
-    /* other params should be filled in */
-    if (sasl_server_new("csync", config_servername, NULL, NULL, NULL,
-			NULL, 0, &sync_saslconn) != SASL_OK)
-	fatal("SASL failed initializing: sasl_server_new()",EC_TEMPFAIL); 
+	/* other params should be filled in */
+	if (sasl_server_new("csync", config_servername, NULL, NULL, NULL,
+			    NULL, 0, &sync_saslconn) != SASL_OK)
+	    fatal("SASL failed initializing: sasl_server_new()",EC_TEMPFAIL); 
 
-    /* will always return something valid */
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
-    sasl_setprop(sync_saslconn, SASL_SEC_PROPS, secprops);
-    sasl_setprop(sync_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
+	/* will always return something valid */
+	secprops = mysasl_secprops(SASL_SEC_NOANONYMOUS);
+	sasl_setprop(sync_saslconn, SASL_SEC_PROPS, secprops);
+	sasl_setprop(sync_saslconn, SASL_SSF_EXTERNAL, &extprops_ssf);
     
-    if(iptostring((struct sockaddr *)&sync_localaddr, salen,
-		  localip, 60) == 0) {
-	sasl_setprop(sync_saslconn, SASL_IPLOCALPORT, localip);
-	saslprops.iplocalport = xstrdup(localip);
-    }
+	if(iptostring((struct sockaddr *)&sync_localaddr, salen,
+		      localip, 60) == 0) {
+	    sasl_setprop(sync_saslconn, SASL_IPLOCALPORT, localip);
+	    saslprops.iplocalport = xstrdup(localip);
+	}
     
-    if(iptostring((struct sockaddr *)&sync_remoteaddr, salen,
-		  remoteip, 60) == 0) {
-	sasl_setprop(sync_saslconn, SASL_IPREMOTEPORT, remoteip);  
-	saslprops.ipremoteport = xstrdup(remoteip);
+	if(iptostring((struct sockaddr *)&sync_remoteaddr, salen,
+		      remoteip, 60) == 0) {
+	    sasl_setprop(sync_saslconn, SASL_IPREMOTEPORT, remoteip);  
+	    saslprops.ipremoteport = xstrdup(remoteip);
+	}
+
+	/* Disable Nagle's Algorithm => increase throughput
+	 *
+	 * http://en.wikipedia.org/wiki/Nagle's_algorithm
+	 */
+	if ((proto = getprotobyname("tcp")) != NULL) {
+	    int on = 1;
+
+	    if (setsockopt(1, proto->p_proto, TCP_NODELAY,
+			   (void *) &on, sizeof(on)) != 0) {
+		syslog(LOG_ERR, "unable to setsocketopt(TCP_NODELAY): %m");
+	    }
+	} else {
+	    syslog(LOG_ERR, "unable to getprotobyname(\"tcp\"): %m");
+	}
+    } else {
+	/* we're not connected to an internet socket! */
+	strcpy(sync_clienthost, "[unix socket]");
+	sync_userid = xstrdup("cyrus");
+	sync_userisadmin = 1;
     }
 
     proc_register("sync_server", sync_clienthost, NULL, NULL);
@@ -466,8 +493,6 @@ void usage(void)
  */
 void shut_down(int code)
 {
-    int i;
-
     proc_cleanup();
 
     seen_done();
@@ -540,7 +565,7 @@ static int reset_saslconn(sasl_conn_t **conn)
        ret = sasl_setprop(*conn, SASL_IPLOCALPORT,
                           saslprops.iplocalport);
     if(ret != SASL_OK) return ret;
-    secprops = mysasl_secprops(SASL_SEC_NOPLAINTEXT);
+    secprops = mysasl_secprops(SASL_SEC_NOANONYMOUS);
     ret = sasl_setprop(*conn, SASL_SEC_PROPS, secprops);
     if(ret != SASL_OK) return ret;
     /* end of service_main initialization excepting SSF */
@@ -841,7 +866,7 @@ static void cmdloop(void)
 		c = getastring(sync_in, sync_out, &arg1);
 		if (c != ' ') goto missingargs;
 
-                /* Let cmd_reserve() process list of Message-UUIDs */
+                /* Let cmd_reserve() process list of Message-GUIDs */
                 cmd_reserve(arg1.s, message_list);
                 continue;
             }
@@ -959,7 +984,21 @@ static void cmdloop(void)
                 cmd_set_annotation(arg1.s, arg2.s, arg3.s, arg4.s);
                 continue;
             }
-	    break;
+            else if (!strcmp(cmd.s, "Setuidvalidity")) {
+		if (c != ' ') goto missingargs;
+		c = getastring(sync_in, sync_out, &arg1);
+		if (c != ' ') goto missingargs;
+		c = getastring(sync_in, sync_out, &arg2);
+		if (c == EOF) goto missingargs;
+		if (c == '\r') c = prot_getc(sync_in);
+		if (c != '\n') goto extraargs;
+
+                if (!imparse_isnumber(arg2.s)) goto invalidargs;
+
+                cmd_setuidvalidity(arg1.s, sync_atoul(arg2.s));
+                continue;
+            }
+            break;
 	case 'U':
             if (!strcmp(cmd.s, "Upload")) {
 		int restart;
@@ -1087,9 +1126,9 @@ static void cmdloop(void)
 static void cmd_authenticate(char *mech, char *resp)
 {
     int r, sasl_result;
-    const int *ssfp;
+    sasl_ssf_t ssf;
     char *ssfmsg = NULL;
-    const char *canon_user;
+    const void *val;
 
     if (sync_userid) {
 	prot_printf(sync_out, "502 Already authenticated\r\n");
@@ -1100,7 +1139,6 @@ static void cmd_authenticate(char *mech, char *resp)
 		   sync_in, sync_out, &sasl_result, NULL);
 
     if (r) {
-	int code;
 	const char *errorstring = NULL;
 
 	switch (r) {
@@ -1140,8 +1178,7 @@ static void cmd_authenticate(char *mech, char *resp)
     /* get the userid from SASL --- already canonicalized from
      * mysasl_proxy_policy()
      */
-    sasl_result = sasl_getprop(sync_saslconn, SASL_USERNAME,
-			       (const void **) &canon_user);
+    sasl_result = sasl_getprop(sync_saslconn, SASL_USERNAME, &val);
     if (sasl_result != SASL_OK) {
 	prot_printf(sync_out, "NO weird SASL error %d SASL_USERNAME\r\n", 
 		    sasl_result);
@@ -1151,24 +1188,25 @@ static void cmd_authenticate(char *mech, char *resp)
 	return;
     }
 
-    sync_userid = xstrdup(canon_user);
+    sync_userid = xstrdup((const char *) val);
     proc_register("sync_server", sync_clienthost, sync_userid, (char *)0);
 
     syslog(LOG_NOTICE, "login: %s %s %s%s %s", sync_clienthost, sync_userid,
 	   mech, sync_starttls_done ? "+TLS" : "", "User logged in");
 
-    sasl_getprop(sync_saslconn, SASL_SSF, (const void **) &ssfp);
+    sasl_getprop(sync_saslconn, SASL_SSF, &val);
+    ssf = *((sasl_ssf_t *) val);
 
     /* really, we should be doing a sasl_getprop on SASL_SSF_EXTERNAL,
        but the current libsasl doesn't allow that. */
     if (sync_starttls_done) {
-	switch(*ssfp) {
+	switch(ssf) {
 	case 0: ssfmsg = "tls protection"; break;
 	case 1: ssfmsg = "tls plus integrity protection"; break;
 	default: ssfmsg = "tls plus privacy protection"; break;
 	}
     } else {
-	switch(*ssfp) {
+	switch(ssf) {
 	case 0: ssfmsg = "no protection"; break;
 	case 1: ssfmsg = "integrity protection"; break;
 	default: ssfmsg = "privacy protection"; break;
@@ -1272,6 +1310,7 @@ static void cmd_starttls(void)
 }
 #endif /* HAVE_SSL */
 
+#if 0
 static int
 user_master_is_local(char *user)
 {
@@ -1290,6 +1329,7 @@ user_master_is_local(char *user)
     /* rc: -1 => error, 0 => lookup failed, 1 => lookup suceeded */
     return(rc == 1);  
 }
+#endif
 
 /* ====================================================================== */
 
@@ -1366,15 +1406,16 @@ static void cmd_reserve(char *mailbox_name,
     struct mailbox m;
     struct index_record record;
     static struct buf arg;
-    int r = 0, c;
+    int r = 0, c = ' ';
     int mailbox_open = 0;
-    int alloc = RESERVE_DELTA, count = 0, i, msgno;
-    struct message_uuid *ids = xmalloc(alloc*sizeof(struct message_uuid));
+    int alloc = RESERVE_DELTA, count = 0, i;
+    unsigned msgno;
+    struct message_guid *ids = xmalloc(alloc*sizeof(struct message_guid));
     char *err = NULL;
     char mailbox_msg_path[MAX_MAILBOX_PATH+1];
     char *stage_msg_path;
     struct sync_message *message = NULL;
-    struct message_uuid tmp_uuid;
+    struct message_guid tmp_guid;
 
     if ((r = sync_message_list_newstage(message_list, mailbox_name))) {
 	eatline(sync_in,c);
@@ -1386,16 +1427,16 @@ static void cmd_reserve(char *mailbox_name,
     do {
         c = getastring(sync_in, sync_out, &arg);
 
-        if (!arg.s || !message_uuid_from_text(&tmp_uuid, arg.s)) {
+        if (!arg.s || !message_guid_decode(&tmp_guid, arg.s)) {
             err = "Not a MessageID";
             goto parse_err;
         }
         
         if (alloc == count) {
             alloc += RESERVE_DELTA;
-            ids = xrealloc(ids, (alloc*sizeof(struct message_uuid)));
+            ids = xrealloc(ids, (alloc*sizeof(struct message_guid)));
         }
-        message_uuid_copy(&ids[count++], &tmp_uuid);
+        message_guid_copy(&ids[count++], &tmp_guid);
     } while (c == ' ');
 
     if (c == EOF) {
@@ -1423,14 +1464,17 @@ static void cmd_reserve(char *mailbox_name,
         goto cleanup;
     }
 
-    for (i = 0, msgno = 1 ; msgno <= m.exists; msgno++) {
+    for (i = 0, msgno = 1 ; (msgno <= m.exists) && (i < count); msgno++) {
         mailbox_read_index_record(&m, msgno, &record);
 
-        if (!message_uuid_compare(&record.uuid, &ids[i]))
+        if (!message_guid_compare(&record.guid, &ids[i]))
             continue;
 
-        if (sync_message_find(message_list, &record.uuid))
-            continue; /* Duplicate UUID on RESERVE list */
+        if (sync_message_find(message_list, &record.guid)) {
+	    /* Duplicate GUID on RESERVE list */
+	    i++;
+            continue;
+	}
 
         /* Attempt to reserve this message */
         snprintf(mailbox_msg_path, sizeof(mailbox_msg_path),
@@ -1445,7 +1489,7 @@ static void cmd_reserve(char *mailbox_name,
         }
 
         /* Reserve succeeded */
-        message = sync_message_add(message_list, &record.uuid);
+        message = sync_message_add(message_list, &record.guid);
         message->msg_size     = record.size;
         message->hdr_size     = record.header_size;
         message->cache_offset = sync_message_list_cache_offset(message_list);
@@ -1457,7 +1501,7 @@ static void cmd_reserve(char *mailbox_name,
                                 (char *)(m.cache_base+record.cache_offset),
                                 message->cache_size);
 
-        prot_printf(sync_out, "* %s\r\n", message_uuid_text(&record.uuid));
+        prot_printf(sync_out, "* %s\r\n", message_guid_encode(&record.guid));
         i++;
     }
     mailbox_close(&m);
@@ -1506,8 +1550,6 @@ static void cmd_quota(char *quotaroot)
 
 static void cmd_setquota(char *root, int limit)
 {
-    char quota_path[MAX_MAILBOX_PATH];
-    struct quota quota;
     int r = 0;
 
     /* NB: Minimal interface without two phase expunge */
@@ -1531,7 +1573,7 @@ static int addmbox_full(char *name,
 
     /* List all mailboxes, including directories and deleted items */
 
-    sync_folder_list_add(list, name, name, NULL, 0, NULL);
+    sync_folder_list_add(list, name, name, NULL, 0, 0, NULL);
     return(0);
 }
 
@@ -1542,7 +1584,7 @@ static int addmbox_sub(char *name,
 {
     struct sync_folder_list *list = (struct sync_folder_list *) rock;
 
-    sync_folder_list_add(list, name, name, NULL, 0, NULL);
+    sync_folder_list_add(list, name, name, NULL, 0, 0, NULL);
     return(0);
 }
 
@@ -1612,7 +1654,7 @@ static void cmd_status_work_preload(struct mailbox *mailbox)
 {
     unsigned long msgno;
     struct index_record record;
-    int lastuid = 0;
+    unsigned lastuid = 0;
 
     /* Quietly preload data from index */
     for (msgno = 1 ; msgno <= mailbox->exists; msgno++) {
@@ -1635,7 +1677,7 @@ static void cmd_status_work(struct mailbox *mailbox)
         mailbox_read_index_record(mailbox, msgno, &record);
 
         prot_printf(sync_out, "* %lu %s (",
-                 record.uid, message_uuid_text(&record.uuid));
+                 record.uid, message_guid_encode(&record.guid));
 
         flags_printed = 0;
 
@@ -1670,7 +1712,7 @@ static void cmd_status(struct mailbox *mailbox)
 }
 
 /* ====================================================================== */
-
+#if 0
 static const char *
 seen_parse(const char *s, unsigned long *first_uidp, unsigned long *last_uidp)
 {
@@ -1750,7 +1792,7 @@ find_return_path(char *hdr)
     }
     return(NULL);
 }
-
+#endif
 /* ====================================================================== */
 
 static void cmd_upload(struct mailbox *mailbox,
@@ -1763,7 +1805,7 @@ static void cmd_upload(struct mailbox *mailbox,
     struct sync_upload_item *item;
     struct sync_message     *message;
     static struct buf arg;
-    int   c;
+    int   c = ' ';
     enum {MSG_SIMPLE, MSG_PARSED, MSG_COPY} msg_type;
     int   r = 0;
     char *err;
@@ -1805,15 +1847,15 @@ static void cmd_upload(struct mailbox *mailbox,
             goto parse_err;
         }
 
-        /* Get Message-UUID */
+        /* Get Message-GUID */
         if ((c = getastring(sync_in, sync_out, &arg)) != ' ') {
             err = "Invalid sequence ID";
             goto parse_err;
         }
         if (!strcmp(arg.s, "NIL"))
-            message_uuid_set_null(&item->uuid);
-        else if (!message_uuid_from_text(&item->uuid, arg.s)) {
-            err = "Invalid Message-UUID";
+            message_guid_set_null(&item->guid);
+        else if (!message_guid_decode(&item->guid, arg.s)) {
+            err = "Invalid Message-GUID";
             goto parse_err;
         }
 
@@ -1860,17 +1902,19 @@ static void cmd_upload(struct mailbox *mailbox,
         switch (msg_type) {
         case MSG_SIMPLE:
             if (c != ' ') {
-                err = "Invalid flags";
+                err = "Invalid flags or missing message";
                 goto parse_err;
             }
 
-            if (message_list->cache_buffer_size > 0)
-                sync_message_list_cache_flush(message_list);
+            if (message_list->cache_buffer_size > 0) {
+                r = sync_message_list_cache_flush(message_list);
+                if (r) {
+                    err = "Failed to flush messages to disk";
+                    goto parse_err;
+                }
+            }
 
-            /* YYY Problem: sync_server needs source of Message-UUID for
-               new uploaded messages. Schema 2? */
-
-            message = sync_message_add(message_list, NULL /* YYY */);
+            message = sync_message_add(message_list, &item->guid);
 
             r = sync_getsimple(sync_in, sync_out, message_list, message);
 
@@ -1882,11 +1926,11 @@ static void cmd_upload(struct mailbox *mailbox,
             break;
         case MSG_PARSED:
             if (c != ' ') {
-                err = "Invalid flags";
+                err = "Invalid flags or missing message";
                 goto parse_err;
             }
 
-            message = sync_message_add(message_list, &item->uuid);
+            message = sync_message_add(message_list, &item->guid);
 
             /* Parse Message (header size, content lines, cache, message body */
             if ((c = getastring(sync_in, sync_out, &arg)) != ' ') {
@@ -1916,7 +1960,7 @@ static void cmd_upload(struct mailbox *mailbox,
 
             break;
         case MSG_COPY:
-            if (!(message=sync_message_find(message_list, &item->uuid))) {
+            if (!(message=sync_message_find(message_list, &item->guid))) {
                 err = "Unknown Reserved message";
                 goto parse_err;
             }
@@ -1944,10 +1988,10 @@ static void cmd_upload(struct mailbox *mailbox,
     }
 
     /* Make sure cache data flushed to disk before we commit */
-    sync_message_fsync(message_list);
-    sync_message_list_cache_flush(message_list);
-
-    r=sync_upload_commit(mailbox, last_appenddate, upload_list, message_list);
+    r = sync_message_fsync(message_list);
+    if (!r) sync_message_list_cache_flush(message_list);
+    if (!r) r = sync_upload_commit(mailbox, last_appenddate,
+                                   upload_list, message_list);
 
     if (r) {
         prot_printf(sync_out, "NO Failed to commit message upload to %s: %s\r\n",
@@ -2163,6 +2207,29 @@ static void cmd_setacl(char *name, char *acl)
         prot_printf(sync_out, "OK SetAcl Suceeded\r\n");
 }
 
+/* ====================================================================== */
+
+static void cmd_setuidvalidity(char *name, unsigned long uidvalidity)
+{
+    struct mailbox m;
+    int mboxopen = 0;
+    int r;
+
+    /* Open and lock mailbox */
+    r = mailbox_open_header(name, 0, &m);
+    if (!r) mboxopen = 1;
+    if (!r) r = mailbox_open_index(&m);
+    if (!r) r = sync_uidvalidity_commit(&m, uidvalidity);
+
+    if (!r) {
+        prot_printf(sync_out, "OK SetUIDvalidity succeeded\r\n");
+    } else {
+        prot_printf(sync_out, "NO SetUIDvalidity failed: %s\r\n",
+                    error_message(r));
+    }
+
+    if (mboxopen) mailbox_close(&m);
+}
 
 /* ====================================================================== */
 
@@ -2173,9 +2240,10 @@ struct uid_list {
     unsigned long  count;
 };
 
-static int cmd_expunge_decide(struct mailbox *mailbox __attribute__((unused)),
-			      void *rock, char *indexbuf,
-			      int expunge_flags __attribute__((unused)))
+static unsigned cmd_expunge_decide(struct mailbox *mailbox __attribute__((unused)),
+				   void *rock,
+				   unsigned char *indexbuf,
+				   int expunge_flags __attribute__((unused)))
 {
     struct uid_list *uids = (struct uid_list *)rock;
     unsigned long uid = htonl(*((bit32 *)(indexbuf+OFFSET_UID)));
@@ -2274,7 +2342,10 @@ static void cmd_expunge(struct mailbox *mailbox)
 
 /* ====================================================================== */
 
-static int do_mailbox_single(char *name, int matchlen, int maycreate, void *rock)
+static int do_mailbox_single(char *name,
+			     int matchlen __attribute__((unused)),
+			     int maycreate __attribute__((unused)),
+			     void *rock)
 {
     struct mailbox m;
     int r;
@@ -2296,6 +2367,7 @@ static int do_mailbox_single(char *name, int matchlen, int maycreate, void *rock
         sync_printastring(sync_out, m.name);
 	prot_printf(sync_out, " ");
         sync_printastring(sync_out, m.acl);
+        prot_printf(sync_out, " %lu", m.uidvalidity);
         prot_printf(sync_out, " %lu", m.last_uid);
 	prot_printf(sync_out, " %lu", m.options);
 	if (m.quota.root && !strcmp(name, m.quota.root) &&
@@ -2314,8 +2386,10 @@ static int do_mailbox_single(char *name, int matchlen, int maycreate, void *rock
 
 /* ====================================================================== */
 
-static int do_lsub_all_single(char *name, int matchlen, int maycreate,
-			       void *rock)
+static int do_lsub_all_single(char *name,
+			      int matchlen __attribute__((unused)),
+			      int maycreate __attribute__((unused)),
+			      void *rock __attribute__((unused)))
 {
     prot_printf(sync_out, "*** ");
     sync_printastring(sync_out, name);
@@ -2334,7 +2408,6 @@ static void cmd_mailboxes()
     char **folder_name = xmalloc(alloc*sizeof(char *));
     char *err;
     int live = 1;
-    int r = 0;
 
     /* Parse list of Folders */
     do {
@@ -2486,9 +2559,8 @@ static void cmd_create(char *mailboxname, char *partition,
 		       unsigned long uidvalidity)
 {
     int r;
-    char buf[MAX_MAILBOX_PATH+1];
     char aclbuf[128];
-    int size;
+    size_t size;
 
     if (uniqueid && !strcasecmp(uniqueid, "NIL"))
         uniqueid = NULL;
@@ -2550,7 +2622,10 @@ static void cmd_rename(char *oldmailboxname, char *newmailboxname)
 
 }
 
-static int do_lsub_single(char *name, int matchlen, int maycreate, void *rock)
+static int do_lsub_single(char *name,
+			  int matchlen __attribute__((unused)),
+			  int maycreate __attribute__((unused)),
+			  void *rock __attribute__((unused)))
 {
     prot_printf(sync_out, "* ");
     sync_printastring(sync_out, name);
@@ -2561,7 +2636,6 @@ static int do_lsub_single(char *name, int matchlen, int maycreate, void *rock)
 
 static void cmd_lsub(char *user)
 {
-    char buf[MAX_MAILBOX_PATH];
     int r;
 
     r = ((*sync_namespacep).mboxlist_findsub)(sync_namespacep, "*",

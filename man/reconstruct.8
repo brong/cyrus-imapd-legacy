@@ -39,7 +39,7 @@
 .\" AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 .\" OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\" 
-.\" $Id: reconstruct.8,v 1.21 2006/11/30 17:11:23 murch Exp $
+.\" $Id: reconstruct.8,v 1.21.2.1 2007/11/01 14:39:37 murch Exp $
 .SH NAME
 reconstruct \- reconstruct mailboxes
 .SH SYNOPSIS
@@ -61,14 +61,21 @@ reconstruct \- reconstruct mailboxes
 [
 .B \-f
 ]
-[
+.br
+            [
 .B \-k  
 ]
 [
 .B \-s
 ]
-
+[
+.B \-g
+]
+[
+.B \-G
+]
 .IR mailbox ...
+.br
 .br
 .B reconstruct
 [
@@ -144,6 +151,12 @@ instead of deleting them.
 .B \-s
 Adds synchronization records to the log, so the synchronization 
 service can replicate the changes.
+.TP
+.B \-g
+Clear existing or regenerated GUIDs for all messages.
+.TP
+.B \-G
+Force regeneration of GUIDs for all messages.
 .TP
 .B \-m
 .B NOTE: CURRENTLY UNAVAILABLE

@@ -41,7 +41,7 @@
  */
 
 static char rcsid[] =
-      "$Id: afskrb.c,v 1.13 2006/11/30 17:11:24 murch Exp $";
+      "$Id: afskrb.c,v 1.13.2.1 2007/11/01 14:39:38 murch Exp $";
 
 #include <config.h>
 #include "ptloader.h"
@@ -158,13 +158,16 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
 	syslog(LOG_DEBUG, "afspts_canonifyid stripped: %s", identifier2);
     }
 
-    if (krb5_init_context(&context))
+    if (krb5_init_context(&context)) {
+        syslog(LOG_ERR, "afspts_canonifyid krb5_init_context failed");
 	return NULL;
+    }
 
     if (krb5_parse_name(context,identifier2,&princ))
     {
 	krb5_free_context(context);
         free(identifier2);
+        syslog(LOG_ERR, "afspts_canonifyid krb5_parse_name failed");
 	return NULL;
     }
     free(identifier2);
@@ -175,6 +178,7 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
 	{
 	    krb5_free_principal(context,princ);
 	    krb5_free_context(context);
+            syslog(LOG_ERR, "afspts_canonifyid krb5_get_default_realm failed");
 	    return NULL;
 	}
 	
@@ -185,6 +189,7 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
 	    krb5_free_principal(context,princ);
 	    krb5_free_context(context);
 	    free(realm);
+            syslog(LOG_ERR, "afspts_canonifyid krb5_build_principal failed");
 	    return NULL;
 	}
 	
@@ -202,7 +207,7 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
     if (config_getswitch(IMAPOPT_PTSKRB5_CONVERT524)) {
 	char nbuf[64], ibuf[64], rbuf[64];
 
-	if (krb5_524_conv_principal(context, princ, nbuf, ibuf, rbuf)) {
+        if (krb5_524_conv_principal(context, princ, nbuf, ibuf, rbuf)) {
 	    krb5_free_principal(context,princ);
 	    krb5_free_context(context);
 	    return NULL;
@@ -218,6 +223,7 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
 	{
 	    krb5_free_principal(context,princ);
 	    krb5_free_context(context);
+            syslog(LOG_ERR, "afspts_canonifyid krb5_unparse_name failed");
 	    return NULL;
         }
     }
@@ -459,6 +465,11 @@ static struct auth_state *myauthstate(const char *identifier,
     int i, rc;
     struct auth_state *newstate;
 
+    if (canon_id == NULL) {
+       syslog(LOG_ERR, "afspts_canonifyid failed for %s", identifier);
+       return NULL;
+    }
+
     *reply = NULL;
     size = strlen(canon_id);
 
@@ -489,7 +500,7 @@ static struct auth_state *myauthstate(const char *identifier,
     /* fill in our new state structure */
     *dsize = sizeof(struct auth_state) + 
 	(groups.namelist_len * sizeof(struct auth_ident));
-    newstate = (struct auth_state *) xmalloc(*dsize);
+    newstate = (struct auth_state *) xzmalloc(*dsize);
 
     strcpy(newstate->userid.id, canon_id);
     newstate->userid.hash = strhash(canon_id);

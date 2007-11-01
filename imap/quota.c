@@ -40,7 +40,7 @@
  *
  */
 
-/* $Id: quota.c,v 1.66 2006/11/30 17:11:19 murch Exp $ */
+/* $Id: quota.c,v 1.66.2.1 2007/11/01 14:39:34 murch Exp $ */
 
 
 #include <config.h>
@@ -82,6 +82,8 @@
 #include "imap_err.h"
 #include "mailbox.h"
 #include "xmalloc.h"
+#include "xstrlcpy.h"
+#include "xstrlcat.h"
 #include "mboxlist.h"
 #include "mboxname.h"
 #include "quota.h"
@@ -138,7 +140,9 @@ int main(int argc,char **argv)
     struct fix_rock frock;
     struct txn *tid = NULL;
 
-    if (geteuid() == 0) fatal("must run as the Cyrus user", EC_USAGE);
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((opt = getopt(argc, argv, "C:d:f")) != EOF) {
 	switch (opt) {
@@ -215,7 +219,7 @@ void usage(void)
 void errmsg(const char *fmt, const char *arg, int err)
 {
     char buf[1024];
-    int len;
+    size_t len;
 
     len = snprintf(buf, sizeof(buf), fmt, arg);
     if (len < sizeof(buf))
@@ -344,7 +348,7 @@ int fixquota_mailbox(char *name,
 
     /* make sure the domains match */
     if (domain &&
-	(!(p = strchr(name, '!')) || (p - name) != strlen(domain) ||
+	(!(p = strchr(name, '!')) || (p - name) != (int) strlen(domain) ||
 	 strncmp(name, domain, p - name))) {
 	return 0;
     }
