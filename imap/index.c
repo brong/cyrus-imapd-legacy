@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219.2.5 2007/11/01 14:39:33 murch Exp $
+ * $Id: index.c,v 1.219.2.6 2007/11/02 14:23:08 murch Exp $
  */
 #include <config.h>
 
@@ -1194,23 +1194,25 @@ int index_search(struct mailbox *mailbox, struct searchargs *searchargs,
 		prot_printf(imapd_out, " MODSEQ " MODSEQ_FMT, highestmodseq);
 	    }
 	    if (searchargs->returnopts & SEARCH_RETURN_ALL) {
-		int j, c = ' ';
+		int c, j;
 
 		prot_printf(imapd_out, " ALL");
 		/* Create a sequence-set */
-		for (i = 0; i < n; i++) {
+		for (i = 0, c = ' '; i < n; i++, c = ',') {
 		    prot_printf(imapd_out, "%c%u", c,
 				usinguid ? UID(msgno_list[i]) : msgno_list[i]);
 
 		    /* Check if we have a range */
-		    for (j = i; j+1 < n && msgno_list[j+1] == msgno_list[j]+1;
-			 j++);
+		    for (j = i; j+1 < n; j++) {
+			if (usinguid &&
+			    UID(msgno_list[j+1]) != UID(msgno_list[j])+1) break;
+			else if (msgno_list[j+1] != msgno_list[j]+1) break;
+		    }
 		    if (j > i) {
 			prot_printf(imapd_out, ":%u",
 				    usinguid ? UID(msgno_list[j]) : msgno_list[j]);
 			i = j;
 		    }
-		    c = ',';
 		}
 	    }
 	}
