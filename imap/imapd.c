@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.8 2007/11/01 14:39:31 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.9 2007/11/02 13:04:39 murch Exp $ */
 
 #include <config.h>
 
@@ -332,6 +332,8 @@ void cmd_netscrape(char* tag);
 
 void cmd_getannotation(char* tag, char *mboxpat);
 void cmd_setannotation(char* tag, char *mboxpat);
+
+void cmd_enable(char* tag);
 
 int getannotatefetchdata(char *tag,
 			 struct strlist **entries, struct strlist **attribs);
@@ -1124,9 +1126,9 @@ void cmdloop()
 	    plaintextloginalert = NULL;
 	}
 
- 	/* Only Authenticate/Login/Logout/Noop/Capability/Id/Starttls
+ 	/* Only Authenticate/Enable/Login/Logout/Noop/Capability/Id/Starttls
 	   allowed when not logged in */
-	if (!imapd_userid && !strchr("ALNCIS", cmd.s[0])) goto nologin;
+	if (!imapd_userid && !strchr("AELNCIS", cmd.s[0])) goto nologin;
     
 	/* note that about half the commands (the common ones that don't
 	   hit the mailboxes file) now close the mailboxes file just in
@@ -1306,7 +1308,13 @@ void cmdloop()
 	    break;
 
 	case 'E':
-	    if (!strcmp(cmd.s, "Expunge")) {
+	    if (!strcmp(cmd.s, "Enable")) {
+		if (c != ' ') goto missingargs;
+
+		cmd_enable(tag.s);
+	    }
+	    else if (!imapd_userid) goto nologin;
+	    else if (!strcmp(cmd.s, "Expunge")) {
 		if (!imapd_mailbox && !backend_current) goto nomailbox;
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
@@ -10607,3 +10615,35 @@ void cmd_compress(char *tag, char *alg)
     }
 }
 #endif /* HAVE_ZLIB */
+
+void cmd_enable(char *tag)
+{
+    static struct buf arg;
+    int c;
+
+    do {
+	c = getword(imapd_in, &arg);
+	if (!arg.s[0]) {
+	    prot_printf(imapd_out,
+			"%s BAD Missing required argument to Enable\r\n", tag);
+	    eatline(imapd_in, c);
+	    return;
+	}
+	lcase(arg.s);
+	if (!strcmp(arg.s, "condstore")) {
+	    imapd_condstore_client = 1;
+	}
+    } while (c == ' ');
+
+    /* check for CRLF */
+    if (c == '\r') c = prot_getc(imapd_in);
+    if (c != '\n') {
+	prot_printf(imapd_out,
+		    "%s BAD Unexpected extra arguments to Enable\r\n", tag);
+	eatline(imapd_in, c);
+	return;
+    }
+
+    prot_printf(imapd_out, "%s OK %s\r\n", tag,
+		error_message(IMAP_OK_COMPLETED));
+}

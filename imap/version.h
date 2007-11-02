@@ -37,7 +37,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: version.h,v 1.141.2.5 2007/11/01 14:39:35 murch Exp $
+ * $Id: version.h,v 1.141.2.6 2007/11/02 13:04:42 murch Exp $
  */
 
 #define _CYRUS_VERSION "v2.4.1"
@@ -60,7 +60,7 @@ enum {
 
 /* CAPABILITIES are defined here, not including TLS/SASL ones,
    and those that are configurable */
-#define CAPA_PREAUTH_STRING "IMAP4 IMAP4rev1 LITERAL+ ID"
+#define CAPA_PREAUTH_STRING "IMAP4 IMAP4rev1 LITERAL+ ID ENABLE"
 
 #define CAPA_POSTAUTH_STRING " ACL RIGHTS=kxte QUOTA " \
 	"MAILBOX-REFERRALS NAMESPACE UIDPLUS " \
