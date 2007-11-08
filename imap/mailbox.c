@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: mailbox.c,v 1.163.2.1 2007/11/01 14:39:33 murch Exp $
+ * $Id: mailbox.c,v 1.163.2.2 2007/11/08 20:28:01 murch Exp $
  *
  */
 
@@ -1949,6 +1949,17 @@ static int process_records(struct mailbox *mailbox, FILE *newindex,
 		 * For two-phase, we should sort by UID.
 		 */
 		*((bit32 *)(buf+OFFSET_LAST_UPDATED)) = htonl(now);
+		if (mailbox->options & OPT_IMAP_CONDSTORE) {
+		    /* bump MODSEQ */
+#ifdef HAVE_LONG_LONG_INT
+		    *((bit64 *)(buf+OFFSET_MODSEQ_64)) =
+			htonll(mailbox->highestmodseq+1);
+#else
+		    *((bit32 *)(buf+OFFSET_MODSEQ_64)) = htonl(0);
+		    *((bit32 *)(buf+OFFSET_MODSEQ)) =
+			htonl(mailbox->highestmodseq+1);
+#endif
+		}
 		n = retry_write(expunge_fd, buf, mailbox->record_size);
 		if (n != mailbox->record_size) {
 		    syslog(LOG_ERR,
@@ -2048,6 +2059,20 @@ static int process_records(struct mailbox *mailbox, FILE *newindex,
 	htonl(ntohl(*((bit32 *)(buf+OFFSET_QUOTA_MAILBOX_USED))) - *quotadeleted);
 #endif
 
+
+    if ((mailbox->options & OPT_IMAP_CONDSTORE) &&
+	*numdeleted && expunge_fd != -1) {
+	/* bump HIGHESTMODSEQ */
+	mailbox->highestmodseq++;
+#ifdef HAVE_LONG_LONG_INT
+	align_htonll(buf+OFFSET_HIGHESTMODSEQ_64, mailbox->highestmodseq);
+#else
+	/* zero the unused 32bits */
+	*((bit32 *)(buf+OFFSET_HIGHESTMODSEQ_64)) = htonl(0);
+	*((bit32 *)(buf+OFFSET_HIGHESTMODSEQ)) = htonl(mailbox->highestmodseq);
+#endif
+    }
+
     /* Fix up start offset if necessary */
     if (mailbox->start_offset < INDEX_HEADER_SIZE) {
 	*((bit32 *)(buf+OFFSET_START_OFFSET)) = htonl(INDEX_HEADER_SIZE);
@@ -2077,7 +2102,7 @@ static int process_records(struct mailbox *mailbox, FILE *newindex,
  */
 int mailbox_expunge(struct mailbox *mailbox,
 		    mailbox_decideproc_t *decideproc, void *deciderock,
-		    int flags)
+		    int flags, unsigned *nexpunged)
 {
     enum enum_value config_expunge_mode = config_getenum(IMAPOPT_EXPUNGE_MODE);
     int r;
@@ -2414,6 +2439,17 @@ int mailbox_expunge(struct mailbox *mailbox,
 	    htonl(ntohl(*((bit32 *)(buf+OFFSET_QUOTA_MAILBOX_USED)))+quotadeleted);
 #endif
 
+	/* Fix up highestmodseq */
+	if ((mailbox->options & OPT_IMAP_CONDSTORE) && numdeleted) {
+#ifdef HAVE_LONG_LONG_INT
+	    align_htonll(buf+OFFSET_HIGHESTMODSEQ_64, mailbox->highestmodseq);
+#else
+	    /* zero the unused 32bits */
+	    *((bit32 *)(buf+OFFSET_HIGHESTMODSEQ_64)) = htonl(0);
+	    *((bit32 *)(buf+OFFSET_HIGHESTMODSEQ)) = htonl(mailbox->highestmodseq);
+#endif
+	}
+
 	/* Fix up start offset if necessary */
 	if (mailbox->start_offset < INDEX_HEADER_SIZE) {
 	    *((bit32 *)(buf+OFFSET_START_OFFSET)) = htonl(INDEX_HEADER_SIZE);
@@ -2492,8 +2528,12 @@ int mailbox_expunge(struct mailbox *mailbox,
 	}
 
 	if (!expunge_exists) {
-	    /* We deleted all cyrus.expunge records, so delete the file */
-	    unlink(fname->buf);
+	    /* We deleted all cyrus.expunge records.
+	     * Leave the header around so that we have HIGHESTMODSEQ
+	     * for QRESYNC.
+
+	     unlink(fname->buf);
+	    */
 	}
     }
     else if (numdeleted) {
@@ -2533,6 +2573,8 @@ int mailbox_expunge(struct mailbox *mailbox,
     }
 
     if (deleted) free(deleted);
+
+    if (nexpunged) *nexpunged = numdeleted;
 
     return 0;
 
@@ -3071,7 +3113,8 @@ int mailbox_rename_cleanup(struct mailbox *oldmailbox, int isinbox)
     
     if (isinbox) {
 	/* Expunge old mailbox */
-	r = mailbox_expunge(oldmailbox, expungeall, (char *)0, EXPUNGE_FORCE);
+	r = mailbox_expunge(oldmailbox, expungeall, (char *)0,
+			    EXPUNGE_FORCE, NULL);
     } else {
 	r = mailbox_delete(oldmailbox, 0);
     }

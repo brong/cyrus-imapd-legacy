@@ -41,7 +41,7 @@
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
  *
- * $Id: sync_server.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: sync_server.c,v 1.2.2.2 2007/11/08 20:28:02 murch Exp $
  */
 
 #include <config.h>
@@ -2320,7 +2320,7 @@ static void cmd_expunge(struct mailbox *mailbox)
 
     if (uids.count > 0) {
         /* Make sure that messages are removed immediately */
-        r = mailbox_expunge(mailbox, cmd_expunge_decide, (void *)&uids, 0);
+        r = mailbox_expunge(mailbox, cmd_expunge_decide, (void *)&uids, 0, NULL);
     }
 
     if (r)

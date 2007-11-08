@@ -1,4 +1,4 @@
-/* $Id: cyrdump.c,v 1.17.2.1 2007/11/01 14:39:31 murch Exp $
+/* $Id: cyrdump.c,v 1.17.2.2 2007/11/08 20:27:59 murch Exp $
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -88,7 +88,7 @@ int imapd_exists;
 struct protstream *imapd_out = NULL;
 struct auth_state *imapd_authstate = NULL;
 char *imapd_userid = NULL;
-int imapd_condstore_client = 0;
+unsigned imapd_client_capa = 0;
 
 struct incremental_record {
     unsigned incruid;

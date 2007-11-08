@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.9 2007/11/02 13:04:39 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.10 2007/11/08 20:27:59 murch Exp $ */
 
 #include <config.h>
 
@@ -160,7 +160,7 @@ static char *imapd_magicplus = NULL;
 struct auth_state *imapd_authstate = 0;
 static int imapd_userisadmin = 0;
 static int imapd_userisproxyadmin = 0;
-int imapd_condstore_client = 0;
+unsigned imapd_client_capa = 0;
 static sasl_conn_t *imapd_saslconn; /* the sasl connection context */
 static int imapd_starttls_done = 0; /* have we done a successful starttls? */
 static void *imapd_tls_comp = NULL; /* TLS compression method, if any */
@@ -669,7 +669,7 @@ static void imapd_reset(void)
     }
     imapd_userisadmin = 0;
     imapd_userisproxyadmin = 0;
-    imapd_condstore_client = 0;
+    imapd_client_capa = 0;
     if (imapd_saslconn) {
 	sasl_dispose(&imapd_saslconn);
 	free(imapd_saslconn);
@@ -3388,10 +3388,13 @@ void cmd_select(char *tag, char *cmd, char *name)
     struct backend *backend_next = NULL;
     static char lastqr[MAX_MAILBOX_PATH+1] = "";
     static time_t nextalert = 0;
+    unsigned long uidvalidity = 0;
+    modseq_t modseq = 0;
+    char *sequence = NULL, *match_seq = NULL, *match_uid = NULL;
 
     c = prot_getc(imapd_in);
     if (cmd[0] != 'B' && c == ' ') {
-	static struct buf arg;
+	static struct buf arg, parm1, parm2;
 
 	c = prot_getc(imapd_in);
 	if (c != '(') goto badlist;
@@ -3399,9 +3402,52 @@ void cmd_select(char *tag, char *cmd, char *name)
 	c = getword(imapd_in, &arg);
 	if (arg.s[0] == '\0') goto badlist;
 	for (;;) {
-	    lcase(arg.s);
-	    if (!strcmp(arg.s, "condstore")) {
-		imapd_condstore_client = 1;
+	    ucase(arg.s);
+	    if (!strcmp(arg.s, "CONDSTORE")) {
+		imapd_client_capa |= CAPA_CONDSTORE;
+	    }
+	    else if ((imapd_client_capa & CAPA_QRESYNC) &&
+		     !strcmp(arg.s, "QRESYNC")) {
+		char *p;
+
+		if (c != ' ') goto badqresync;
+		c = prot_getc(imapd_in);
+		if (c != '(') goto badqresync;
+		c = getastring(imapd_in, imapd_out, &arg);
+		uidvalidity = strtoul(arg.s, &p, 10);
+		if (*p || !uidvalidity || uidvalidity == ULONG_MAX) goto badqresync;
+		if (c != ' ') goto badqresync;
+		c = getastring(imapd_in, imapd_out, &arg);
+		modseq = strtoul(arg.s, &p, 10);
+		if (*p || !modseq || modseq == ULONG_MAX) goto badqresync;
+		if (c == ' ') {
+		    c = prot_getc(imapd_in);
+		    if (c != '(') {
+			/* optional UID sequence */
+			prot_ungetc(c, imapd_in);
+			c = getword(imapd_in, &arg);
+			if (!imparse_issequence(arg.s)) goto badqresync;
+			sequence = arg.s;
+			if (c == ' ') {
+			    c = prot_getc(imapd_in);
+			    if (c != '(') goto badqresync;
+			}
+		    }
+		    if (c == '(') {
+			/* optional sequence match data */
+			c = getword(imapd_in, &parm1);
+			if (!imparse_issequence(parm1.s)) goto badqresync;
+			match_seq = parm1.s;
+			if (c != ' ') goto badqresync;
+			c = getword(imapd_in, &parm2);
+			if (!imparse_issequence(parm2.s)) goto badqresync;
+			match_uid = parm2.s;
+			if (c != ')') goto badqresync;
+			c = prot_getc(imapd_in);
+		    }
+		}
+		if (c != ')') goto badqresync;
+		c = prot_getc(imapd_in);
 	    }
 	    else {
 		prot_printf(imapd_out, "%s BAD Invalid %s modifier %s\r\n",
@@ -3457,6 +3503,8 @@ void cmd_select(char *tag, char *cmd, char *name)
     if (r == IMAP_MAILBOX_MOVED) return;
 
     if (!r && (mbtype & MBTYPE_REMOTE)) {
+	char mytag[128];
+
 	if (supports_referrals) {
 	    imapd_refer(tag, newserver, name);
 	    return;
@@ -3469,8 +3517,6 @@ void cmd_select(char *tag, char *cmd, char *name)
 	if (!backend_next) r = IMAP_SERVER_UNAVAILABLE;
 
 	if (backend_current && backend_current != backend_next) {
-	    char mytag[128];
-
 	    /* switching servers; flush old server output */
 	    proxy_gentag(mytag, sizeof(mytag));
 	    prot_printf(backend_current->out, "%s Unselect\r\n", mytag);
@@ -3485,9 +3531,35 @@ void cmd_select(char *tag, char *cmd, char *name)
 	    return;
 	}
 
-	prot_printf(backend_current->out, "%s %s {%d+}\r\n%s%s\r\n", tag, cmd, 
-		    strlen(name), name,
-		    imapd_condstore_client ? " (CONDSTORE)" : "");
+	if (imapd_client_capa) {
+	    /* Enable client capabilities on new backend */
+	    proxy_gentag(mytag, sizeof(mytag));
+	    prot_printf(backend_current->out, "%s Enable", mytag);
+	    if (imapd_client_capa & CAPA_QRESYNC)
+		prot_printf(backend_current->out, " Qresync");
+	    if (imapd_client_capa & CAPA_CONDSTORE)
+		prot_printf(backend_current->out, " Condstore");
+	    prot_printf(backend_current->out, "\r\n");
+	    pipe_until_tag(backend_current, mytag, 0);
+	}	    
+
+	/* Send SELECT command to backend */
+	prot_printf(backend_current->out, "%s %s {%d+}\r\n%s", tag, cmd, 
+		    strlen(name), name);
+	if (uidvalidity) {
+	    prot_printf(backend_current->out, " (QRESYNC %lu " MODSEQ_FMT,
+			uidvalidity, modseq);
+	    if (sequence) {
+		prot_printf(backend_current->out, " %s", sequence);
+	    }
+	    if (match_seq && match_uid) {
+		prot_printf(backend_current->out, " (%s %s)",
+			    match_seq, match_uid);
+	    }
+	    prot_printf(backend_current->out, ")");
+	}
+	prot_printf(backend_current->out, "\r\n");
+
 	switch (pipe_including_tag(backend_current, tag, 0)) {
 	case PROXY_OK:
 	    proc_register("imapd", imapd_clienthost, imapd_userid, mailboxname);
@@ -3543,6 +3615,10 @@ void cmd_select(char *tag, char *cmd, char *name)
     mboxstruct = mailbox;
     imapd_mailbox = &mboxstruct;
 
+    if (imapd_client_capa & CAPA_QRESYNC) {
+	prot_printf(imapd_out, "* OK [CLOSED]\r\n");
+    }
+
     index_newmailbox(imapd_mailbox, cmd[0] == 'E');
 
     /* Examine command puts mailbox in read-only mode */
@@ -3586,6 +3662,30 @@ void cmd_select(char *tag, char *cmd, char *name)
     }
 
     prot_printf(imapd_out, "* OK [URLMECH INTERNAL]\r\n");
+
+    /* QRESYNC response:
+     * UID FETCH seq FLAGS (CHANGEDSINCE modseq VANISHED)
+     */
+    if ((imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
+	uidvalidity == imapd_mailbox->uidvalidity) {
+	struct fetchargs fetchargs;
+	char all_uids[128];
+
+	memset(&fetchargs, 0, sizeof(struct fetchargs));
+	fetchargs.fetchitems = FETCH_UID | FETCH_FLAGS;
+	fetchargs.changedsince = modseq;
+	fetchargs.vanished = 1;
+	fetchargs.match_seq = match_seq;
+	fetchargs.match_uid = match_uid;
+
+	if (!sequence) {
+	    sprintf(all_uids, "1:%lu", imapd_mailbox->last_uid);
+	    sequence = all_uids;
+	}
+
+	index_fetch(imapd_mailbox, sequence, 1, &fetchargs, NULL);
+    }
+
     prot_printf(imapd_out, "%s OK [READ-%s] %s\r\n", tag,
 		(imapd_mailbox->myrights & ACL_READ_WRITE) ?
 		"WRITE" : "ONLY", error_message(IMAP_OK_COMPLETED));
@@ -3597,6 +3697,13 @@ void cmd_select(char *tag, char *cmd, char *name)
  badlist:
     prot_printf(imapd_out, "%s BAD Invalid modifier list in %s\r\n", tag, cmd);
     eatline(imapd_in, c);
+    return;
+
+ badqresync:
+    prot_printf(imapd_out, "%s BAD Invalid QRESYNC parameter list in %s\r\n",
+		tag, cmd);
+    eatline(imapd_in, c);
+    return;
 }
 	  
 /*
@@ -3605,6 +3712,7 @@ void cmd_select(char *tag, char *cmd, char *name)
 void cmd_close(char *tag)
 {
     int r;
+    unsigned nexpunged;
 
     if (backend_current) {
 	/* remote mailbox */
@@ -3623,21 +3731,28 @@ void cmd_close(char *tag)
     /* local mailbox */
     if (!(imapd_mailbox->myrights & ACL_EXPUNGE)) r = 0;
     else {
-	r = mailbox_expunge(imapd_mailbox, NULL, NULL, 0);
-	if (!r) sync_log_mailbox(imapd_mailbox->name);
+	r = mailbox_expunge(imapd_mailbox, NULL, NULL, 0, &nexpunged);
     }
-
-    index_closemailbox(imapd_mailbox);
-    mailbox_close(imapd_mailbox);
-    imapd_mailbox = 0;
 
     if (r) {
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
     }
     else {
-	prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		    error_message(IMAP_OK_COMPLETED));
+	prot_printf(imapd_out, "%s ", tag);
+	if (nexpunged) {
+	    sync_log_mailbox(imapd_mailbox->name);
+
+	    if (imapd_mailbox->options & OPT_IMAP_CONDSTORE) {
+		prot_printf(imapd_out, "[HIGHESTMODSEQ " MODSEQ_FMT "] ",
+			    imapd_mailbox->highestmodseq);
+	    }
+	}
+	prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
     }
+
+    index_closemailbox(imapd_mailbox);
+    mailbox_close(imapd_mailbox);
+    imapd_mailbox = 0;
 }    
 
 /*
@@ -4055,52 +4170,6 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
     if (inlist && c == ')') {
 	inlist = 0;
 	c = prot_getc(imapd_in);
-	if (c == ' ') {
-	    /* Grab/parse the modifier(s) */
-	    c = prot_getc(imapd_in);
-	    if (c != '(') {
-		prot_printf(imapd_out,
-			    "%s BAD Missing required open parenthesis in %s modifiers\r\n",
-			    tag, cmd);
-		eatline(imapd_in, c);
-		goto freeargs;
-	    }
-	    inlist = 1;
-	    do {
-		c = getword(imapd_in, &fetchatt);
-		ucase(fetchatt.s);
-		if ((imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
-		    !strcmp(fetchatt.s, "CHANGEDSINCE")) {
-		    if (c != ' ') {
-			prot_printf(imapd_out,
-				    "%s BAD Missing required argument to %s %s\r\n",
-				    tag, cmd, fetchatt.s);
-			eatline(imapd_in, c);
-			goto freeargs;
-		    }
-		    c = getastring(imapd_in, imapd_out, &fieldname);
-		    fetchargs.changedsince = strtoul(fieldname.s, &p, 10);
-		    if (*p || fetchargs.changedsince == ULONG_MAX) {
-			prot_printf(imapd_out,
-				    "%s BAD Invalid argument to %s %s\r\n",
-				    tag, cmd, fetchatt.s);
-			eatline(imapd_in, c);
-			goto freeargs;
-		    }
-		    fetchitems |= FETCH_MODSEQ;
-		}
-		else {
-		    prot_printf(imapd_out, "%s BAD Invalid %s modifier %s\r\n",
-				tag, cmd, fetchatt.s);
-		    eatline(imapd_in, c);
-		    goto freeargs;
-		}
-	    } while (c == ' ');
-	    if (c == ')') {
-		inlist = 0;
-		c = prot_getc(imapd_in);
-	    }
-	}
     }
     if (inlist) {
 	prot_printf(imapd_out, "%s BAD Missing close parenthesis in %s\r\n",
@@ -4108,6 +4177,61 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 	eatline(imapd_in, c);
 	goto freeargs;
     }
+
+    if (c == ' ') {
+	/* Grab/parse the modifier(s) */
+	c = prot_getc(imapd_in);
+	if (c != '(') {
+	    prot_printf(imapd_out,
+			"%s BAD Missing required open parenthesis in %s modifiers\r\n",
+			tag, cmd);
+	    eatline(imapd_in, c);
+	    goto freeargs;
+	}
+	do {
+	    c = getword(imapd_in, &fetchatt);
+	    ucase(fetchatt.s);
+	    if ((imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
+		!strcmp(fetchatt.s, "CHANGEDSINCE")) {
+		if (c != ' ') {
+		    prot_printf(imapd_out,
+				"%s BAD Missing required argument to %s %s\r\n",
+				tag, cmd, fetchatt.s);
+		    eatline(imapd_in, c);
+		    goto freeargs;
+		}
+		c = getastring(imapd_in, imapd_out, &fieldname);
+		fetchargs.changedsince = strtoul(fieldname.s, &p, 10);
+		if (*p || fetchargs.changedsince == ULONG_MAX) {
+		    prot_printf(imapd_out,
+				"%s BAD Invalid argument to %s %s\r\n",
+				tag, cmd, fetchatt.s);
+		    eatline(imapd_in, c);
+		    goto freeargs;
+		}
+		fetchitems |= FETCH_MODSEQ;
+	    }
+	    else if (usinguid && (imapd_client_capa & CAPA_QRESYNC) &&
+		     (imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
+		     !strcmp(fetchatt.s, "VANISHED")) {
+		fetchargs.vanished = 1;
+	    }
+	    else {
+		prot_printf(imapd_out, "%s BAD Invalid %s modifier %s\r\n",
+			    tag, cmd, fetchatt.s);
+		eatline(imapd_in, c);
+		goto freeargs;
+	    }
+	} while (c == ' ');
+	if (c != ')') {
+	    prot_printf(imapd_out, "%s BAD Missing close parenthesis in %s\r\n",
+			tag, cmd);
+	    eatline(imapd_in, c);
+	    goto freeargs;
+	}
+	c = prot_getc(imapd_in);
+    }
+
     if (c == '\r') c = prot_getc(imapd_in);
     if (c != '\n') {
 	prot_printf(imapd_out, "%s BAD Unexpected extra arguments to %s\r\n", tag, cmd);
@@ -4122,10 +4246,17 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 	goto freeargs;
     }
 
+    if (fetchargs.vanished && !fetchargs.changedsince) {
+	prot_printf(imapd_out, "%s BAD Missing required argument to %s\r\n", tag, cmd);
+	goto freeargs;
+    }
+
     if (fetchitems & FETCH_MODSEQ) {
-	if (!imapd_condstore_client++)
+	if (!(imapd_client_capa & CAPA_CONDSTORE)) {
+	    imapd_client_capa |= CAPA_CONDSTORE;
 	    prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 			imapd_mailbox->highestmodseq);
+	}
     }
 
     /* EXPUNGE responses allowed for UID FETCH */
@@ -4336,9 +4467,9 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 
 	do {
 	    c = getword(imapd_in, &storemod);
-	    lcase(storemod.s);
+	    ucase(storemod.s);
 	    if ((imapd_mailbox->options & OPT_IMAP_CONDSTORE) &&
-		!strcmp(storemod.s, "unchangedsince")) {
+		!strcmp(storemod.s, "UNCHANGEDSINCE")) {
 		if (c != ' ') {
 		    prot_printf(imapd_out,
 				"%s BAD Missing required argument to %s %s\r\n",
@@ -4486,7 +4617,9 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 	goto freeflags;
     }
 
-    if ((storeargs.unchangedsince != ULONG_MAX) && !imapd_condstore_client++) {
+    if ((storeargs.unchangedsince != ULONG_MAX) &&
+	!(imapd_client_capa & CAPA_CONDSTORE)) {
+	imapd_client_capa |= CAPA_CONDSTORE;
 	prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 		    imapd_mailbox->highestmodseq);
     }
@@ -4935,6 +5068,7 @@ void cmd_copy(char *tag, char *sequence, char *name, int usinguid)
 void cmd_expunge(char *tag, char *sequence)
 {
     int r;
+    unsigned nexpunged;
 
     if (backend_current) {
 	/* remote mailbox */
@@ -4953,12 +5087,13 @@ void cmd_expunge(char *tag, char *sequence)
     else if (sequence) {
 	struct seq_set *seq_set = index_parse_sequence(sequence, 1, NULL);
 
-	r = mailbox_expunge(imapd_mailbox, index_expungeuidlist, seq_set, 0);
+	r = mailbox_expunge(imapd_mailbox, index_expungeuidlist, seq_set,
+			    0, &nexpunged);
 	freesequencelist(seq_set);
     }
     else {
 	r = mailbox_expunge(imapd_mailbox, (mailbox_decideproc_t *)0,
-			    (void *)0, 0);
+			    (void *)0, 0, &nexpunged);
     }
 
     index_check(imapd_mailbox, 0, 0);
@@ -4967,9 +5102,16 @@ void cmd_expunge(char *tag, char *sequence)
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
     }
     else {
-	prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		    error_message(IMAP_OK_COMPLETED));
-        sync_log_mailbox(imapd_mailbox->name);
+	prot_printf(imapd_out, "%s ", tag);
+	if (nexpunged) {
+	    sync_log_mailbox(imapd_mailbox->name);
+
+	    if (imapd_mailbox->options & OPT_IMAP_CONDSTORE) {
+		prot_printf(imapd_out, "[HIGHESTMODSEQ " MODSEQ_FMT "] ",
+			    imapd_mailbox->highestmodseq);
+	    }
+	}
+	prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
     }
 }    
 
@@ -10631,7 +10773,10 @@ void cmd_enable(char *tag)
 	}
 	lcase(arg.s);
 	if (!strcmp(arg.s, "condstore")) {
-	    imapd_condstore_client = 1;
+	    imapd_client_capa |= CAPA_CONDSTORE;
+	}
+	else if (!strcmp(arg.s, "qresync")) {
+	    imapd_client_capa |= CAPA_QRESYNC | CAPA_CONDSTORE;
 	}
     } while (c == ' ');
 

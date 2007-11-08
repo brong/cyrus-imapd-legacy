@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.3 2007/11/01 14:39:33 murch Exp $
+ * $Id: imapd.h,v 1.63.2.4 2007/11/08 20:28:01 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -58,8 +58,8 @@ extern struct auth_state *imapd_authstate;
 /* Number of messages in currently open mailbox */
 extern int imapd_exists;
 
-/* Is client CONDSTORE-aware? */
-extern int imapd_condstore_client;
+/* Client capabilities (via ENABLE) */
+extern unsigned imapd_client_capa;
 
 /* List of HEADER.FIELDS[.NOT] fetch specifications */
 struct fieldlist {
@@ -82,6 +82,8 @@ struct fetchargs {
     int start_octet;              /* start_octet for partial fetch */
     int octet_count;              /* octet_count for partial fetch, or 0 */
     modseq_t changedsince;        /* changed since modseq, or 0 */
+    int vanished;                 /* report expunges since changedsince */
+    char *match_seq, *match_uid;  /* sequence match data for VANISHED */
 
     bit32 cache_atleast;          /* to do headers we need atleast this
 				   * cache version */
@@ -271,6 +273,12 @@ enum {
     MBOX_ATTRIBUTE_HASCHILDREN =	(1<<7),
     MBOX_ATTRIBUTE_HASNOCHILDREN =	(1<<8),
     MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED = (1<<9)
+};
+
+/* Bitmask for client capabilities */
+enum {
+    CAPA_CONDSTORE =	(1<<0),
+    CAPA_QRESYNC = 	(1<<1)
 };
 
 extern struct protstream *imapd_out, *imapd_in;

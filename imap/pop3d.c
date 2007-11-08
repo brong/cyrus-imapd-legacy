@@ -40,7 +40,7 @@
  */
 
 /*
- * $Id: pop3d.c,v 1.169.2.1 2007/11/01 14:39:34 murch Exp $
+ * $Id: pop3d.c,v 1.169.2.2 2007/11/08 20:28:02 murch Exp $
  */
 #include <config.h>
 
@@ -822,7 +822,7 @@ static void cmdloop(void)
 
 		    if (msg <= popd_exists) {
 			(void) mailbox_expunge(popd_mailbox, expungedeleted,
-					       0, 0);
+					       0, 0, NULL);
 			sync_log_mailbox(popd_mailbox->name);
 		    }
 		}

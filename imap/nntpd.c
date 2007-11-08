@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: nntpd.c,v 1.53.2.1 2007/11/01 14:39:34 murch Exp $
+ * $Id: nntpd.c,v 1.53.2.2 2007/11/08 20:28:02 murch Exp $
  */
 
 /*
@@ -118,7 +118,7 @@ int imapd_exists;
 struct protstream *imapd_out = NULL;
 struct auth_state *imapd_authstate = NULL;
 char *imapd_userid = NULL;
-int imapd_condstore_client = 0;
+unsigned imapd_client_capa = 0;
 
 void printastring(const char *s __attribute__((unused)))
 {
@@ -3439,7 +3439,7 @@ static int cancel_cb(const char *msgid __attribute__((unused)),
 	if (!r) {
 	    mailbox_lock_index(&mbox);
 	    mbox.index_lock_count = 1;
-	    mailbox_expunge(&mbox, expunge_cancelled, &uid, EXPUNGE_FORCE);
+	    mailbox_expunge(&mbox, expunge_cancelled, &uid, EXPUNGE_FORCE, NULL);
 	}
 
 	if (doclose) mailbox_close(&mbox);

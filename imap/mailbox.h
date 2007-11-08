@@ -1,5 +1,5 @@
 /* mailbox.h -- Mailbox format definitions
- * $Id: mailbox.h,v 1.82.2.1 2007/11/01 14:39:33 murch Exp $
+ * $Id: mailbox.h,v 1.82.2.2 2007/11/08 20:28:02 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -372,7 +372,7 @@ extern int mailbox_append_index(struct mailbox *mailbox,
 
 extern int mailbox_expunge(struct mailbox *mailbox,
 			   mailbox_decideproc_t *decideproc, void *deciderock,
-			   int flags);
+			   int flags, unsigned *nexpunged);
 extern int mailbox_cleanup(struct mailbox *mailbox, int iscurrentdir,
 			   mailbox_decideproc_t *decideproc, void *deciderock);
 
