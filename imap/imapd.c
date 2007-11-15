@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.10 2007/11/08 20:27:59 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.11 2007/11/15 15:45:52 murch Exp $ */
 
 #include <config.h>
 
@@ -676,6 +676,7 @@ static void imapd_reset(void)
 	imapd_saslconn = NULL;
     }
     imapd_compress_done = 0;
+    imapd_tls_comp = NULL;
     imapd_starttls_done = 0;
     plaintextloginalert = NULL;
 
@@ -6964,7 +6965,10 @@ void cmd_starttls(char *tag, int imaps)
     prot_settls(imapd_out, tls_conn);
 
     imapd_starttls_done = 1;
+
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
     imapd_tls_comp = (void *) SSL_get_current_compression(tls_conn);
+#endif
 }
 #else
 void cmd_starttls(char *tag, int imaps)
@@ -10731,11 +10735,13 @@ void cmd_compress(char *tag, char *alg)
 		    "%s BAD [COMPRESSIONACTIVE] DEFLATE active via COMPRESS\r\n",
 		    tag);
     }
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
     else if (imapd_tls_comp) {
 	prot_printf(imapd_out,
 		    "%s NO [COMPRESSIONACTIVE] %s active via TLS\r\n",
 		    tag, SSL_COMP_get_name(imapd_tls_comp));
     }
+#endif
     else if (strcasecmp(alg, "DEFLATE")) {
 	prot_printf(imapd_out,
 		    "%s NO Unknown COMPRESS algorithm: %s\r\n", tag, alg);
