@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: mailbox.c,v 1.163.2.2 2007/11/08 20:28:01 murch Exp $
+ * $Id: mailbox.c,v 1.163.2.3 2007/11/16 13:52:47 murch Exp $
  *
  */
 
@@ -2928,6 +2928,9 @@ int mailbox_delete(struct mailbox *mailbox, int delete_quota_root)
     } while(r == IMAP_MAILBOX_NONEXISTENT);
 
     syslog(LOG_NOTICE, "Deleted mailbox %s", mailbox->name);
+
+    if (updatenotifier) updatenotifier(mailbox);
+
     mailbox_close(mailbox);
     return 0;
 }
