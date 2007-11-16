@@ -1,5 +1,5 @@
 /* cyrusdb_skiplist.c -- cyrusdb skiplist implementation
- * $Id: cyrusdb_skiplist.c,v 1.51.2.1 2007/11/01 14:39:36 murch Exp $
+ * $Id: cyrusdb_skiplist.c,v 1.51.2.2 2007/11/16 12:33:52 murch Exp $
  *
  * Copyright (c) 1998, 2000, 2002 Carnegie Mellon University.
  * All rights reserved.
@@ -1086,7 +1086,7 @@ int mystore(struct db *db,
     int addrectype = htonl(ADD);
     int delrectype = htonl(DELETE);
     bit32 todelete;
-    bit32 newoffset;
+    bit32 newoffset, netnewoffset;
     int r;
 
     assert(db != NULL);
@@ -1174,17 +1174,7 @@ int mystore(struct db *db,
     klen = htonl(keylen);
     dlen = htonl(datalen);
     
-    newoffset = htonl(newoffset);
-
-    /* set pointers appropriately */
-    for (i = 0; i < lvl; i++) {
-	/* write pointer updates */
-	/* FORWARD(updates[i], i) = newoffset; */
-	lseek(db->fd, 
-	      PTR(db->map_base + updateoffsets[i], i) - db->map_base,
-	      SEEK_SET);
-	retry_write(db->fd, (char *) &newoffset, 4);
-    }
+    netnewoffset = htonl(newoffset);
 
     WRITEV_ADD_TO_IOVEC(iov, num_iov, (char *) &addrectype, 4);
     WRITEV_ADD_TO_IOVEC(iov, num_iov, (char *) &klen, 4);
@@ -1211,6 +1201,17 @@ int mystore(struct db *db,
 	return CYRUSDB_IOERROR;
     }
     tp->logend += r;		/* update where to write next */
+
+    /* update pointers after writing record so abort is guaranteed to
+     * see which records need reverting */
+    for (i = 0; i < lvl; i++) {
+	/* write pointer updates */
+	/* FORWARD(updates[i], i) = newoffset; */
+	lseek(db->fd,
+	      PTR(db->map_base + updateoffsets[i], i) - db->map_base,
+	      SEEK_SET);
+	retry_write(db->fd, (char *) &netnewoffset, 4);
+    }
 
     if (tid) {
 	if (!*tid) {
@@ -1290,12 +1291,28 @@ int mydelete(struct db *db,
     }
 
     ptr = find_node(db, key, keylen, updateoffsets);
-    if (ptr == db->map_base ||
+    if (ptr != db->map_base &&
 	!db->compar(KEY(ptr), KEYLEN(ptr), key, keylen)) {
 	/* gotcha */
 	offset = ptr - db->map_base;
 
-	/* update pointers */
+	/* log the deletion */
+	getsyncfd(db, tp);
+	lseek(tp->syncfd, tp->logend, SEEK_SET);
+	writebuf[0] = delrectype;
+	writebuf[1] = htonl(offset);
+
+	/* update end-of-log */
+	r = retry_write(tp->syncfd, (char *) writebuf, 8);
+	if (r < 0) {
+	    syslog(LOG_ERR, "DBERROR: retry_write(): %m");
+	    myabort(db, tp);
+	    return CYRUSDB_IOERROR;
+	}
+	tp->logend += r;
+
+	/* update pointers after writing record so abort is guaranteed to
+	 * see which records need reverting */
 	for (i = 0; i < db->curlevel; i++) {
 	    int newoffset;
 
@@ -1308,15 +1325,6 @@ int mydelete(struct db *db,
 		  SEEK_SET);
 	    retry_write(db->fd, (char *) &newoffset, 4);
 	}
-
-	/* log the deletion */
-	getsyncfd(db, tp);
-	lseek(tp->syncfd, tp->logend, SEEK_SET);
-	writebuf[0] = delrectype;
-	writebuf[1] = htonl(offset);
-
-	/* update end-of-log */
-	tp->logend += retry_write(tp->syncfd, (char *) writebuf, 8);
     }
 
     if (tid) {
@@ -1429,6 +1437,9 @@ int myabort(struct db *db, struct txn *tid)
     int r = 0;
 
     assert(db && tid);
+
+    /* update the mmap so we can see the log entries we need to remove */
+    update_lock(db, tid);
     
     /* look at the log entries we've written, and undo their effects */
     while (tid->logstart != tid->logend) {
@@ -1557,6 +1568,15 @@ static int mycheckpoint(struct db *db, int locked)
     db->fd = open(fname, O_RDWR | O_CREAT, 0644);
     if (db->fd < 0) {
 	syslog(LOG_ERR, "DBERROR: skiplist checkpoint: open(%s): %m", fname);
+	if (!locked) unlock(db);
+	db->fd = oldfd;
+	return CYRUSDB_IOERROR;
+    }
+
+    /* truncate it just in case! */
+    r = ftruncate(db->fd, 0);
+    if (r < 0) {
+	syslog(LOG_ERR, "DBERROR: skiplist checkpoint %s: ftruncate %m", fname);
 	if (!locked) unlock(db);
 	db->fd = oldfd;
 	return CYRUSDB_IOERROR;
@@ -1861,7 +1881,7 @@ static int recovery(struct db *db, int flags)
     const char *ptr, *keyptr;
     int updateoffsets[SKIPLIST_MAXLEVEL];
     bit32 offset, offsetnet, myoff = 0;
-    int r = 0;
+    int r = 0, need_checkpoint = 0;
     time_t start = time(NULL);
     unsigned i;
 
@@ -1926,20 +1946,13 @@ static int recovery(struct db *db, int flags)
     
     /* reset the data that was written INORDER by the last checkpoint */
     offset = DUMMY_OFFSET(db) + DUMMY_SIZE(db);
-    while (!r && (offset < (bit32) db->logstart)) {
+    while (!r && (offset < db->map_size)
+	      && TYPE(db->map_base + offset) == INORDER) {
 	ptr = db->map_base + offset;
 	offsetnet = htonl(offset);
 
 	db->listsize++;
 
-	/* make sure this is INORDER */
-	if (TYPE(ptr) != INORDER) {
-	    syslog(LOG_ERR, "DBERROR: skiplist recovery: %04X should be INORDER",
-		   offset);
-	    r = CYRUSDB_IOERROR;
-	    continue;
-	}
-	    
 	/* xxx check \0 fill on key */
 
 	/* xxx check \0 fill on data */
@@ -1980,6 +1993,12 @@ static int recovery(struct db *db, int flags)
 	}
     }
 
+    if (offset != db->logstart) {
+	syslog(LOG_NOTICE, "skiplist recovery %s: incorrect logstart %04X changed to %04X", 
+	       db->fname, db->logstart, offset);
+	db->logstart = offset; /* header will be committed later */
+    }
+
     /* zero out the remaining pointers */
     if (!r) {
 	for (i = 0; !r && i < db->maxlevel; i++) {
@@ -2013,6 +2032,19 @@ static int recovery(struct db *db, int flags)
 		    db->fname, 0);
 
 	ptr = db->map_base + offset;
+
+	/* bugs in recovery truncates could have left some bogus zeros here */
+	if (TYPE(ptr) == 0) {
+	    int orig = offset;
+	    while (TYPE(ptr) == 0 && offset < db->map_size) {
+		offset += 4;
+		ptr = db->map_base + offset;
+	    }
+	    syslog(LOG_ERR, "skiplist recovery %s: skipped %d bytes of zeros at %04X",
+			    db->fname, offset - orig, orig);
+	    need_checkpoint = 1;
+	}
+
 	offsetnet = htonl(offset);
 
 	/* if this is a commit, we've processed everything in this txn */
@@ -2059,6 +2091,10 @@ static int recovery(struct db *db, int flags)
 		       db->fname);
 		r = CYRUSDB_IOERROR;
 	    }
+
+	    /* set the map size back as well */
+	    db->map_size = offset;
+
 	    break;
 	}
 
@@ -2179,6 +2215,10 @@ static int recovery(struct db *db, int flags)
 	       "skiplist: recovered %s (%d record%s, %ld bytes) in %d second%s",
 	       db->fname, db->listsize, db->listsize == 1 ? "" : "s", 
 	       db->map_size, diff, diff == 1 ? "" : "s"); 
+    }
+
+    if (!r && need_checkpoint) {
+	r = mycheckpoint(db, 1);
     }
 
     if(r || !(flags & RECOVERY_CALLER_LOCKED)) {
