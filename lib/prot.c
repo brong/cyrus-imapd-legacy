@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: prot.c,v 1.87.2.3 2007/11/01 14:39:36 murch Exp $
+ * $Id: prot.c,v 1.87.2.4 2007/11/19 17:48:25 murch Exp $
  */
 
 #include <config.h>
@@ -676,7 +676,7 @@ int prot_fill(struct protstream *s)
 		write(s->logfd, timebuf, strlen(timebuf));
 
 		left = s->cnt;
-		ptr = s->buf;
+		ptr = s->ptr;
 		do {
 		    n = write(s->logfd, ptr, left);
 		    if (n == -1 && errno != EINTR) {
