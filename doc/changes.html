@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<!-- $Id: changes.html,v 1.105.2.8 2007/11/08 20:27:58 murch Exp $ -->
+<!-- $Id: changes.html,v 1.105.2.9 2007/11/28 15:18:09 murch Exp $ -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
@@ -23,6 +23,21 @@ Dave Cridland &lt;dave@cridland.net&gt;</i></li>
 
 <h1>Changes to the Cyrus IMAP Server since 2.3.10</h1>
 <ul>
+<li>Fixed several skiplist bugs <i>-- courtesy of Fastmail.fm</i>.</li>
+<li>Add robustness to skiplist recovery <i>-- courtesy of
+Fastmail.fm</i>.</li>
+<li>Added support for modification sequences to replication protocol
+(for CONDSTORE) <i>-- courtesy of David Carter</i>.</li>
+<li>Fixed delayed delete replication <i>-- courtesy of Fastmail.fm</i>.</li>
+<li>Allow [un]deleting of user INBOXes (renaming to/from deleted
+hierarchy) to work when using delayed delete
+<i>-- courtesy of Simon Matter</i>.</li>
+<li>Fixed interaction with removal of rights and
+<tt>implicitownerrights</tt>.</li>
+<li>Fixed parsing of single FETCH item when using FETCH
+modifiers.</li>
+<li>Prevented SSL_accept() from blocking indefinitely when using
+TLS/SSL.</li>
 <li>Fixed miscellaneous bugs and build issues.</li>
 </ul>
 
@@ -49,7 +64,7 @@ increase the throughput of the replication protocol.
 <li>Added support for a shared \Seen flag on messages (must be
 enabled on a per-mailbox basis with the
 <tt>/vendor/cmu/cyrus-imapd/sharedseen</tt> mailbox annotation.</li>
-<li>Added <tt>-u</tt> and <tt>-U</tt> options to <tt>reconstruct</tt>
+<li>Added <tt>-g</tt> and <tt>-G</tt> options to <tt>reconstruct</tt>
 <i>-- courtesy of David Carter</i>.</li>
 <li>Added <tt>SETUIDVALIDITY</tt> command to the replication protocol
 <i>-- courtesy of David Carter</i>.</li>
@@ -2295,7 +2310,7 @@ message for this common configuration error.</li>
 </ul>
 
 <hr />
-last modified: $Date: 2007/11/08 20:27:58 $ <br />
+last modified: $Date: 2007/11/28 15:18:09 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

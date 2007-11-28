@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.11 2007/11/15 15:45:52 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.12 2007/11/28 15:18:09 murch Exp $ */
 
 #include <config.h>
 
@@ -150,6 +150,7 @@ static int supports_referrals;
 /* end PROXY STUFF */
 
 /* per-user/session state */
+int imapd_timeout;
 struct protstream *imapd_out = NULL;
 struct protstream *imapd_in = NULL;
 struct protgroup *protin = NULL;
@@ -783,7 +784,6 @@ int service_main(int argc __attribute__((unused)),
 #endif
 {
     socklen_t salen;
-    int timeout;
     sasl_security_properties_t *secprops = NULL;
     struct sockaddr_storage imapd_localaddr, imapd_remoteaddr;
     char localip[60], remoteip[60];
@@ -860,9 +860,10 @@ int service_main(int argc __attribute__((unused)),
     proc_register("imapd", imapd_clienthost, NULL, NULL);
 
     /* Set inactivity timer */
-    timeout = config_getint(IMAPOPT_TIMEOUT);
-    if (timeout < 30) timeout = 30;
-    prot_settimeout(imapd_in, timeout*60);
+    imapd_timeout = config_getint(IMAPOPT_TIMEOUT);
+    if (imapd_timeout < 30) imapd_timeout = 30;
+    imapd_timeout *= 60;
+    prot_settimeout(imapd_in, imapd_timeout);
     prot_setflushonread(imapd_in, imapd_out);
 
     /* we were connected on imaps port so we should do 
@@ -5282,7 +5283,7 @@ static int delmbox(char *name,
         r = mboxlist_deletemailbox(name, imapd_userisadmin,
                                    imapd_userid, imapd_authstate,
                                    0, 0, 0);
-    } else if (imapd_userisadmin && mboxlist_in_deletedhierarchy(name)) {
+    } else if (imapd_userisadmin && mboxname_isdeletedmailbox(name)) {
         r = mboxlist_deletemailbox(name, imapd_userisadmin,
                                    imapd_userid, imapd_authstate,
                                    0, 0, 0);
@@ -5374,7 +5375,7 @@ void cmd_delete(char *tag, char *name, int localonly, int force)
                                        imapd_userid, imapd_authstate, 
                                        1-force, localonly, 0);
         } else if (imapd_userisadmin &&
-                   mboxlist_in_deletedhierarchy(mailboxname)) {
+                   mboxname_isdeletedmailbox(mailboxname)) {
             r = mboxlist_deletemailbox(mailboxname, imapd_userisadmin,
                                        imapd_userid, imapd_authstate,
                                        0 /* checkacl */, localonly, 0);
@@ -6922,6 +6923,7 @@ void cmd_starttls(char *tag, int imaps)
   
     result=tls_start_servertls(0, /* read */
 			       1, /* write */
+			       imaps ? 180 : imapd_timeout,
 			       layerp,
 			       &auth_id,
 			       &tls_conn);

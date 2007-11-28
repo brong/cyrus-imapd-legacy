@@ -1,5 +1,5 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
- * $Id: seen_db.c,v 1.49.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: seen_db.c,v 1.49.2.2 2007/11/28 15:18:12 murch Exp $
  * 
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -686,10 +686,12 @@ int seen_merge(const char *tmpfile, const char *tgtfile)
     rock.db = tgt;
     rock.tid = NULL;
     
-    r = DB->foreach(tmp, "", 0, NULL, seen_merge_cb, &rock, &rock.tid);
+    r = DB->foreach(tmp, "", 0, NULL, seen_merge_cb, &rock, NULL);
 
-    if(r) DB->abort(rock.db, rock.tid);
-    else DB->commit(rock.db, rock.tid);
+    if (rock.tid) {
+	if(r) DB->abort(rock.db, rock.tid);
+	else DB->commit(rock.db, rock.tid);
+    }
 
  done:
 

@@ -1,5 +1,5 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.117.2.1 2007/11/01 14:39:33 murch Exp $
+ * $Id: lmtpengine.c,v 1.117.2.2 2007/11/28 15:18:11 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -1579,6 +1579,7 @@ void lmtpmode(struct lmtp_func *func,
   
 		r=tls_start_servertls(0, /* read */
 				      1, /* write */
+				      360, /* 6 minutes */
 				      layerp,
 				      &auth_id,
 				      &(cd.tls_conn));
