@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.4 2007/11/08 20:28:01 murch Exp $
+ * $Id: imapd.h,v 1.63.2.5 2007/11/30 04:02:18 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -240,25 +240,36 @@ enum {
     STATUS_HIGHESTMODSEQ =	(1<<5)
 };
 
+/* Arguments to List functions */
+struct listargs {
+    unsigned cmd;		/* Command variant */
+    unsigned sel;		/* Selection options */
+    unsigned ret;		/* Return options */
+    const char *ref;		/* Reference name */
+    struct strlist *pat;	/* Mailbox pattern(s) */
+};
+
+/* Value for List command variant */
 enum {
-    /* LIST selection options */
+    LIST_CMD_LIST = 0,
+    LIST_CMD_LSUB,
+    LIST_CMD_EXTENDED,
+};
+
+/* Bitmask for List selection options */
+enum {
     LIST_SEL_SUBSCRIBED =	(1<<0),
     LIST_SEL_REMOTE =		(1<<1),
-    LIST_SEL_RECURSIVEMATCH =	(1<<2),
-
-    /* LIST return options */
-    LIST_RET_SUBSCRIBED =	(1<<8),
-    LIST_RET_CHILDREN =		(1<<9),
-
-    /* other options */
-    LIST_OPT_RLIST =		(1<<16),
-    LIST_OPT_LSUB =		(1<<17),
-    LIST_OPT_EXTENDED =		(1<<18)  /* Extended List command */
+    LIST_SEL_RECURSIVEMATCH =	(1<<2)
 };
-#define list_sel_opts (LIST_RET_SUBSCRIBED - 1)
-#define list_ret_opts ((LIST_OPT_RLIST - 1) & ~list_sel_opts)
 
-/* Name attributes that may be retuned by LIST */
+/* Bitmask for List return options */
+enum {
+    LIST_RET_SUBSCRIBED =	(1<<0),
+    LIST_RET_CHILDREN =		(1<<1)
+};
+
+/* Bitmask for List name attributes */
 enum {
     /* from RFC 3501 */
     MBOX_ATTRIBUTE_NOINFERIORS =	(1<<0),
