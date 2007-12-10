@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.41.2.2 2007/11/28 15:18:12 murch Exp $
+ * $Id: parser.c,v 1.41.2.3 2007/12/10 17:48:38 murch Exp $
  */
 /*
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
@@ -861,7 +861,7 @@ static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved
 
     starttls_done = 1;
 
-    return result;
+    return capabilities(sieved_out, sieved_saslconn, starttls_done, authenticated);
 }
 #else
 static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved_in)
