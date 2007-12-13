@@ -1,7 +1,7 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.41.2.3 2007/12/10 17:48:38 murch Exp $
+ * $Id: parser.c,v 1.41.2.4 2007/12/13 14:03:24 murch Exp $
  */
 /*
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
@@ -141,6 +141,13 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
 
   switch (token)
   {
+  case EOF:
+      /* timlex() will return EOF when the remote disconnects badly */
+      syslog(LOG_WARNING, "Lost connection to client -- exiting");
+      ret = TRUE;
+      goto done;
+      break;
+
   case AUTHENTICATE:
     if (timlex(NULL, NULL, sieved_in)!=SPACE)
     {
