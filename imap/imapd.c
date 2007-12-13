@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.13 2007/11/30 04:02:16 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.14 2007/12/13 18:12:40 murch Exp $ */
 
 #include <config.h>
 
@@ -2723,7 +2723,7 @@ void capa_response(int flags)
     }
 
 #ifdef HAVE_SSL
-    prot_printf(imapd_out, " URLAUTH");
+    prot_printf(imapd_out, " URLAUTH URLAUTH=BINARY");
 #endif
 
 #ifdef ENABLE_X_NETSCAPE_HACK
@@ -2984,7 +2984,7 @@ static int catenate_url(const char *s, const char *cur_name, FILE *f,
 	/* Catenate message part to stage */
 	struct protstream *s = prot_new(fileno(f), 1);
 
-	r = index_urlfetch(mailbox, msgno, url.section,
+	r = index_urlfetch(mailbox, msgno, 0, url.section,
 			   url.start_octet, url.octet_count, s, &size);
 	if (r == IMAP_BADURL)
 	    *parseerr = "No such message part";
@@ -10313,7 +10313,7 @@ void cmd_urlfetch(char *tag)
 {
     struct mboxkey *mboxkey_db;
     int c, r, doclose;
-    static struct buf arg;
+    static struct buf arg, param;
     struct imapurl url;
     char mailboxname[MAX_MAILBOX_NAME+1];
     struct mailbox mboxstruct, *mailbox = NULL;
@@ -10322,14 +10322,40 @@ void cmd_urlfetch(char *tag)
     int mbtype;
     char *newserver;
     time_t now = time(NULL);
+    unsigned extended, params;
 
     prot_printf(imapd_out, "* URLFETCH");
 
     do {
+	extended = params = 0;
+
+	/* See if its an extended URLFETCH */
+	c = prot_getc(imapd_in);
+	if (c == '(') extended = 1;
+	else prot_ungetc(c, imapd_in);
+
 	c = getastring(imapd_in, imapd_out, &arg);
 	prot_putc(' ', imapd_out);
 	printstring(arg.s);
 	prot_putc(' ', imapd_out);
+
+	if (extended) {
+	    while (c == ' ') {
+		c = getword(imapd_in, &param);
+
+		ucase(param.s);
+		if (!strcmp(param.s, "BINARY")) {
+		    params |= URLFETCH_BINARY;
+		} else if (!strcmp(param.s, "BODYPARTSTRUCTURE")) {
+		    params |= URLFETCH_BODYPARTSTRUCTURE;
+		} else {
+		    goto badext;
+		}
+	    }
+
+	    if (c != ')') goto badext;
+	    c = prot_getc(imapd_in);
+	}
 
 	doclose = 0;
 	r = imapurl_fromURL(&url, arg.s);
@@ -10475,7 +10501,7 @@ void cmd_urlfetch(char *tag)
 		       (index_getuid(msgno) != url.uid)) {
 		r = IMAP_BADURL;
 	    } else {
-		r = index_urlfetch(mailbox, msgno, url.section,
+		r = index_urlfetch(mailbox, msgno, 0, url.section,
 				   url.start_octet, url.octet_count,
 				   imapd_out, NULL);
 	    }
@@ -10504,6 +10530,13 @@ void cmd_urlfetch(char *tag)
 	prot_printf(imapd_out, "%s OK %s\r\n", tag,
 		    error_message(IMAP_OK_COMPLETED));
     }
+    return;
+
+  badext:
+    prot_printf(imapd_out, "NIL\r\n");
+    prot_printf(imapd_out,
+		"%s BAD Invalid extended URLFETCH parameters\r\n", tag);
+    eatline(imapd_in, c);
 }
 
 /* Convert the binary data into ASCII hex

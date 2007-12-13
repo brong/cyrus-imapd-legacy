@@ -1,5 +1,5 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.5 2007/11/30 04:02:18 murch Exp $
+ * $Id: imapd.h,v 1.63.2.6 2007/12/13 18:12:42 murch Exp $
  *
  * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
  *
@@ -290,6 +290,12 @@ enum {
 enum {
     CAPA_CONDSTORE =	(1<<0),
     CAPA_QRESYNC = 	(1<<1)
+};
+
+/* Bitmask for urlfetch params */
+enum {
+    URLFETCH_BINARY =			(1<<0),
+    URLFETCH_BODYPARTSTRUCTURE =	(1<<1)
 };
 
 extern struct protstream *imapd_out, *imapd_in;

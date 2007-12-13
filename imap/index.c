@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.c,v 1.219.2.8 2007/12/11 12:02:07 murch Exp $
+ * $Id: index.c,v 1.219.2.9 2007/12/13 18:12:42 murch Exp $
  */
 #include <config.h>
 
@@ -2949,16 +2949,17 @@ static int index_fetchreply(struct mailbox *mailbox,
  * and index_fetchmsg().
  */
 int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
-		   const char *section,
+		   unsigned params, const char *section,
 		   unsigned long start_octet, unsigned long octet_count,
 		   struct protstream *pout, unsigned long *outsize)
 {
-    const char *msg_base = 0;
+    const char *data, *msg_base = 0;
     unsigned long msg_size = 0;
     const char *cacheitem;
-    int fetchmime = 0;
-    unsigned size, offset = 0, skip = 0;
+    int fetchmime = 0, domain = DOMAIN_7BIT;
+    unsigned size, skip = 0;
     int n, r = 0;
+    char *decbuf = NULL;
 
     if (outsize) *outsize = 0;
 
@@ -2967,12 +2968,15 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 	return IMAP_NO_MSGGONE;
     }
 
+    data = msg_base;
+
     cacheitem = cache_base + CACHE_OFFSET(msgno);
     cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip envelope */
     cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip bodystructure */
     cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip body */
 
     size = SIZE(msgno);
+    if (size > msg_size) size = msg_size;
 
     cacheitem += CACHE_ITEM_SIZE_SKIP;
 
@@ -3048,31 +3052,57 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 	    goto done;
 	}
 
-	offset = CACHE_ITEM_BIT32(cacheitem);
+	data += CACHE_ITEM_BIT32(cacheitem);
 	size = CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP);
     }
 
+    /* Handle BINARY request */
+    if (params & URLFETCH_BINARY) {
+	int encoding = CACHE_ITEM_BIT32(cacheitem + 2 * 4) & 0xff;
+
+	data = charset_decode_mimebody(data, size, encoding,
+				       &decbuf, 0, (int *) &size);
+	if (!data) {
+	    /* failed to decode */
+	    r = IMAP_NO_UNKNOWN_CTE;
+	    goto done;
+	}
+    }
+
     /* Handle PARTIAL request */
-    offset += start_octet;
-    if (octet_count) size = octet_count;
+    n = octet_count ? octet_count : size;
 
     /* Sanity check the requested size */
-    if (size && (offset + size > msg_size))
-	n = msg_size - offset;
-    else
-	n = size;
+    if (start_octet + n > size) n = size - start_octet;
 
-    if (outsize)
+    if (outsize) {
+	/* Return size (CATENATE) */
 	*outsize = n;
-    else
-	prot_printf(pout, "{%u}\r\n", n);
+    } else {
+	domain = data_domain(data + start_octet, n);
 
-    prot_write(pout, msg_base + offset, n);
+	if (domain == DOMAIN_BINARY) {
+	    /* Write size of literal8 */
+	    prot_printf(pout, "~{%u}\r\n", n);
+	} else {
+	    /* Write size of literal */
+	    prot_printf(pout, "{%u}\r\n", n);
+	}
+    }
+
+    /* Non-text literal -- tell the protstream about it */
+    if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
+
+    prot_write(pout, data + start_octet, n);
+
+    /* End of non-text literal -- tell the protstream about it */
+    if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
 
   done:
     /* Close the message file */
     mailbox_unmap_message(mailbox, UID(msgno), &msg_base, &msg_size);
 
+    if (decbuf) free(decbuf);
     return r;
 }
 

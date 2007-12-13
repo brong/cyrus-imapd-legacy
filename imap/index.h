@@ -41,7 +41,7 @@
  *
  */
 /*
- * $Id: index.h,v 1.11.2.1 2007/11/01 14:39:33 murch Exp $
+ * $Id: index.h,v 1.11.2.2 2007/12/13 18:12:42 murch Exp $
  */
 
 /* Header for internal usage of index.c + programs that make raw access
@@ -197,7 +197,7 @@ extern void index_operatemailbox(struct mailbox *mailbox);
 extern unsigned index_finduid(unsigned uid);
 extern unsigned index_getuid(unsigned msgno);
 extern int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
-			  const char *section,
+			  unsigned params, const char *section,
 			  unsigned long start_octet, unsigned long octet_count,
 			  struct protstream *pout, unsigned long *size);
 extern char *index_get_msgid(struct mailbox *mailbox, unsigned msgno);
