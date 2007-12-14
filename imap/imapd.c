@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.14 2007/12/13 18:12:40 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.15 2007/12/14 18:58:46 murch Exp $ */
 
 #include <config.h>
 
@@ -1310,12 +1310,12 @@ void cmdloop()
 	    break;
 
 	case 'E':
-	    if (!strcmp(cmd.s, "Enable")) {
+	    if (!imapd_userid) goto nologin;
+	    else if (!strcmp(cmd.s, "Enable")) {
 		if (c != ' ') goto missingargs;
 
 		cmd_enable(tag.s);
 	    }
-	    else if (!imapd_userid) goto nologin;
 	    else if (!strcmp(cmd.s, "Expunge")) {
 		if (!imapd_mailbox && !backend_current) goto nomailbox;
 		if (c == '\r') c = prot_getc(imapd_in);
@@ -10804,22 +10804,29 @@ void cmd_enable(char *tag)
     static struct buf arg;
     int c;
 
+    prot_printf(imapd_out, "* ENABLED");
+
     do {
 	c = getword(imapd_in, &arg);
 	if (!arg.s[0]) {
 	    prot_printf(imapd_out,
-			"%s BAD Missing required argument to Enable\r\n", tag);
+			"\r\n%s BAD Missing required argument to Enable\r\n",
+			tag);
 	    eatline(imapd_in, c);
 	    return;
 	}
 	lcase(arg.s);
 	if (!strcmp(arg.s, "condstore")) {
 	    imapd_client_capa |= CAPA_CONDSTORE;
+	    prot_printf(imapd_out, " CONDSTORE");
 	}
 	else if (!strcmp(arg.s, "qresync")) {
 	    imapd_client_capa |= CAPA_QRESYNC | CAPA_CONDSTORE;
+	    prot_printf(imapd_out, " QRESYNC CONDSTORE");
 	}
     } while (c == ' ');
+
+    prot_printf(imapd_out, "\r\n");
 
     /* check for CRLF */
     if (c == '\r') c = prot_getc(imapd_in);
