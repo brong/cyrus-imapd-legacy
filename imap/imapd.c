@@ -38,7 +38,7 @@
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* $Id: imapd.c,v 1.502.2.15 2007/12/14 18:58:46 murch Exp $ */
+/* $Id: imapd.c,v 1.502.2.16 2008/02/14 14:45:25 murch Exp $ */
 
 #include <config.h>
 
@@ -1467,6 +1467,7 @@ void cmdloop()
 		if (c != ' ') goto missingargs;
 
 		memset(&listargs, 0, sizeof(struct listargs));
+		listargs.ret = LIST_RET_CHILDREN;
 		getlistargs(tag.s, &listargs);
 		if (listargs.pat) cmd_list(tag.s, &listargs);
 
@@ -6043,6 +6044,7 @@ void getlistargs(char *tag, struct listargs *listargs)
     c = prot_getc(imapd_in);
     if (c == '(') {
 	listargs->cmd = LIST_CMD_EXTENDED;
+	listargs->ret = 0;
 	c = getlistselopts(tag, &listargs->sel);
 	if (c == EOF) {
 	    eatline(imapd_in, c);
@@ -6076,6 +6078,7 @@ void getlistargs(char *tag, struct listargs *listargs)
     c = prot_getc(imapd_in);
     if (c == '(') {
 	listargs->cmd = LIST_CMD_EXTENDED;
+	listargs->ret = 0;
 	for (;;) {
 	    c = getastring(imapd_in, imapd_out, &buf);
 	    if (*buf.s)
@@ -6106,6 +6109,7 @@ void getlistargs(char *tag, struct listargs *listargs)
     /* Check for and parse LIST-EXTENDED return options */
     if (c == ' ') {
 	listargs->cmd = LIST_CMD_EXTENDED;
+	listargs->ret = 0;
 	c = getlistretopts(tag, &listargs->ret);
 	if (c == EOF) {
 	    eatline(imapd_in, c);
@@ -9726,7 +9730,7 @@ static void list_response(char *name, int attributes,
     char internal_name[MAX_MAILBOX_PATH+1];
     int r, mbtype;
     char mboxname[MAX_MAILBOX_PATH+1];
-    char c;
+    char *sep;
 
     if (!name) return;
 
@@ -9780,14 +9784,14 @@ static void list_response(char *name, int attributes,
 	    attributes &= ~MBOX_ATTRIBUTE_NOSELECT;
     }
 
-    prot_printf(imapd_out, "* %s ",
+    prot_printf(imapd_out, "* %s (",
 		(listargs->cmd & LIST_CMD_LSUB) ? "LSUB" : "LIST");
-    for (c = '(', attr = mbox_name_attributes; attr->id; attr++)
+    for (sep = "", attr = mbox_name_attributes; attr->id; attr++) {
 	if (attributes & attr->flag) {
-	    prot_putc(c, imapd_out);
-	    prot_printf(imapd_out, attr->id);
-	    c = ' ';
+	    prot_printf(imapd_out, "%s%s", sep, attr->id);
+	    sep = " ";
 	}
+    }
     prot_printf(imapd_out, ") ");
 
     prot_printf(imapd_out, "\"%c\" ", imapd_namespace.hier_sep);
@@ -10103,8 +10107,6 @@ static void list_data(struct listargs *listargs)
 		rock.last_name = NULL;
 	    }
 	} else {
-	    /* implicitly return CHILDREN info */
-	    rock.listargs->ret |= LIST_RET_CHILDREN;
 	    for (pattern = listargs->pat; pattern; pattern = pattern->next) {
 		rock.trailing_percent =
 		    pattern->s[strlen(pattern->s) - 1] == '%';
