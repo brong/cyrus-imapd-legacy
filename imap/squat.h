@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
+ *    prior written permission. For permission or any legal
  *    details, please contact
- *      Office of Technology Transfer
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: squat.h,v 1.2 2003/02/13 20:15:31 rjs3 Exp $
+ * $Id: squat.h,v 1.2.8.1 2009/12/28 21:51:39 murch Exp $
  */
 
 /*
@@ -257,8 +258,8 @@ int         squat_index_close_document(SquatIndex* index);
    index are released whether this call succeeds or fails.
    Call this after successfully calling squat_index_init or
    squat_index_close_document. */
-int         squat_index_finish(SquatIndex* index);
 
+int         squat_index_finish(SquatIndex* index);
 
 /* Notify SQUAT that something has gone wrong and index construction
    must be aborted. It is the client's responsibility to close and/or
@@ -267,6 +268,15 @@ int         squat_index_finish(SquatIndex* index);
    Call this anytime. */
 int         squat_index_destroy(SquatIndex* index);
 
+
+typedef int (* SquatScanCallback)(void* closure, char *name, int doc_ID);
+
+int         squat_scan(SquatSearchIndex* index, char first_char,
+                       SquatScanCallback handler,
+                       void* closure);
+
+int         squat_count_docs(SquatSearchIndex* index, char first_char,
+                             int *counter);
 
 /***************************************
    INDEX SEARCH API
@@ -317,4 +327,12 @@ int               squat_search_execute(SquatSearchIndex* index, char const* data
    Call this anytime. */
 int               squat_search_close(SquatSearchIndex* index);
 
+
+typedef int (* SquatDocChooserCallback)(void* closure,
+                                        SquatListDoc const* doc);
+
+int squat_index_add_existing(SquatIndex* index,
+                             SquatSearchIndex *old_index,
+                             SquatDocChooserCallback choose_existing,
+                             void *closure);
 #endif

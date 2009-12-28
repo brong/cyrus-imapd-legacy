@@ -1,13 +1,13 @@
 /* ctl_mboxlist.c -- do DB related operations on mboxlist
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,9 +39,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: ctl_mboxlist.c,v 1.51.2.2 2009/12/28 21:51:29 murch Exp $
  */
-
-/* $Id: ctl_mboxlist.c,v 1.51.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 /* currently doesn't catch signals; probably SHOULD */
 
@@ -116,8 +116,8 @@ struct dumprock {
 
 struct mb_node 
 {
-    char mailbox[MAX_MAILBOX_NAME+1];
-    char server[MAX_MAILBOX_NAME+1];
+    char mailbox[MAX_MAILBOX_BUFFER];
+    char server[MAX_MAILBOX_BUFFER];
     char *acl;
     struct mb_node *next;
 };
@@ -518,10 +518,12 @@ void do_dump(enum mboxop op, const char *part, int purge)
 
 	    for (me = wipe_head; me != NULL; me = me->next) count++;
 
-	    fprintf(stderr, "OK to delete %d local mailboxes? ", count);
-	    if (!yes()) {
-		fprintf(stderr, "Cancelled!\n");
-		exit(1);
+	    if ( count > 0 ) {
+		fprintf(stderr, "OK to delete %d local mailboxes? ", count);
+		if (!yes()) {
+		    fprintf(stderr, "Cancelled!\n");
+		    exit(1);
+		}
 	    }
 	}
 
@@ -554,7 +556,7 @@ void do_undump(void)
     int r = 0;
     char buf[16384];
     int line = 0;
-    char last_commit[MAX_MAILBOX_NAME];
+    char last_commit[MAX_MAILBOX_BUFFER];
     char *key=NULL, *data=NULL;
     int keylen, datalen;
     int untilCommit = PER_COMMIT;
@@ -576,7 +578,7 @@ void do_undump(void)
 	    continue;
 	}
 	*p++ = '\0';
-	if (isdigit((int) *p)) {
+	if (Uisdigit(*p)) {
 	    /* new style dump */
 	    mbtype = strtol(p, &p, 10);
 	    /* skip trailing space */
@@ -594,7 +596,7 @@ void do_undump(void)
 	for (; *p && *p != '\r' && *p != '\n'; p++) ;
 	*p++ = '\0';
 
-	if (strlen(name) > MAX_MAILBOX_NAME) {
+	if (strlen(name) >= MAX_MAILBOX_BUFFER) {
 	    fprintf(stderr, "line %d: mailbox name too long\n", line);
 	    continue;
 	}
@@ -664,8 +666,8 @@ enum {
 
 struct found_data {
     int type;
-    char mboxname[MAX_MAILBOX_NAME+1];
-    char partition[MAX_MAILBOX_NAME+1];
+    char mboxname[MAX_MAILBOX_BUFFER];
+    char partition[MAX_MAILBOX_BUFFER];
     char path[MAX_MAILBOX_PATH+1];
 };
 
@@ -791,9 +793,9 @@ static int verify_cb(void *rockp,
 		   name, part);
 	}
 	else if (r > 0) {
-	    printf("'%s' has a directory on partition '%s' but no DB entry\n",
+	    printf("'%s' has a directory '%s' but no DB entry\n",
 		   found->data[found->idx].mboxname,
-		   found->data[found->idx].partition);
+		   found->data[found->idx].path);
 	    found->idx++;
 	}
 	else found->idx++;
@@ -823,18 +825,25 @@ void do_verify(void)
     for (i = 0; i < found.size; i++) {
 	DIR *dirp;
 	struct dirent *dirent;
-	char name[MAX_MAILBOX_NAME+1];
-	char part[MAX_MAILBOX_NAME+1]; 
+	char name[MAX_MAILBOX_BUFFER];
+	char part[MAX_MAILBOX_BUFFER]; 
 	char path[MAX_MAILBOX_PATH+1];
 	int type;
 
 	if (config_hashimapspool && (found.data[i].type & ROOT)) {
 	    /* need to add hashed directories */
+	    int config_fulldirhash = libcyrus_config_getswitch(CYRUSOPT_FULLDIRHASH);
 	    char *tail;
-	    int c;
+	    int j, c;
 
 	    /* make the toplevel partition /a */
-	    strcat(found.data[i].path, "/a");
+	    if (config_fulldirhash) {
+		strcat(found.data[i].path, "/A");
+		c = 'B';
+	    } else {
+		strcat(found.data[i].path, "/a");
+		c = 'b';
+	    }
 	    type = (found.data[i].type &= ~ROOT);
 
 	    /* make a template path for /b - /z */
@@ -843,7 +852,7 @@ void do_verify(void)
 	    strcpy(path, found.data[i].path);
 	    tail = path + strlen(path) - 1;
 
-	    for (c = 'b'; c <= 'z'; c++) {
+	    for (j = 1; j < 26; j++, c++) {
 		*tail = c;
 		add_path(&found, type, name, part, path);
 	    }

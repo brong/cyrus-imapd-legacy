@@ -1,13 +1,13 @@
 /* mboxlist.h -- Mailbox list manipulation routines
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,8 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- * 
- * $Id: mboxlist.h,v 1.40.2.2 2007/11/28 15:18:11 murch Exp $
+ *
+ * $Id: mboxlist.h,v 1.40.2.3 2009/12/28 21:51:36 murch Exp $
  */
 
 #ifndef INCLUDED_MBOXLIST_H
@@ -73,7 +74,7 @@ extern struct db *mbdb;
 
 /* each mailbox has the following data */
 struct mbox_entry {
-    char name[MAX_MAILBOX_NAME];
+    char name[MAX_MAILBOX_BUFFER];
     int mbtype;
     char partition[MAX_PARTITION_LEN];
 				/* holds remote machine for REMOTE mailboxes */
@@ -137,7 +138,8 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 /* Rename/move a mailbox (hierarchical) */
 int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
 			   int isadmin, char *userid, 
-			   struct auth_state *auth_state, int forceuser);
+			   struct auth_state *auth_state, int forceuser,
+                           int ignorequota);
 
 /* change ACL */
 int mboxlist_setacl(const char *name, const char *identifier,
@@ -178,6 +180,9 @@ int mboxlist_findsub_alt(struct namespace *namespace,
    'stagedir' should be MAX_MAILBOX_PATH. */
 int mboxlist_findstage(const char *name, char *stagedir, size_t sd_len);
 
+/* Check 'user's subscription status for mailbox 'name' */
+int mboxlist_checksub(const char *name, const char *userid);
+
 /* Change 'user's subscription status for mailbox 'name'. */
 int mboxlist_changesub(const char *name, const char *userid, 
 		       struct auth_state *auth_state, int add, int force);
@@ -211,4 +216,9 @@ int mboxlist_commit(struct txn *tid);
 int mboxlist_abort(struct txn *tid);
 
 int mboxlist_delayed_delete_isenabled(void);
+
+/* Small utility routine for limit_user_folders */
+int mboxlist_count_inferiors(char *mailboxname, int isadmin, char *userid,
+                             struct auth_state *authstate);
+
 #endif

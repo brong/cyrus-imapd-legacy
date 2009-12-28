@@ -1,6 +1,6 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<!-- $Id: changes.html,v 1.105.2.11 2007/12/13 18:12:40 murch Exp $ -->
+<!-- $Id: changes.html,v 1.105.2.12 2009/12/28 21:51:27 murch Exp $ -->
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
@@ -13,13 +13,173 @@
 <li>Added support for LIST-EXTENDED IMAP extension.  Removed
 support for deprecated (compile-time) LISTEXT IMAP extension.
 <i>Based on work by Martin Konold &lt;martin.konold@erfrakon.de&gt;</i></li> 
-<li>Added support for COMPRESS IMAP extension.  <i>Inspired by work of
-Dave Cridland &lt;dave@cridland.net&gt;</i></li>
 <li>Added support for ESEARCH IMAP extension.</li>
 <li>Added support for WITHIN extension to IMAP SEARCH.</li>
 <li>Added support for ENABLE IMAP extension.</li>
 <li>Added support for QRESYNC IMAP extension.</li>
 <li>Added support for URLAUTH=BINARY IMAP extension.</li>
+</ul>
+
+<h1>Changes to the Cyrus IMAP Server since 2.3.15</h1>
+<ul>
+<li>Added <tt>user_deny.db</tt> to be able to selectively deny users
+  access to Cyrus services.</li>
+<li>Added <tt>disconnect_on_vanished_mailbox</tt> option.
+  See <tt>imapd.conf(5)</tt> for details</li>
+<li>Reworked SQL detection code in configure.
+  See <a href=install-upgrade.html>install-upgrade.html</a> for more
+  details.</li>
+<li>Added <tt>popuseimapflags</tt> option which enables setting and
+  obeying IMAP flags in the POP server.</li>
+<li>Added optimized method of handling an empty maildrop in pop3d.
+  Requires <tt>statuscache</tt> to be enabled. (based on work of
+  Cyril Servant <elfejoyeux@gmail.com>) </li>
+<li>Added <tt>annotation_definitions</tt> option for specifying
+  external (third-party) annotations. (courtesy of Thomas
+  Viehmann <tv@beamnet.de>)</li>
+<li>Added <tt>sync_compress</tt> option to compress replication traffic</li>
+<li>Added <tt>user_folder_limit</tt> option to limit the number of
+  folders a non-admin user is allowed to create.</li>
+<li>Added <tt>-x</tt> option to <tt>cyr_expire</tt> to disable expunge</li>
+<li>Track idle state so a shutdown doesn't leave idled killing random other 
+  processes on a busy system</li>
+<li>Fix missing closedir() - bug #3159 (thanks Simon Matter)</li>
+<li>Make Cyrus compile with older GCC (thanks Simon Matter)</li>
+</ul>
+
+<h1>Changes to the Cyrus IMAP Server since 2.3.14</h1>
+<ul>
+<li>Fixed
+ CERT <a href="http://www.kb.cert.org/vuls/id/336053">VU#336053</a>
+ - Potential buffer overflow in Sieve.</li>
+<li>Added new <tt>cyr_df</tt> tool for reporting Cyrus spool partition
+disk space usage.</li>
+<li>Fixed a crash when selecting a folder after using the SCAN command</li>
+<li>Split mupdate_synchronize() into network scarfing and mailbox
+  comparision pieces.  This allows us to not lock out the
+  mailboxes.db and mupdate clients while scarfing the UPDATE
+  response, which can be quite time consuming over slow links.</li>
+<li>Added support for MUPDATE COMPRESS and IMAP COMPRESS commands
+  which help speed up bulk data commands over slow links.
+  <i>Inspired by work of Dave Cridland &lt;dave@cridland.net&gt;</i></li>
+<li>Allow frontend servers in a Murder to proxy the CREATE, DELETE,
+  SETACL, SETQUOTA, and GETQUOTA commands for toplevel mailboxes.  In
+  order for a frontend to know where to CREATE a toplevel mailbox,
+  either the <tt>defaultserver</tt> option must be set (ALL new
+  toplevel mailboxes are created on this particular server), or
+  the <tt>serverlist</tt> option must be set (new toplevel mailboxes
+  are created on whichever server has the most available spool space).</li>
+<li>Use delayed expunge in ipurge to avoid corrupting cache file
+  and as a bonus make it unexpungable.</li>
+<li>Run daily tasks at the same time each day instead of exactly
+  24 hours apart to detect daylight savings changes</li>
+<li>Fixed Bug #2727 by immediately expunging old messages on INBOX
+  to INBOX.sub rename</li>
+<li>Fixed incorrect quota calculations on sync_server when replicating
+  unexpunged messages (thanks David Carter)</li>
+<li>Allow user rename to succeed even if the user is over quota</li>
+<li>Fixed a skiplist foreach bug and various datatype size issues that 
+  caused problems on some 64 bit architectures</li>
+<li>Added additional logging of mailbox events if condstore is enabled
+  to ensure modseq values are always correctly replicated</li>
+<li>Fixed "DBERROR db4: environment reference count went negative" by
+  forking idled before opening the database environment.</li>
+<li>Fixed a squatter bug where any short search term (&lt; 4 characters)
+  would cause squatter to return all messages regardless of the other
+  filters being applied</li>
+</ul>
+
+<h1>Changes to the Cyrus IMAP Server since 2.3.13</h1>
+<ul>
+<li>Fixed incompatibility between older ManageSieve clients and newer
+servers that issue an auto-capability response after AUTH with a
+SASL security layer.</li>
+<li>Fixed quota calculation to ignore files not mentioned in the
+  index</li>
+<li>Correct cache truncation after an aborted append (was leaving
+  empty holes in the cache file>)</li>
+<li>Fixed ACLs copying when renaming users</li>
+<li>Fixed TLS session reuse</li>
+<li>Log more detail about changes done by a reconstruct (indicating
+  that there were problems with the mailbox before hand - mainly
+  as a debugging aid)</li>
+<li>Ensured that the longest possible named mailbox can still be
+  deleted when delayed delete is enabled by increasing buffer sizes</li>
+<li>Add configuration option mailbox_default_options allowing
+  (for example) modsequences to be turned on for all new mailboxes</li>
+<li>Replication:
+<ul>
+  <li>added -R option to sync_client to do rolling replication in the
+   foreground (to run under supervise or similar)</li>
+ <li>made cyr_synclog run as cyrus user if started as root</li>
+ <li>Changed ADDSUB/DELSUB replication to replicate current state
+   rather than log explicit changes, avoiding a bug where if multiple
+   subscription changes happened in one sync run, the replica could
+   be incorrect</li>
+ <li>Changed replication logging related to user creation and mailboxes
+   to ensure correct replication of delayed delete of entire users</li>
+ <li>Always overwrite the seen DB on the replica with the full DB from
+   the master on "setseen_all" to guarantee consistency</li>
+ <li>Sync all mailbox annotations, not just condstore, ensuring
+   mailbox is consistent on both ends (solves POP3_NEW_UIDL bug)</li>
+</ul></li>
+</ul>
+
+<h1>Changes to the Cyrus IMAP Server since 2.3.12</h1>
+<ul>
+<li>Added an experimental "sql" backend for cyrusdb.  Currently MySQL,
+PostgreSQL, and SQLite are supported.  See the new <tt>sql_*</tt>
+options for details.</li>
+<li>Added support for IMAP [CAPABILITY] response code to client-side
+of Murder proxies.</li>
+<li>Added support for ManageSieve auto-capability response after
+STARTTLS and after AUTH with a SASL security layer.</li>
+<li>Made <tt>MAXWORD</tt> and <tt>MAXQUOTED</tt> sizes configurable
+  via <tt>imapd.conf</tt> <i>-- courtesy of Fastmail.fm</i>.</li>
+<li>Rewrote <tt>cyrusdb_quotalegacy.c</tt> to use <tt>readir()</tt>
+  rather than <tt>glob.c</tt>.  This avoids a potential crash due to
+  conflicts between glibc and Heimdal implementations of <tt>glob()</tt>.</li>
+<li>Added support for <tt>fulldirhash</tt> to <tt>ctl_mboxlist -v</tt>.</li>
+<li>More skiplist transaction fixes <i>-- courtesy of Fastmail.fm</i>.</li>
+<li><tt>cyr_expire</tt> no longer has a default of 0 (zero)
+  for <tt>-X</tt> and <tt>-D</tt>.  These options must be used
+  explicitly in order to have the desired effect.</li>
+<li>Added <tt>sieve_utf8fileinto</tt> option.</li>
+<li>Added <tt>sieve_sasl_send_unsolicited_capability</tt>
+  and <tt>sieve_sasl_expect_unsolicited_capability</tt> options.</li>
+<li>Several 32/64-bit compatibility fixes.</li>
+<li>Fixed miscellaneous bugs and build issues.</li>
+</ul>
+
+<h1>Changes to the Cyrus IMAP Server since 2.3.11</h1>
+<ul>
+<li>Added <tt>statuscache.db</tt> to cache IMAP STATUS data which
+significantly reduces the amount of I/O necessary when neither the
+mailbox nor \Seen state has changed
+<i>-- courtesy of Fastmail.fm</i>.</li>
+<li>Added option to <tt>unexpunge</tt> to restore messages by time
+interval
+<i>-- courtesy of David Carter</i>.</li>
+<li>Implemented undocumented IMAP SCAN extension, which allows
+Pine/Alpine to do cross-mailbox searches
+<i>-- based on work of David Carter</i>.</li>
+<li>Implemented incremental squat updates (see <tt>squatter.8</tt>)
+<i>-- courtesy of David Carter</i>.</li>
+<li>Fixed major bugs in <tt>reconstruct -k</tt> implementation 
+<i>-- courtesy of David Carter</i>.</li>
+<li>Added code to promote transaction safety and to track the lock
+status of skiplist databases <i>-- courtesy of Fastmail.fm</i>.</li>
+<li>Added option to <tt>mbexamine</tt> to compare quota usage in
+cyrus.index to the actual message file sizes.</li>
+<li>Allow long lines in <tt>imapd.conf</tt> to be split across
+multiple lines by using backslash as a continuation character.</li>
+<li>The Sieve compiler now translates UTF-8 mailbox names used in
+<tt>fileinto</tt> to modified UTF-7 so that messages will be
+successfully inserted into the mailbox.</li>
+<li>Use a more appropriate argument with LHLO command.</li>
+<li>Added <tt>serverinfo</tt> option to control the information
+displayed in banner greetings and capability responses.</li>
+<li>Fixed miscellaneous bugs and build issues.</li>
 </ul>
 
 <h1>Changes to the Cyrus IMAP Server since 2.3.10</h1>
@@ -2318,7 +2478,7 @@ message for this common configuration error.</li>
 </ul>
 
 <hr />
-last modified: $Date: 2007/12/13 18:12:40 $ <br />
+last modified: $Date: 2009/12/28 21:51:27 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

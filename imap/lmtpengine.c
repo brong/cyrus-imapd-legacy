@@ -1,14 +1,13 @@
 /* lmtpengine.c: LMTP protocol engine
- * $Id: lmtpengine.c,v 1.117.2.3 2007/12/10 17:48:38 murch Exp $
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: lmtpengine.c,v 1.117.2.4 2009/12/28 21:51:34 murch Exp $
  */
 
 #include <config.h>
@@ -477,11 +479,11 @@ static char *parseaddr(char *s)
 	p++;
 	if (*p == '[') {
 	    p++;
-	    while (isdigit((int) *p) || *p == '.') p++;
+	    while (Uisdigit(*p) || *p == '.') p++;
 	    if (*p++ != ']') return 0;
 	}
 	else {
-	    while (isalnum((int) *p) || *p == '.' || *p == '-') p++;
+	    while (Uisalnum(*p) || *p == '.' || *p == '-') p++;
 	}
 	if (*p == ',' && p[1] == '@') p++;
 	else if (*p == ':' && p[1] != '@') p++;
@@ -517,11 +519,11 @@ static char *parseaddr(char *s)
 	p++;
 	if (*p == '[') {
 	    p++;
-	    while (isdigit((int) *p) || *p == '.') p++;
+	    while (Uisdigit(*p) || *p == '.') p++;
 	    if (*p++ != ']') return 0;
 	}
 	else {
-	    while (isalnum((int) *p) || *p == '.' || *p == '-') p++;
+	    while (Uisalnum(*p) || *p == '.' || *p == '-') p++;
 	}
     }
     
@@ -682,9 +684,11 @@ static int savemsg(struct clientdata *cd,
     }
 
     /* We are always atleast "with LMTPA" -- no unauth delivery */
-    p += sprintf(p, " by %s (Cyrus %s) with LMTP%s%s",
-		 config_servername,
-		 CYRUS_VERSION,
+    p += sprintf(p, " by %s", config_servername);
+    if (config_serverinfo == IMAP_ENUM_SERVERINFO_ON) {
+	p += sprintf(p, " (Cyrus %s)", CYRUS_VERSION);
+    }
+    p += sprintf(p, " with LMTP%s%s",
 		 cd->starttls_done ? "S" : "",
 		 cd->authenticated != NOAUTH ? "A" : "");
 
@@ -699,7 +703,7 @@ static int savemsg(struct clientdata *cd,
  
     fprintf(f, "Received: ");
     for (i = 0, p = addbody; i < nfold; p = fold[i], i++) {
-	fprintf(f, "%.*s\r\n\t", fold[i] - p, p);
+	fprintf(f, "%.*s\r\n\t", (int) (fold[i] - p), p);
     }
     fprintf(f, "%s\r\n", p);
     spool_cache_header(xstrdup("Received"), addbody, m->hdrcache);
@@ -805,7 +809,7 @@ static int savemsg(struct clientdata *cd,
 static int process_recipient(char *addr, struct namespace *namespace,
 			     int ignorequota,
 			     int (*verify_user)(const char *, const char *,
-						char *, long,
+						char *, quota_t,
 						struct auth_state *),
 			     message_data_t *msg)
 {
@@ -894,7 +898,7 @@ static int process_recipient(char *addr, struct namespace *namespace,
 	ret->user = NULL;
 
     r = verify_user(ret->user, ret->domain, ret->mailbox,
-		    ignorequota ? -1 : msg->size, msg->authstate);
+		    (quota_t) (ignorequota ? -1 : msg->size), msg->authstate);
     if (r) {
 	/* we lost */
 	free(ret->all);
@@ -1112,9 +1116,12 @@ void lmtpmode(struct lmtp_func *func,
 	if(haveremote) sasl_setprop(cd.conn, SASL_IPREMOTEPORT, &remoteip);  
     }
 
-    prot_printf(pout, "220 %s LMTP Cyrus %s ready\r\n", 
-		config_servername,
-		CYRUS_VERSION);
+    prot_printf(pout, "220 %s", config_servername);
+    if (config_serverinfo == IMAP_ENUM_SERVERINFO_ON) {
+	prot_printf(pout, " Cyrus LMTP%s %s",
+		    config_mupdate_server ? " Murder" : "", CYRUS_VERSION);
+    }
+    prot_printf(pout, " server ready\r\n");
 
     for (;;) {
     nextcmd:
@@ -1242,6 +1249,14 @@ void lmtpmode(struct lmtp_func *func,
 	      }
 	      user = (const char *) val;
 
+	      r = sasl_getprop(cd.conn, SASL_SSF, &val);
+	      if (r != SASL_OK) {
+		  prot_printf(pout, "501 5.5.4 SASL Error\r\n");
+		  reset_saslconn(&cd.conn);
+		  goto nextcmd;
+	      }
+	      saslprops.ssf = *((sasl_ssf_t *) val);
+
 	      /* Create telemetry log */
 	      deliver_logfd = telemetry_log(user, pin, pout, 0);
 
@@ -1324,7 +1339,7 @@ void lmtpmode(struct lmtp_func *func,
 		  cd.authenticated <= NOAUTH) {
 		  prot_printf(pout, "250-STARTTLS\r\n");
 	      }
-	      if (cd.authenticated <= NOAUTH &&
+	      if ((cd.authenticated <= NOAUTH || saslprops.ssf) &&
 		  sasl_listmech(cd.conn, NULL, "AUTH ", " ", "", &mechs, 
 				NULL, &mechcount) == SASL_OK && 
 		  mechcount > 0) {
@@ -1409,7 +1424,7 @@ void lmtpmode(struct lmtp_func *func,
 			}
 			tmp += 5;
 			/* make sure we have a value */
-			if (!isdigit((int) *tmp)) {
+			if (!Uisdigit(*tmp)) {
 				prot_printf(pout, 
 					    "501 5.5.2 SIZE requires a value\r\n");
 				goto nextcmd;
@@ -1723,9 +1738,9 @@ static int ask_code(const char *s)
     if (strlen(s) < 3) return -1;
 
     /* check to make sure 0-2 are digits */
-    if ((isdigit((int) s[0])==0) ||
-	(isdigit((int) s[1])==0) ||
-	(isdigit((int) s[2])==0))
+    if ((Uisdigit(s[0])==0) ||
+	(Uisdigit(s[1])==0) ||
+	(Uisdigit(s[2])==0))
     {
 	return -1;
     }

@@ -1,13 +1,13 @@
 /* cyr_dbtool.c -- manage Cyrus databases
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,9 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- */
-/*
- * $Id: cyr_dbtool.c,v 1.4.2.1 2007/11/01 14:39:31 murch Exp $
+ * $Id: cyr_dbtool.c,v 1.4.2.2 2009/12/28 21:51:29 murch Exp $
  */
 
 #include <config.h>
@@ -159,15 +158,15 @@ int main(int argc, char *argv[])
     }
 	
     if((argc - optind) < 3) {
-	fprintf(stderr, "Usage: %s [-C altconfig] <old db> <old db backend> <action> [<key>] [<value>]\n", argv[0]);
-	fprintf(stderr, "Usable Backends:  ");
+	char sep;
 
-	if(!cyrusdb_backends || !cyrusdb_backends[0])
-	    fatal("we don't seem to have any db backends available", EC_OSERR);
-	
-	fprintf(stderr, "%s", cyrusdb_backends[0]->name);
-	for(i=1; cyrusdb_backends[i]; i++)
-	    fprintf(stderr, ", %s", cyrusdb_backends[i]->name);
+	fprintf(stderr, "Usage: %s [-C altconfig] <old db> <old db backend> <action> [<key>] [<value>]\n", argv[0]);
+	fprintf(stderr, "Usable Backends");
+
+	for(i=0, sep = ':'; cyrusdb_backends[i]; i++) {
+	    fprintf(stderr, "%c %s", sep, cyrusdb_backends[i]->name);
+	    sep = ',';
+	}
 	
 	fprintf(stderr, "\n");
 	fprintf(stderr, "\n");
@@ -245,6 +244,10 @@ int main(int argc, char *argv[])
             key = argv[optind+3];
             keylen = strlen(key);
             DB_OLD->foreach(odb, key, keylen, NULL, printer_cb, NULL, &tid);
+        }
+    } else if (!strcmp(action, "consistency")) {
+        if (DB_OLD->consistent(odb)) {
+            printf("Consistency Error for %s\n", old_db);
         }
     } else {
         printf("Unknown action %s\n", action);

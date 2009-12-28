@@ -1,13 +1,13 @@
 /* backend.c -- IMAP server proxy for Cyrus Murder
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: backend.c,v 1.43.2.2 2009/12/28 21:51:28 murch Exp $
  */
-
-/* $Id: backend.c,v 1.43.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -59,13 +60,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
 
+#include "assert.h"
 #include "prot.h"
 #include "backend.h"
 #include "global.h"
@@ -75,26 +76,38 @@
 #include "iptostring.h"
 #include "util.h"
 
+enum {
+    AUTO_BANNER = -1,
+    AUTO_NO = 0,
+    AUTO_YES = 1
+};
+
 static char *ask_capability(struct protstream *pout, struct protstream *pin,
 			    struct protocol_t *prot, unsigned long *capa,
-			    int banner)
+			    int automatic)
 {
     char str[4096];
     char *ret = NULL, *tmp;
     struct capa_t *c;
+    const char *resp;
 
-    *capa = 0;
-    
-    if (!banner && prot->capa_cmd.cmd) {
+    resp = (automatic == AUTO_BANNER) ? prot->banner.resp : prot->capa_cmd.resp;
+
+    if (!automatic) {
+	/* no capability command */
+	if (!prot->capa_cmd.cmd) return NULL;
+	
 	/* request capabilities of server */
-	prot_printf(pout, "%s\r\n", prot->capa_cmd.cmd);
+	prot_printf(pout, "%s", prot->capa_cmd.cmd);
+	if (prot->capa_cmd.arg) prot_printf(pout, " %s", prot->capa_cmd.arg);
+	prot_printf(pout, "\r\n");
 	prot_flush(pout);
     }
 
+    *capa = 0;
+    
     do {
-	if (prot_fgets(str, sizeof(str), pin) == NULL) {
-	    return NULL;
-	}
+	if (prot_fgets(str, sizeof(str), pin) == NULL) break;
 
 	/* look for capabilities in the string */
 	for (c = prot->capa_cmd.capa; c->str; c++) {
@@ -109,10 +122,39 @@ static char *ask_capability(struct protstream *pout, struct protstream *pin,
 		}
 	    }
 	}
+	if (!resp) {
+	    /* multiline response with no distinct end (IMAP banner) */
+	    prot_NONBLOCK(pin);
+	}
+
 	/* look for the end of the capabilities */
-    } while (strncasecmp(str, prot->capa_cmd.resp, strlen(prot->capa_cmd.resp)));
+    } while (!resp || strncasecmp(str, resp, strlen(resp)));
     
+    prot_BLOCK(pin);
     return ret;
+}
+
+static int do_compress(struct backend *s, struct simple_cmd_t *compress_cmd)
+{
+#ifndef HAVE_ZLIB
+    return -1;
+#else
+    char buf[1024];
+
+    /* send compress command */
+    prot_printf(s->out, "%s\r\n", compress_cmd->cmd);
+    prot_flush(s->out);
+
+    /* check response */
+    if (!prot_fgets(buf, sizeof(buf), s->in) ||
+	strncmp(buf, compress_cmd->ok, strlen(compress_cmd->ok)))
+	return -1;
+
+    prot_setcompress(s->in);
+    prot_setcompress(s->out);
+
+    return 0;
+#endif /* HAVE_ZLIB */
 }
 
 static int do_starttls(struct backend *s, struct tls_cmd_t *tls_cmd)
@@ -163,7 +205,8 @@ static int backend_authenticate(struct backend *s, struct protocol_t *prot,
 				sasl_callback_t *cb, const char **status)
 {
     int r;
-    sasl_security_properties_t *secprops = NULL;
+    sasl_security_properties_t secprops =
+	{ 0, 0xFF, PROT_BUFSIZE, 0, NULL, NULL }; /* default secprops */
     struct sockaddr_storage saddr_l, saddr_r;
     char remoteip[60], localip[60];
     socklen_t addrsize;
@@ -207,8 +250,7 @@ static int backend_authenticate(struct backend *s, struct protocol_t *prot,
 	return r;
     }
 
-    secprops = mysasl_secprops(0);
-    r = sasl_setprop(s->saslconn, SASL_SEC_PROPS, secprops);
+    r = sasl_setprop(s->saslconn, SASL_SEC_PROPS, &secprops);
     if (r != SASL_OK) {
 	return r;
     }
@@ -246,7 +288,9 @@ static int backend_authenticate(struct backend *s, struct protocol_t *prot,
 	/* If we don't have a usable mech, do TLS and try again */
     } while (r == SASL_NOMECH && CAPA(s, CAPA_STARTTLS) &&
 	     do_starttls(s, &prot->tls_cmd) != -1 &&
-	     (*mechlist = ask_capability(s->out, s->in, prot, &s->capability, 0)));
+	     (*mechlist = ask_capability(s->out, s->in, prot,
+					 &s->capability,
+					 prot->tls_cmd.auto_capa)));
 
     /* xxx unclear that this is correct */
     if (local_cb) free_callbacks(cb);
@@ -260,7 +304,7 @@ static int backend_authenticate(struct backend *s, struct protocol_t *prot,
     return r;
 }
 
-static int timedout = 0;
+static volatile sig_atomic_t timedout = 0;
 
 static void timed_out(int sig) 
 {
@@ -279,6 +323,7 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
     int sock = -1;
     int r;
     int err = -1;
+    int ask = 1; /* should we explicitly ask for capabilities? */
     struct addrinfo hints, *res0 = NULL, *res;
     struct sockaddr_un sunsock;
     char buf[2048], *mechlist = NULL;
@@ -370,7 +415,16 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
     prot_setflushonread(ret->in, ret->out);
     ret->prot = prot;
     
-    if (!prot->banner.is_capa) {
+    if (prot->banner.is_capa) {
+	/* try to get the capabilities from the banner */
+	mechlist = ask_capability(ret->out, ret->in, prot,
+				  &ret->capability, AUTO_BANNER);
+	if (mechlist || ret->capability) {
+	    /* found capabilities in banner -> don't ask */
+	    ask = 0;
+	}
+    }
+    else {
 	do { /* read the initial greeting */
 	    if (!prot_fgets(buf, sizeof(buf), ret->in)) {
 		syslog(LOG_ERR,
@@ -384,16 +438,20 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
 			     strlen(prot->banner.resp)));
     }
 
-    /* get the capabilities */
-    mechlist = ask_capability(ret->out, ret->in, prot, &ret->capability,
-			      prot->banner.is_capa);
+    if (ask) {
+	/* get the capabilities */
+	mechlist = ask_capability(ret->out, ret->in, prot,
+				  &ret->capability, AUTO_NO);
+    }
 
     /* now need to authenticate to backend server,
        unless we're doing LMTP/CSYNC on a UNIX socket (deliver/sync_client) */
     if ((server[0] != '/') ||
 	(strcmp(prot->sasl_service, "lmtp") &&
 	 strcmp(prot->sasl_service, "csync"))) {
-	if ((r = backend_authenticate(ret, prot, &mechlist, userid,
+	char *mlist = xstrdup(mechlist); /* backend_auth is destructive */
+
+	if ((r = backend_authenticate(ret, prot, &mlist, userid,
 				      cb, auth_status))) {
 	    syslog(LOG_ERR, "couldn't authenticate to backend server: %s",
 		   sasl_errstring(r, NULL, NULL));
@@ -401,9 +459,65 @@ struct backend *backend_connect(struct backend *ret_backend, const char *server,
 	    close(sock);
 	    ret = NULL;
 	}
+	else {
+	    const void *ssf;
+
+	    sasl_getprop(ret->saslconn, SASL_SSF, &ssf);
+	    if (*((sasl_ssf_t *) ssf)) {
+		/* if we have a SASL security layer, compare SASL mech lists
+		   to check for a MITM attack */
+		char *new_mechlist;
+		int auto_capa = prot->sasl_cmd.auto_capa;
+
+		if (!strcmp(prot->service, "sieve")) {
+		    /* XXX  Hack to handle ManageSieve servers.
+		     * No way to tell from protocol if server will
+		     * automatically send capabilities, so we treat it
+		     * as optional.
+		     */
+		    char ch;
+
+		    /* wait and probe for possible auto-capability response */
+		    usleep(250000);
+		    prot_NONBLOCK(ret->in);
+		    if ((ch = prot_getc(ret->in)) != EOF) {
+			prot_ungetc(ch, ret->in);
+		    } else {
+			auto_capa = AUTO_NO;
+		    }
+		    prot_BLOCK(ret->in);
+		}
+
+		new_mechlist = ask_capability(ret->out, ret->in, prot,
+					      &ret->capability, auto_capa);
+		if (new_mechlist && strcmp(new_mechlist, mechlist)) {
+		    syslog(LOG_ERR, "possible MITM attack:"
+			   "list of available SASL mechanisms changed");
+		    if (!ret_backend) free(ret);
+		    close(sock);
+		    ret = NULL;
+		}
+
+		free(new_mechlist);
+	    }
+	}
+
+	if (mlist) free(mlist);
     }
 
     if (mechlist) free(mechlist);
+
+    /* start compression if requested and both client/server support it */
+    if (config_getswitch(IMAPOPT_PROXY_COMPRESS) &&
+	CAPA(ret, CAPA_COMPRESS) &&
+	prot->compress_cmd.cmd &&
+	do_compress(ret, &prot->compress_cmd)) {
+
+	syslog(LOG_ERR, "couldn't enable compression on backend server");
+	if (!ret_backend) free(ret);
+	close(sock);
+	ret = NULL;
+    }
 
     if (!ret_backend) ret_backend = ret;
 	    

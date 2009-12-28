@@ -1,30 +1,48 @@
 %{
 /* sieve.y -- sieve parser
  * Larry Greenfield
- * $Id: sieve.y,v 1.33.2.1 2007/11/01 14:39:39 murch Exp $
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Carnegie Mellon University
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: sieve.y,v 1.33.2.2 2009/12/28 21:51:54 murch Exp $
  */
-/***********************************************************
-        Copyright 1999 by Carnegie Mellon University
-
-                      All Rights Reserved
-
-Permission to use, copy, modify, and distribute this software and its
-documentation for any purpose and without fee is hereby granted,
-provided that the above copyright notice appear in all copies and that
-both that copyright notice and this permission notice appear in
-supporting documentation, and that the name of Carnegie Mellon
-University not be used in advertising or publicity pertaining to
-distribution of the software without specific, written prior
-permission.
-
-CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
-THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE FOR
-ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
-OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-******************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -40,6 +58,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "script.h"
 #include "tree.h"
 
+#include "../lib/imapurl.h"
 #include "../lib/util.h"
 #include "../lib/imparse.h"
 #include "../lib/libconfig.h"
@@ -95,7 +114,7 @@ struct dtags {
 
 static commandlist_t *ret;
 static sieve_script_t *parse_script;
-static int check_reqs(stringlist_t *sl);
+static char *check_reqs(stringlist_t *sl);
 static test_t *build_address(int t, struct aetags *ae,
 			     stringlist_t *sl, stringlist_t *pl);
 static test_t *build_header(int t, struct htags *h,
@@ -200,8 +219,10 @@ reqs: /* empty */
 	| require reqs
 	;
 
-require: REQUIRE stringlist ';'	{ if (!check_reqs($2)) {
-                                    yyerror("Unsupported feature(s) in \"require\"");
+require: REQUIRE stringlist ';'	{ char *err = check_reqs($2);
+                                  if (err) {
+				    yyerror(err);
+				    free(err);
 				    YYERROR; 
                                   } }
 	;
@@ -416,12 +437,12 @@ vtags: /* empty */		 { $$ = new_vtags(); }
 				   else { $$->mime = MIME; } }
 	;
 
-stringlist: '[' strings ']'      { $$ = $2; }
+stringlist: '[' strings ']'      { $$ = sl_reverse($2); }
 	| STRING		 { $$ = new_sl($1, NULL); }
 	;
 
 strings: STRING			 { $$ = new_sl($1, NULL); }
-	| STRING ',' strings	 { $$ = new_sl($1, $3); }
+	| strings ',' STRING	 { $$ = new_sl($3, $1); }
 	;
 
 block: '{' commands '}'		 { $$ = $2; }
@@ -699,21 +720,36 @@ int yyerror(char *msg)
     return 0;
 }
 
-static int check_reqs(stringlist_t *sl)
+static char *check_reqs(stringlist_t *sl)
 {
-    int i = 1;
     stringlist_t *s;
+    char *err = NULL, *p, sep = ':';
+    size_t alloc = 0;
     
     while (sl != NULL) {
 	s = sl;
 	sl = sl->next;
 
-	i &= script_require(parse_script, s->s);
+	if (!script_require(parse_script, s->s)) {
+	    if (!err) {
+		alloc = 100;
+		p = err = xmalloc(alloc);
+		p += sprintf(p, "Unsupported feature(s) in \"require\"");
+	    }
+	    else if ((size_t) (p - err + strlen(s->s) + 5) > alloc) {
+		alloc += 100;
+		err = xrealloc(err, alloc);
+		p = err + strlen(err);
+	    }
+
+	    p += sprintf(p, "%c \"%s\"", sep, s->s);
+	    sep = ',';
+	}
 
 	if (s->s) free(s->s);
 	free(s);
     }
-    return i;
+    return err;
 }
 
 static test_t *build_address(int t, struct aetags *ae,
@@ -832,7 +868,14 @@ static commandlist_t *build_fileinto(int t, int copy, char *folder)
 
     if (ret) {
 	ret->u.f.copy = copy;
-	ret->u.f.folder = folder;
+	if (config_getswitch(IMAPOPT_SIEVE_UTF8FILEINTO)) {
+	    ret->u.f.folder = xmalloc(5 * strlen(folder) + 1);
+	    UTF8_to_mUTF7(ret->u.f.folder, folder);
+	    free(folder);
+	}
+	else {
+	    ret->u.f.folder = folder;
+	}
     }
     return ret;
 }
@@ -1133,7 +1176,7 @@ static int verify_relat(char *r)
 	else if (!strcmp(r, "ne")) {return NE;}
 	else if (!strcmp(r, "eq")) {return EQ;}
 	else{
-	  sprintf(errbuf, "flag '%s': not a valid relational operation", r);
+	  snprintf(errbuf, sizeof(errbuf), "flag '%s': not a valid relational operation", r);
 	  yyerror(errbuf);
 	  return -1;
 	}

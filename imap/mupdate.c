@@ -1,14 +1,13 @@
 /* mupdate.c -- cyrus murder database master 
  *
- * $Id: mupdate.c,v 1.93.2.2 2007/11/28 15:18:11 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: mupdate.c,v 1.93.2.3 2009/12/28 21:51:37 murch Exp $
  */
 
 #include <config.h>
@@ -51,7 +53,6 @@
 #include <ctype.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <assert.h>
 #include <syslog.h>
 #include <errno.h>
 
@@ -74,6 +75,7 @@
 #include "mupdate-client.h"
 #include "telemetry.h"
 
+#include "assert.h"
 #include "exitcodes.h"
 #include "global.h"
 #include "imap_err.h"
@@ -110,7 +112,7 @@ enum {
 struct pending {
     struct pending *next;
 
-    char mailbox[MAX_MAILBOX_NAME+1];
+    char mailbox[MAX_MAILBOX_BUFFER];
 };
 
 struct stringlist 
@@ -133,6 +135,8 @@ struct conn {
 #else
     void *tlsconn;
 #endif
+    void *tls_comp;     /* TLS compression method, if any */
+    int compress_done;  /* have we done a successful compress? */
 
     int idle;
     
@@ -154,8 +158,8 @@ struct conn {
 
     /* pending changes to send, in reverse order */
     pthread_mutex_t m;
-    pthread_cond_t cond;
     struct pending *plist;
+    struct pending *ptail;
     struct conn *updatelist_next;
     struct prot_waitevent *ev; /* invoked every 'update_wait' seconds
 				  to send out updates */
@@ -221,6 +225,7 @@ void cmd_list(struct conn *C, const char *tag, const char *host_prefix);
 void cmd_startupdate(struct conn *C, const char *tag,
 		     struct stringlist *partial);
 void cmd_starttls(struct conn *C, const char *tag);
+void cmd_compress(struct conn *C, const char *tag, const char *alg);
 void shut_down(int code);
 static int reset_saslconn(struct conn *c);
 void database_init();
@@ -622,7 +627,7 @@ int service_init(int argc, char **argv,
 	 * to the slave.  We can probably fix this by prepending
 	 * config_servername onto the entries before updating the slaves.
 	 */
-	fatal("can not run mupdate master on a unified server", EC_USAGE);
+	fatal("cannot run mupdate master on a unified server", EC_USAGE);
     }
 
     if(pipe(conn_pipe) == -1) {
@@ -753,11 +758,11 @@ mupdate_docmd_result_t docmd(struct conn *c)
 	goto nextcmd;
     }
     
-    if (islower((unsigned char) c->cmd.s[0])) {
+    if (Uislower(c->cmd.s[0])) {
 	c->cmd.s[0] = toupper((unsigned char) c->cmd.s[0]);
     }
     for (p = &(c->cmd.s[1]); *p; p++) {
-	if (isupper((unsigned char) *p)) *p = tolower((unsigned char) *p);
+	if (Uisupper(*p)) *p = tolower((unsigned char) *p);
     }
     
     switch (c->cmd.s[0]) {
@@ -801,7 +806,20 @@ mupdate_docmd_result_t docmd(struct conn *c)
 	}
 	else goto badcmd;
 	break;
-	
+
+#ifdef HAVE_ZLIB
+    case 'C':
+	if (!strcmp(c->cmd.s, "Compress")) {
+	    if (ch != ' ') goto missingargs;
+	    ch = getstring(c->pin, c->pout, &(c->arg1));
+	    CHECKNEWLINE(c, ch);
+
+	    cmd_compress(c, c->tag.s, c->arg1.s);
+	}	
+	else goto badcmd;
+	break;
+#endif
+
     case 'D':
 	if (!c->userid) goto nologin;
 	else if (!strcmp(c->cmd.s, "Deactivate")) {
@@ -918,6 +936,14 @@ mupdate_docmd_result_t docmd(struct conn *c)
 	    if (c->userid) {
 		prot_printf(c->pout, 
 			    "%s BAD Can't Starttls after authentication\r\n",
+			    c->tag.s);
+		goto nextcmd;
+	    }
+		
+	    /* if we've already done COMPRESS fail */
+	    if (c->compress_done) {
+		prot_printf(c->pout, 
+			    "%s BAD Can't Starttls after Compress\r\n",
 			    c->tag.s);
 		goto nextcmd;
 	    }
@@ -1101,6 +1127,12 @@ static void dobanner(struct conn *c)
 	prot_printf(c->pout, "* STARTTLS\r\n");
     }
 
+#ifdef HAVE_ZLIB
+    if (!c->compress_done && !c->tls_comp) {
+	prot_printf(c->pout, "* COMPRESS \"DEFLATE\"\r\n");
+    }
+#endif
+
     prot_printf(c->pout, "* PARTIAL-UPDATE\r\n");
 
     prot_printf(c->pout,
@@ -1131,6 +1163,7 @@ static void *thread_main(void *rock __attribute__((unused)))
     int connflag;
     int new_fd;
     int ret = 0;
+    struct conn *ni;
 
     /* Lock Worker Count Mutex */
     pthread_mutex_lock(&worker_count_mutex); /* LOCK */
@@ -1267,8 +1300,11 @@ static void *thread_main(void *rock __attribute__((unused)))
 	    /* Free all connections on idle_connlist.  Note that
 	     * any connection not currently on the idle_connlist will
 	     * instead be freed when they drop out of their docmd() below */
+
 	    pthread_mutex_lock(&idle_connlist_mutex); /* LOCK */
-	    for(C=idle_connlist; C; C=C->next_idle) {
+	    for(C=idle_connlist; C; C = ni) {
+		ni = C->next_idle;
+
 		prot_printf(C->pout,
 			    "* BYE \"no longer ready for connections\"\r\n");
 
@@ -1545,6 +1581,7 @@ void log_update(const char *mailbox,
     for (upc = updatelist; upc != NULL; upc = upc->updatelist_next) {
 	/* for each connection, add to pending list */
 	struct pending *p = (struct pending *) xmalloc(sizeof(struct pending));
+	p->next = NULL;
 	strlcpy(p->mailbox, mailbox, sizeof(p->mailbox));
 	
 	/* this might need to be inside the mutex, but I doubt it */
@@ -1556,12 +1593,16 @@ void log_update(const char *mailbox,
 	    /* No Match! Continue! */
 	    continue;
 	}
-	
+
 	pthread_mutex_lock(&upc->m);
-	p->next = upc->plist;
-	upc->plist = p;
-	
-	pthread_cond_signal(&upc->cond);
+
+	if ( upc->plist == NULL ) {
+	    upc->plist = upc->ptail = p;
+	} else {
+	    upc->ptail->next = p;
+	    upc->ptail = p;
+	}
+
 	pthread_mutex_unlock(&upc->m);
     }
 }
@@ -1711,19 +1752,21 @@ void cmd_find(struct conn *C, const char *tag, const char *mailbox,
     pthread_mutex_unlock(&mailboxes_mutex); /* UNLOCK */
 
     if (m && m->t == SET_ACTIVE) {
-	prot_printf(C->pout, "%s MAILBOX {%d+}\r\n%s {%d+}\r\n%s {%d+}\r\n%s\r\n",
+	prot_printf(C->pout, "%s MAILBOX {" SIZE_T_FMT "+}\r\n%s"
+		    " {" SIZE_T_FMT "+}\r\n%s {" SIZE_T_FMT "+}\r\n%s\r\n",
 		    tag,
 		    strlen(m->mailbox), m->mailbox,
 		    strlen(m->server), m->server,
 		    strlen(m->acl), m->acl);
     } else if (m && m->t == SET_RESERVE) {
-	prot_printf(C->pout, "%s RESERVE {%d+}\r\n%s {%d+}\r\n%s\r\n",
+	prot_printf(C->pout, "%s RESERVE {" SIZE_T_FMT "+}\r\n%s"
+		    " {" SIZE_T_FMT "+}\r\n%s\r\n",
 		    tag,
 		    strlen(m->mailbox), m->mailbox,
 		    strlen(m->server), m->server);
     } else if (send_delete) {
 	/* not found, if needed, send a delete */
-	prot_printf(C->pout, "%s DELETE {%d+}\r\n%s\r\n",
+	prot_printf(C->pout, "%s DELETE {" SIZE_T_FMT "+}\r\n%s\r\n",
 		    tag, strlen(mailbox), mailbox);
     }
     
@@ -1766,14 +1809,16 @@ static int sendupdate(char *name,
 	    switch (m->t) {
 	    case SET_ACTIVE:
 		prot_printf(C->pout,
-			    "%s MAILBOX {%d+}\r\n%s {%d+}\r\n%s {%d+}\r\n%s\r\n",
+			    "%s MAILBOX {" SIZE_T_FMT "+}\r\n%s"
+			    " {" SIZE_T_FMT "+}\r\n%s {" SIZE_T_FMT "+}\r\n%s\r\n",
 			    C->streaming,
 			    strlen(m->mailbox), m->mailbox,
 			    strlen(m->server), m->server,
 			    strlen(m->acl), m->acl);
 		break;
 	    case SET_RESERVE:
-		prot_printf(C->pout, "%s RESERVE {%d+}\r\n%s {%d+}\r\n%s\r\n",
+		prot_printf(C->pout, "%s RESERVE {" SIZE_T_FMT "+}\r\n%s"
+			    " {" SIZE_T_FMT "+}\r\n%s\r\n",
 			    C->streaming,
 			    strlen(m->mailbox), m->mailbox,
 			    strlen(m->server), m->server);
@@ -1846,7 +1891,6 @@ void cmd_startupdate(struct conn *C, const char *tag,
     char pattern[2] = {'*','\0'};
 
     /* initialize my condition variable */
-    pthread_cond_init(&C->cond, NULL);
 
     /* The inital dump of the database can result in a lot of data,
      * let's do this nonblocking */
@@ -1887,6 +1931,7 @@ void sendupdates(struct conn *C, int flushnow)
     /* just grab the update list and release the lock */
     p = C->plist;
     C->plist = NULL;
+    C->ptail = NULL;
     pthread_mutex_unlock(&C->m);
 
     while (p != NULL) {
@@ -1977,6 +2022,10 @@ void cmd_starttls(struct conn *C, const char *tag)
     prot_settls(C->pin, C->tlsconn);
     prot_settls(C->pout, C->tlsconn);
 
+#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+    C->tls_comp = (void *) SSL_get_current_compression(C->tlsconn);
+#endif
+
     /* Reissue capability banner */
     dobanner(C);
 }
@@ -1987,6 +2036,48 @@ void cmd_starttls(struct conn *C, const char *tag)
 	  EC_SOFTWARE);
 }
 #endif /* HAVE_SSL */
+
+#ifdef HAVE_ZLIB
+void cmd_compress(struct conn *C, const char *tag, const char *alg)
+{
+    if (C->compress_done) {
+	prot_printf(C->pout,
+		    "%s BAD DEFLATE active via COMPRESS\r\n", tag);
+    }
+#if defined(HAVE_SSL) && (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+    else if (C->tls_comp) {
+	prot_printf(C->pout,
+		    "%s NO %s active via TLS\r\n",
+		    tag, SSL_COMP_get_name(C->tls_comp));
+    }
+#endif
+    else if (strcasecmp(alg, "DEFLATE")) {
+	prot_printf(C->pout,
+		    "%s NO Unknown COMPRESS algorithm: %s\r\n", tag, alg);
+    }
+    else if (ZLIB_VERSION[0] != zlibVersion()[0]) {
+	prot_printf(C->pout,
+		    "%s NO Error initializing %s (incompatible zlib version)\r\n",
+		    tag, alg);
+    }
+    else {
+	prot_printf(C->pout,
+		    "%s OK %s active\r\n", tag, alg);
+
+	/* enable (de)compression for the prot layer */
+	prot_setcompress(C->pin);
+	prot_setcompress(C->pout);
+
+	C->compress_done = 1;
+    }
+}
+#else
+void cmd_compress(struct conn *C, const char *tag, const char *alg)
+{
+    fatal("cmd_compress() executed, but COMPRESS isn't implemented!",
+	  EC_SOFTWARE);
+}
+#endif /* HAVE_ZLIB */
 
 void shut_down(int code) __attribute__((noreturn));
 void shut_down(int code)
@@ -2232,53 +2323,64 @@ static int sync_findall_cb(char *name,
     return 0;
 }
 
-int mupdate_synchronize(mupdate_handle *handle) 
+int mupdate_synchronize_remote(mupdate_handle *handle,
+			       struct mbent_queue *remote_boxes,
+			       struct mpool *pool)
 {
-    struct mbent_queue local_boxes;
-    struct mbent_queue remote_boxes;
-    struct mbent *l,*r;
-    struct mpool *pool;
     struct sync_rock rock;
-    char pattern[] = { '*', '\0' };
-    struct txn *tid = NULL;
-    int ret = 0;    
-
+  
     if(!handle || !handle->saslcompleted) return 1;
 
-    pool = new_mpool(131072); /* Arbitrary, but large (128k) */
     rock.pool = pool;
-    
-    /* ask for updates and set nonblocking */
+  
+    /* ask mupdate master for updates and set nonblocking */
     prot_printf(handle->conn->out, "U01 UPDATE\r\n");
+  
+    syslog(LOG_NOTICE,
+	   "scarfing mailbox list from master mupdate server");
 
-    /* Note that this prevents other people from running an UPDATE against
-     * us for the duration.  this is a GOOD THING */
-    pthread_mutex_lock(&mailboxes_mutex); /* LOCK */
-    
-    syslog(LOG_NOTICE, 
-	   "synchronizing mailbox list with master mupdate server");
-
-    local_boxes.head = NULL;
-    local_boxes.tail = &(local_boxes.head);
-    remote_boxes.head = NULL;
-    remote_boxes.tail = &(remote_boxes.head);
-
-    rock.boxes = &remote_boxes;
-
-    /* If there is a fatal error, die, other errors ignore */
+    remote_boxes->head = NULL;
+    remote_boxes->tail = &(remote_boxes->head);
+  
+    rock.boxes = remote_boxes;
+  
+    /* If there is a fatal error, return, other errors ignore */
     if (mupdate_scarf(handle, cmd_resync, &rock, 1, NULL) != 0) {
-	struct mbent *p=remote_boxes.head, *p_next=NULL;
+	struct mbent *p=remote_boxes->head, *p_next=NULL;
 	while(p) {
 	    p_next = p->next;
 	    p = p_next;
 	}
-	
-	ret = 1;
-	goto done;	
+	return 1;
     }
 
     /* Make socket nonblocking now */
     prot_NONBLOCK(handle->conn->in);
+
+    return 0;
+}
+
+int mupdate_synchronize(struct mbent_queue *remote_boxes, struct mpool *pool)
+{
+    struct mbent_queue local_boxes;
+    struct mbent *l,*r;
+    struct sync_rock rock;
+    char pattern[] = { '*', '\0' };
+    struct txn *tid = NULL;
+    int ret = 0;    
+    int err = 0;
+
+    rock.pool = pool;
+    
+    /* Note that this prevents other people from running an UPDATE against
+     * us for the duration.  this is a GOOD THING */
+    pthread_mutex_lock(&mailboxes_mutex); /* LOCK */
+    
+    syslog(LOG_NOTICE,
+	   "synchronizing mailbox list with master mupdate server");
+
+    local_boxes.head = NULL;
+    local_boxes.tail = &(local_boxes.head);
 
     rock.boxes = &local_boxes;
 
@@ -2290,8 +2392,8 @@ int mupdate_synchronize(mupdate_handle *handle)
        move on, if not, fix them */
     /* If the local is before the next remote, delete it */
     /* If the next remote is before theis local, insert it and try again */
-    for(l = local_boxes.head, r = remote_boxes.head; l && r;
-	l = local_boxes.head, r = remote_boxes.head) 
+    for(l = local_boxes.head, r = remote_boxes->head; l && r;
+	l = local_boxes.head, r = remote_boxes->head) 
     {
 	int ret = strcmp(l->mailbox, r->mailbox);
 	if(!ret) {
@@ -2300,18 +2402,45 @@ int mupdate_synchronize(mupdate_handle *handle)
 	       strcmp(l->server, r->server) ||
 	       strcmp(l->acl,r->acl)) {
 		/* Something didn't match, replace it */
-		mboxlist_insertremote(r->mailbox, 
-				     (r->t == SET_RESERVE ?
-				        MBTYPE_RESERVE : 0),
-				      r->server, r->acl, &tid);
+		/*
+		 * If this is a locally hosted mailbox, don't make a
+		 * change, just warn.
+		 */
+		if ((config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) &&
+			(strchr( l->server, '!' ) == NULL )) {
+		    syslog(LOG_ERR, "local mailbox %s wrong in mailbox list",
+			    l->mailbox );
+		    err++;
+		} else {
+		    mboxlist_insertremote(r->mailbox, 
+					 (r->t == SET_RESERVE ?
+					    MBTYPE_RESERVE : 0),
+					  r->server, r->acl, &tid);
+		}
 	    }
 	    /* Okay, dump these two */
 	    local_boxes.head = l->next;
-	    remote_boxes.head = r->next;
+	    remote_boxes->head = r->next;
 	} else if (ret < 0) {
 	    /* Local without corresponding remote, delete it */
-	    if (config_mupdate_config != IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) {
-		/* But not for a unified configuration */
+		/*
+		 * In a unified murder, we don't want to delete locally
+		 * hosted mailboxes during mupdate's resync process.
+		 * If that sort of operation appears necessary, it
+		 * probably requires an operator to review it --
+		 * ctl_mboxlist is the right place to fix the kind
+		 * of configuration error implied.
+		 * 
+		 * A similar problem exists when the server thinks
+		 * it is locally hosting a mailbox, but mupdate master
+		 * thinks it's somewhere else.
+		 */
+	    if ((config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) &&
+		    (strchr( l->server, '!' ) == NULL )) {
+		syslog(LOG_ERR, "local mailbox %s not in mailbox list",
+			l->mailbox );
+		err++;
+	    } else {
 		mboxlist_deleteremote(l->mailbox, &tid);
 	    }
 	    local_boxes.head = l->next;
@@ -2321,15 +2450,19 @@ int mupdate_synchronize(mupdate_handle *handle)
 				  (r->t == SET_RESERVE ?
 				   MBTYPE_RESERVE : 0),
 				  r->server, r->acl, &tid);
-	    remote_boxes.head = r->next;
+	    remote_boxes->head = r->next;
 	}
     }
 
     if(l && !r) {
 	/* we have more deletes to do */
 	while(l) {
-	    if (config_mupdate_config != IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) {
-		/* But not for a unified configuration */
+	    if ((config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_UNIFIED) &&
+		    (strchr( l->server, '!' ) == NULL )) {
+		syslog(LOG_ERR, "local mailbox %s not in mailbox list",
+			l->mailbox );
+		err++;
+	    } else {
 		mboxlist_deleteremote(l->mailbox, &tid);
 	    }
 	    local_boxes.head = l->next;
@@ -2342,19 +2475,22 @@ int mupdate_synchronize(mupdate_handle *handle)
 				  (r->t == SET_RESERVE ?
 				   MBTYPE_RESERVE : 0),
 				  r->server, r->acl, &tid);
-	    remote_boxes.head = r->next;
-	    r = remote_boxes.head;
+	    remote_boxes->head = r->next;
+	    r = remote_boxes->head;
 	}
     }
 
     if (tid) mboxlist_commit(tid);
 
     /* All up to date! */
-    syslog(LOG_NOTICE, "mailbox list synchronization complete");
+    if ( err ) {
+	syslog(LOG_ERR, "mailbox list synchronization NOT complete (%d) errors",
+		err);
+    } else {
+	syslog(LOG_NOTICE, "mailbox list synchronization complete");
+    }
 
- done:
     pthread_mutex_unlock(&mailboxes_mutex); /* UNLOCK */
-    free_mpool(pool);
     return ret;
 }
 

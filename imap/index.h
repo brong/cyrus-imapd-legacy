@@ -1,13 +1,13 @@
 /* index.c -- Routines for dealing with the index file in the imapd
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,10 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- *
- */
-/*
- * $Id: index.h,v 1.11.2.2 2007/12/13 18:12:42 murch Exp $
+ * $Id: index.h,v 1.11.2.3 2009/12/28 21:51:34 murch Exp $
  */
 
 /* Header for internal usage of index.c + programs that make raw access
@@ -87,35 +85,8 @@
 #endif
 #define GUID(msgno) message_guid_import(NULL, (unsigned char *)(INDEC_OFFSET(msgno)+OFFSET_MESSAGE_GUID))
 
-/* Access assistance macros for memory-mapped cache file data */
-/* CACHE_ITEM_BIT32: Convert to host byte order */
-/* CACHE_ITEM_LEN: Get the length out */
-/* CACHE_ITEM_NEXT: Return a pointer to the next entry.  Sizes are
- * 4-byte aligned, so round up to the next 4 byte boundry */
-#define CACHE_ITEM_BIT32(ptr) (ntohl(*((bit32 *)(ptr))))
-#define CACHE_ITEM_LEN(ptr) CACHE_ITEM_BIT32(ptr)
-#define CACHE_ITEM_NEXT(ptr) ((ptr)+4+((3+CACHE_ITEM_LEN(ptr))&~3))
-
-/* Size of a bit32 to skip when jumping over cache item sizes */
-#define CACHE_ITEM_SIZE_SKIP sizeof(bit32)
-
 /* Calculate the number of entries in a vector */
 #define VECTOR_SIZE(vector) (sizeof(vector)/sizeof(vector[0]))
-
-/* Cached envelope token positions */
-enum {
-    ENV_DATE = 0,
-    ENV_SUBJECT,
-    ENV_FROM,
-    ENV_SENDER,
-    ENV_REPLYTO,
-    ENV_TO,
-    ENV_CC,
-    ENV_BCC,
-    ENV_INREPLYTO,
-    ENV_MSGID
-};
-#define NUMENVTOKENS (10)
 
 /* Special "sort criteria" to load message-id and references/in-reply-to
  * into msgdata array for threaders that need them.

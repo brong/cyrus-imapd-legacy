@@ -1,6 +1,6 @@
 # sasl2.m4--sasl2 libraries and includes
 # Rob Siemborski
-# $Id: sasl2.m4,v 1.52 2006/05/18 19:25:00 murch Exp $
+# $Id: sasl2.m4,v 1.52.4.1 2009/12/28 21:51:26 murch Exp $
 
 # SASL2_CRYPT_CHK
 # ---------------
@@ -65,9 +65,7 @@ if test "$gssapi" != no; then
       fi
     fi
   fi
-  AC_CHECK_HEADER([gssapi.h],
-                  [AC_DEFINE(HAVE_GSSAPI_H,,
-                             [Define if you have the gssapi.h header file])],
+  AC_CHECK_HEADER([gssapi.h],,
                   [AC_CHECK_HEADER([gssapi/gssapi.h],,
                                    [AC_WARN([Disabling GSSAPI - no include files found]); gssapi=no])])
 
@@ -76,6 +74,10 @@ if test "$gssapi" != no; then
 fi
 
 if test "$gssapi" != no; then
+  if test "$ac_cv_header_gssapi_h" = "yes" -o "$ac_cv_header_gssapi_gssapi_h" = "yes"; then
+    AC_DEFINE(HAVE_GSSAPI_H,,[Define if you have the gssapi.h header file])
+  fi
+
   # We need to find out which gssapi implementation we are
   # using. Supported alternatives are: MIT Kerberos 5,
   # Heimdal Kerberos 5 (http://www.pdc.kth.se/heimdal),
@@ -253,7 +255,7 @@ if test "$gssapi" != no; then
   AC_CHECK_LIB(resolv,res_search,GSSAPIBASE_LIBS="$GSSAPIBASE_LIBS -lresolv")
   SASL_MECHS="$SASL_MECHS libgssapiv2.la"
   SASL_STATIC_OBJS="$SASL_STATIC_OBJS gssapi.o"
-  SASL_STATIC_SRCS="$SASL_STATIC_SRCS ../plugins/gssapi.c"
+  SASL_STATIC_SRCS="$SASL_STATIC_SRCS \$(top_srcdir)/plugins/gssapi.c"
 
   cmu_save_LIBS="$LIBS"
   LIBS="$LIBS $GSSAPIBASE_LIBS"

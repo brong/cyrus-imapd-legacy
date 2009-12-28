@@ -1,14 +1,13 @@
 /* append.c -- Routines for appending messages to a mailbox
- * $Id: append.c,v 1.109.2.1 2007/11/01 14:39:31 murch Exp $
  *
- * Copyright (c)1998, 2000 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: append.c,v 1.109.2.2 2009/12/28 21:51:28 murch Exp $
  */
 
 #include <config.h>
@@ -67,6 +69,7 @@
 #include "seen.h"
 #include "retry.h"
 #include "quota.h"
+#include "util.h"
 
 #include "message_guid.h"
 
@@ -105,7 +108,7 @@ static void addme(char **msgrange, int *alloced, long uid);
  */
 int append_check(const char *name, int format, 
 		 struct auth_state *auth_state,
-		 long aclcheck, long quotacheck)
+		 long aclcheck, quota_t quotacheck)
 {
     struct mailbox m;
     int r;
@@ -171,7 +174,7 @@ int append_check(const char *name, int format,
 int append_setup(struct appendstate *as, const char *name,
 		 int format, 
 		 const char *userid, struct auth_state *auth_state,
-		 long aclcheck, long quotacheck)
+		 long aclcheck, quota_t quotacheck)
 {
     int r;
 
@@ -215,7 +218,6 @@ int append_setup(struct appendstate *as, const char *name,
 	    as->m.quota.used + quotacheck > 
 	    ((uquota_t) as->m.quota.limit * QUOTA_UNITS)) {
 	    quota_abort(&as->tid);
-	    mailbox_close(&as->m);
 	    r = IMAP_QUOTA_EXCEEDED;
 	}
     }
@@ -232,8 +234,10 @@ int append_setup(struct appendstate *as, const char *name,
 	as->userid[0] = '\0';
     }
 
+    /* store original size to truncate if append is aborted */
+    as->orig_cache_size = as->m.cache_size;
+
     /* zero out metadata */
-    as->orig_cache_len = as->m.cache_len;
     as->nummsg = as->numanswered = 
 	as->numdeleted = as->numflagged = 0;
     as->quota_used = 0;
@@ -249,7 +253,7 @@ int append_setup(struct appendstate *as, const char *name,
 /* may return non-zero, indicating that the entire append has failed
  and the mailbox is probably in an inconsistent state. */
 int append_commit(struct appendstate *as, 
-		  long quotacheck __attribute__((unused)),
+		  quota_t quotacheck __attribute__((unused)),
 		  unsigned long *uidvalidity, 
 		  unsigned long *start,
 		  unsigned long *num)
@@ -321,7 +325,7 @@ int append_commit(struct appendstate *as,
     else {
 	quota_abort(&as->tid);
 	syslog(LOG_ERR,
-	       "LOSTQUOTA: unable to record use of %u bytes in quota file %s",
+	       "LOSTQUOTA: unable to record use of " UQUOTA_T_FMT " bytes in quota file %s",
 	       as->quota_used, as->m.quota.root);
     }
 
@@ -367,7 +371,7 @@ int append_abort(struct appendstate *as)
     }
 
     /* truncate the cache */
-    ftruncate(as->m.cache_fd, as->orig_cache_len);
+    ftruncate(as->m.cache_fd, as->orig_cache_size);
 
     /* unlock mailbox */
     mailbox_unlock_index(&as->m);
@@ -429,6 +433,7 @@ FILE *append_newstage(const char *mailboxname, time_t internaldate,
     strlcat(stagefile, stage->fname, sizeof(stagefile));
 
     /* create this file and put it into stage->parts[0] */
+    unlink(stagefile);
     f = fopen(stagefile, "w+");
     if (!f) {
 	if (mkdir(stagedir, 0755) != 0) {
@@ -1043,7 +1048,7 @@ static void addme(char **msgrange, int *alloced, long uid)
 
 	/* see what the last one is */
 	p = *msgrange + len - 1;
-	while (isdigit((int) *p) && p > *msgrange) p--;
+	while (Uisdigit(*p) && p > *msgrange) p--;
 	/* second time, p == msgrange here */
 	if (*p == ':') wasrange = 1;
 	p++;
@@ -1091,7 +1096,10 @@ static int append_addseen(struct mailbox *mailbox,
     if (r) return r;
     
     r = seen_lockread(seendb, &last_read, &last_uid, &last_change, &seenuids);
-    if (r) return r;
+    if (r) {
+	seen_close(seendb);
+	return r;
+    }
     
     oldlen = strlen(seenuids);
     newlen = oldlen + strlen(msgrange) + 10;
@@ -1099,7 +1107,7 @@ static int append_addseen(struct mailbox *mailbox,
 
     tail = seenuids + oldlen;
     /* Scan back to last uid */
-    while (tail > seenuids && isdigit((int) tail[-1])) tail--;
+    while (tail > seenuids && Uisdigit(tail[-1])) tail--;
     for (p = tail, last_seen=0; *p; p++) last_seen = last_seen * 10 + *p - '0';
     if (last_seen && last_seen >= start-1) {
 	if (tail > seenuids && tail[-1] == ':') p = tail - 1;

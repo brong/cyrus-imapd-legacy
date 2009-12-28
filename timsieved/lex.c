@@ -1,17 +1,15 @@
 /* lex.c -- lexer for timsieved
  * Tim Martin
  * 9/21/99
- * $Id: lex.c,v 1.25.2.2 2007/12/13 14:03:22 murch Exp $
- */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -20,14 +18,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -42,6 +41,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: lex.c,v 1.25.2.3 2009/12/28 21:51:55 murch Exp $
  */
 
 #ifdef HAVE_CONFIG_H
@@ -61,6 +61,7 @@
 #include "actions.h"
 #include "libconfig.h"
 #include "global.h"
+#include "util.h"
 #include "xmalloc.h"
 
 int token_lookup (char *str, int len __attribute__((unused)))
@@ -304,7 +305,7 @@ int timlex(mystring_t **outstr, unsigned long *outnum,  struct protstream *strea
       return STRING;
     case LEXER_STATE_NUMBER:
 
-	if (isdigit((unsigned char) ch)) {
+	if (Uisdigit(ch)) {
 	    unsigned long   newcount = tmpnum * 10 + (ch - '0');
 
 	    if (newcount < tmpnum)
@@ -321,12 +322,12 @@ int timlex(mystring_t **outstr, unsigned long *outnum,  struct protstream *strea
 	
 	break;
     case LEXER_STATE_NORMAL:
-      if (isalpha((unsigned char) ch)) {
+      if (Uisalpha(ch)) {
 	lexer_state=LEXER_STATE_ATOM;
 	*buff_ptr++ = tolower(ch);
 	break;
       }
-      if (isdigit((unsigned char) ch)) {
+      if (Uisdigit(ch)) {
 	lexer_state=LEXER_STATE_NUMBER;
 	tmpnum = ch -'0';
 	break;
@@ -359,7 +360,7 @@ int timlex(mystring_t **outstr, unsigned long *outnum,  struct protstream *strea
       }
       break;
     case LEXER_STATE_ATOM:
-      if (!isalpha((unsigned char) ch)) {
+      if (!Uisalpha(ch)) {
 	int token;
 
 	buffer[ buff_ptr - buffer] = '\0';

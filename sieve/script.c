@@ -1,29 +1,47 @@
 /* script.c -- sieve script functions
  * Larry Greenfield
- * $Id: script.c,v 1.63.2.1 2007/11/01 14:39:39 murch Exp $
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Carnegie Mellon University
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: script.c,v 1.63.2.2 2009/12/28 21:51:54 murch Exp $
  */
-/***********************************************************
-        Copyright 1999 by Carnegie Mellon University
-
-                      All Rights Reserved
-
-Permission to use, copy, modify, and distribute this software and its
-documentation for any purpose and without fee is hereby granted,
-provided that the above copyright notice appear in all copies and that
-both that copyright notice and this permission notice appear in
-supporting documentation, and that the name of Carnegie Mellon
-University not be used in advertising or publicity pertaining to
-distribution of the software without specific, written prior
-permission.
-
-CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
-THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE FOR
-ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
-OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-******************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -326,7 +344,7 @@ static int build_notify_message(sieve_interp_t *i,
 		    *out = xrealloc(*out, allocsize);
 		}
 		/* copy the plaintext */
-		strncat(*out, parts[0]->content, n);
+		strncat(*out, content, n);
 		(*out)[*outlen+n]='\0';
 		(*outlen) += n;
 	    }
@@ -650,9 +668,9 @@ static int do_sieve_error(int ret,
     if ((ret != SIEVE_OK) && interp->err) {
 	char buf[1024];
 	if (lastaction == -1) /* we never executed an action */
-	    sprintf(buf, "%s", errmsg ? errmsg : sieve_errstr(ret));
+	    snprintf(buf, sizeof(buf), "%s", errmsg ? errmsg : sieve_errstr(ret));
 	else
-	    sprintf(buf, "%s: %s", action_to_string(lastaction),
+	    snprintf(buf, sizeof(buf), "%s: %s", action_to_string(lastaction),
 		    errmsg ? errmsg : sieve_errstr(ret));
  
 	ret |= interp->execute_err(buf, interp->interp_context,
@@ -670,7 +688,7 @@ static int do_sieve_error(int ret,
 	ret |= keep_ret;
         if (keep_ret == SIEVE_OK)
             snprintf(actions_string+strlen(actions_string),
-		     sizeof(actions_string)-strlen(actions_string),
+		     ACTIONS_STRING_LEN-strlen(actions_string),
 		     "Kept\n");
 	else {
 	    implicit_keep = 0;	/* don't try an implicit keep again */
@@ -724,7 +742,7 @@ static int do_action_list(sieve_interp_t *interp,
 	    
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
-			 sizeof(actions_string)-strlen(actions_string), 
+			 ACTIONS_STRING_LEN-strlen(actions_string), 
 			 "Rejected with: %s\n", a->u.rej.msg);
 
 	    break;
@@ -739,7 +757,7 @@ static int do_action_list(sieve_interp_t *interp,
 
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
-			 sizeof(actions_string)-strlen(actions_string),
+			 ACTIONS_STRING_LEN-strlen(actions_string),
 			 "Filed into: %s\n",a->u.fil.mailbox);
 	    break;
 	case ACTION_KEEP:
@@ -752,7 +770,7 @@ static int do_action_list(sieve_interp_t *interp,
 			       &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
-			 sizeof(actions_string)-strlen(actions_string),
+			 ACTIONS_STRING_LEN-strlen(actions_string),
 			 "Kept\n");
 	    break;
 	case ACTION_REDIRECT:
@@ -765,7 +783,7 @@ static int do_action_list(sieve_interp_t *interp,
 				   &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
-			 sizeof(actions_string)-strlen(actions_string),
+			 ACTIONS_STRING_LEN-strlen(actions_string),
 			 "Redirected to %s\n", a->u.red.addr);
 	    break;
 	case ACTION_DISCARD:
@@ -776,7 +794,7 @@ static int do_action_list(sieve_interp_t *interp,
 				      &errmsg);
 	    if (ret == SIEVE_OK)
 		snprintf(actions_string+strlen(actions_string),
-			 sizeof(actions_string)-strlen(actions_string),
+			 ACTIONS_STRING_LEN-strlen(actions_string),
 			 "Discarded\n");
 	    break;
 
@@ -802,12 +820,12 @@ static int do_action_list(sieve_interp_t *interp,
 
 		    if (ret == SIEVE_OK)
 			snprintf(actions_string+strlen(actions_string),
-				 sizeof(actions_string)-strlen(actions_string),
+				 ACTIONS_STRING_LEN-strlen(actions_string),
 				 "Sent vacation reply\n");
 
 		} else if (ret == SIEVE_DONE) {
 		    snprintf(actions_string+strlen(actions_string),
-			     sizeof(actions_string)-strlen(actions_string),
+			     ACTIONS_STRING_LEN-strlen(actions_string),
 			     "Vacation reply suppressed\n");
 
 		    ret = SIEVE_OK;

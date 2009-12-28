@@ -1,14 +1,13 @@
 /* lmtpd.c -- Program to deliver mail to a mailbox
  *
- * $Id: lmtpd.c,v 1.145.2.2 2007/11/01 14:39:33 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- *
+ * $Id: lmtpd.c,v 1.145.2.3 2009/12/28 21:51:34 murch Exp $
  */
 
 #include <config.h>
@@ -109,7 +109,7 @@ static sieve_interp_t *sieve_interp = NULL;
 static int deliver(message_data_t *msgdata, char *authuser,
 		   struct auth_state *authstate);
 static int verify_user(const char *user, const char *domain, char *mailbox,
-		       long quotacheck, struct auth_state *authstate);
+		       quota_t quotacheck, struct auth_state *authstate);
 static char *generate_notify(message_data_t *m);
 
 void shut_down(int code);
@@ -144,6 +144,22 @@ int deliver_logfd = -1; /* used in lmtpengine.c */
 /* our cached connections */
 mupdate_handle *mhandle = NULL;
 struct backend **backend_cached = NULL;
+
+static struct protocol_t lmtp_protocol =
+{ "lmtp", "lmtp",
+  { 0, "220 " },
+  { "LHLO", "lmtpproxyd", "250 ", NULL,
+    { { "AUTH ", CAPA_AUTH },
+      { "STARTTLS", CAPA_STARTTLS },
+      { "PIPELINING", CAPA_PIPELINING },
+      { "IGNOREQUOTA", CAPA_IGNOREQUOTA },
+      { NULL, 0 } } },
+  { "STARTTLS", "220", "454", 0 },
+  { "AUTH", 512, 0, "235", "5", "334 ", "*", NULL, 0 },
+  { NULL, NULL, NULL },
+  { "NOOP", NULL, "250" },
+  { "QUIT", NULL, "221" }
+};
 
 static struct sasl_callback mysasl_cb[] = {
     { SASL_CB_GETOPT, &mysasl_config, NULL },
@@ -285,8 +301,13 @@ int service_main(int argc, char **argv,
     } else {
 	syslog(LOG_ERR, "couldn't connect to %s: %s", config_mupdate_server,
 	       error_message(r));
-	prot_printf(deliver_out, "451 %s LMTP Cyrus %s %s\r\n",
-		    config_servername, CYRUS_VERSION, error_message(r));
+	prot_printf(deliver_out, "451");
+	if (config_serverinfo) prot_printf(deliver_out, " %s", config_servername);
+	if (config_serverinfo == IMAP_ENUM_SERVERINFO_ON) {
+	    prot_printf(deliver_out, " Cyrus LMTP%s %s",
+			config_mupdate_server ? " Murder" : "", CYRUS_VERSION);
+	}
+	prot_printf(deliver_out, " %s\r\n", error_message(r));
     }
 
     /* free session state */
@@ -357,7 +378,7 @@ static int fuzzy_match_cb(char *name,
 
 int fuzzy_match(char *mboxname)
 {
-    char name[MAX_MAILBOX_NAME+1], prefix[MAX_MAILBOX_NAME+1], *p = NULL;
+    char name[MAX_MAILBOX_BUFFER], prefix[MAX_MAILBOX_BUFFER], *p = NULL;
     size_t prefixlen;
     struct fuzz_rock frock;
 
@@ -537,9 +558,9 @@ int deliver_mailbox(FILE *f,
     }
 
     if (!r && user && (notifier = config_getstring(IMAPOPT_MAILNOTIFIER))) {
-	char inbox[MAX_MAILBOX_NAME+1];
-	char namebuf[MAX_MAILBOX_NAME+1];
-	char userbuf[MAX_MAILBOX_NAME+1];
+	char inbox[MAX_MAILBOX_BUFFER];
+	char namebuf[MAX_MAILBOX_BUFFER];
+	char userbuf[MAX_MAILBOX_BUFFER];
 	const char *notify_mailbox = mailboxname;
 	int r2;
 
@@ -613,7 +634,7 @@ void deliver_remote(message_data_t *msgdata,
 	}
 	assert(i == d->rnum);
 
-	remote = proxy_findserver(d->server, &protocol[PROTOCOL_LMTP], "",
+	remote = proxy_findserver(d->server, &lmtp_protocol, "",
 				  &backend_cached, NULL, NULL, NULL);
 	if (remote) {
 	    r = lmtp_runtxn(remote, lt);
@@ -663,7 +684,7 @@ void deliver_remote(message_data_t *msgdata,
 int deliver_local(deliver_data_t *mydata, char **flag, int nflags,
 		  const char *username, const char *mailboxname)
 {
-    char namebuf[MAX_MAILBOX_NAME+1] = "", *tail;
+    char namebuf[MAX_MAILBOX_BUFFER] = "", *tail;
     message_data_t *md = mydata->m;
     int quotaoverride = msg_getrcpt_ignorequota(md, mydata->cur_rcpt);
     int ret;
@@ -758,8 +779,8 @@ int deliver(message_data_t *msgdata, char *authuser,
     
     /* loop through each recipient, attempting delivery for each */
     for (n = 0; n < nrcpts; n++) {
-	char namebuf[MAX_MAILBOX_NAME+1] = "", *server;
-	char userbuf[MAX_MAILBOX_NAME+1];
+	char namebuf[MAX_MAILBOX_BUFFER] = "", *server;
+	char userbuf[MAX_MAILBOX_BUFFER];
 	const char *rcpt, *user, *domain, *mailbox;
 	int r = 0;
 
@@ -951,15 +972,17 @@ void shut_down(int code)
 	snmp_increment(ACTIVE_CONNECTIONS, -1);
     }
 
+    sync_log_done();
+
     cyrus_done();
 
     exit(code);
 }
 
 static int verify_user(const char *user, const char *domain, char *mailbox,
-		       long quotacheck, struct auth_state *authstate)
+		       quota_t quotacheck, struct auth_state *authstate)
 {
-    char namebuf[MAX_MAILBOX_NAME+1] = "";
+    char namebuf[MAX_MAILBOX_BUFFER] = "";
     int r = 0;
 
     if ((!user && !mailbox) ||
@@ -1083,7 +1106,7 @@ FILE *spoolfile(message_data_t *msgdata)
        (don't bother if we're only a proxy) */
     n = mhandle ? 0 : msg_getnumrcpt(msgdata);
     for (i = 0; !f && (i < n); i++) {
-	char namebuf[MAX_MAILBOX_NAME+1] = "", *server;
+	char namebuf[MAX_MAILBOX_BUFFER] = "", *server;
 	const char *user, *domain, *mailbox;
 	int r;
 

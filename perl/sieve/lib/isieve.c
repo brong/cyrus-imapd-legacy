@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: isieve.c,v 1.30.2.1 2009/12/28 21:51:52 murch Exp $
  */
-
-/* $Id: isieve.c,v 1.30 2006/11/30 17:11:24 murch Exp $ */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -55,6 +55,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
@@ -208,10 +209,14 @@ int init_sasl(isieve_t *obj,
   addrsize=sizeof(struct sockaddr_storage);
   if (getsockname(obj->sock,(struct sockaddr *)&saddr_l,&addrsize)!=0)
       return -1;
-
+#if 0
+  /* XXX  The following line causes problems with KERBEROS_V4 decoding.
+   * We're not sure why its an issue, but this code isn't used in any of 
+   * our other client code (imtest.c, backend.c), so we're removing it.
+   */
   /* set the port manually since getsockname is stupid and doesn't */
   ((struct sockaddr_in *)&saddr_l)->sin_port = htons(obj->port);
-
+#endif
   if (iptostring((struct sockaddr *)&saddr_r, addrsize, remoteip, 60))
       return -1;
 
@@ -299,6 +304,33 @@ char * read_capability(isieve_t *obj)
   return cap;
 }
 
+int detect_mitm(isieve_t *obj, char *mechlist)
+{
+    char *new_mechlist;
+    int ch, r = 0;
+
+    /* wait and probe for possible automatic capability response */
+    usleep(250000);
+    prot_NONBLOCK(obj->pin);
+    if ((ch = prot_getc(obj->pin)) != EOF) {
+	/* automatic capability response */
+	prot_ungetc(ch, obj->pin);
+    } else {
+	/* manually ask for capabilities */
+	prot_printf(obj->pout, "CAPABILITY\r\n");
+	prot_flush(obj->pout);
+    }
+    prot_BLOCK(obj->pin);
+
+    if ((new_mechlist = read_capability(obj))) {
+	/* if the server still advertises SASL mechs, compare lists */
+	r = strcmp(new_mechlist, mechlist);
+	free(new_mechlist);
+    }
+
+    return r;
+}
+
 static int getauthline(isieve_t *obj, char **line, unsigned int *linelen,
 		       char **errstrp)
 {
@@ -353,7 +385,7 @@ static int getauthline(isieve_t *obj, char **line, unsigned int *linelen,
 
 
 int auth_sasl(char *mechlist, isieve_t *obj, const char **mechusing,
-	      char **errstr)
+	      sasl_ssf_t *ssf, char **errstr)
 {
   sasl_interact_t *client_interact=NULL;
   int saslresult=SASL_INTERACT;
@@ -462,6 +494,15 @@ int auth_sasl(char *mechlist, isieve_t *obj, const char **mechusing,
 	      return -1;
       }
 
+      if (ssf) {
+	  const void *ssfp;
+
+	  saslresult = sasl_getprop(obj->conn, SASL_SSF, &ssfp);
+	  if(saslresult != SASL_OK) return -1;
+
+	  *ssf = *((sasl_ssf_t *) ssfp);
+      }
+
       /* turn on layer if need be */
       prot_setsasl(obj->pin,  obj->conn);
       prot_setsasl(obj->pout, obj->conn);
@@ -510,6 +551,7 @@ int do_referral(isieve_t *obj, char *refer_to)
     const char *scheme = "sieve://";
     char *host, *p;
     sasl_callback_t *callbacks;
+    sasl_ssf_t ssf;
 
     /* check scheme */
     if (strncasecmp(refer_to, scheme, strlen(scheme)))
@@ -592,7 +634,7 @@ int do_referral(isieve_t *obj, char *refer_to)
 
     do {
 	mtried = NULL;
-	ret = auth_sasl(mechlist, obj_new, &mtried, &errstr);
+	ret = auth_sasl(mechlist, obj_new, &mtried, &ssf, &errstr);
 	if(ret) init_sasl(obj_new, 128, callbacks);
 
 	if(mtried) {
@@ -619,6 +661,16 @@ int do_referral(isieve_t *obj, char *refer_to)
 
     /* xxx leak? */
     if(ret) return STAT_NO;
+
+    if (ssf) {
+        /* SASL security layer negotiated --
+	   check if SASL mech list changed */
+        if (detect_mitm(obj_new, mechlist)) {
+	    free(mechlist);
+	    return STAT_NO;
+	}
+    }
+    free(mechlist);
 
     /* free old isieve_t */
     sieve_dispose(obj);

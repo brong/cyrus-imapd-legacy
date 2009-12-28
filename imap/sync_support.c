@@ -1,13 +1,13 @@
 /* sync_support.c -- Cyrus synchonization support functions
  *
- * Copyright (c) 1998-2005 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,10 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * Original version written by David Carter <dpc22@cam.ac.uk>
- * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
- *
- * $Id: sync_support.c,v 1.2.2.2 2007/11/28 15:18:12 murch Exp $
+ * $Id: sync_support.c,v 1.2.2.3 2009/12/28 21:51:40 murch Exp $
  */
 
 #include <config.h>
@@ -92,8 +90,6 @@
 /* Parse routines */
 
 enum {
-    MAXQUOTED = 8192,
-    MAXWORD = 8192,
     MAXLITERAL = INT_MAX / 20
 };
 
@@ -125,7 +121,7 @@ int sync_getline(struct protstream *in, struct buf *buf)
 	if (len == buf->alloc) {
 	    buf->alloc += BUFGROWSIZE;
 	    buf->s = xrealloc(buf->s, buf->alloc+1);
-            if (len > MAXWORD) {
+            if (len > config_maxword) {
                 fatal("word too long", EC_IOERR);
             }
 	}
@@ -187,7 +183,7 @@ void sync_printstring(struct protstream *out, const char *s)
 
     /* if it's too long, literal it */
     if (*p || len >= 1024) {
-	prot_printf(out, "{%u+}\r\n%s", strlen(s), s);
+	prot_printf(out, "{" SIZE_T_FMT "+}\r\n%s", strlen(s), s);
     } else {
 	prot_printf(out, "\"%s\"", s);
     }
@@ -220,7 +216,7 @@ void sync_printastring(struct protstream *out, const char *s)
 
     /* if it's too long, literal it */
     if (*p || len >= 1024) {
-	prot_printf(out, "{%u+}\r\n%s", strlen(s), s);
+	prot_printf(out, "{" SIZE_T_FMT "+}\r\n%s", strlen(s), s);
     } else {
 	prot_printf(out, "\"%s\"", s);
     }
@@ -334,6 +330,9 @@ void sync_flags_meta_to_list(struct sync_flags_meta *meta, char **flagname)
             !strcmp(flagname[n], meta->flagname[n]))
             continue;
         
+	if (flagname[n])
+	    free(flagname[n]);
+
         if (meta->flagname[n])
             flagname[n] = xstrdup(meta->flagname[n]);
         else
@@ -859,7 +858,7 @@ void sync_user_list_free(struct sync_user_list **lp)
 struct sync_message_list *sync_message_list_create(int hash_size, int file_max)
 {
     struct sync_message_list *l = xzmalloc(sizeof (struct sync_message_list));
-    const char *root;
+    const char *root, *partition;
 
     /* Pick a sensible default if no size given */
     if (hash_size == 0)
@@ -876,7 +875,10 @@ struct sync_message_list *sync_message_list_create(int hash_size, int file_max)
     l->file_max   = file_max;  
 
     /* Set up cache file */
-    root = config_partitiondir(config_defpartition);
+    partition = config_defpartition;
+    if (!partition) partition = find_free_partition(NULL);
+
+    root = config_partitiondir(partition);
 
     snprintf(l->cache_name, sizeof(l->cache_name), "%s/sync./%lu.cache",
 	     root, (unsigned long) getpid());
@@ -1244,7 +1246,7 @@ static int sync_getliteral_size(struct protstream *input,
         return(IMAP_PROTOCOL_ERROR);
 
     /* Read size from literal */
-    for (p = p + 1; *p && isdigit((int) *p); p++) {
+    for (p = p + 1; *p && Uisdigit(*p); p++) {
         sawdigit++;
         size = (size*10) + *p - '0';
     }
@@ -1366,6 +1368,15 @@ int sync_getsimple(struct protstream *input, struct protstream *output,
 
     if ((r = sync_getliteral_size(input, output, &message->msg_size)))
         return(r);
+
+    /* unlink just in case a previous crash left a file 
+     * hard linked into someone else's mailbox! */
+    if (unlink(message->msg_path) == -1 && errno != ENOENT) {
+	syslog(LOG_ERR,
+	       "sync_getsimple(): failed to unlink stale file %s: %m",
+	       message->msg_path);
+	return(IMAP_IOERROR);
+    }
 
     /* Open read/write so file can later be mmap()ed */
     if ((file=fopen(message->msg_path, "w+")) == NULL) {

@@ -1,16 +1,14 @@
 /* actions.c -- executes the commands for timsieved
  * Tim Martin
- * $Id: actions.c,v 1.40.2.1 2007/11/01 14:39:39 murch Exp $
- */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -19,14 +17,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -41,6 +40,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: actions.c,v 1.40.2.2 2009/12/28 21:51:55 murch Exp $
  */
 
 #ifdef HAVE_CONFIG_H
@@ -179,7 +179,7 @@ int scriptname_valid(mystring_t *name)
 }
 
 int capabilities(struct protstream *conn, sasl_conn_t *saslconn,
-		 int starttls_done, int authenticated)
+		 int starttls_done, int authenticated, sasl_ssf_t sasl_ssf)
 {
     const char *sasllist;
     int mechcount;
@@ -190,11 +190,11 @@ int capabilities(struct protstream *conn, sasl_conn_t *saslconn,
 		config_mupdate_server ? " (Murder)" : "", CYRUS_VERSION);
     
     /* SASL */
-    if (!authenticated &&
+    if ((!authenticated || sasl_ssf) &&
 	sasl_listmech(saslconn, NULL, 
 		    "\"SASL\" \"", " ", "\"\r\n",
 		    &sasllist,
-		    NULL, &mechcount) == SASL_OK && mechcount > 0)
+		      NULL, &mechcount) == SASL_OK/* && mechcount > 0*/)
     {
       prot_printf(conn,"%s",sasllist);
     }
@@ -301,6 +301,8 @@ static int countscripts(char *name)
 	}
     }
     
+    closedir(dp);
+
     return number;
 }
 
@@ -373,7 +375,8 @@ int putscript(struct protstream *conn, mystring_t *name, mystring_t *data,
 
   if (result != TIMSIEVE_OK) {
       if (errstr && *errstr) { 
-	  prot_printf(conn, "NO {%d}\r\n%s\r\n", strlen(errstr), errstr);
+	  prot_printf(conn, "NO {" SIZE_T_FMT "}\r\n%s\r\n",
+		      strlen(errstr), errstr);
 	  free(errstr);
       } else {
 	  if (errstr) free(errstr);
@@ -553,6 +556,8 @@ int listscripts(struct protstream *conn)
 	    }
 	}    
     }
+
+    closedir(dp);
 
     prot_printf(conn,"OK\r\n");
   

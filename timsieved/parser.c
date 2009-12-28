@@ -1,17 +1,15 @@
 /* parser.c -- parser used by timsieved
  * Tim Martin
  * 9/21/99
- * $Id: parser.c,v 1.41.2.4 2007/12/13 14:03:24 murch Exp $
- */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -20,14 +18,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -42,6 +41,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: parser.c,v 1.41.2.5 2009/12/28 21:51:55 murch Exp $
  */
 
 #ifdef HAVE_CONFIG_H
@@ -84,6 +84,7 @@ const char *referral_host = NULL;
 int authenticated = 0;
 int verify_only = 0;
 int starttls_done = 0;
+sasl_ssf_t sasl_ssf = 0;
 #ifdef HAVE_SSL
 /* our tls connection, if any */
 static SSL *tls_conn = NULL;
@@ -101,6 +102,35 @@ static void cmd_logout(struct protstream *sieved_out,
 static int cmd_authenticate(struct protstream *sieved_out, struct protstream *sieved_in,
 			    mystring_t *mechanism_name, mystring_t *initial_challenge, const char **errmsg);
 static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved_in);
+
+static char *sieve_parsesuccess(char *str, const char **status)
+{
+    char *success = NULL, *tmp;
+
+    if (!strncmp(str, "OK (", 4) &&
+	(tmp = strstr(str+4, "SASL \"")) != NULL) {
+	success = tmp+6; /* skip SASL " */
+	tmp = strstr(success, "\"");
+	*tmp = '\0'; /* clip " */
+    }
+
+    if (status) *status = NULL;
+    return success;
+}
+
+static struct protocol_t sieve_protocol =
+{ "sieve", SIEVE_SERVICE_NAME,
+  { 1, "OK" },
+  { "CAPABILITY", NULL, "OK", NULL,
+    { { "\"SASL\" ", CAPA_AUTH },
+      { "\"STARTTLS\"", CAPA_STARTTLS },
+      { NULL, 0 } } },
+  { "STARTTLS", "OK", "NO", 1 },
+  { "AUTHENTICATE", INT_MAX, 1, "OK", "NO", NULL, "*", &sieve_parsesuccess, 1 },
+  { NULL, NULL, NULL },
+  { NULL, NULL, NULL },
+  { "LOGOUT", NULL, "OK" }
+};
 
 /* Returns TRUE if we are done */
 int parser(struct protstream *sieved_out, struct protstream *sieved_in)
@@ -213,7 +243,8 @@ int parser(struct protstream *sieved_out, struct protstream *sieved_in)
       if(referral_host)
 	  goto do_referral;
 
-      capabilities(sieved_out, sieved_saslconn, starttls_done, authenticated);
+      capabilities(sieved_out, sieved_saslconn, starttls_done, authenticated,
+		   sasl_ssf);
       break;
 
   case HAVESPACE:
@@ -499,7 +530,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
   const char *serverout=NULL;
   unsigned int serveroutlen;
   const char *errstr=NULL;
-  const void *canon_user;
+  const void *canon_user, *val;
   char *username;
   int ret = TRUE;
 
@@ -657,7 +688,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
   if (!verify_only) {
       /* Check for a remote mailbox (should we setup a redirect?) */
       struct namespace sieved_namespace;
-      char inboxname[MAX_MAILBOX_NAME];
+      char inboxname[MAX_MAILBOX_BUFFER];
       char *server;
       int type = 0, r;
       
@@ -742,7 +773,7 @@ static int cmd_authenticate(struct protstream *sieved_out,
 		  if(c) *c = '\0';
 	      }
 
-	      backend = backend_connect(NULL, server, &protocol[PROTOCOL_SIEVE],
+	      backend = backend_connect(NULL, server, &sieve_protocol,
 					username, NULL, &statusline);
 
 	      if (!backend) {
@@ -791,6 +822,16 @@ static int cmd_authenticate(struct protstream *sieved_out,
 
   prot_setsasl(sieved_in, sieved_saslconn);
   prot_setsasl(sieved_out, sieved_saslconn);
+
+  sasl_getprop(sieved_saslconn, SASL_SSF, &val);
+  sasl_ssf = *((sasl_ssf_t *) val);
+
+  if (sasl_ssf &&
+      config_getswitch(IMAPOPT_SIEVE_SASL_SEND_UNSOLICITED_CAPABILITY)) {
+      capabilities(sieved_out, sieved_saslconn, starttls_done, authenticated,
+		   sasl_ssf);
+      prot_flush(sieved_out);
+  }
 
   /* Create telemetry log */
   sieved_logfd = telemetry_log(username, sieved_in, sieved_out, 0);
@@ -868,7 +909,8 @@ static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved
 
     starttls_done = 1;
 
-    return capabilities(sieved_out, sieved_saslconn, starttls_done, authenticated);
+    return capabilities(sieved_out, sieved_saslconn, starttls_done,
+			authenticated, sasl_ssf);
 }
 #else
 static int cmd_starttls(struct protstream *sieved_out, struct protstream *sieved_in)

@@ -1,13 +1,13 @@
-/* ldap.c - LDAP Backend to ptloader */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+/* ldap.c - LDAP Backend to ptloader
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,14 +39,13 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: ldap.c,v 1.10.2.2 2009/12/28 21:51:53 murch Exp $
  */
-
-static char rcsid[] =
-      "$Id: ldap.c,v 1.10.2.1 2007/11/01 14:39:38 murch Exp $";
 
 #include <config.h>
 #include "ptloader.h"
 #include "exitcodes.h"
+#include "util.h"
 
 #ifdef HAVE_LDAP
 
@@ -253,7 +253,7 @@ static char *ptsmodule_canonifyid(const char *identifier, size_t len)
     username_tolower = config_getswitch(IMAPOPT_USERNAME_TOLOWER);
     sawalpha = 0;
     for(p = retbuf+i; *p; p++) {
-        if (username_tolower && isupper((unsigned char)*p))
+        if (username_tolower && Uisupper(*p))
             *p = tolower((unsigned char)*p);
 
         switch (allowedchars[*(unsigned char*) p]) {
@@ -859,8 +859,14 @@ static int ptsmodule_get_dn(
             return PTSM_FAIL;
         }
 
-        if ( (entry = ldap_first_entry(ptsm->ld, res)) != NULL )
-            *ret = ldap_get_dn(ptsm->ld, entry);
+	/*
+	 * We don't want to return the *first* entry found, we want to return
+	 * the *only* entry found.
+	 */
+	if ( ldap_count_entries(ptsm->ld, res) == 1 ) {
+	    if ( (entry = ldap_first_entry(ptsm->ld, res)) != NULL )
+		*ret = ldap_get_dn(ptsm->ld, entry);
+	}
 
         ldap_msgfree(res);
         res = NULL;
@@ -880,8 +886,7 @@ static int ptsmodule_make_authstate_attribute(
     char *dn = NULL;
     LDAPMessage *res = NULL;
     LDAPMessage *entry = NULL;
-    char *attr = NULL, **vals = NULL;
-    BerElement *ber = NULL;
+    char **vals = NULL;
     int rc;
     char *attrs[] = {(char *)ptsm->member_attribute,NULL};
 
@@ -910,45 +915,37 @@ static int ptsmodule_make_authstate_attribute(
     }
 
     if ((entry = ldap_first_entry(ptsm->ld, res)) != NULL) {
-        for (attr = ldap_first_attribute(ptsm->ld, entry, &ber); attr != NULL; 
-            attr = ldap_next_attribute(ptsm->ld, entry, ber)) {
-            int i, numvals;
+	int i, numvals;
 
-            vals = ldap_get_values(ptsm->ld, entry, attr);
-            if (vals == NULL)
-                continue;
+	vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
+	if (vals != NULL) {
+	    numvals = ldap_count_values( vals );
 
-            for (i = 0; vals[i] != NULL; i++)
-                numvals = i;
-            numvals++;
+	    *dsize = sizeof(struct auth_state) +
+		     (numvals * sizeof(struct auth_ident));
+	    *newstate = xmalloc(*dsize);
+	    if (*newstate == NULL) {
+		*reply = "no memory";
+		rc = PTSM_FAIL;
+		goto done;
+	    }
+	    (*newstate)->ngroups = numvals;
 
-            *dsize = sizeof(struct auth_state) +
-                     (numvals * sizeof(struct auth_ident));
-            *newstate = xmalloc(*dsize);
-            if (*newstate == NULL) {
-                *reply = "no memory";
-                rc = PTSM_FAIL;
-                goto done;
-            }
-            (*newstate)->ngroups = numvals;
-
-            for (i = 0; vals[i] != NULL; i++) {
+	    for (i = 0; i < numvals; i++) {
 		int j;
-                strcpy((*newstate)->groups[i].id, "group:");
+		strcpy((*newstate)->groups[i].id, "group:");
 		for(j =0; j < strlen(vals[i]); j++) {
-		  if(isupper(vals[i][j]))
+		  if(Uisupper(vals[i][j]))
 		    vals[i][j]=tolower(vals[i][j]);
 		}
-                strlcat((*newstate)->groups[i].id, vals[i], 
-                    sizeof((*newstate)->groups[i].id));
-                (*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
-            }
+		strlcat((*newstate)->groups[i].id, vals[i], 
+		    sizeof((*newstate)->groups[i].id));
+		(*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
+	    }
 
-            ldap_value_free(vals);
-            vals = NULL;
-            ldap_memfree(attr);
-            attr = NULL;
-        }
+	    ldap_value_free(vals);
+	    vals = NULL;
+	}
     }
 
     if(!*newstate) {
@@ -975,10 +972,6 @@ done:;
         ldap_msgfree(res);
     if (vals)
         ldap_value_free(vals);
-    if (attr)
-        ldap_memfree(attr);
-    if (ber)
-        ber_free(ber, 0);
     if (dn)
         free(dn);
 
@@ -997,8 +990,7 @@ static int ptsmodule_make_authstate_filter(
     int i; int n;
     LDAPMessage *res = NULL;
     LDAPMessage *entry = NULL;
-    char *attr = NULL, **vals = NULL;
-    BerElement *ber = NULL;
+    char **vals = NULL;
     char *attrs[] = {(char *)ptsm->member_attribute,NULL};
     char *dn = NULL;
 
@@ -1060,30 +1052,33 @@ static int ptsmodule_make_authstate_filter(
 
     for (i = 0, entry = ldap_first_entry(ptsm->ld, res); entry != NULL;
          i++, entry = ldap_next_entry(ptsm->ld, entry)) {
-        for (attr = ldap_first_attribute(ptsm->ld, entry, &ber); attr != NULL; 
-            attr = ldap_next_attribute(ptsm->ld, entry, ber)) {
 
-            vals = ldap_get_values(ptsm->ld, entry, attr);
-            if (vals == NULL)
-                continue;
+	vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
+	if (vals == NULL)
+	    continue;
 
-	    strcpy((*newstate)->groups[i].id, "group:");
+	if ( ldap_count_values( vals ) != 1 ) {
+	    *reply = "too many values";
+	    rc = PTSM_FAIL;
+	    ldap_value_free(vals);
+	    vals = NULL;
+	    goto done;
+	}
 
-	    int j;
-	    for(j =0; j < strlen(vals[0]); j++) {
-	      if(isupper(vals[0][j]))
-		vals[0][j]=tolower(vals[0][j]);
-	    }
+	strcpy((*newstate)->groups[i].id, "group:");
 
-            strlcat((*newstate)->groups[i].id, vals[0], 
-                sizeof((*newstate)->groups[i].id));
-            (*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
+	int j;
+	for(j =0; j < strlen(vals[0]); j++) {
+	  if(Uisupper(vals[0][j]))
+	    vals[0][j]=tolower(vals[0][j]);
+	}
 
-            ldap_value_free(vals);
-            vals = NULL;
-            ldap_memfree(attr);
-            attr = NULL;
-        }
+	strlcat((*newstate)->groups[i].id, vals[0], 
+	    sizeof((*newstate)->groups[i].id));
+	(*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
+
+	ldap_value_free(vals);
+	vals = NULL;
     }
 
     rc = PTSM_OK;
@@ -1092,9 +1087,6 @@ done:;
 
     if (res)
         ldap_msgfree(res);
-    if (ber)
-        ber_free(ber, 0);
-    ber = NULL;
     if (dn)
         free(dn);
     if (filter)
@@ -1117,7 +1109,7 @@ static int ptsmodule_make_authstate_group(
     int i; int n;
     LDAPMessage *res = NULL;
     LDAPMessage *entry = NULL;
-    char *attr = NULL, **vals = NULL;
+    char **vals = NULL;
     char *attrs[] = {NULL};
 
     if (strncmp(canon_id, "group:", 6))  { // Sanity check

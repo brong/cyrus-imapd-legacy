@@ -1,13 +1,13 @@
 /* user.c -- User manipulation routines
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,9 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- */
-/*
- * $Id: user.c,v 1.21.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: user.c,v 1.21.2.2 2009/12/28 21:51:41 murch Exp $
  */
 
 #include <config.h>
@@ -92,8 +91,12 @@ static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
     int r;
     char *acl;
     char *rights, *nextid;
+    char *origacl, *aclalloc;
 
-    r = mboxlist_lookup(name, &acl, NULL);
+    r = mboxlist_lookup(name, &origacl, NULL);
+
+    /* setacl re-calls mboxlist_lookup and will stomp on us */
+    aclalloc = acl = xstrdup(origacl);
 
     while (!r && acl) {
 	rights = strchr(acl, '\t');
@@ -112,6 +115,9 @@ static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 
 	acl = nextid;
     }
+
+    free(aclalloc);
+
     return 0;
 }
 #endif
@@ -215,7 +221,7 @@ static int user_renamesub(char *name, int matchlen __attribute__((unused)),
 			  int maycreate __attribute__((unused)), void* rock)
 {
     struct rename_rock *rrock = (struct rename_rock *) rock;
-    char newname[MAX_MAILBOX_NAME+1];
+    char newname[MAX_MAILBOX_BUFFER];
 
     if (!strncasecmp(name, "INBOX", 5) &&
 	(name[5] == '\0' || name[5] == '.')) {
@@ -313,10 +319,10 @@ int user_renamedata(char *olduser, char *newuser,
 		    struct auth_state *authstate)
 {
     struct namespace namespace;
-    char oldinbox[MAX_MAILBOX_NAME+1], newinbox[MAX_MAILBOX_NAME+1];
+    char oldinbox[MAX_MAILBOX_BUFFER], newinbox[MAX_MAILBOX_BUFFER];
     char *olddomain, *newdomain;
     struct rename_rock rrock;
-    char pat[MAX_MAILBOX_NAME+1];
+    char pat[MAX_MAILBOX_BUFFER];
     int r;
 
     /* set namespace */
@@ -371,8 +377,12 @@ int user_renameacl(char *name, char *olduser, char *newuser)
     int r = 0;
     char *acl;
     char *rights, *nextid;
+    char *origacl, *aclalloc;
 
-    r = mboxlist_lookup(name, &acl, NULL);
+    r = mboxlist_lookup(name, &origacl, NULL);
+
+    /* setacl re-calls mboxlist_lookup and will stomp on us */
+    aclalloc = acl = xstrdup(origacl);
 
     while (!r && acl) {
 	rights = strchr(acl, '\t');
@@ -393,6 +403,8 @@ int user_renameacl(char *name, char *olduser, char *newuser)
 
 	acl = nextid;
     }
+
+    free(aclalloc);
 
     return r;
 }
@@ -444,7 +456,7 @@ static int find_cb(void *rockp,
 int user_deletequotaroots(const char *user)
 {
     struct namespace namespace;
-    char buf[MAX_MAILBOX_NAME+1], *inboxname = buf;
+    char buf[MAX_MAILBOX_BUFFER], *inboxname = buf;
     struct txn *tid = NULL;
     int r;
 
@@ -452,9 +464,10 @@ int user_deletequotaroots(const char *user)
     r = mboxname_init_namespace(&namespace, 0);
 
     /* get user's toplevel quotaroot (INBOX) */
-    if (!r)
+    if (!r) {
 	r = (*namespace.mboxname_tointernal)(&namespace, "INBOX",
 						 user, inboxname);
+    }
 
     if (!r) {
 	struct find_rock frock = { NULL, NULL };

@@ -1,14 +1,13 @@
-/*
- * proxy.c - proxy support functions
+/* proxy.c - proxy support functions
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,18 +16,19 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
- *    "This product includes software developed by Computing Services
  *    acknowledgment:
+ *    "This product includes software developed by Computing Services
  *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
  *
  * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
@@ -39,12 +39,11 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: proxy.c,v 1.2.2.2 2007/11/01 14:39:34 murch Exp $
+ * $Id: proxy.c,v 1.2.2.3 2009/12/28 21:51:38 murch Exp $
  */
 
 #include <config.h>
 
-#include <assert.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -52,6 +51,7 @@
 #include <syslog.h>
 #include <sys/un.h>
 
+#include "assert.h"
 #include "backend.h"
 #include "exitcodes.h"
 #include "global.h"
@@ -260,15 +260,14 @@ int proxy_check_input(struct protgroup *protin,
 
 	    if (pout) {
 		const char *err;
-		char buf[4096];
-		int c;
 
 		do {
-		    c = prot_read(pin, buf, sizeof(buf));
+		    char buf[4096];
+		    int c = prot_read(pin, buf, sizeof(buf));
 
 		    if (c == 0 || c < 0) break;
 		    prot_write(pout, buf, c);
-		} while (c == sizeof(buf));
+		} while (pin->cnt > 0);
 
 		if ((err = prot_error(pin)) != NULL) {
 		    if (serverout && !strcmp(err, PROT_EOF_STRING)) {
@@ -280,6 +279,9 @@ int proxy_check_input(struct protgroup *protin,
 			fatal("Lost connection to input stream",
 			      EC_UNAVAILABLE);
 		    }
+		}
+		else {
+		    return 0;
 		}
 	    }
 	}

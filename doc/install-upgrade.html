@@ -1,4 +1,4 @@
-<!-- $Id: install-upgrade.html,v 1.35.2.2 2007/12/10 17:48:38 murch Exp $ -->
+<!-- $Id: install-upgrade.html,v 1.35.2.3 2009/12/28 21:51:27 murch Exp $ -->
 <HTML>
 <HEAD>
 <TITLE>Upgrading From Previous Versions
@@ -8,13 +8,19 @@
 
 <h1>Upgrading From Previous Versions</h1>
 
+<h2>Upgrading from 2.3.15</h2>
+<ul>
+<li>The SQL detection code in configure has been reworked.  Separate
+  options for the include directories and lib directories have been
+  added.  Previous SQL options may not work as expected.</li>
+</ul>
+
 <h2>Upgrading from 2.3.10</h2>
 <ul>
 <li>STARTTLS is now allowed for externally preauth'd LMTP connections.
 If you don't want STARTTLS to be advertised and used by preauth'd
 clients, you can set <tt>&lt;service_name&gt;_tls_cert_file:
 disabled</tt> in imapd.conf.</li>
-</ol>
 </ul>
 
 <h2>Upgrading from 2.3.9</h2>
@@ -498,7 +504,7 @@ worry about it.)
 </ul>
 
 <HR><P>
-last modified: $Date: 2007/12/10 17:48:38 $
+last modified: $Date: 2009/12/28 21:51:27 $
 </BODY></HTML>
 
 

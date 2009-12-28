@@ -1,14 +1,13 @@
 /* mailbox.h -- Mailbox format definitions
- * $Id: mailbox.h,v 1.82.2.2 2007/11/08 20:28:02 murch Exp $
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,7 +38,10 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: mailbox.h,v 1.82.2.3 2009/12/28 21:51:35 murch Exp $
  */
+
 #ifndef INCLUDED_MAILBOX_H
 #define INCLUDED_MAILBOX_H
 
@@ -75,6 +78,7 @@ typedef unsigned long int modseq_t;
 #endif
 
 #define MAX_MAILBOX_NAME 490
+#define MAX_MAILBOX_BUFFER 1024   /* enough space for all possible rewrites and DELETED.* and stuff */
 #define MAX_MAILBOX_PATH 4096
 
 #define MAX_USER_FLAGS (16*8)
@@ -254,10 +258,11 @@ struct index_record {
 #define FLAG_DRAFT (1<<3)
 
 #define OPT_POP3_NEW_UIDL (1<<0)	/* added for Outlook stupidity */
+/* these three are annotations, if you add more, update annotate.c
+ * struct annotate_mailbox_flags */
 #define OPT_IMAP_CONDSTORE (1<<1)	/* added for CONDSTORE extension */
 #define OPT_IMAP_SHAREDSEEN (1<<2)	/* added for shared \Seen flag */
 #define OPT_IMAP_DUPDELIVER (1<<3)	/* added to allow duplicate delivery */
-
 
 struct mailbox_header_cache {
     const char *name; /* Name of header */
@@ -285,16 +290,68 @@ enum {
     EXPUNGE_CLEANUP =		(1<<1)
 };
 
+/* Access assistance macros for memory-mapped cache file data */
+/* CACHE_ITEM_BIT32: Convert to host byte order */
+/* CACHE_ITEM_LEN: Get the length out */
+/* CACHE_ITEM_NEXT: Return a pointer to the next entry.  Sizes are
+ * 4-byte aligned, so round up to the next 4 byte boundry */
+#define CACHE_ITEM_BIT32(ptr) (ntohl(*((bit32 *)(ptr))))
+#define CACHE_ITEM_LEN(ptr) CACHE_ITEM_BIT32(ptr)
+#define CACHE_ITEM_NEXT(ptr) ((ptr)+4+((3+CACHE_ITEM_LEN(ptr))&~3))
+
+/* Size of a bit32 to skip when jumping over cache item sizes */
+#define CACHE_ITEM_SIZE_SKIP sizeof(bit32)
+
+/* Cache item positions */
+enum {
+    CACHE_ENVELOPE = 0,
+    CACHE_BODYSTRUCTURE,
+    CACHE_BODY,
+    CACHE_SECTION,
+    CACHE_HEADERS,
+    CACHE_FROM,
+    CACHE_TO,
+    CACHE_CC,
+    CACHE_BCC,
+    CACHE_SUBJECT
+};
+#define NUMCACHEITEMS 10
+
+struct cacheitem {
+    unsigned l;
+    const char *s;
+};
+
+/* pointers for a single cache record */
+typedef struct cacheitem cacherecord[NUMCACHEITEMS];
+
+/* Cached envelope token positions */
+enum {
+    ENV_DATE = 0,
+    ENV_SUBJECT,
+    ENV_FROM,
+    ENV_SENDER,
+    ENV_REPLYTO,
+    ENV_TO,
+    ENV_CC,
+    ENV_BCC,
+    ENV_INREPLYTO,
+    ENV_MSGID
+};
+#define NUMENVTOKENS (10)
+
 unsigned mailbox_cached_header(const char *s);
 unsigned mailbox_cached_header_inline(const char *text);
 
-unsigned long mailbox_cache_size(struct mailbox *mailbox, unsigned msgno);
+unsigned cache_parserecord(const char *map_base, unsigned map_size, unsigned cache_offset, cacherecord *rec);
+unsigned mailbox_cacherecord_offset(struct mailbox *mailbox, unsigned cache_offset, cacherecord *rec);
+unsigned mailbox_cacherecord_index(struct mailbox *mailbox, unsigned msgno, cacherecord *rec);
 
 typedef unsigned mailbox_decideproc_t(struct mailbox *mailbox, void *rock,
 				      unsigned char *indexbuf,
 				      int expunge_flags);
 
-typedef void mailbox_notifyproc_t(struct mailbox *mailbox);
+typedef void mailbox_notifyproc_t(const char *mboxname);
 
 extern void mailbox_set_updatenotifier(mailbox_notifyproc_t *notifyproc);
 extern mailbox_notifyproc_t *mailbox_get_updatenotifier(void);
@@ -387,7 +444,8 @@ extern int mailbox_delete(struct mailbox *mailbox, int delete_quota_root);
 extern int mailbox_rename_copy(struct mailbox *oldmailbox, 
 			       const char *newname, char *newpartition,
 			       bit32 *olduidvalidityp, bit32 *newuidvalidityp,
-			       struct mailbox *mailboxp, char *userid);
+			       struct mailbox *mailboxp, char *userid,
+                               int ignorequota);
 extern int mailbox_rename_cleanup(struct mailbox *oldmailbox, int isinbox);
 
 extern int mailbox_sync(const char *oldname, const char *oldpath, 

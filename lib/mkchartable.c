@@ -1,15 +1,13 @@
 /* mkchartable.c -- Generate character set mapping table
  *
- * $Id: mkchartable.c,v 1.25.8.1 2007/11/01 14:39:36 murch Exp $
- *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -18,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -40,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: mkchartable.c,v 1.25.8.2 2009/12/28 21:51:45 murch Exp $
  */
 
 #include <config.h>
@@ -49,6 +49,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "xmalloc.h"
+#include "util.h"
 
 #define XX 127
 /*
@@ -235,7 +236,7 @@ readmapfile(char *name)
     while (fgets(buf, sizeof(buf), mapfile)) {
 	line++;
 	p = buf;
-	while (*p && isspace(*(unsigned char*)p)) p++;
+	while (*p && Uisspace(*p)) p++;
 	if (!*p || *p == '#') continue;
 
 	/* Unicode character */
@@ -530,7 +531,7 @@ readcharfile(char *name)
 	p = buf + strlen(buf);
 	if (p > buf && p[-1] == '\n') p[-1] = '\0';
 	p = buf;
-	while (*p && isspace(*(unsigned char*)p)) p++;
+	while (*p && Uisspace(*p)) p++;
 	if (!*p || *p == '#') continue;
 
 	if (*p == ':') {
@@ -545,14 +546,14 @@ readcharfile(char *name)
 
 	thisstate = curstate;
 	thischar = i = 0;
-	while (!isspace(*(unsigned char*)p)) {
+	while (!Uisspace(*p)) {
 	    c = HEXCHAR(*p);
 	    i++;
 	    p++;
 	    if (c == XX) goto syntaxerr;
 	    thischar = thischar*16 + c;
 	}
-	while (*p && isspace(*(unsigned char*)p)) p++;
+	while (*p && Uisspace(*p)) p++;
 
 	if (i > 4) goto syntaxerr;	
 	if (i > 2) {
@@ -613,7 +614,7 @@ readcharfile(char *name)
 
 	if (*p == ':' || *p == '>' || *p == '<') {
 	    p = table[thisstate].ch[thischar].action = xstrdup(p);
-	    while (*p && !isspace(*(unsigned char*)p)) p++;
+	    while (*p && !Uisspace(*p)) p++;
 	    *p = '\0';
 	    continue;
 	}
@@ -799,7 +800,7 @@ newstate(char *args)
     }
 
     p = table[table_num].name;
-    while (*p && !isspace(*(unsigned char*)p)) p++;
+    while (*p && !Uisspace(*p)) p++;
     if (*p) *p++ = '\0';
     while (*p) {
 	if (*p == '<') table[table_num].endaction = "RET";

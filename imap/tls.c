@@ -4,14 +4,14 @@
  *
  * Based upon Lutz Jaenicke's TLS patches for postfix
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -20,14 +20,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -41,7 +42,11 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: tls.c,v 1.52.2.3 2009/12/28 21:51:40 murch Exp $
+ */
 
+/*
 * NAME
 *	tls
 * SUMMARY
@@ -92,8 +97,6 @@
 *	tls_peer_fingerprint fingerprint of the certificate
 *
 */
-
-/* $Id: tls.c,v 1.52.2.2 2007/11/28 15:18:12 murch Exp $ */
 
 #include <config.h>
 
@@ -403,6 +406,10 @@ static int set_cert_stuff(SSL_CTX * ctx,
 			  const char *cert_file, const char *key_file)
 {
     if (cert_file != NULL) {
+	/* SSL_CTX_use_certificate_chain_file() requires an empty error stack.
+	 * To make sure there is no error from previous op, we clear it here...
+	 */
+	ERR_clear_error();
 	if (SSL_CTX_use_certificate_chain_file(ctx, cert_file) <= 0) {
 	    syslog(LOG_ERR, "unable to get certificate from '%s'", cert_file);
 	    return (0);
@@ -976,7 +983,7 @@ int tls_start_servertls(int readfd, int writefd, int timeout,
 
 	if (authid != NULL) {
 	    /* save the peer id for our caller */
-	    *authid = peer_CN ? xstrdup(peer_CN) : NULL;
+	    *authid = peer_CN[0] ? xstrdup(peer_CN) : NULL;
 	}
 	X509_free(peer);
     }
@@ -1128,7 +1135,7 @@ int tls_prune_sessions(void)
     strlcpy(dbdir, config_dir, sizeof(dbdir));
     strlcat(dbdir, FNAME_TLSSESSIONS, sizeof(dbdir));
 
-    ret = (DB->open)(dbdir, CYRUSDB_CREATE, &sessdb);
+    ret = (DB->open)(dbdir, 0, &sessdb);
     if (ret != CYRUSDB_OK) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s",
 	       dbdir, cyrusdb_strerror(ret));
@@ -1326,7 +1333,7 @@ int tls_start_clienttls(int readfd, int writefd,
 
 	if (authid != NULL) {
 	    /* save the peer id for our caller */
-	    *authid = peer_CN ? xstrdup(peer_CN) : NULL;
+	    *authid = peer_CN[0] ? xstrdup(peer_CN) : NULL;
 	}
 	X509_free(peer);
     }

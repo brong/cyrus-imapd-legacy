@@ -1,12 +1,13 @@
 /* fud.c -- long-lived finger information provider
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,12 +39,10 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
-
+ * $Id: fud.c,v 1.54.2.2 2009/12/28 21:51:29 murch Exp $
  */
 
 #include <config.h>
-
-/* $Id: fud.c,v 1.54.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -112,18 +112,21 @@ int begin_handling(void)
         struct sockaddr_storage sfrom;
         socklen_t sfromsiz = sizeof(sfrom);
         int r;
-        char    buf[MAXLOGNAME + MAXDOMNAME+ MAX_MAILBOX_NAME + 1];
+        char    buf[MAXLOGNAME + MAXDOMNAME + MAX_MAILBOX_BUFFER];
         char    username[MAXLOGNAME + MAXDOMNAME];
-        char    mbox[MAX_MAILBOX_NAME+1];
+        char    mbox[MAX_MAILBOX_BUFFER];
         char    *q;
         int     off;
-	int     maxuserlen = MAXLOGNAME + config_virtdomains ? MAXDOMNAME : 0;
+	int     maxuserlen = MAXLOGNAME;
+
+	if (config_virtdomains) 
+	    maxuserlen += MAXDOMNAME + 1; /* @ + DOM */
 
         while(1) {
             /* For safety */
-            memset(username,'\0',MAXLOGNAME + MAXDOMNAME);	
-            memset(mbox,'\0',MAX_MAILBOX_NAME+1);
-            memset(buf, '\0', MAXLOGNAME + MAX_MAILBOX_NAME + 1);
+            memset(buf, 0, sizeof(buf));
+            memset(username, 0, sizeof(username));
+            memset(mbox, 0, sizeof(mbox));
 
 	    if (signals_poll() == SIGHUP) {
 		/* caught a SIGHUP, return */
@@ -354,7 +357,7 @@ int handle_request(const char *who, const char *name,
     unsigned recentuid;
     char *seenuids;
     unsigned numrecent;
-    char mboxname[MAX_MAILBOX_NAME+1];
+    char mboxname[MAX_MAILBOX_BUFFER];
     char *location, *acl;
     int mbflag;
 

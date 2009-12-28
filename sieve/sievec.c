@@ -1,16 +1,14 @@
 /* sievec.c -- compile a sieve script to bytecode manually
  * Rob Siemborski
- * $Id: sievec.c,v 1.6.2.1 2007/11/01 14:39:39 murch Exp $
- */
-/*
- * Copyright (c) 1999-2000 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -19,14 +17,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -41,6 +40,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: sievec.c,v 1.6.2.2 2009/12/28 21:51:54 murch Exp $
  */
 
 #ifdef HAVE_CONFIG_H
@@ -91,14 +91,14 @@ int main(int argc, char **argv)
 	}
 
     if (usage_error || (argc - optind) < 2) {
-	printf("Syntax: %s [-C <altconfig>] <filename> <outputfile>\n",
+	fprintf(stderr, "Syntax: %s [-C <altconfig>] <filename> <outputfile>\n",
 	       argv[0]);
 	exit(1);
     }
 
     instream = fopen(argv[optind++],"r");
     if(instream == NULL) {
-	printf("Unable to open %s for reading\n", argv[1]);
+	fprintf(stderr, "Unable to open %s for reading\n", argv[1]);
 	exit(1);
     }
     
@@ -107,9 +107,9 @@ int main(int argc, char **argv)
 
     if(is_script_parsable(instream, &err, &s) == TIMSIEVE_FAIL) {
 	if(err) {
-	    printf("Unable to parse script: %s\n", err);
+	    fprintf(stderr, "Unable to parse script: %s\n", err);
 	} else {
-	    printf("Unable to parse script.\n");
+	    fprintf(stderr, "Unable to parse script.\n");
 	}
 	 
 	exit(1);
@@ -117,20 +117,20 @@ int main(int argc, char **argv)
     
     /* Now, generate the bytecode */
     if(sieve_generate_bytecode(&bc, s) == -1) {
-	printf("bytecode generate failed\n");
+	fprintf(stderr, "bytecode generate failed\n");
 	exit(1);
     }
 
     /* Now, open the new file */
     fd = open(argv[optind], O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if(fd < 0) {
-	printf("couldn't open bytecode output file\n");
+	fprintf(stderr, "couldn't open bytecode output file\n");
 	exit(1);
     }  
 
     /* Now, emit the bytecode */
     if(sieve_emit_bytecode(fd, bc) == -1) {
-	printf("bytecode emit failed\n");
+	fprintf(stderr, "bytecode emit failed\n");
 	exit(1);
     }
 
@@ -180,7 +180,7 @@ static int mysieve_error(int lineno, const char *msg,
 
 void fatal(const char *s, int code)
 {  
-    printf("Fatal error: %s (%d)\r\n", s, code);
+    fprintf(stderr, "Fatal error: %s (%d)\r\n", s, code);
                            
     exit(1);
 }

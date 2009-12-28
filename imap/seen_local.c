@@ -1,13 +1,13 @@
 /* seen_local.c -- Storage for /Recent and /Seen state on local filesystem
- * $Id: seen_local.c,v 1.44 2006/11/30 17:11:20 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: seen_local.c,v 1.44.2.1 2009/12/28 21:51:39 murch Exp $
  */
 
 #include <config.h>
@@ -63,6 +65,7 @@
 #include "retry.h"
 #include "mailbox.h"
 #include "imap_err.h"
+#include "util.h"
 #include "xmalloc.h"
 
 #include "seen.h"
@@ -186,7 +189,7 @@ int seen_lockread(struct seen *seendb, time_t *lastreadptr, unsigned int *lastui
     left = length - namelen;
 
     /* Parse last-read timestamp */
-    while (left && isdigit((int) *buf)) {
+    while (left && Uisdigit(*buf)) {
 	*lastreadptr = *lastreadptr * 10 + *buf++ - '0';
 	left--;
     }
@@ -196,7 +199,7 @@ int seen_lockread(struct seen *seendb, time_t *lastreadptr, unsigned int *lastui
     }
 
     /* Parse last-read uid */
-    while (left && isdigit((int) *buf)) {
+    while (left && Uisdigit(*buf)) {
 	*lastuidptr = *lastuidptr * 10 + *buf++ - '0';
 	left--;
     }
@@ -207,12 +210,12 @@ int seen_lockread(struct seen *seendb, time_t *lastreadptr, unsigned int *lastui
 
     /* Scan for end of uids or last-change timestamp */
     p = buf;
-    while (left && !isspace((int) *p)) {
+    while (left && !Uisspace(*p)) {
 	p++;
 	left--;
     }
 
-    if (left > 1 && p[0] == ' ' && isdigit((int) p[1])) {
+    if (left > 1 && p[0] == ' ' && Uisdigit(p[1])) {
 	/* Have a last-change timestamp */
 	while (buf < p) {
 	    *lastchangeptr = *lastchangeptr * 10 + *buf++ - '0';
@@ -222,7 +225,7 @@ int seen_lockread(struct seen *seendb, time_t *lastreadptr, unsigned int *lastui
 	left--;
 
 	/* Scan for end of uids */
-	while (left && !isspace((int) *p)) {
+	while (left && !Uisspace(*p)) {
 	    p++;
 	    left--;
 	}
@@ -601,7 +604,7 @@ int seen_reconstruct(struct mailbox *mailbox,
 	/* Parse last-read timestamp */
 	p++;
 	lastread = 0;
-	while (p < endline && isdigit((int) *p)) {
+	while (p < endline && Uisdigit(*p)) {
 	    lastread = lastread * 10 + *p++ - '0';
 	}
 	if (p >= endline || *p++ != ' ') {
@@ -626,7 +629,7 @@ int seen_reconstruct(struct mailbox *mailbox,
 	
 	/* Parse last-read uid */
 	lastuidread = 0;
-	while (p < endline && isdigit((int) *p)) {
+	while (p < endline && Uisdigit(*p)) {
 	    lastuidread = lastuidread * 10 + *p++ - '0';
 	}
 	if (p >= endline || *p++ != ' ' || lastuidread > uidtoobig) {
@@ -641,9 +644,9 @@ int seen_reconstruct(struct mailbox *mailbox,
 	space = memchr(p, ' ', endline - p);
 
 	if (space && space+1 < endline &&
-	    space[0] == ' ' && isdigit((int) space[1])) {
+	    space[0] == ' ' && Uisdigit(space[1])) {
 	    /* Have a last-change timestamp */
-	    while (p < space && isdigit((int) *p)) {
+	    while (p < space && Uisdigit(*p)) {
 		lastchange = lastchange * 10 + *p++ - '0';
 	    }
 	    if (p != space) {
@@ -671,7 +674,7 @@ int seen_reconstruct(struct mailbox *mailbox,
 
 	while (p < space) {
 	    thisuid = 0;
-	    while (p < space && isdigit((int) *p)) {
+	    while (p < space && Uisdigit(*p)) {
 		if (dst) *dst++ = *p;
 		thisuid = thisuid * 10 + *p++ - '0';
 	    }
@@ -679,7 +682,7 @@ int seen_reconstruct(struct mailbox *mailbox,
 	    if (thisuid <= lastuid || thisuid > uidtoobig) {
 		/* Remove this UID and trailing separator */
 		FIXING();
-		while (isdigit((int) dst[-1])) dst--;
+		while (Uisdigit(dst[-1])) dst--;
 		if (dst[-1] == ':') dst[-1] = ',';
 	    }
 	    else if (lastsep == ':' && *p == ':') {

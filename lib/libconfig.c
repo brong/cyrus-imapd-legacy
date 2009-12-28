@@ -1,12 +1,13 @@
 /* libconfig.c -- imapd.conf handling
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,13 +39,11 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: libconfig.c,v 1.11.2.2 2009/12/28 21:51:45 murch Exp $
  */
-
-/* $Id: libconfig.c,v 1.11.2.1 2007/11/01 14:39:36 murch Exp $ */
 
 #include <config.h>
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,12 +53,14 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 
+#include "assert.h"
 #include "hash.h"
 #include "libconfig.h"
 #include "imapopts.h"
 #include "xmalloc.h"
 #include "xstrlcat.h"
 #include "xstrlcpy.h"
+#include "util.h"
 
 #define CONFIGHASHSIZE 30 /* relatively small,
 			   * because it is for overflow only */
@@ -71,12 +73,15 @@ const char *config_filename= NULL;       /* filename of configuration file */
 const char *config_dir = NULL;		 /* ie /var/imap */
 const char *config_defpartition = NULL;  /* /var/spool/imap */
 const char *config_servername= NULL;	 /* gethostname() */
+enum enum_value config_serverinfo;	 /* on */
 const char *config_mupdate_server = NULL;/* NULL */
 const char *config_defdomain = NULL;     /* NULL */
 const char *config_ident = NULL;         /* the service name */
 int config_hashimapspool;	  /* f */
 enum enum_value config_virtdomains;	          /* f */
 enum enum_value config_mupdate_config;	/* IMAP_ENUM_MUPDATE_CONFIG_STANDARD */
+int config_maxword;
+int config_maxquoted;
 
 /* declared in each binary that uses libconfig */
 extern const int config_need_data;
@@ -144,6 +149,8 @@ const char *config_getoverflowstring(const char *key, const char *def)
     char buf[256];
     char *ret = NULL;
 
+    if (!config_filename) return 0;
+
     /* First lookup <ident>_key, to see if we have a service-specific
      * override */
 
@@ -165,6 +172,8 @@ const char *config_getoverflowstring(const char *key, const char *def)
 void config_foreachoverflowstring(void (*func)(const char *, const char *, void *),
 				  void *rock)
 {
+    if (!config_filename) return;
+
     hash_enumerate(&confighash, (void (*)(char *, void *, void *)) func, rock);
 }
 
@@ -190,6 +199,15 @@ const char *config_metapartitiondir(const char *partition)
 	return 0;
 
     return config_getoverflowstring(buf, NULL);
+}
+
+static void config_ispartition(const char *key,
+			       const char *val __attribute__((unused)),
+			       void *rock)
+{
+    int *found = (int *) rock;
+
+    if (!strncmp("partition-", key, 10)) *found = 1;
 }
 
 void config_read(const char *alt_config)
@@ -259,18 +277,31 @@ void config_read(const char *alt_config)
 
     /* Look up default partition */
     config_defpartition = config_getstring(IMAPOPT_DEFAULTPARTITION);
-    for (p = (char *)config_defpartition; *p; p++) {
-	if (!isalnum((unsigned char) *p))
+    for (p = (char *)config_defpartition; p && *p; p++) {
+	if (!Uisalnum(*p))
 	  fatal("defaultpartition option contains non-alphanumeric character",
 		EC_CONFIG);
-	if (isupper((unsigned char) *p)) *p = tolower((unsigned char) *p);
+	if (Uisupper(*p)) *p = tolower((unsigned char) *p);
     }
-    if ((config_need_data & CONFIG_NEED_PARTITION_DATA) &&
-	(!config_defpartition || !config_partitiondir(config_defpartition))) {
-	snprintf(buf, sizeof(buf),
-		"partition-%s option not specified in configuration file",
-		config_defpartition);
-	fatal(buf, EC_CONFIG);
+
+    if (config_need_data & CONFIG_NEED_PARTITION_DATA) {
+	int found = 0;
+
+	if (config_defpartition) {
+	    /* see if defaultpartition is specified properly */
+	    if (config_partitiondir(config_defpartition)) found = 1;
+	}
+	else {
+	    /* see if we have ANY partition-<name> options */
+	    config_foreachoverflowstring(config_ispartition, &found);
+	}
+
+	if (!found) {
+	    snprintf(buf, sizeof(buf),
+		     "partition-%s option not specified in configuration file",
+		     config_defpartition ? config_defpartition : "<name>");
+	    fatal(buf, EC_CONFIG);
+	}
     }
 
     /* look up mailbox hashing */
@@ -280,67 +311,101 @@ void config_read(const char *alt_config)
     config_virtdomains = config_getenum(IMAPOPT_VIRTDOMAINS);
     config_defdomain = config_getstring(IMAPOPT_DEFAULTDOMAIN);
 
-    /* look up the hostname we should present to the user */
+    /* look up the hostname and info we should present to the user */
     config_servername = config_getstring(IMAPOPT_SERVERNAME);
     if (!config_servername) {
 	config_servername = xmalloc(sizeof(char) * 256);
 	gethostname((char *) config_servername, 256);
     }
+    config_serverinfo = config_getenum(IMAPOPT_SERVERINFO);
 
     config_mupdate_server = config_getstring(IMAPOPT_MUPDATE_SERVER);
 
     if (config_mupdate_server) {
 	config_mupdate_config = config_getenum(IMAPOPT_MUPDATE_CONFIG);
     }
+
+    /* set some limits */
+    config_maxquoted = config_getint(IMAPOPT_MAXQUOTED);
+    config_maxword = config_getint(IMAPOPT_MAXWORD);
 }
+
+#define GROWSIZE 4096
 
 void config_read_file(const char *filename)
 {
     FILE *infile;
     enum imapopt opt = IMAPOPT_ZERO;
     int lineno = 0;
-    char buf[4096], errbuf[1024];
+    char *buf, errbuf[1024];
+    unsigned bufsize, len;
     char *p, *q, *key, *fullkey, *srvkey, *val, *newval;
     int service_specific;
     int idlen = (config_ident ? strlen(config_ident) : 0);
 
+    bufsize = GROWSIZE;
+    buf = xmalloc(bufsize);
+
     /* read in config file */
     infile = fopen(filename, "r");
     if (!infile) {
-	strlcpy(buf, CYRUS_PATH, sizeof(buf));
-	strlcat(buf, filename, sizeof(buf));
+	strlcpy(buf, CYRUS_PATH, bufsize);
+	strlcat(buf, filename, bufsize);
 	infile = fopen(buf, "r");
     }
     if (!infile) {
-	snprintf(buf, sizeof(buf), "can't open configuration file %s: %s",
+	snprintf(buf, bufsize, "can't open configuration file %s: %s",
 		 filename, error_message(errno));
 	fatal(buf, EC_CONFIG);
     }
 
     /* check to see if we've already read this file */
     if (hash_lookup(filename, &includehash)) {
-	snprintf(buf, sizeof(buf), "configuration file %s included twice",
+	snprintf(buf, bufsize, "configuration file %s included twice",
 		 filename);
 	fatal(buf, EC_CONFIG);
-	return;
     }
     else {
 	hash_insert(filename, (void*) 0xDEADBEEF, &includehash);
     }
     
-    while (fgets(buf, sizeof(buf), infile)) {
+    len = 0;
+    while (fgets(buf+len, bufsize-len, infile)) {
+	if (buf[len]) {
+	    len = strlen(buf);
+	    if (buf[len-1] == '\n') {
+		/* end of line */
+		buf[--len] = '\0';
+
+		if (len && buf[len-1] == '\\') {
+		    /* line continuation */
+		    len--;
+		    lineno++;
+		    continue;
+		}
+	    }
+	    else if (!feof(infile) && len == bufsize-1) {
+		/* line is longer than the buffer */
+		bufsize += GROWSIZE;
+		buf = xrealloc(buf, bufsize);
+		continue;
+	    }
+	}
+	len = 0;
 	lineno++;
 
 	service_specific = 0;
-	
-	if (buf[0] && buf[strlen(buf)-1] == '\n') buf[strlen(buf)-1] = '\0';
-	for (p = buf; *p && isspace((int) *p); p++);
+
+	/* remove leading whitespace */
+	for (p = buf; *p && Uisspace(*p); p++);
+
+	/* skip comments */
 	if (!*p || *p == '#') continue;
 
 	fullkey = key = p;
 	if (*p == '@') p++;  /* allow @ as the first char (for directives) */
-	while (*p && (isalnum((int) *p) || *p == '-' || *p == '_')) {
-	    if (isupper((unsigned char) *p)) *p = tolower((unsigned char) *p);
+	while (*p && (Uisalnum(*p) || *p == '-' || *p == '_')) {
+	    if (Uisupper(*p)) *p = tolower((unsigned char) *p);
 	    p++;
 	}
 	if (*p != ':') {
@@ -351,10 +416,11 @@ void config_read_file(const char *filename)
 	}
 	*p++ = '\0';
 	
-	while (*p && isspace((int) *p)) p++;
+	/* remove leading whitespace */
+	while (*p && Uisspace(*p)) p++;
 	
 	/* remove trailing whitespace */
-	for (q = p + strlen(p) - 1; q > p && isspace((int) *q); q--) {
+	for (q = p + strlen(p) - 1; q > p && Uisspace(*q); q--) {
 	    *q = '\0';
 	}
 	
@@ -514,7 +580,7 @@ void config_read_file(const char *filename)
 
 		while (*p) {
 		    /* find the end of the first value */
-		    for (; *q && !isspace((int) *q); q++);
+		    for (; *q && !Uisspace(*q); q++);
 		    if (*q) *q++ = '\0';
 
 		    /* see if its a legal value */
@@ -535,7 +601,8 @@ void config_read_file(const char *filename)
 			imapopts[opt].val.x |= e->val;
 
 		    /* find the start of the next value */
-		    for (p = q; *p && isspace((int) *p); p++);
+		    for (p = q; *p && Uisspace(*p); p++);
+		    q = p;
 		}
 
 		break;
@@ -573,4 +640,5 @@ void config_read_file(const char *filename)
 	}
     }
     fclose(infile);
+    free(buf);
 }

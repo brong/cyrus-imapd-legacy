@@ -1,13 +1,13 @@
 /* quota_db.c -- quota manipulation routines
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,8 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: quota_db.c,v 1.3.2.1 2007/11/01 14:39:34 murch Exp $
- *
+ * $Id: quota_db.c,v 1.3.2.2 2009/12/28 21:51:38 murch Exp $
  */
 
 #include <config.h>
@@ -94,6 +94,10 @@ int quota_read(struct quota *quota, struct txn **tid, int wrlock)
 	if (!data ||
 	    sscanf(data, UQUOTA_T_FMT " %d",
 		   &quota->used, &quota->limit) != 2) {
+            char *buf = xstrndup(data, datalen);
+            syslog(LOG_ERR, "DBERROR: parsed bogus quota data <%s> for %s",
+               buf, quota->root);
+            free(buf);
 	    r = CYRUSDB_IOERROR;
 	}
 	break;
@@ -108,7 +112,7 @@ int quota_read(struct quota *quota, struct txn **tid, int wrlock)
     }
 
     if (r) {
-	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+	syslog(LOG_ERR, "DBERROR: error fetching quota %s: %s",
 	       quota->root, cyrusdb_strerror(r));
 	return IMAP_IOERROR;
     }
@@ -197,7 +201,7 @@ int quota_delete(struct quota *quota, struct txn **tid)
 
 /*
  * Find the mailbox 'name' 's quotaroot, and return it in 'ret'.
- * 'ret' must be at least MAX_MAILBOX_PATH. 
+ * 'ret' must be at least MAX_MAILBOX_NAME.
  *
  * returns true if a quotaroot is found, 0 otherwise. 
 */

@@ -1,13 +1,13 @@
 /* mboxlist.c -- Mailbox list manipulation routines
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,9 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- */
-/*
- * $Id: mboxlist.c,v 1.243.2.3 2007/11/28 15:18:11 murch Exp $
+ * $Id: mboxlist.c,v 1.243.2.4 2009/12/28 21:51:35 murch Exp $
  */
 
 #include <config.h>
@@ -240,7 +239,7 @@ static int mboxlist_mylookup(const char *name, int *typep,
 	break;
 
     default:
-	syslog(LOG_ERR, "DBERROR: error fetching %s: %s",
+	syslog(LOG_ERR, "DBERROR: error fetching mboxlist %s: %s",
 	       name, cyrusdb_strerror(r));
 	return IMAP_IOERROR;
 	break;
@@ -315,7 +314,7 @@ int mboxlist_update(char *name, int flags, const char *part, const char *acl,
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for update of '%s'",
+		   "cannot connect to mupdate server for update of '%s'",
 		   name);
 	} else {
 	    r = mupdate_activate(mupdate_h, name, buf, acl);
@@ -363,7 +362,7 @@ mboxlist_mycreatemailboxcheck(char *name,
     char *p;
     char *acl;
     char *defaultacl, *identifier, *rights;
-    char parent[MAX_MAILBOX_NAME+1];
+    char parent[MAX_MAILBOX_BUFFER];
     unsigned long parentlen;
     char *parentname = NULL;
     char *parentpartition = NULL;
@@ -371,6 +370,7 @@ mboxlist_mycreatemailboxcheck(char *name,
     unsigned long parentpartitionlen = 0;
     unsigned long parentacllen = 0;
     int mbtype;
+    int user_folder_limit;
     
     /* Check for invalid name/partition */
     if (partition && strlen(partition) > MAX_PARTITION_LEN) {
@@ -388,7 +388,7 @@ mboxlist_mycreatemailboxcheck(char *name,
     if(!isadmin && force_user_create) return IMAP_PERMISSION_DENIED;
 
     /* User has admin rights over their own mailbox namespace */
-    if (mboxname_userownsmailbox(userid, name) && strchr(name+5, '.') &&
+    if (mboxname_userownsmailbox(userid, name) && strchr(mbox+5, '.') &&
 	(config_implicitrights & ACL_ADMIN)) {
 	isadmin = 1;
     }
@@ -444,6 +444,23 @@ mboxlist_mycreatemailboxcheck(char *name,
 	    break;
 	}
     }
+
+    /* check the folder limit */
+    if (!isadmin && (user_folder_limit = config_getint(IMAPOPT_USER_FOLDER_LIMIT))) {
+	char buf[MAX_MAILBOX_NAME+1];
+	strncpy(buf, mbox, strlen(mbox));
+	if (!strncmp(buf, "user.", 5)) {
+	    char *firstdot = strchr(buf+5, '.');
+	    if (firstdot) *firstdot = '\0';
+	    if (mboxlist_count_inferiors(buf, isadmin, userid, auth_state) + 1
+					 >= user_folder_limit) {
+		syslog(LOG_ERR, "LIMIT: refused to create %s for %s because of limit %d",
+			        mbox, userid, user_folder_limit);
+		return IMAP_PERMISSION_DENIED;
+	    }
+	}
+    }
+
     if (parentlen != 0) {
 	/* check acl */
 	if (!isadmin &&
@@ -506,7 +523,7 @@ mboxlist_mycreatemailboxcheck(char *name,
 	    if (mbox != name) {
 		/* add domain to identifier */
 		sprintf(identifier+strlen(identifier),
-			"@%.*s", mbox - name - 1, name);
+			"@%.*s", (int) (mbox - name - 1), name);
 	    }
 	    cyrus_acl_set(&acl, identifier, ACL_MODE_SET, ACL_ALL,
 		    (cyrus_acl_canonproc_t *)0, (void *)0);
@@ -515,15 +532,15 @@ mboxlist_mycreatemailboxcheck(char *name,
 	    defaultacl = identifier = 
 		xstrdup(config_getstring(IMAPOPT_DEFAULTACL));
 	    for (;;) {
-		while (*identifier && isspace((int) *identifier)) identifier++;
+		while (*identifier && Uisspace(*identifier)) identifier++;
 		rights = identifier;
-		while (*rights && !isspace((int) *rights)) rights++;
+		while (*rights && !Uisspace(*rights)) rights++;
 		if (!*rights) break;
 		*rights++ = '\0';
-		while (*rights && isspace((int) *rights)) rights++;
+		while (*rights && Uisspace(*rights)) rights++;
 		if (!*rights) break;
 		p = rights;
-		while (*p && !isspace((int) *p)) p++;
+		while (*p && !Uisspace(*p)) p++;
 		if (*p) *p++ = '\0';
 		cyrus_acl_set(&acl, identifier, ACL_MODE_SET, cyrus_acl_strtomask(rights),
 			(cyrus_acl_canonproc_t *)0, (void *)0);
@@ -533,13 +550,26 @@ mboxlist_mycreatemailboxcheck(char *name,
 	}
 
 	if (!partition) {  
-	    partition = (char *)config_defpartition;
-	    if (strlen(partition) > MAX_PARTITION_LEN) {
-		/* Configuration error */
-		fatal("name of default partition is too long", EC_CONFIG);
+	    if (config_mupdate_server &&
+		(config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_STANDARD) &&
+		!config_getstring(IMAPOPT_PROXYSERVERS)) {
+		/* proxy-only server -- caller will find a server */
+		partition = NULL;
+	    }
+	    else {
+		/* use defaultpartition if specified */
+		partition = (char *)config_defpartition;
+
+		/* otherwise find partition with most available space */
+		if (!partition) partition = find_free_partition(NULL);
+
+		if (strlen(partition) > MAX_PARTITION_LEN) {
+		    /* Configuration error */
+		    fatal("name of default partition is too long", EC_CONFIG);
+		}
 	    }
 	}
-	partition = xstrdup(partition);
+	if (partition) partition = xstrdup(partition);
     }
 
     if (newpartition) *newpartition = partition;
@@ -639,7 +669,7 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for reservation on '%s'",
+		   "cannot connect to mupdate server for reservation on '%s'",
 		   name);
 	    goto done;
 	}
@@ -886,7 +916,7 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid,
                                int local_only __attribute__((unused)),
 			       int force)
 {
-    char newname[MAX_MAILBOX_PATH+1];
+    char newname[MAX_MAILBOX_BUFFER];
     char *path, *mpath;
     char *acl;
     char *partition;
@@ -963,7 +993,7 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid,
     /* Get mboxlist_renamemailbox to do the hard work. No ACL checks needed */
     r = mboxlist_renamemailbox((char *)name, newname, partition,
                                1 /* isadmin */, userid,
-                               auth_state, force);
+                               auth_state, force, 1);
 
     /* don't forget to log the rename! */
     sync_log_mailbox_double((char *)name, newname);
@@ -1096,7 +1126,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for delete of '%s'",
+		   "cannot connect to mupdate server for delete of '%s'",
 		   name);
 	    goto done;
 	}
@@ -1145,7 +1175,8 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
  */
 int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
 			   int isadmin, char *userid, 
-			   struct auth_state *auth_state, int forceuser)
+			   struct auth_state *auth_state, int forceuser,
+                           int ignorequota)
 {
     int r;
     long access;
@@ -1312,7 +1343,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for rename of '%s'",
+		   "cannot connect to mupdate server for rename of '%s'",
 		   newname);
 	    goto done;
 	}
@@ -1339,15 +1370,19 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     if(!r) {
 	r = mailbox_open_locked(oldname, oldpath, oldmpath, oldacl, auth_state,
 				&oldmailbox, 0);
-	oldopen = 1;
+	if (r) {
+	    goto done;
+	} else {
+	    oldopen = 1;
+	}
     }
 
     /* 6. Copy mailbox */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
+    if (!(mbtype & MBTYPE_REMOTE)) {
 	/* Rename the actual mailbox */
 	r = mailbox_rename_copy(&oldmailbox, newname, newpartition,
 				NULL, NULL, &newmailbox,
-				isusermbox ? userid : NULL);
+				isusermbox ? userid : NULL, ignorequota);
 	if (r) {
 	    goto done;
 	} else {
@@ -1570,7 +1605,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
 		!strcmp(identifier, "anonymous") ||
 		!strcmp(identifier, "anyone")) {
 		snprintf(ident, sizeof(ident),
-			 "%.*s", cp - identifier, identifier);
+			 "%.*s", (int) (cp - identifier), identifier);
 	    } else {
 		strlcpy(ident, identifier, sizeof(ident));
 	    }
@@ -1726,7 +1761,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for reservation on '%s'",
+		   "cannot connect to mupdate server for reservation on '%s'",
 		   name);
 	} else {
 	    r = mupdate_activate(mupdate_h, name, buf, newacl);
@@ -1861,7 +1896,7 @@ mboxlist_sync_setacls(char *name, char *newacl)
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
-		   "can not connect to mupdate server for reservation on '%s'",
+		   "cannot connect to mupdate server for reservation on '%s'",
 		   name);
 	} else {
 	    r = mupdate_activate(mupdate_h, name, buf, newacl);
@@ -1918,11 +1953,11 @@ static int find_p(void *rockp,
     long matchlen;
 
     /* don't list mailboxes outside of the default domain */
-    if (!rock->domainlen && !rock->isadmin && strchr(key, '!')) return 0; 
+    if (!rock->domainlen && !rock->isadmin && memchr(key, '!', keylen)) return 0; 
 
     minmatch = 0;
     if (rock->inboxoffset) {
-	char namebuf[MAX_MAILBOX_NAME+1];
+	char namebuf[MAX_MAILBOX_BUFFER];
 
 	if(keylen >= (int) sizeof(namebuf)) {
 	    syslog(LOG_ERR, "oversize keylen in mboxlist.c:find_p()");
@@ -1968,7 +2003,7 @@ static int find_p(void *rockp,
 
     /* Suppress deleted hierarchy unless admin: overrides ACL_LOOKUP test */
     if (!rock->isadmin) {
-	char namebuf[MAX_MAILBOX_NAME+1];
+	char namebuf[MAX_MAILBOX_BUFFER];
 
 	memcpy(namebuf, key, keylen);
 	namebuf[keylen] = '\0';
@@ -2023,7 +2058,7 @@ static int find_cb(void *rockp,
 		   const char *data __attribute__((unused)),
 		   int datalen __attribute__((unused)))
 {
-    char namebuf[MAX_MAILBOX_NAME+1];
+    char namebuf[MAX_MAILBOX_BUFFER];
     struct find_rock *rock = (struct find_rock *) rockp;
     int r = 0;
     long minmatch;
@@ -2126,7 +2161,7 @@ int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
 		     struct auth_state *auth_state, int (*proc)(), void *rock)
 {
     struct find_rock cbrock;
-    char usermboxname[MAX_MAILBOX_NAME+1];
+    char usermboxname[MAX_MAILBOX_BUFFER];
     int usermboxnamelen = 0;
     const char *data;
     int datalen;
@@ -2134,7 +2169,7 @@ int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
     char *p;
     int prefixlen;
     int userlen = userid ? strlen(userid) : 0, domainlen = 0;
-    char domainpat[MAX_MAILBOX_NAME+1] = ""; /* do intra-domain fetches only */
+    char domainpat[MAX_MAILBOX_BUFFER] = ""; /* do intra-domain fetches only */
     char *pat = NULL;
 
     if (config_virtdomains) {
@@ -2169,7 +2204,7 @@ int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
 		domainlen = strlen(p);
 	    }
 	    snprintf(domainpat+domainlen, sizeof(domainpat)-domainlen,
-		     "%.*s", p - pattern, pattern);
+		     "%.*s", (int) (p - pattern), pattern);
 	}
     }
 
@@ -2189,7 +2224,7 @@ int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > userlen)) &&
-	strlen(userid)+5 < MAX_MAILBOX_NAME) {
+	strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
 	if (domainlen)
 	    snprintf(usermboxname, sizeof(usermboxname),
 		     "%s!", userid+userlen+1);
@@ -2303,7 +2338,7 @@ int mboxlist_findall_alt(struct namespace *namespace,
 			 void *rock)
 {
     struct find_rock cbrock;
-    char usermboxname[MAX_MAILBOX_NAME+1], patbuf[MAX_MAILBOX_NAME+1];
+    char usermboxname[MAX_MAILBOX_BUFFER], patbuf[MAX_MAILBOX_BUFFER];
     int usermboxnamelen = 0;
     const char *data;
     int datalen;
@@ -2311,7 +2346,7 @@ int mboxlist_findall_alt(struct namespace *namespace,
     char *p;
     int prefixlen, len;
     int userlen = userid ? strlen(userid) : 0, domainlen = 0;
-    char domainpat[MAX_MAILBOX_NAME+1]; /* do intra-domain fetches only */
+    char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
 
     if (config_virtdomains && userid && (p = strchr(userid, '@'))) {
@@ -2335,7 +2370,7 @@ int mboxlist_findall_alt(struct namespace *namespace,
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > userlen)) &&
-	strlen(userid)+5 < MAX_MAILBOX_NAME) {
+	strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
 	if (domainlen)
 	    snprintf(usermboxname, sizeof(usermboxname),
 		     "%s!", userid+userlen+1);
@@ -2943,7 +2978,7 @@ int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
 {
     struct db *subs = NULL;
     struct find_rock cbrock;
-    char usermboxname[MAX_MAILBOX_NAME+1];
+    char usermboxname[MAX_MAILBOX_BUFFER];
     int usermboxnamelen = 0;
     const char *data;
     int datalen;
@@ -2951,7 +2986,7 @@ int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
     char *p;
     int prefixlen;
     int userlen = userid ? strlen(userid) : 0, domainlen = 0;
-    char domainpat[MAX_MAILBOX_NAME+1]; /* do intra-domain fetches only */
+    char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
 
     if (config_virtdomains && userid && (p = strchr(userid, '@'))) {
@@ -2981,7 +3016,7 @@ int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > userlen)) &&
-	strlen(userid)+5 < MAX_MAILBOX_NAME) {
+	strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
 	if (domainlen)
 	    snprintf(usermboxname, sizeof(usermboxname),
 		     "%s!", userid+userlen+1);
@@ -3094,7 +3129,7 @@ int mboxlist_findsub_alt(struct namespace *namespace,
 {
     struct db *subs = NULL;
     struct find_rock cbrock;
-    char usermboxname[MAX_MAILBOX_NAME+1], patbuf[MAX_MAILBOX_NAME+1];
+    char usermboxname[MAX_MAILBOX_BUFFER], patbuf[MAX_MAILBOX_BUFFER];
     int usermboxnamelen = 0;
     const char *data;
     int datalen;
@@ -3102,7 +3137,7 @@ int mboxlist_findsub_alt(struct namespace *namespace,
     char *p;
     int prefixlen, len;
     int userlen = userid ? strlen(userid) : 0, domainlen = 0;
-    char domainpat[MAX_MAILBOX_NAME+1]; /* do intra-domain fetches only */
+    char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
 
     if (config_virtdomains && userid && (p = strchr(userid, '@'))) {
@@ -3132,7 +3167,7 @@ int mboxlist_findsub_alt(struct namespace *namespace,
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > userlen)) &&
-	strlen(userid)+5 < MAX_MAILBOX_NAME) {
+	strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
 	if (domainlen)
 	    snprintf(usermboxname, sizeof(usermboxname),
 		     "%s!", userid+userlen+1);
@@ -3308,6 +3343,22 @@ int mboxlist_findsub_alt(struct namespace *namespace,
     return r;
 }
 
+/* returns CYRUSDB_NOTFOUND if the folder doesn't exist, and 0 if it does! */
+int mboxlist_checksub(const char *name, const char *userid)
+{
+    int r;
+    struct db *subs;
+    const char *val;
+    int vallen;
+
+    r = mboxlist_opensubs(userid, &subs);
+
+    if (!r) r = SUBDB->fetch(subs, name, strlen(name), &val, &vallen, NULL);
+
+    mboxlist_closesubs(subs);
+    return r;
+}
+
 /*
  * Change 'user's subscription status for mailbox 'name'.
  * Subscribes if 'add' is nonzero, unsubscribes otherwise.
@@ -3379,4 +3430,37 @@ int mboxlist_delayed_delete_isenabled(void)
     enum enum_value config_delete_mode = config_getenum(IMAPOPT_DELETE_MODE);
 
     return(config_delete_mode == IMAP_ENUM_DELETE_MODE_DELAYED);
+}
+
+/* Callback used by mboxlist_count_inferiors below */
+static int
+mboxlist_count_addmbox(char *name __attribute__((unused)),
+                       int matchlen __attribute__((unused)),
+                       int maycreate __attribute__((unused)),
+                       void *rock)
+{
+    int *count = (int *)rock;
+
+    (*count)++;
+    
+    return 0;
+}
+
+/* Count how many children a mailbox has */
+int
+mboxlist_count_inferiors(char *mailboxname, int isadmin, char *userid,
+                         struct auth_state *authstate)
+{
+    int count = 0;
+    char mailboxname2[MAX_MAILBOX_NAME+1];
+    char *p;
+
+    strcpy(mailboxname2, mailboxname);
+    p = mailboxname2 + strlen(mailboxname2); /* end of mailboxname */
+    strcpy(p, ".*");
+
+    mboxlist_findall(NULL, mailboxname2, isadmin, userid,
+                     authstate, mboxlist_count_addmbox, &count);
+
+    return(count);
 }

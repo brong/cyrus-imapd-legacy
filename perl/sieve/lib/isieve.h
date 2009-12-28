@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: isieve.h,v 1.10.8.1 2009/12/28 21:51:52 murch Exp $
  */
-
-/* $Id: isieve.h,v 1.10 2003/02/13 20:15:53 rjs3 Exp $ */
 
 #ifndef ISIEVE_H_
 #define ISIEVE_H_
@@ -60,6 +60,7 @@ int init_sasl(isieve_t *obj,
 	      sasl_callback_t *callbacks);
 
 char * read_capability(isieve_t *obj);
+int detect_mitm(isieve_t *obj, char *mechlist);
 
 typedef enum {
     STAT_CONT = 0,
@@ -67,7 +68,7 @@ typedef enum {
     STAT_OK = 2
 } imt_stat;
 
-int auth_sasl(char *mechlist, isieve_t *obj, const char **mechusing, char **errstr);
+int auth_sasl(char *mechlist, isieve_t *obj, const char **mechusing, sasl_ssf_t *ssf, char **errstr);
 
 int isieve_logout(isieve_t **obj);
 int isieve_put_file(isieve_t *obj, char *filename, char *destname,

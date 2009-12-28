@@ -1,13 +1,13 @@
 /* message_guid.c -- GUID manipulation
  *
- * Copyright (c) 1998-2007 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: message_guid.c,v 1.6.2.1 2007/11/01 14:39:34 murch Exp $
+ * $Id: message_guid.c,v 1.6.2.2 2009/12/28 21:51:37 murch Exp $
  */
 
 #include <config.h>
@@ -48,6 +49,7 @@
 #include "assert.h"
 #include "global.h"
 #include "message_guid.h"
+#include "util.h"
 
 #ifdef HAVE_SSL
 #include <openssl/sha.h>
@@ -293,11 +295,11 @@ int message_guid_decode(struct message_guid *guid, const char *text)
     guid->status = GUID_NULL;
 
     for (i = 0; i < MESSAGE_GUID_SIZE; i++, v++) {
-	if (!isxdigit((int) *p)) return(0);
+	if (!Uisxdigit(*p)) return(0);
 	msn = (*p > '9') ? tolower((int) *p) - 'a' + 10 : *p - '0';
 	p++;
 
-	if (!isxdigit((int) *p)) return(0);
+	if (!Uisxdigit(*p)) return(0);
 	lsn = (*p > '9') ? tolower((int) *p) - 'a' + 10 : *p - '0';
 	p++;
 	

@@ -1,14 +1,13 @@
-/*
- * imap_proxy.c - IMAP proxy support functions
+/* imap_proxy.c - IMAP proxy support functions
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,18 +16,19 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
- *    "This product includes software developed by Computing Services
  *    acknowledgment:
+ *    "This product includes software developed by Computing Services
  *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
  *
  * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
@@ -39,18 +39,18 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: imap_proxy.c,v 1.2.2.1 2007/11/01 14:39:31 murch Exp $
+ * $Id: imap_proxy.c,v 1.2.2.2 2009/12/28 21:51:29 murch Exp $
  */
 
 #include <config.h>
 
-#include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
 #include <sys/un.h>
 
+#include "assert.h"
 #include "acl.h"
 #include "annotate.h"
 #include "backend.h"
@@ -62,7 +62,9 @@
 #include "mboxname.h"
 #include "mupdate-client.h"
 #include "prot.h"
+#include "util.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
 
 extern unsigned int proxy_cmdcnt;
 extern struct protstream *imapd_in, *imapd_out;
@@ -76,6 +78,53 @@ extern int mlookup(const char *tag, const char *ext_name,
 		   const char *name, int *flags, char **pathp, char **mpathp,
 		   char **partp, char **aclp, struct txn **tid) ;
 
+static char *imap_parsemechlist(const char *str, struct protocol_t *prot)
+{
+    char *ret = xzmalloc(strlen(str)+1);
+    char *tmp;
+    int num = 0;
+    
+    if (strstr(str, "SASL-IR")) {
+	/* server supports initial response in AUTHENTICATE command */
+	prot->sasl_cmd.maxlen = INT_MAX;
+    }
+    
+    while ((tmp = strstr(str, "AUTH="))) {
+	char *end = (tmp += 5);
+	
+	while((*end != ' ') && (*end != '\0')) end++;
+	
+	/* add entry to list */
+	if (num++ > 0) strcat(ret, " ");
+	strlcat(ret, tmp, strlen(ret) + (end - tmp) + 1);
+	
+	/* reset the string */
+	str = end + 1;
+    }
+    
+    return ret;
+}
+
+struct protocol_t imap_protocol =
+{ "imap", "imap",
+  { 1, NULL },
+  { "C01 CAPABILITY", NULL, "C01 ", &imap_parsemechlist,
+    { { " AUTH=", CAPA_AUTH },
+      { " STARTTLS", CAPA_STARTTLS },
+      { " COMPRESS=DEFLATE", CAPA_COMPRESS },
+      { " IDLE", CAPA_IDLE },
+      { " MUPDATE", CAPA_MUPDATE },
+      { " MULTIAPPEND", CAPA_MULTIAPPEND },
+      { " RIGHTS=kxte", CAPA_ACLRIGHTS },
+      { " LIST-EXTENDED", CAPA_LISTEXTENDED },
+      { NULL, 0 } } },
+  { "S01 STARTTLS", "S01 OK", "S01 NO", 0 },
+  { "A01 AUTHENTICATE", 0, 0, "A01 OK", "A01 NO", "+ ", "*", NULL, 0 },
+  { "Z01 COMPRESS DEFLATE", "* ", "Z01 OK" },
+  { "N01 NOOP", "* ", "N01 OK" },
+  { "Q01 LOGOUT", "* ", "Q01 " }
+};
+
 void proxy_gentag(char *tag, size_t len)
 {
     snprintf(tag, len, "PROXY%d", proxy_cmdcnt++);
@@ -83,7 +132,7 @@ void proxy_gentag(char *tag, size_t len)
 
 struct backend *proxy_findinboxserver(void)
 {
-    char inbox[MAX_MAILBOX_NAME+1];
+    char inbox[MAX_MAILBOX_BUFFER];
     int r, mbtype;
     char *server = NULL;
     struct backend *s = NULL;
@@ -94,7 +143,7 @@ struct backend *proxy_findinboxserver(void)
     if(!r) {
 	r = mlookup(NULL, NULL, inbox, &mbtype, NULL, NULL, &server, NULL, NULL);
 	if (!r && (mbtype & MBTYPE_REMOTE)) {
-	    s = proxy_findserver(server, &protocol[PROTOCOL_IMAP],
+	    s = proxy_findserver(server, &imap_protocol,
 				 proxy_userid, &backend_cached,
 				 &backend_current, &backend_inbox, imapd_in);
 	}
@@ -105,8 +154,8 @@ struct backend *proxy_findinboxserver(void)
 
 /* pipe_response() reads from 's->in' until either the tagged response
    starting with 'tag' appears, or if 'tag' is NULL, to the end of the
-   current line.  If 'include_tag' is set, the tagged line is included
-   in the output, otherwise the tagged line is stored in 's->last_result'. 
+   current line.  If 'include_last' is set, the last/tagged line is included
+   in the output, otherwise the last/tagged line is stored in 's->last_result'. 
    In either case, the result of the tagged command is returned.
 
    's->last_result' assumes that tagged responses don't contain literals.
@@ -115,7 +164,7 @@ struct backend *proxy_findinboxserver(void)
    force_notfatal says to not fatal() if we lose connection to backend_current
    even though it is in 95% of the cases, a good idea...
 */
-static int pipe_response(struct backend *s, const char *tag, int include_tag,
+static int pipe_response(struct backend *s, const char *tag, int include_last,
 			 int force_notfatal)
 {
     char buf[2048];
@@ -179,7 +228,7 @@ static int pipe_response(struct backend *s, const char *tag, int include_tag,
 		last = 1;
 	    }
 	
-	    if (last && !include_tag) {
+	    if (last && !include_last) {
 		/* Store the tagged line */
 		if (sl > s->last_result.alloc - s->last_result.len) {
 		    s->last_result.alloc =
@@ -202,14 +251,14 @@ static int pipe_response(struct backend *s, const char *tag, int include_tag,
 
 	    /* write out this part, but we have to keep reading until we
 	       hit the end of the line */
-	    if (!last || include_tag) prot_write(imapd_out, buf, sl);
+	    if (!last || include_last) prot_write(imapd_out, buf, sl);
 	    cont = 1;
 	    continue;
 	} else {		/* we got the end of the line */
 	    int i;
 	    int litlen = 0, islit = 0;
 
-	    if (!last || include_tag) prot_write(imapd_out, buf, sl);
+	    if (!last || include_last) prot_write(imapd_out, buf, sl);
 
 	    /* now we have to see if this line ends with a literal */
 	    if (sl < 64) {
@@ -225,7 +274,7 @@ static int pipe_response(struct backend *s, const char *tag, int include_tag,
 		eol[i-1] == '\n' && eol[i-2] == '\r' && eol[i-3] == '}') {
 		/* possible literal */
 		i -= 4;
-		while (i > 0 && eol[i] != '{' && isdigit((int) eol[i])) {
+		while (i > 0 && eol[i] != '{' && Uisdigit(eol[i])) {
 		    i--;
 		}
 		if (eol[i] == '{') {
@@ -245,7 +294,7 @@ static int pipe_response(struct backend *s, const char *tag, int include_tag,
 			/* EOF or other error */
 			return -1;
 		    }
-		    if (!last || include_tag) prot_write(imapd_out, buf, j);
+		    if (!last || include_last) prot_write(imapd_out, buf, j);
 		    litlen -= j;
 		}
 
@@ -271,7 +320,8 @@ int pipe_until_tag(struct backend *s, const char *tag, int force_notfatal)
     return pipe_response(s, tag, 0, force_notfatal);
 }
 
-int pipe_including_tag(struct backend *s, const char *tag, int force_notfatal) {
+int pipe_including_tag(struct backend *s, const char *tag, int force_notfatal)
+{
     int r;
 
     r = pipe_response(s, tag, 1, force_notfatal);
@@ -286,7 +336,7 @@ int pipe_including_tag(struct backend *s, const char *tag, int force_notfatal) {
 
 static int pipe_to_end_of_response(struct backend *s, int force_notfatal)
 {
-    return pipe_response(s, NULL, 0, force_notfatal);
+    return pipe_response(s, NULL, 1, force_notfatal);
 }
 
 /* copy our current input to 's' until we hit a true EOL.
@@ -345,7 +395,7 @@ int pipe_command(struct backend *s, int optimistic_literal)
 		    nonsynch = 1;
 		    i--;
 		}
-		while (i > 0 && eol[i] != '{' && isdigit((int) eol[i])) {
+		while (i > 0 && eol[i] != '{' && Uisdigit(eol[i])) {
 		    i--;
 		}
 		if (eol[i] == '{') {
@@ -421,7 +471,7 @@ int pipe_lsub(struct backend *s, const char *tag,
     int c;
     int r = PROXY_OK;
     int exist_r;
-    char mailboxname[MAX_MAILBOX_PATH + 1];
+    char mailboxname[MAX_MAILBOX_BUFFER];
     static struct buf tagb, cmd, sep, name;
     int cur_flags_size = 64;
     char *flags = xmalloc(cur_flags_size);
@@ -739,12 +789,19 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	c = prot_getc(backend_current->in);
 	if (c != ' ') { /* protocol error */ c = EOF; break; }
 	    
+	/* check for OK/NO/BAD/BYE response */
+	if (!isdigit(c = prot_getc(backend_current->in))) {
+	    prot_printf(imapd_out, "* %c", c);
+	    pipe_to_end_of_response(backend_current, 0);
+	    continue;
+	}
+
 	/* read seqno */
 	seqno = 0;
-	while (isdigit(c = prot_getc(backend_current->in))) {
+	do {
 	    seqno *= 10;
 	    seqno += c - '0';
-	}
+	} while (isdigit(c = prot_getc(backend_current->in)));
 	if (seqno == 0 || c != ' ') {
 	    /* we suck and won't handle this case */
 	    c = EOF; break;
@@ -864,7 +921,8 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
     }
 
     /* start the append */
-    prot_printf(s->out, "%s Append {%d+}\r\n%s", tag, strlen(name), name);
+    prot_printf(s->out, "%s Append {" SIZE_T_FMT "+}\r\n%s",
+		tag, strlen(name), name);
     prot_printf(backend_current->out, "%s %s %s (Rfc822.peek)\r\n",
 		mytag, usinguid ? "Uid Fetch" : "Fetch", sequence);
     for (/* each FETCH response */;;) {
@@ -875,13 +933,20 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	if (c != '*') break;
 	c = prot_getc(backend_current->in);
 	if (c != ' ') { /* protocol error */ c = EOF; break; }
-	    
+
+	/* check for OK/NO/BAD/BYE response */
+	if (!isdigit(c = prot_getc(backend_current->in))) {
+	    prot_printf(imapd_out, "* %c", c);
+	    pipe_to_end_of_response(backend_current, 0);
+	    continue;
+	}
+
 	/* read seqno */
 	seqno = 0;
-	while (isdigit(c = prot_getc(backend_current->in))) {
+	do {
 	    seqno *= 10;
 	    seqno += c - '0';
-	}
+	} while (isdigit(c = prot_getc(backend_current->in)));
 	if (seqno == 0 || c != ' ') {
 	    /* we suck and won't handle this case */
 	    c = EOF; break;
@@ -938,7 +1003,11 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	    case 'r': case 'R':
 		c = chomp(backend_current->in, "fc822");
 		if (c == ' ') c = prot_getc(backend_current->in);
-		if (c != '{') c = EOF;
+		if (c != '{') {
+		    /* NIL? */
+		    eatline(backend_current->in, c);
+		    c = EOF;
+		}
 		else {
 		    sz = 0;
 		    while (isdigit(c = prot_getc(backend_current->in))) {
@@ -1027,7 +1096,7 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	}
     } else {
 	/* abort the append */
-	prot_printf(s->out, " {0}\r\n");
+	prot_printf(s->out, " {0+}\r\n\r\n");
 	pipe_until_tag(backend_current, mytag, 0);
 	pipe_until_tag(s, tag, 0);
 	    
@@ -1058,7 +1127,7 @@ int proxy_catenate_url(struct backend *s, struct imapurl *url, FILE *f,
 
     /* select the mailbox (read-only) */
     proxy_gentag(mytag, sizeof(mytag));
-    prot_printf(s->out, "%s Examine {%d+}\r\n%s\r\n",
+    prot_printf(s->out, "%s Examine {" SIZE_T_FMT "+}\r\n%s\r\n",
 		mytag, strlen(url->mailbox), url->mailbox);
     for (/* each examine response */;;) {
 	/* read a line */
@@ -1263,7 +1332,7 @@ int annotate_fetch_proxy(const char *server, const char *mbox_pat,
     
     assert(server && mbox_pat && entry_pat && attribute_pat);
     
-    be = proxy_findserver(server, &protocol[PROTOCOL_IMAP],
+    be = proxy_findserver(server, &imap_protocol,
 			  proxy_userid, &backend_cached,
 			  &backend_current, &backend_inbox, imapd_in);
     if (!be) return IMAP_SERVER_UNAVAILABLE;
@@ -1299,7 +1368,7 @@ int annotate_store_proxy(const char *server, const char *mbox_pat,
     
     assert(server && mbox_pat && entryatts);
     
-    be = proxy_findserver(server, &protocol[PROTOCOL_IMAP],
+    be = proxy_findserver(server, &imap_protocol,
 			  proxy_userid, &backend_cached,
 			  &backend_current, &backend_inbox, imapd_in);
     if (!be) return IMAP_SERVER_UNAVAILABLE;
@@ -1325,4 +1394,101 @@ int annotate_store_proxy(const char *server, const char *mbox_pat,
     pipe_until_tag(be, mytag, 0);
 
     return 0;
+}
+
+
+char *find_free_server()
+{
+    const char *servers = config_getstring(IMAPOPT_SERVERLIST);
+    unsigned long max_avail = 0;
+    char *server = NULL;
+
+    if (servers) {
+	char *tmpbuf, *cur_server, *next_server;
+	char mytag[128];
+	struct backend *be;
+
+	/* make a working copy of the list */
+	cur_server = tmpbuf = xstrdup(servers);
+
+	while (cur_server) {
+	    /* eat any leading whitespace */
+	    while (Uisspace(*cur_server)) cur_server++;
+
+	    if (!*cur_server) break;
+
+	    /* find end of server */
+	    if ((next_server = strchr(cur_server, ' ')) ||
+		(next_server = strchr(cur_server, '\t')))
+		*next_server++ = '\0';
+
+	    syslog(LOG_DEBUG, "checking free space on server '%s'", cur_server);
+
+	    /* connect to server */
+	    be = proxy_findserver(cur_server, &imap_protocol,
+				  proxy_userid, &backend_cached,
+				  &backend_current, &backend_inbox, imapd_in);
+	    if (be) {
+		unsigned long avail = 0;
+		int c;
+
+		/* fetch annotation from remote */
+		proxy_gentag(mytag, sizeof(mytag));
+		prot_printf(be->out,
+			    "%s GETANNOTATION \"\" "
+			    "\"/vendor/cmu/cyrus-imapd/freespace\" "
+			    "\"value.shared\"\r\n", mytag);
+		prot_flush(be->out);
+
+		for (/* each annotation response */;;) {
+		    /* read a line */
+		    c = prot_getc(be->in);
+		    if (c != '*') break;
+		    c = prot_getc(be->in);
+		    if (c != ' ') { /* protocol error */ c = EOF; break; }
+
+		    c = chomp(be->in,
+			      "ANNOTATION \"\" "
+			      "\"/vendor/cmu/cyrus-imapd/freespace\" "
+			      "(\"value.shared\" \"");
+		    if (c == EOF) {
+			/* we don't care about this response */
+			eatline(be->in, c);
+			continue;
+		    }
+
+		    /* read uidvalidity */
+		    while (isdigit(c = prot_getc(be->in))) {
+			avail *= 10;
+			avail += c - '0';
+		    }
+		    if (c != '\"') { c = EOF; break; }
+		    eatline(be->in, c); /* we don't care about the rest of the line */
+		}
+		if (c != EOF) {
+		    prot_ungetc(c, be->in);
+
+		    /* we should be looking at the tag now */
+		    eatline(be->in, c);
+		}
+		if (c == EOF) {
+		    /* uh oh, we're not happy */
+		    fatal("Lost connection to backend", EC_UNAVAILABLE);
+		}
+		if (avail > max_avail) {
+		    server = cur_server;
+		    max_avail = avail;
+		}
+	    }
+
+	    /* move to next server */
+	    cur_server = next_server;
+	}
+
+	if (server) server = xstrdup(server);
+
+	free(tmpbuf);
+    }
+
+    return server;
 }

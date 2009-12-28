@@ -1,7 +1,7 @@
 #ifndef HAVE_MASTER_H
 #define HAVE_MASTER_H
 
-/* $Id: master.h,v 1.14.2.1 2007/11/01 14:39:37 murch Exp $ */
+/* $Id: master.h,v 1.14.2.2 2009/12/28 21:51:50 murch Exp $ */
 
 #include <config.h>
 #include <sys/resource.h> /* for rlim_t */

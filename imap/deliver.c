@@ -1,14 +1,14 @@
 /* deliver.c -- deliver shell - just calls lmtpd
  * Tim Martin
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +17,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,9 +40,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: deliver.c,v 1.175.2.2 2009/12/28 21:51:29 murch Exp $
  */
-
-/* $Id: deliver.c,v 1.175.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -88,6 +88,22 @@ static int logdebug = 0;
 static struct protstream *deliver_out, *deliver_in;
 
 static const char *sockaddr;
+
+static struct protocol_t lmtp_protocol =
+{ "lmtp", "lmtp",
+  { 0, "220 " },
+  { "LHLO", "deliver", "250 ", NULL,
+    { { "AUTH ", CAPA_AUTH },
+      { "STARTTLS", CAPA_STARTTLS },
+      { "PIPELINING", CAPA_PIPELINING },
+      { "IGNOREQUOTA", CAPA_IGNOREQUOTA },
+      { NULL, 0 } } },
+  { "STARTTLS", "220", "454", 0 },
+  { "AUTH", 512, 0, "235", "5", "334 ", "*", NULL, 0 },
+  { NULL, NULL, NULL },
+  { "NOOP", NULL, "250" },
+  { "QUIT", NULL, "221" }
+};
 
 /* unused for deliver.c, but needed to make lmtpengine.c happy */
 int deliver_logfd = -1;
@@ -295,7 +311,7 @@ static struct backend *init_net(const char *unixpath)
   conn->out = prot_new(lmtpdsock, 1);
   conn->sock = lmtpdsock;
   prot_setflushonread(conn->in, conn->out);
-  conn->prot = &protocol[PROTOCOL_LMTP];
+  conn->prot = &lmtp_protocol;
 
   return conn;
 }
@@ -315,7 +331,7 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
     }
 
     /* connect */
-    conn = backend_connect(NULL, sockaddr, &protocol[PROTOCOL_LMTP],
+    conn = backend_connect(NULL, sockaddr, &lmtp_protocol,
 			   "", NULL, NULL);
     if (!conn) {
 	just_exit("couldn't connect to lmtpd");
@@ -347,7 +363,8 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
 
 		/* find the length of the userid minus the domain */
 		ulen = strcspn(users[j], "@");
-		sprintf(txn->rcpt[j].addr, "%.*s+%s", ulen, users[j], mailbox);
+		sprintf(txn->rcpt[j].addr, "%.*s+%s",
+			(int) ulen, users[j], mailbox);
 
 		/* add the domain if we have one */
 		if (ulen < strlen(users[j]))

@@ -1,14 +1,13 @@
 /* seen_db.c -- implementation of seen database using per-user berkeley db
- * $Id: seen_db.c,v 1.49.2.2 2007/11/28 15:18:12 murch Exp $
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,12 +39,12 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: seen_db.c,v 1.49.2.3 2009/12/28 21:51:39 murch Exp $
  */
 
 #include <config.h>
 
 #include <stdlib.h>
-#include <assert.h>
 #include <syslog.h>
 #include <string.h>
 #include <ctype.h>
@@ -62,12 +62,14 @@
 #include "bsearch.h"
 #include "util.h"
 
+#include "assert.h"
 #include "global.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 #include "mailbox.h"
 #include "imap_err.h"
+#include "statuscache.h"
 #include "seen.h"
 
 #define FNAME_SEENSUFFIX ".seen" /* per user seen state extension */
@@ -80,6 +82,7 @@ enum {
 
 struct seen {
     char *user;			/* what user is this for? */
+    const char *mboxname;	/* what mailbox name? */
     const char *uniqueid;	/* what mailbox? */
     const char *path;		/* where is this mailbox? */
     struct db *db;
@@ -147,6 +150,7 @@ int seen_open(struct mailbox *mailbox,
     /* if this is the db we've already opened, return it */
     if (seendb && !strcmp(seendb->user, user)) {
 	abortcurrent(seendb);
+	seendb->mboxname = mailbox->name;
 	seendb->uniqueid = mailbox->uniqueid;
 	seendb->path = mailbox->path;
 	*seendbptr = seendb;
@@ -185,6 +189,7 @@ int seen_open(struct mailbox *mailbox,
     free(fname);
 
     seendb->tid = NULL;
+    seendb->mboxname = mailbox->name;
     seendb->uniqueid = mailbox->uniqueid;
     seendb->path = mailbox->path;
     seendb->user = xstrdup(user);
@@ -248,10 +253,10 @@ static int seen_readold(struct seen *seendb,
     *lastreadptr = strtol(buf, (char **) &p, 10); buf = p;
     *lastuidptr = strtol(buf, (char **) &p, 10); buf = p;
     *lastchangeptr = strtol(buf, (char **) &p, 10); buf = p;
-    while (isspace((int) *p)) p++;
+    while (Uisspace(*p)) p++;
     buf = p;
     /* Scan for end of uids */
-    while (p < base + offset + linelen && !isspace((int) *p)) p++;
+    while (p < base + offset + linelen && !Uisspace(*p)) p++;
 
     *seenuidsptr = xmalloc(p - buf + 1);
     strlcpy(*seenuidsptr, buf, p - buf + 1);
@@ -316,7 +321,7 @@ static int seen_readit(struct seen *seendb,
     *lastreadptr = strtol(data, &p, 10); data = p;
     *lastuidptr = strtol(data, &p, 10); data = p;
     *lastchangeptr = strtol(data, &p, 10); data = p;
-    while (p < dend && isspace((int) *p)) p++; data = p;
+    while (p < dend && Uisspace(*p)) p++; data = p;
     uidlen = dend - data;
     *seenuidsptr = xmalloc(uidlen + 1);
     memcpy(*seenuidsptr, data, uidlen);
@@ -386,6 +391,9 @@ int seen_write(struct seen *seendb, time_t lastread, unsigned int lastuid,
 	break;
     }
 
+    /* Something changed, kill our status cache for this mailbox */
+    statuscache_invalidate(seendb->mboxname, seendb->user);
+
     free(data);
     return r;
 }
@@ -408,6 +416,7 @@ int seen_close(struct seen *seendb)
 	seendb->tid = NULL;
     }
 
+    seendb->mboxname = NULL;
     seendb->uniqueid = NULL;
     seendb->path = NULL;
 
@@ -479,7 +488,7 @@ int seen_delete_user(const char *user)
     /* erp! */
     r = unlink(fname);
     if (r < 0 && errno == ENOENT) {
-	syslog(LOG_DEBUG, "can not unlink %s: %m", fname);
+	syslog(LOG_DEBUG, "cannot unlink %s: %m", fname);
 	/* but maybe the user just never read anything? */
 	r = 0;
     }

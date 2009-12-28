@@ -1,13 +1,13 @@
 /* annotate.c -- Annotation manipulation routines
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,9 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- */
-/*
- * $Id: annotate.c,v 1.34.2.1 2007/11/01 14:39:31 murch Exp $
+ * $Id: annotate.c,v 1.34.2.2 2009/12/28 21:51:28 murch Exp $
  */
 
 #include <config.h>
@@ -91,6 +90,8 @@ int (*proxy_fetch_func)(const char *server, const char *mbox_pat,
 			struct strlist *attribute_pat) = NULL;
 int (*proxy_store_func)(const char *server, const char *mbox_pat,
 			struct entryattlist *entryatts) = NULL;
+
+void init_annotation_definitions();
 
 /* String List Management */
 /*
@@ -238,6 +239,8 @@ void annotatemore_init(int myflags,
     if (store_func) {
 	proxy_store_func = store_func;
     }
+    
+    init_annotation_definitions();
 }
 
 void annotatemore_open(char *fname)
@@ -423,6 +426,19 @@ struct mailbox_annotation_rock
     char *server, *partition, *acl, *path, *mpath;
 };
 
+const struct annotate_info_t annotate_mailbox_flags[] =
+{
+    { "/vendor/cmu/cyrus-imapd/pop3newuidl",
+      OPT_POP3_NEW_UIDL },
+    { "/vendor/cmu/cyrus-imapd/duplicatedeliver",
+      OPT_IMAP_DUPDELIVER },
+    { "/vendor/cmu/cyrus-imapd/sharedseen",
+      OPT_IMAP_SHAREDSEEN },
+    { "/vendor/cmu/cyrus-imapd/condstore",
+      OPT_IMAP_CONDSTORE },
+    { NULL, 0 }
+};
+
 /* To free values in the mailbox_annotation_rock as needed */
 static void cleanup_mbrock(struct mailbox_annotation_rock *mbrock __attribute__((unused))) 
 {
@@ -507,9 +523,9 @@ static void output_entryatt(const char *mboxname, const char *entry,
 			    struct fetchdata *fdata)
 {
     static struct attvaluelist *attvalues = NULL;
-    static char lastname[MAX_MAILBOX_NAME+1];
-    static char lastentry[MAX_MAILBOX_NAME+1];
-    char key[MAX_MAILBOX_PATH+1]; /* XXX MAX_MAILBOX_NAME + entry + userid */
+    static char lastname[MAX_MAILBOX_BUFFER];
+    static char lastentry[MAX_MAILBOX_BUFFER];
+    char key[MAX_MAILBOX_BUFFER]; /* XXX MAX_MAILBOX_NAME + entry + userid */
     char buf[100];
 
     /* We have to reset before each GETANNOTATION command.
@@ -564,7 +580,7 @@ static void output_entryatt(const char *mboxname, const char *entry,
 	/* Base the return of the size attribute on whether or not there is
 	 * an attribute, not whether size is nonzero. */
 	if ((fdata->attribs & ATTRIB_SIZE_SHARED) && attrib->value) {
-	    snprintf(buf, sizeof(buf), "%u", attrib->size);
+	    snprintf(buf, sizeof(buf), SIZE_T_FMT, attrib->size);
 	    appendattvalue(&attvalues, "size.shared", buf);
 	}
 
@@ -590,7 +606,7 @@ static void output_entryatt(const char *mboxname, const char *entry,
 	/* Base the return of the size attribute on whether or not there is
 	 * an attribute, not whether size is nonzero. */
 	if ((fdata->attribs & ATTRIB_SIZE_PRIV) && attrib->value) {
-	    snprintf(buf, sizeof(buf), "%u", attrib->size);
+	    snprintf(buf, sizeof(buf), SIZE_T_FMT, attrib->size);
 	    appendattvalue(&attvalues, "size.priv", buf);
 	}
 
@@ -612,7 +628,7 @@ static void annotation_get_fromfile(const char *int_mboxname __attribute__((unus
 				    void *rock)
 {
     const char *filename = (const char *) rock;
-    char path[1024], buf[1024], *p;
+    char path[MAX_MAILBOX_PATH+1], buf[MAX_MAILBOX_PATH+1], *p;
     FILE *f;
     struct stat statbuf;
     struct annotation_data attrib;
@@ -633,6 +649,30 @@ static void annotation_get_fromfile(const char *int_mboxname __attribute__((unus
 	output_entryatt(ext_mboxname, entry, "", &attrib, fdata);
     }
     if (f) fclose(f);
+}
+
+static void annotation_get_freespace(const char *int_mboxname __attribute__((unused)),
+				     const char *ext_mboxname,
+				     const char *entry,
+				     struct fetchdata *fdata,
+				     struct mailbox_annotation_rock *mbrock __attribute__((unused)),
+				     void *rock __attribute__((unused)))
+{
+    unsigned long tavail;
+    char value[21];
+    struct annotation_data attrib;
+
+    (void) find_free_partition(&tavail);
+
+    if (snprintf(value, sizeof(value), "%lu", tavail) == -1) return;
+
+    memset(&attrib, 0, sizeof(attrib));
+
+    attrib.value = value;
+    attrib.size = strlen(value);
+    attrib.contenttype = "text/plain";
+
+    output_entryatt(ext_mboxname, entry, "", &attrib, fdata);
 }
 
 static void annotation_get_server(const char *int_mboxname,
@@ -879,7 +919,7 @@ static void annotation_get_mailboxopt(const char *int_mboxname,
 				      void *rock __attribute__((unused)))
 { 
     struct mailbox mailbox;
-    int flag, r = 0;
+    int flag = 0, r = 0, i;
     char value[40];
     struct annotation_data attrib;
   
@@ -892,16 +932,14 @@ static void annotation_get_mailboxopt(const char *int_mboxname,
     /* Make sure its a local mailbox */
     if (mbrock->server) return;
 
-    /* Check entry */
-    if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/condstore")) {
-	flag = OPT_IMAP_CONDSTORE;
-    } else if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/sharedseen")) {
-	flag = OPT_IMAP_SHAREDSEEN;
-    } else if (!strcmp(entry, "/vendor/cmu/cyrus-imapd/duplicatedeliver")) {
-	flag = OPT_IMAP_DUPDELIVER;
-    } else {
-	return;
+    /* check that this is a mailboxopt annotation */
+    for (i = 0; annotate_mailbox_flags[i].name; i++) {
+	if (!strcmp(entry, annotate_mailbox_flags[i].name)) {
+	    flag = annotate_mailbox_flags[i].flag;
+	    break;
+	}
     }
+    if (!flag) return;
   
     /* Check ACL */
     if(!fdata->isadmin &&
@@ -1029,6 +1067,8 @@ const struct annotate_f_entry mailbox_ro_entries[] =
       annotation_get_lastupdate, NULL },
     { "/vendor/cmu/cyrus-imapd/lastpop", BACKEND_ONLY,
       annotation_get_lastpop, NULL },
+    { "/vendor/cmu/cyrus-imapd/pop3newuidl", BACKEND_ONLY,
+      annotation_get_mailboxopt, NULL },
     { "/vendor/cmu/cyrus-imapd/condstore", BACKEND_ONLY,
       annotation_get_mailboxopt, NULL },
     { "/vendor/cmu/cyrus-imapd/sharedseen", BACKEND_ONLY,
@@ -1046,6 +1086,8 @@ const struct annotate_f_entry server_legacy_entries[] =
     { "/motd", PROXY_AND_BACKEND, annotation_get_fromfile, "motd" },
     { "/vendor/cmu/cyrus-imapd/shutdown", PROXY_AND_BACKEND,
       annotation_get_fromfile, "shutdown" },
+    { "/vendor/cmu/cyrus-imapd/freespace", BACKEND_ONLY,
+      annotation_get_freespace, NULL },
     { NULL, ANNOTATION_PROXY_T_INVALID, NULL, NULL }
 };
 
@@ -1081,10 +1123,10 @@ static int fetch_cb(char *name, int matchlen,
 {
     struct fetchdata *fdata = (struct fetchdata *) rock;
     struct annotate_f_entry_list *entries_ptr;
-    static char lastname[MAX_MAILBOX_PATH+1];
+    static char lastname[MAX_MAILBOX_BUFFER];
     static int sawuser = 0;
     int c;
-    char int_mboxname[MAX_MAILBOX_PATH+1], ext_mboxname[MAX_MAILBOX_PATH+1];
+    char int_mboxname[MAX_MAILBOX_BUFFER], ext_mboxname[MAX_MAILBOX_BUFFER];
     struct mailbox_annotation_rock mbrock;
 
     /* We have to reset the sawuser flag before each fetch command.
@@ -1285,11 +1327,14 @@ int annotatemore_fetch(char *mailbox,
 		 entries_ptr;
 		 entries_ptr = entries_ptr->next) {
 	
+		if (!(entries_ptr->entry->proxytype == BACKEND_ONLY &&
+		      proxy_fetch_func && !config_getstring(IMAPOPT_PROXYSERVERS))) {
 		entries_ptr->entry->get("", "", entries_ptr->entry->name,
 					&fdata, NULL,
 					(entries_ptr->entry->rock ?
 					 entries_ptr->entry->rock :
 					 (void*) entries_ptr->entrypat));
+		}
 	    }
 
 	    free_hash_table(&fdata.entry_table, NULL);
@@ -1299,7 +1344,7 @@ int annotatemore_fetch(char *mailbox,
 	/* mailbox annotation(s) */
 
 	if (fdata.entry_list || proxy_fetch_func) {
-	    char mboxpat[MAX_MAILBOX_NAME+1];
+	    char mboxpat[MAX_MAILBOX_BUFFER];
 
 	    /* Reset state in fetch_cb */
 	    fetch_cb(NULL, 0, 0, 0);
@@ -1538,7 +1583,7 @@ static int store_cb(char *name, int matchlen,
     struct annotate_st_entry_list *entries_ptr;
     static char lastname[MAX_MAILBOX_PATH+1];
     static int sawuser = 0;
-    char int_mboxname[MAX_MAILBOX_PATH+1];
+    char int_mboxname[MAX_MAILBOX_BUFFER];
     struct mailbox_annotation_rock mbrock;
     int r = 0;
 
@@ -1622,7 +1667,7 @@ static int annotation_set_tofile(const char *int_mboxname __attribute__((unused)
 				 void *rock)
 {
     const char *filename = (const char *) rock;
-    char path[1024];
+    char path[MAX_MAILBOX_PATH+1];
     FILE *f;
 
     /* Check ACL */
@@ -1718,20 +1763,16 @@ static int annotation_set_mailboxopt(const char *int_mboxname,
 				     void *rock __attribute__((unused)))
 {
     struct mailbox mailbox;
-    int flag, r = 0;
+    int flag = 0, r = 0, i;
 
     /* Check entry */
-    if (!strcmp(entry->entry->name, "/vendor/cmu/cyrus-imapd/condstore")) {
-	flag = OPT_IMAP_CONDSTORE;
-    } else if (!strcmp(entry->entry->name,
-		       "/vendor/cmu/cyrus-imapd/sharedseen")) {
-	flag = OPT_IMAP_SHAREDSEEN;
-    } else if (!strcmp(entry->entry->name,
-		       "/vendor/cmu/cyrus-imapd/duplicatedeliver")) {
-	flag = OPT_IMAP_DUPDELIVER;
-    } else {
-	return IMAP_PERMISSION_DENIED;
+    for (i = 0; annotate_mailbox_flags[i].name; i++) {
+	if (!strcmp(entry->entry->name, annotate_mailbox_flags[i].name)) {
+	    flag = annotate_mailbox_flags[i].flag;
+	    break;
+	}
     }
+    if (!flag) return IMAP_PERMISSION_DENIED;
   
     /* Check ACL */
     if(!sdata->isadmin &&
@@ -1821,6 +1862,9 @@ const struct annotate_st_entry mailbox_rw_entries[] =
     { "/vendor/cmu/cyrus-imapd/sieve", ATTRIB_TYPE_STRING, BACKEND_ONLY,
       ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
       ACL_ADMIN, annotation_set_todb, NULL },
+    { "/vendor/cmu/cyrus-imapd/pop3newuidl", ATTRIB_TYPE_BOOLEAN, BACKEND_ONLY,
+      ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
+      ACL_ADMIN, annotation_set_mailboxopt, NULL },
     { "/vendor/cmu/cyrus-imapd/condstore", ATTRIB_TYPE_BOOLEAN, BACKEND_ONLY,
       ATTRIB_VALUE_SHARED | ATTRIB_CONTENTTYPE_SHARED,
       ACL_ADMIN, annotation_set_mailboxopt, NULL },
@@ -1833,6 +1877,9 @@ const struct annotate_st_entry mailbox_rw_entries[] =
     { NULL, 0, ANNOTATION_PROXY_T_INVALID, 0, 0, NULL, NULL }
 };
 
+struct annotate_st_entry_list *server_entries_list = NULL;
+struct annotate_st_entry_list *mailbox_rw_entries_list = NULL;
+
 int annotatemore_store(char *mailbox,
 		       struct entryattlist *l,
 		       struct namespace *namespace,
@@ -1844,7 +1891,7 @@ int annotatemore_store(char *mailbox,
     struct entryattlist *e = l;
     struct attvaluelist *av;
     struct storedata sdata;
-    const struct annotate_st_entry *entries;
+    const struct annotate_st_entry_list *entries, *currententry;
     time_t now = time(0);
 
     memset(&sdata, 0, sizeof(struct storedata));
@@ -1855,45 +1902,45 @@ int annotatemore_store(char *mailbox,
 
     if (!mailbox[0]) {
 	/* server annotations */
-	entries = server_entries;
+	entries = server_entries_list;
     }
     else {
 	/* mailbox annotation(s) */
-	entries = mailbox_rw_entries;
+	entries = mailbox_rw_entries_list;
     }
 
     /* Build a list of callbacks for storing the annotations */
     while (e) {
-	int entrycount, attribs;
+	int attribs;
 	struct annotate_st_entry_list *nentry = NULL;
 
 	/* See if we support this entry */
-	for (entrycount = 0;
-	     entries[entrycount].name;
-	     entrycount++) {
-	    if (!strcmp(e->entry, entries[entrycount].name)) {
+	for (currententry = entries;
+	     currententry;
+	     currententry = currententry->next) {
+	    if (!strcmp(e->entry, currententry->entry->name)) {
 		break;
 	    }
 	}
-	if (!entries[entrycount].name) {
+	if (!currententry) {
 	    /* unknown annotation */
 	    return IMAP_PERMISSION_DENIED;
 	}
 
 	/* Add this entry to our list only if it
 	   applies to our particular server type */
-	if ((entries[entrycount].proxytype != PROXY_ONLY)
+	if ((currententry->entry->proxytype != PROXY_ONLY)
 	    || proxy_store_func) {
 	    nentry = xzmalloc(sizeof(struct annotate_st_entry_list));
 	    nentry->next = sdata.entry_list;
-	    nentry->entry = &(entries[entrycount]);
+	    nentry->entry = currententry->entry;
 	    nentry->shared.modifiedsince = now;
 	    nentry->priv.modifiedsince = now;
 	    sdata.entry_list = nentry;
 	}
 
 	/* See if we are allowed to set the given attributes. */
-	attribs = entries[entrycount].attribs;
+	attribs = currententry->entry->attribs;
 	av = e->attvalues;
 	while (av) {
 	    const char *value;
@@ -1903,7 +1950,7 @@ int annotatemore_store(char *mailbox,
 		    goto cleanup;
 		}
 		value = annotate_canon_value(av->value,
-					     entries[entrycount].type);
+					     currententry->entry->type);
 		if (!value) {
 		    r = IMAP_ANNOTATION_BADVALUE;
 		    goto cleanup;
@@ -1929,7 +1976,7 @@ int annotatemore_store(char *mailbox,
 		    goto cleanup;
 		}
 		value = annotate_canon_value(av->value,
-					     entries[entrycount].type);
+					     currententry->entry->type);
 		if (!value) {
 		    r = IMAP_ANNOTATION_BADVALUE;
 		    goto cleanup;
@@ -1983,7 +2030,7 @@ int annotatemore_store(char *mailbox,
     else {
 	/* mailbox annotations */
 
-	char mboxpat[MAX_MAILBOX_NAME+1];
+	char mboxpat[MAX_MAILBOX_BUFFER];
 
 	/* Reset state in store_cb */
 	store_cb(NULL, 0, 0, 0);
@@ -2110,4 +2157,231 @@ int annotatemore_delete(const char *mboxname)
     /* we treat a deleteion as a rename without a new name */
 
     return annotatemore_rename(mboxname, NULL, NULL, NULL);
+}
+
+/*************************  Annotation Initialization  ************************/
+
+/* The following code is courtesy of Thomas Viehmann <tv@beamnet.de> */
+
+enum {
+  ANNOTATION_SCOPE_SERVER = 1,
+  ANNOTATION_SCOPE_MAILBOX = 2
+};
+
+const struct annotate_attrib annotation_scope_names[] =
+{
+    { "server", ANNOTATION_SCOPE_SERVER },
+    { "mailbox", ANNOTATION_SCOPE_MAILBOX },
+    { NULL, 0 }
+};
+
+const struct annotate_attrib annotation_proxy_type_names[] =
+{
+    { "proxy", PROXY_ONLY },
+    { "backend", BACKEND_ONLY },
+    { "proxy_and_backend", PROXY_AND_BACKEND },
+    { NULL, 0 }
+};
+
+const struct annotate_attrib attribute_type_names[] = 
+{
+    { "content-type", ATTRIB_TYPE_CONTENTTYPE },
+    { "string", ATTRIB_TYPE_STRING },
+    { "boolean", ATTRIB_TYPE_BOOLEAN },
+    { "uint", ATTRIB_TYPE_UINT },
+    { "int", ATTRIB_TYPE_INT },
+    { NULL, 0 }
+};
+
+#define ANNOT_DEF_MAXLINELEN 1024
+
+/* Search in table for the value given by name and namelen
+ * (name is null-terminated, but possibly more than just the key).
+ * errmsg is used to hint the user where we failed
+ */
+int table_lookup(const struct annotate_attrib *table,
+		 char *name, size_t namelen, char *errmsg) 
+{
+    char errbuf[ANNOT_DEF_MAXLINELEN*2];
+    int entry;
+
+    for (entry = 0; table[entry].name &&
+	     (strncasecmp(table[entry].name, name, namelen)
+	      || table[entry].name[namelen] != '\0'); entry++);
+
+    if (! table[entry].name) {
+	sprintf(errbuf, "invalid %s at '%s'", errmsg, name);
+	fatal(errbuf, EC_CONFIG);
+    }
+    return table[entry].entry;
+}
+
+/* Advance beyond the next ',', skipping whitespace,
+ * fail if next non-space is no comma.
+ */
+char *consume_comma(char* p)
+{
+    char errbuf[ANNOT_DEF_MAXLINELEN*2];
+
+    for (; *p && isspace(*p); p++);  
+    if (*p != ',') {
+	sprintf(errbuf,
+		"',' expected, '%s' found parsing annotation definition", p);
+	fatal(errbuf, EC_CONFIG);
+    }
+    p++;
+    for (; *p && isspace(*p); p++);  
+
+    return p;
+}
+
+/* Parses strings of the form value1 [ value2 [ ... ]].
+ * value1 is mapped via table to ints and the result or'ed.
+ * Whitespace is allowed between value names and punctuation.
+ * The field must end in '\0' or ','.
+ * s is advanced to '\0' or ','.
+ * On error errmsg is used to identify item to be parsed.
+ */
+int parse_table_lookup_bitmask(const struct annotate_attrib *table,
+                               char** s, char* errmsg) 
+{
+    int result = 0;
+    char *p, *p2;
+
+    p = *s;
+    do {
+	p2 = p;
+	for (; *p && (isalnum(*p) || *p=='.' || *p=='-' || *p=='_' || *p=='/');
+	     p++);
+	result |= table_lookup(table, p2, p-p2, errmsg);
+	for (; *p && isspace(*p); p++);
+    } while (*p && *p != ',');
+
+    *s = p;
+    return result;
+}
+
+/* Create array of allowed annotations, both internally & externally defined */
+void init_annotation_definitions()
+{
+    char *p, *p2, *tmp;
+    const char *filename;
+    char aline[ANNOT_DEF_MAXLINELEN];
+    char errbuf[ANNOT_DEF_MAXLINELEN*2];
+    struct annotate_st_entry_list *se, *me;
+    struct annotate_st_entry *ae;
+    int i;
+    FILE* f;
+
+    /* NOTE: we assume # static entries > 0 */
+    server_entries_list = xmalloc(sizeof(struct annotate_st_entry_list));
+    mailbox_rw_entries_list = xmalloc(sizeof(struct annotate_st_entry_list));
+    se = server_entries_list;
+    me = mailbox_rw_entries_list;
+
+    /* copy static entries into list */
+    for (i = 0; server_entries[i].name;i++) {
+	se->entry = &server_entries[i];
+	if (server_entries[i+1].name) {
+	    se->next = xmalloc(sizeof(struct annotate_st_entry_list));
+	    se = se->next;
+	}
+    }
+
+    /* copy static entries into list */
+    for (i = 0; mailbox_rw_entries[i].name;i++) {
+	me->entry = &mailbox_rw_entries[i];
+	if (mailbox_rw_entries[i+1].name) {
+	    me->next = xmalloc(sizeof(struct annotate_st_entry_list));
+	    me = me->next;
+	}
+    }
+
+    /* parse config file */
+    filename = config_getstring(IMAPOPT_ANNOTATION_DEFINITIONS);
+
+    if (! filename) {
+	se->next = NULL;
+	me->next = NULL;
+	return;
+    }
+  
+    f = fopen(filename,"r");
+    if (! f) {
+	sprintf(errbuf, "could not open annotation definiton %s", filename);
+	fatal(errbuf, EC_CONFIG);
+    }
+  
+    while (fgets(aline, sizeof(aline), f)) {
+	/* remove leading space, skip blank lines and comments */
+	for (p = aline; *p && isspace(*p); p++);
+	if (!*p || *p == '#') continue;
+
+	/* note, we only do the most basic validity checking and may
+	   be more restrictive than neccessary */
+
+	ae = xmalloc(sizeof(struct annotate_st_entry));
+
+	p2 = p;
+	for (; *p && (isalnum(*p) || *p=='.' || *p=='-' || *p=='_' || *p=='/');
+	     p++);
+	/* TV-TODO: should test for empty */
+	ae->name = xstrndup(p2, p-p2);
+
+	p = consume_comma(p);
+  
+	p2 = p;
+	for (; *p && (isalnum(*p) || *p=='.' || *p=='-' || *p=='_' || *p=='/');
+	     p++);
+
+	if (table_lookup(annotation_scope_names, p2, p-p2,
+			 "annotation scope")==ANNOTATION_SCOPE_SERVER) {
+	    se->next = xmalloc(sizeof(struct annotate_st_entry_list));
+	    se = se->next;
+	    se->entry = ae;
+	}
+	else {
+	    me->next = xmalloc(sizeof(struct annotate_st_entry_list));
+	    me = me->next;      
+	    me->entry = ae;
+	}
+
+	p = consume_comma(p);
+	p2 = p;
+	for (; *p && (isalnum(*p) || *p=='.' || *p=='-' || *p=='_' || *p=='/');
+	     p++);
+	ae->type = table_lookup(attribute_type_names, p2, p-p2,
+				"attribute type");
+
+	p = consume_comma(p);
+	ae->proxytype = parse_table_lookup_bitmask(annotation_proxy_type_names,
+						   &p,
+						   "annotation proxy type");
+
+	p = consume_comma(p);
+	ae->attribs = parse_table_lookup_bitmask(annotation_attributes,
+						 &p,
+						 "annotation attributes");
+
+	p = consume_comma(p);
+	p2 = p;
+	for (; *p && (isalnum(*p) || *p=='.' || *p=='-' || *p=='_' || *p=='/');
+	     p++);
+	tmp = xstrndup(p2, p-p2);
+	ae->acl = cyrus_acl_strtomask(tmp);
+	free(tmp);
+
+	for (; *p && isspace(*p); p++);
+	if (*p) {
+	    sprintf(errbuf, "junk at end of line: '%s'", p);
+	    fatal(errbuf, EC_CONFIG);
+	}
+
+	ae->set = annotation_set_todb;
+	ae->rock = NULL;
+    }
+
+    fclose(f);
+    se->next = NULL;
+    me->next = NULL;
 }

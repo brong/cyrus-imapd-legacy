@@ -1,13 +1,13 @@
-/* afskrb.c - AFS PTS Group (Kerberos Canonicalization) Backend to ptloader */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+/* afskrb.c - AFS PTS Group (Kerberos Canonicalization) Backend to ptloader
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,14 +39,13 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: afskrb.c,v 1.13.2.2 2009/12/28 21:51:53 murch Exp $
  */
-
-static char rcsid[] =
-      "$Id: afskrb.c,v 1.13.2.1 2007/11/01 14:39:38 murch Exp $";
 
 #include <config.h>
 #include "ptloader.h"
 #include "exitcodes.h"
+#include "util.h"
 #include "xmalloc.h"
 
 #ifdef HAVE_AFSKRB
@@ -104,7 +104,7 @@ int is_local_realm(const char *realm)
 	size_t len;
 	char *p;
 	
-	for (p = (char *) val; *p && !isspace((int) *p); p++);
+	for (p = (char *) val; *p && !Uisspace(*p); p++);
 	len = p-val;
 	if(len >= sizeof(buf))
 	    len = sizeof(buf) - 1;
@@ -115,7 +115,7 @@ int is_local_realm(const char *realm)
 	    return 1;
 	}
 	val = p;
-	while (*val && isspace((int) *val)) val++;
+	while (*val && Uisspace(*val)) val++;
     }
 
     return 0;
@@ -278,20 +278,20 @@ static int parse_krbequiv_line(const char *src,
 {
     int i;
     
-    while (isspace(*src)) src++;
+    while (Uisspace(*src)) src++;
     if (!*src) return 0;
 
-    for (i = 0; *src && !isspace(*src); i++) {
+    for (i = 0; *src && !Uisspace(*src); i++) {
         if (i >= MAX_K_NAME_SZ) return 0;
         *principal++ = *src++;
     }
     *principal = 0;
     
-    if (!isspace(*src)) return 0; /* Need at least one separator */
-    while (isspace(*src)) src++;
+    if (!Uisspace(*src)) return 0; /* Need at least one separator */
+    while (Uisspace(*src)) src++;
     if (!*src) return 0;
   
-    for (i = 0; *src && !isspace(*src); i++) {
+    for (i = 0; *src && !Uisspace(*src); i++) {
         if (i >= MAX_K_NAME_SZ) return 0;
         *localuser++ = *src++;
     }
@@ -343,7 +343,7 @@ static char *auth_map_krbid(const char *real_aname,
             
             /* Upcase realm name */
             for (p = realm; *p; p++) {
-                if (islower(*p)) *p = toupper(*p);
+                if (Uislower(*p)) *p = toupper(*p);
             }
             
             if (*realm) {
@@ -406,7 +406,7 @@ static char *afspts_canonifyid(const char *identifier, size_t len)
     
     /* Upcase realm name */
     for (p = realm; *p; p++) {
-        if (islower(*p)) *p = toupper(*p);
+        if (Uislower(*p)) *p = toupper(*p);
     }
     
     if (*realm) {
@@ -547,6 +547,7 @@ static struct auth_state *myauthstate(
     int *dsize __attribute__((unused))) 
 {
 	fatal("PTS module (afskrb) not compiled in", EC_CONFIG);
+	return NULL;
 }
 
 #endif /* HAVE_AFSKRB */

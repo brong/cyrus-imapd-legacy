@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: managesieve.xs,v 1.23.2.2 2009/12/28 21:51:52 murch Exp $
  */
-
-/* $Id: managesieve.xs,v 1.23.2.1 2007/11/01 14:39:38 murch Exp $ */
 
 #ifdef __cplusplus
 extern "C" {
@@ -204,6 +204,7 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
   const char *mtried;
   isieve_t *obj;
   char *p;
+  sasl_ssf_t ssf;
 
   CODE:
 
@@ -277,7 +278,7 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
   /* loop through all the mechanisms */
   do {
     mtried = NULL;
-    r = auth_sasl(mlist, obj, &mtried, &globalerr);
+    r = auth_sasl(mlist, obj, &mtried, &ssf, &globalerr);
 
     if(r) init_sasl(obj, 128, callbacks);
 
@@ -309,6 +310,19 @@ sieve_get_handle(servername, username_cb, authname_cb, password_cb, realm_cb)
 	free(ret);
 	XSRETURN_UNDEF;
   }
+
+  if (ssf) {
+        /* SASL security layer negotiated --
+	   check if SASL mech list changed */
+        if (detect_mitm(obj, mechlist)) {
+	    globalerr = "possible MITM attack: "
+		"list of available SASL mechamisms changed";
+	    free(mechlist);
+	    XSRETURN_UNDEF;
+	}
+  }
+  free(mechlist);
+
   ST(0) = sv_newmortal();
   sv_setref_pv(ST(0), ret->class, (void *) ret);
 

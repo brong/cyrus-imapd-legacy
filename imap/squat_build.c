@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
+ *    prior written permission. For permission or any legal
  *    details, please contact
- *      Office of Technology Transfer
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: squat_build.c,v 1.11.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: squat_build.c,v 1.11.2.2 2009/12/28 21:51:39 murch Exp $
  */
 
 /*
@@ -94,11 +95,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <assert.h>
 #include <sys/mman.h>
 
 #include "squat_internal.h"
 
+#include "assert.h"
 #include "index.h"
 #include "xmalloc.h"
 
@@ -242,6 +243,14 @@ typedef struct _SquatWordTable {
   SquatWordTableEntry entries[256];
 } SquatWordTable;
 
+/* Map docIDs in existing index to docIDs in the new index */
+struct doc_ID_map {
+  int *map;
+  int alloc;
+  int max;
+  int new;
+};
+
 struct _SquatIndex {
   char* tmp_path;                     /* Saved tmp_path option, with
 					 the temporary filename
@@ -281,6 +290,11 @@ struct _SquatIndex {
   SquatStatsCallback stats_callback;  /* Saved stats_callback option */
   void* stats_callback_closure;
 
+  SquatSearchIndex* old_index;        /* Link to old index in incremental */
+  struct doc_ID_map doc_ID_map;       /* Map doc_IDs in old index to new */
+  SquatDocChooserCallback select_doc; /* Decide whether we want doc in new */
+  void *select_doc_closure;           /* Data for handler */
+
   /* put the big structures at the end */
 
   SquatWriteBuffer index_buffers[256]; /* Buffers for the temporary
@@ -292,6 +306,119 @@ struct _SquatIndex {
   int doc_words[256];        /* number of words in current document
 				starting with given char */
 };
+
+/* ====================================================================== */
+
+/* Collection of utility routines to maintain mapping between doc_ID in
+ * the old and new squat files. Not a one to one map as old documents
+ * (old messages in Cyrus) may have been deleted.
+ */
+
+/* Copy existing document details verbatim from old to new index */
+static int squat_index_copy_document(SquatIndex* index, char const* name,
+                                     SquatInt64 size)
+{
+  char* buf;
+  int r = squat_index_open_document(index, name);
+
+  if (r != SQUAT_OK)
+    return(r);
+
+  squat_set_last_error(SQUAT_ERR_OK);
+  if ((buf = prepare_buffered_write(&index->out, 10)) == NULL) {
+    return SQUAT_ERR;
+  }
+  buf = squat_encode_I(buf, size);
+  complete_buffered_write(&index->out, buf);
+
+  index->current_doc_len = -1;
+  index->current_doc_ID++;
+
+  return SQUAT_OK;
+}
+
+static void doc_ID_map_init(struct doc_ID_map *doc_ID_map)
+{
+  doc_ID_map->alloc = 50;
+  doc_ID_map->map   = xmalloc(doc_ID_map->alloc*sizeof(int));
+  doc_ID_map->max   = 0;
+  doc_ID_map->new   = 0;
+}
+
+static void doc_ID_map_free(struct doc_ID_map *doc_ID_map)
+{
+  if (doc_ID_map->map) free(doc_ID_map->map);
+
+  memset(doc_ID_map, 0, sizeof(struct doc_ID_map));
+}
+
+static void doc_ID_map_add(struct doc_ID_map *doc_ID_map, int exists)
+{
+  if (doc_ID_map->max == doc_ID_map->alloc) {
+    doc_ID_map->alloc *= 2;
+    doc_ID_map->map = xrealloc(doc_ID_map->map, doc_ID_map->alloc*sizeof(int));
+  }
+  if (exists) {
+    doc_ID_map->map[doc_ID_map->max++] = doc_ID_map->new++;
+  } else {
+    doc_ID_map->map[doc_ID_map->max++] = 0;  /* Does not exist in new index */
+  }
+}
+
+static int doc_ID_map_lookup(struct doc_ID_map *doc_ID_map, int docID)
+{
+  if ((docID < 1) || (docID > doc_ID_map->max))
+    return(0);
+
+  return(doc_ID_map->map[docID]);
+}
+
+static int copy_docIDs(void* closure, SquatListDoc const* doc)
+{
+  SquatIndex* index = (SquatIndex*)closure;
+  struct doc_ID_map *doc_ID_map = &index->doc_ID_map;
+  int choice = (index->select_doc)(index->select_doc_closure, doc);
+
+  if (choice > 0) {
+    doc_ID_map_add(doc_ID_map, 1);
+    return(squat_index_copy_document(index, doc->doc_name, doc->size));
+  }
+
+  /* This docID no longer exists */
+  doc_ID_map_add(doc_ID_map, 0);
+  return SQUAT_CALLBACK_CONTINUE;
+}
+
+/* Comes later */
+static int add_word_to_trie(SquatIndex* index, char const* word_ptr,
+                            int doc_ID);
+
+static int add_word_callback(void* closure, char *name, int doc_ID)
+{
+  SquatIndex* index = (SquatIndex*)closure;
+  struct doc_ID_map *doc_ID_map = &index->doc_ID_map;
+
+  /* Find doc_ID in the new index which corresponds to this old doc_ID */
+  if ((doc_ID = doc_ID_map_lookup(doc_ID_map, doc_ID)) == 0)
+    return SQUAT_ERR;
+
+  add_word_to_trie(index, name+1, doc_ID);
+
+  return SQUAT_CALLBACK_CONTINUE;
+}
+
+int squat_index_add_existing(SquatIndex* index,
+                             SquatSearchIndex *old_index,
+                             SquatDocChooserCallback select_doc,
+                             void *select_doc_closure) {
+  index->old_index = old_index;
+  index->select_doc = select_doc;
+  index->select_doc_closure = select_doc_closure;
+
+  return(squat_search_list_docs(old_index, copy_docIDs, index));
+}
+
+/* ====================================================================== */
 
 /* Initally, before we see a document, there are no words for the document. */
 static void init_doc_word_table(SquatWordTable** t) {
@@ -373,6 +500,9 @@ SquatIndex* squat_index_init(int fd, SquatOptions const* options) {
   init_doc_word_table(&index->doc_word_table);
 
   memset(index->total_num_words, 0, sizeof(index->total_num_words));
+
+  index->old_index = NULL;            /* Until we are given one */
+  doc_ID_map_init(&index->doc_ID_map);
 
   return index;
 
@@ -1178,6 +1308,8 @@ static int write_trie_word_data(SquatIndex* index, SquatWordTable* t, int len,
             != SQUAT_OK) {
           return SQUAT_ERR;
         }
+        free(entries[i].table);
+        entries[i].table = NULL;
       } else {
         offsets[i] = 0;
       }
@@ -1229,16 +1361,32 @@ static int write_trie_word_data(SquatIndex* index, SquatWordTable* t, int len,
    returned in 'result_offset'. */
 static int dump_index_trie_words(SquatIndex* index, int first_char,
                                  int* result_offset) {
+  SquatSearchIndex* old_index = index->old_index;
   SquatWriteBuffer* buf = index->index_buffers + first_char;
   int num_words = index->total_num_words[first_char];
   WordDocEntry* doc_table;
   char const* word_list_ptr;
   int r = SQUAT_OK;
   char const* word_ptr;
-  
+  int existing = 0;
+
+  if (old_index &&
+      squat_count_docs(old_index, first_char, &existing) != SQUAT_OK) {
+    return(SQUAT_ERR);
+  }
+
   /* Allocate all the necessary document-ID linked list entries at once. */
-  doc_table = (WordDocEntry*)xmalloc(sizeof(WordDocEntry)*num_words);
+  doc_table = (WordDocEntry*)xmalloc(sizeof(WordDocEntry)*(num_words+existing));
   index->word_doc_allocator = doc_table;
+
+  /* Send existing trie across first as those leafs have lowest doc IDs */
+  if (old_index) {
+    r = squat_scan(old_index, first_char, add_word_callback, index);
+    if (r != SQUAT_OK) {
+      r = SQUAT_ERR;
+      goto cleanup;
+    }
+  }
 
   /* mmap the temporary file. */
   word_list_ptr = mmap(NULL, buf->total_output_bytes, PROT_READ, MAP_SHARED,
@@ -1269,10 +1417,6 @@ static int dump_index_trie_words(SquatIndex* index, int first_char,
     }
   }
 
-  /* Make sure we used exactly as many linked list entries as we
-     thought we would. */
-  assert(index->word_doc_allocator - doc_table
-         == index->total_num_words[first_char]);
   /* Make sure we read all the bytes from the temporary file. */
   assert(word_ptr - word_list_ptr == buf->total_output_bytes);
  
@@ -1290,6 +1434,44 @@ cleanup_map:
 cleanup:
   free(doc_table);
 
+  return r;
+}
+
+static int dump_index_trie_words_no_file(SquatIndex* index,
+                                         int first_char,
+                                         int* result_offset) {
+  SquatSearchIndex* old_index = index->old_index;
+  WordDocEntry* doc_table;
+  int r = SQUAT_OK;
+  int existing = 0;
+
+  if (!old_index)
+    return(SQUAT_OK);   /* Should never happen? */
+    
+  if (squat_count_docs(old_index, first_char, &existing) != SQUAT_OK)
+    return(SQUAT_ERR);
+  if (existing == 0)
+    return(SQUAT_OK);
+
+  /* Allocate all the necessary document-ID linked list entries at once. */
+  doc_table = (WordDocEntry*)xmalloc(sizeof(WordDocEntry)*existing);
+  index->word_doc_allocator = doc_table;
+
+  /* Send existing trie across first as those leafs have lowest doc IDs */
+  r = squat_scan(old_index, first_char, add_word_callback, index);
+  if (r != SQUAT_OK) {
+    r = SQUAT_ERR;
+    goto cleanup;
+  }
+ 
+  if (index->word_doc_allocator > doc_table) {
+    /* Now dump the trie to the index file. */
+    r = write_trie_word_data(index, index->doc_word_table,
+                             SQUAT_WORD_SIZE - 1, result_offset);
+  }
+
+ cleanup:
+  free(doc_table);
   return r;
 }
 
@@ -1371,8 +1553,13 @@ static int index_close_internal(SquatIndex* index, int OK) {
       }
       free(index->index_buffers[i].buf);
       index->index_buffers[i].buf = NULL;
-    } else {
-      offset_buf[i] = 0;
+    } else if (index->old_index) {
+      /* Only needed if incremental updates going on */
+      /* Just copy across existing trie if nothing new to merge in */
+      if (dump_index_trie_words_no_file(index, i, offset_buf + i) != SQUAT_OK) {
+        r = SQUAT_ERR;
+        goto cleanup;
+      }
     }
   }
 
@@ -1448,6 +1635,7 @@ cleanup:
   }
   free(index->tmp_path);
   free(index->doc_ID_list);
+  doc_ID_map_free(&index->doc_ID_map);
   free(index);
 
   return r;

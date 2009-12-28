@@ -1,13 +1,13 @@
 /* mbdump.c -- Mailbox dump routines
- * $Id: mbdump.c,v 1.32.2.1 2007/11/01 14:39:33 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: mbdump.c,v 1.32.2.2 2009/12/28 21:51:35 murch Exp $
  */
 
 #include <config.h>
@@ -58,8 +60,8 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <assert.h>
 
+#include "assert.h"
 #include "annotate.h"
 #include "exitcodes.h"
 #include "global.h"
@@ -77,6 +79,7 @@
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 #include "util.h"
+#include "index.h"
 
 /* is this the active script? */
 static int sieve_isactive(char *sievepath, char *name)
@@ -134,7 +137,8 @@ static int dump_annotations(const char *mailbox __attribute__((unused)),
     /* Transfer all attributes for this annotation, don't transfer size
      * separately since that can be implicitly determined */
     prot_printf(ctx->pout,
-		" {%ld%s}\r\nA-%s%s (%ld {%d%s}\r\n%s {%d%s}\r\n%s)",
+		" {%ld%s}\r\nA-%s%s (%ld {" SIZE_T_FMT "%s}\r\n%s"
+		" {" SIZE_T_FMT "%s}\r\n%s)",
 		ename_size, (!ctx->tag ? "+" : ""),
 		userid, entry,
 		attrib->modifiedsince,
@@ -178,7 +182,7 @@ static int dump_file(int first, int sync,
 
     /* send: name, size, and contents */
     if (first) {
-	prot_printf(pout, " {%d}\r\n", strlen(ftag));
+	prot_printf(pout, " {" SIZE_T_FMT "}\r\n", strlen(ftag));
 
 	if (sync) {
 	    /* synchronize */
@@ -194,7 +198,7 @@ static int dump_file(int first, int sync,
 	prot_printf(pout, "%s {%lu%s}\r\n",
 		    ftag, len, (sync ? "+" : ""));
     } else {
-	prot_printf(pout, " {%d%s}\r\n%s {%lu%s}\r\n",
+	prot_printf(pout, " {" SIZE_T_FMT "%s}\r\n%s {%lu%s}\r\n",
 		    strlen(ftag), (sync ? "+" : ""),
 		    ftag, len, (sync ? "+" : ""));
     }
@@ -331,7 +335,7 @@ int dump_mailbox(const char *tag, const char *mbname, const char *mbpath,
 	if (name[0] == '.') continue;
 
 	/* skip non-message files */
-	while (*p && isdigit((int)(*p))) p++;
+	while (*p && Uisdigit(*p)) p++;
 	if (p[0] != '.' || p[1] != '\0') continue;
 
 	/* ensure (number) is >= our target uid */
@@ -479,6 +483,7 @@ int undump_mailbox(const char *mbname, const char *mbpath,
     int curfile = -1;
     const char *userid = NULL;
     struct mailbox mb;
+    struct index_record rec;
     char sieve_path[2048];
     int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
     int domainlen = 0;
@@ -604,7 +609,7 @@ int undump_mailbox(const char *mbname, const char *mbpath,
 		goto done;
 	    }
 	    for (p = data.s; *p; p++) {
-		if (!isdigit((int) *p)) {
+		if (!Uisdigit(*p)) {
 		    r = IMAP_PROTOCOL_ERROR;
 		    goto done;
 		}
@@ -753,11 +758,6 @@ int undump_mailbox(const char *mbname, const char *mbpath,
 		r = IMAP_PROTOCOL_ERROR;
 		goto done;
 	    }
-	    if(strncmp(file.s, "cyrus.", 6)) {
-		/* it doesn't match cyrus.*, so its a message file.
-		 * charge it against the quota */
-		quotaused += size;
-	    }
 	}	
 
 	/* if we haven't opened it, do so */
@@ -820,10 +820,56 @@ int undump_mailbox(const char *mbname, const char *mbpath,
 	    goto done;
 	}
     }
-    
+
+ done:
+    /* eat the rest of the line, we have atleast a \r\n coming */
+    eatline(pin, c);
+    freebuf(&file);
+    freebuf(&data);
+
+    if(curfile >= 0) close(curfile);
+    mailbox_close(&mb);
+
+    if ( r ) {
+	return r;
+    }
+
+    /*
+     * Set mtimes of message files to INTERNALDATE.  This allows later
+     * reconstructs to recover INTERNALDATE from the filesystem.
+     */
+    r = mailbox_open_locked(mbname, mbpath, metapath, mbacl, auth_state, &mb, 0);
+    if (!r) {
+	struct timeval times[ 2 ];
+        char fname[MAX_MAILBOX_PATH+1];
+	size_t offset;
+	unsigned long i;
+ 
+        strlcpy(fname, mb.path, sizeof(fname));
+        strlcat(fname, "/", sizeof(fname));
+	offset = strlen( fname );
+
+	for ( i = 1; i <= mb.exists; i++ ) {
+	    mailbox_read_index_record(&mb, i, &rec);
+	    /*
+	     * We calculate the usage here to avoid counting expunged
+	     * messages that may have been included in the undump.
+	     */
+	    quotaused += rec.size;
+
+	    mailbox_message_get_fname( &mb, rec.uid,
+		    fname + offset, sizeof( fname ) - offset);
+	    times[ 0 ].tv_sec = rec.internaldate;
+	    times[ 0 ].tv_usec = 0;
+	    times[ 1 ].tv_sec = rec.internaldate;
+	    times[ 1 ].tv_usec = 0;
+	    (void)utimes( fname, times );
+	}
+    }
+
     if(!r && quotaused) {
 	struct quota quota;
-	char quota_root[MAX_MAILBOX_PATH+1];
+	char quota_root[MAX_MAILBOX_BUFFER];
 	struct txn *tid = NULL;
 	
 	if (quota_findroot(quota_root, sizeof(quota_root), mbname)) {
@@ -846,14 +892,7 @@ int undump_mailbox(const char *mbname, const char *mbpath,
 	}
     }
 
- done:
-    /* eat the rest of the line, we have atleast a \r\n coming */
-    eatline(pin, c);
-    freebuf(&file);
-    freebuf(&data);
-
-    if(curfile >= 0) close(curfile);
-    mailbox_close(&mb);
+    mailbox_close( &mb );
     
     return r;
 }

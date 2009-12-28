@@ -1,14 +1,13 @@
 /* lmtpengine.h: lmtp protocol engine interface
- * $Id: lmtpengine.h,v 1.23 2006/11/30 17:11:18 murch Exp $
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: lmtpengine.h,v 1.23.2.1 2009/12/28 21:51:34 murch Exp $
  */
 
 #ifndef LMTPENGINE_H
@@ -47,6 +49,7 @@
 
 #include "spool.h"
 #include "mboxname.h"
+#include "quota.h"
 
 typedef struct message_data message_data_t;
 typedef struct address_data address_data_t;
@@ -107,7 +110,7 @@ struct lmtp_func {
     int (*deliver)(message_data_t *m, 
 		   char *authuser, struct auth_state *authstate);
     int (*verify_user)(const char *user, const char *domain, char *mailbox,
-		       long quotacheck, /* user must have this much quota left
+		       quota_t quotacheck, /* user must have this much quota left
 					   (-1 means don't care about quota) */
 		       struct auth_state *authstate);
     void (*shutdown)(int code);
@@ -132,6 +135,12 @@ void lmtpmode(struct lmtp_func *func,
 /************** client-side LMTP ****************/
 
 #include "backend.h"
+
+enum {
+    /* LMTP capabilities */
+    CAPA_PIPELINING	= (1 << 3),
+    CAPA_IGNOREQUOTA	= (1 << 4)
+};
 
 struct lmtp_txn {
     const char *from;

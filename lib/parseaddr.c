@@ -1,14 +1,13 @@
 /* parseaddr.c -- RFC 822 address parser
- * $Id: parseaddr.c,v 1.17 2003/02/13 20:15:41 rjs3 Exp $
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: parseaddr.c,v 1.17.8.1 2009/12/28 21:51:45 murch Exp $
  */
 
 #include <config.h>
@@ -49,6 +50,7 @@
 
 #include "parseaddr.h"
 #include "xmalloc.h"
+#include "util.h"
 
 static char parseaddr_unspecified_domain[] = "unspecified-domain";
 
@@ -220,7 +222,7 @@ char **freemep;
 	    } \
 	    (s)--; \
 	} \
-	else if (!isspace(_c)) break; \
+	else if (!Uisspace(_c)) break; \
 	(s)++; \
     } \
 }
@@ -254,7 +256,7 @@ char *specials;
 		*dst++ = c;
 	    }
 	}
-	else if (isspace(c) || c == '(') {
+	else if (Uisspace(c) || c == '(') {
 	    src--;
 	    SKIPWHITESPACE(src);
 	    *dst++ = ' ';
@@ -292,7 +294,7 @@ char **commentp;
 
     for (;;) {
         c = *src++;
-	if (isalnum(c) || c == '-' || c == '[' || c == ']' || c == ':') {
+	if (Uisalnum(c) || c == '-' || c == '[' || c == ']' || c == ':') {
 	    *dst++ = c;
 	    if (commentp) *commentp = 0;
 	}
@@ -319,7 +321,7 @@ char **commentp;
 		SKIPWHITESPACE(src);
 	    }
 	}
-	else if (!isspace(c)) {
+	else if (!Uisspace(c)) {
 	    if (dst > *domainp && dst[-1] == '.') dst--;
 	    *dst = '\0';
 	    *inp = src;
@@ -345,14 +347,14 @@ char **routep;
 
     for (;;) {
         c = *src++;
-	if (isalnum(c) || c == '-' || c == '[' || c == ']' ||
+	if (Uisalnum(c) || c == '-' || c == '[' || c == ']' ||
 	    c == ',' || c == '@') {
 	    *dst++ = c;
 	}
 	else if (c == '.') {
 	    if (dst > *routep && dst[-1] != '.') *dst++ = c;
 	}
-	else if (isspace(c) || c == '(') {
+	else if (Uisspace(c) || c == '(') {
 	    src--;
 	    SKIPWHITESPACE(src);
 	}

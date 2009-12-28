@@ -1,14 +1,14 @@
 dnl Process this file with autoconf to produce a configure script.
 
 dnl
-dnl Copyright (c) 1998-2000 Carnegie Mellon University.  All rights reserved.
+dnl Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
 dnl
 dnl Redistribution and use in source and binary forms, with or without
 dnl modification, are permitted provided that the following conditions
 dnl are met:
 dnl
 dnl 1. Redistributions of source code must retain the above copyright
-dnl    notice, this list of conditions and the following disclaimer. 
+dnl    notice, this list of conditions and the following disclaimer.
 dnl
 dnl 2. Redistributions in binary form must reproduce the above copyright
 dnl    notice, this list of conditions and the following disclaimer in
@@ -17,19 +17,20 @@ dnl    distribution.
 dnl
 dnl 3. The name "Carnegie Mellon University" must not be used to
 dnl    endorse or promote products derived from this software without
-dnl    prior written permission. For permission or any other legal
-dnl    details, please contact  
-dnl      Office of Technology Transfer
+dnl    prior written permission. For permission or any legal
+dnl    details, please contact
 dnl      Carnegie Mellon University
-dnl      5000 Forbes Avenue
-dnl      Pittsburgh, PA  15213-3890
-dnl      (412) 268-4387, fax: (412) 268-7395
-dnl      tech-transfer@andrew.cmu.edu
+dnl      Center for Technology Transfer and Enterprise Creation
+dnl      4615 Forbes Avenue
+dnl      Suite 302
+dnl      Pittsburgh, PA  15213
+dnl      (412) 268-7393, fax: (412) 268-7395
+dnl      innovation@andrew.cmu.edu
 dnl
 dnl 4. Redistributions of any form whatsoever must retain the following
 dnl    acknowledgment:
-dnl    \"This product includes software developed by Computing Services
-dnl     at Carnegie Mellon University (http://www.cmu.edu/computing/).\"
+dnl    "This product includes software developed by Computing Services
+dnl     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
 dnl
 dnl CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
 dnl THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
@@ -39,17 +40,16 @@ dnl WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
 dnl AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
 dnl OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 dnl
-
+dnl $Id: configure.in,v 1.297.2.4 2009/12/28 21:51:25 murch Exp $
 dnl
 dnl configure.in for the Cyrus imapd
-dnl $Id: configure.in,v 1.297.2.3 2007/11/01 14:39:28 murch Exp $
 dnl
 
 
 AC_INIT(imap/imapd.c)
 AC_PREREQ([2.54])
 AC_CONFIG_HEADER(config.h)
-AC_CANONICAL_HOST
+AC_CANONICAL_SYSTEM
 
 dnl Useful hook for distributions
 AC_ARG_WITH(extraident,[  --with-extraident=STRING   use STRING as extra version information],
@@ -100,7 +100,11 @@ if test $ac_cv_sys_long_file_names = no; then
 fi
 AC_C_INLINE
 
+dnl Check the size of various types
+AC_CHECK_SIZEOF(int)
 AC_CHECK_SIZEOF(long)
+AC_CHECK_SIZEOF(size_t)
+AC_CHECK_SIZEOF(off_t)
 
 dnl Check if `long long int' is available
 AC_CHECK_SIZEOF(long long int)
@@ -218,6 +222,149 @@ if test "$use_berkeley" != "no"; then
 fi
 
 dnl End Berkeley DB Detection
+
+
+dnl SQL DB Detection
+
+HAVE_SQL=0
+
+dnl MySQL Detection
+AC_ARG_WITH(mysql,  [  --with-mysql=DIR          use MySQL (in DIR) [[no]] ],
+  with_mysql=$withval, with_mysql="no")
+
+case "$with_mysql" in
+  no)
+	use_mysql="no"
+	;;
+  yes)
+	use_mysql="yes"
+	with_mysql_lib=none
+	with_mysql_inc=none
+	;;
+  
+  *)
+	use_mysql="yes"
+	with_mysql_lib="$with_mysql/lib"
+	with_mysql_inc="$with_mysql/include"
+	;;
+esac
+
+if test "$use_mysql" != "no"; then
+  CYRUS_MYSQL_CHK()
+
+  if test "$mysqllib" = "no"; then
+    AC_ERROR([MySQL was not found.  You may need to supply the
+    --with-mysql-libdir or --with-mysql-incdir configure options.])
+  else
+    HAVE_SQL=1
+  fi
+
+  if test "$with_mysql_lib" != "none"; then
+    CMU_ADD_LIBPATH($with_mysql_lib)
+  fi
+
+  LIBS="${LIBS} ${MYSQL_LIBADD}"
+  CPPFLAGS="${MYSQL_INCADD} ${CPPFLAGS}"
+
+  AC_DEFINE(HAVE_MYSQL,[],[Build in MySQL support?])
+fi
+
+dnl End MySQL Detection
+
+
+dnl PgSQL Detection
+AC_ARG_WITH(pgsql,  [  --with-pgsql=DIR          use PostgreSQL (in DIR) [[no]] ],
+  with_pgsql=$withval, with_pgsql="no")
+
+case "$with_pgsql" in
+  no)
+	use_pgsql="no"
+	;;
+  yes)
+	use_pgsql="yes"
+	with_pgsql_lib=none
+	with_pgsql_inc=none
+	;;
+  
+  *)
+	use_pgsql="yes"
+	with_pgsql_lib="$with_pgsql/lib"
+	with_pgsql_inc="$with_pgsql/include"
+	;;
+esac
+
+if test "$use_pgsql" != "no"; then
+  CYRUS_PGSQL_CHK()
+
+  if test "$pgsqllib" = "no"; then
+    AC_ERROR([PgSQL was not found.  You may need to supply the
+    --with-pgsql-libdir or --with-pgsql-incdir configure options.])
+  else
+    HAVE_SQL=1
+  fi
+
+  if test "$with_pgsql_lib" != "none"; then
+    CMU_ADD_LIBPATH($with_pgsql_lib)
+  fi
+
+  LIBS="${LIBS} ${PGSQL_LIBADD}"
+  CPPFLAGS="${PGSQL_INCADD} ${CPPFLAGS}"
+
+  AC_DEFINE(HAVE_PGSQL,[],[Build in PgSQL support?])
+fi
+
+dnl End PgSQL Detection
+
+
+dnl SQLite Detection
+AC_ARG_WITH(sqlite,  [  --with-sqlite=DIR          use SQLite (in DIR) [[no]] ],
+  with_sqlite=$withval, with_sqlite=no)
+
+case "$with_sqlite" in
+  no)
+	use_sqlite="no"
+	;;
+  yes)
+	use_sqlite="yes"
+	with_sqlite_lib=none
+	with_sqlite_inc=none
+	;;
+  
+  *)
+	use_sqlite="yes"
+	with_sqlite_lib="$with_sqlite/lib"
+	with_sqlite_inc="$with_sqlite/include"
+	;;
+esac
+
+if test "$use_sqlite" != "no"; then
+  CYRUS_SQLITE_CHK()
+
+  if test "$sqlitelib" = "no"; then
+    AC_ERROR([Sqlite was not found.  You may need to supply the
+    --with-sqlite-libdir or --with-sqlite-incdir configure options.])
+  else
+    HAVE_SQL=1
+  fi
+
+  if test "$with_sqlite_lib" != "none"; then
+    CMU_ADD_LIBPATH($with_sqlite_lib)
+  fi
+
+  LIBS="${LIBS} ${SQLITE_LIBADD}"
+  CPPFLAGS="${SQLITE_INCADD} ${CPPFLAGS}"
+
+  AC_DEFINE(HAVE_SQLITE,[],[Build in SQLite support?])
+fi
+
+dnl End SQLite Detection
+
+
+if test $HAVE_SQL = 1; then
+  CYRUSDB_OBJS="${CYRUSDB_OBJS} cyrusdb_sql.o"
+fi
+
+dnl End SQL DB Detection
 
 AC_SUBST(CYRUSDB_OBJS)
 
@@ -451,25 +598,25 @@ AC_CHECK_FUNC(fdatasync, AC_DEFINE(HAVE_FDATASYNC,[],[Do we have fdatasync()?]),
 
 dnl for makedepend and AFS.
 cant_find_sigvec=no
-AC_CACHE_VAL(cyrus_sigveclib,[
+AC_CACHE_VAL(cyrus_cv_sigveclib,[
  dnl bsd classic flavor
  AC_CHECK_FUNC(sigvec, [
-	cyrus_sigveclib=""
+	cyrus_cv_sigveclib=""
   ], [
   dnl hp flavor
-  AC_CHECK_LIB(BSD, sigvec, cyrus_sigveclib="-lBSD", [
+  AC_CHECK_LIB(BSD, sigvec, cyrus_cv_sigveclib="-lBSD", [
     dnl not hp flavor
     SAVE_LDFLAGS="$LDFLAGS"
     dnl solaris flavor
     LDFLAGS="-L/usr/ucblib -R/usr/ucblib $LDFLAGS"
     AC_CHECK_LIB(ucb, sigvec, [
       dnl more solaris flavor
-      cyrus_sigveclib="-lc -L/usr/ucblib -R/usr/ucblib -lucb"],
+      cyrus_cv_sigveclib="-lc -L/usr/ucblib -R/usr/ucblib -lucb"],
       [ cant_find_sigvec=yes ])
     LDFLAGS="$SAVE_LDFLAGS"])
   ])
 ])
-AC_SUBST(cyrus_sigveclib)
+AC_SUBST(cyrus_cv_sigveclib)
 
 # ok, we still look for this stuff because of checking groups, but
 # all authentication goes through SASL
@@ -499,7 +646,7 @@ if test "x$with_afs" != "xno"; then
       AFS_LIBS="$AFS_LIBS -lc -lucb"
     fi
 
-    AC_CACHE_VAL(cyrus_afs_sigvec,[
+    AC_CACHE_VAL(cyrus_cv_afs_sigvec,[
         SAVE_LIBS="$LIBS"
         LIBS="${with_afs}/lib/liblwp.a"
         AC_MSG_CHECKING(if AFS libraries need sigvec)
@@ -510,18 +657,18 @@ if test "x$with_afs" != "xno"; then
                 [
                         dnl it linked; don't need it
                         AC_MSG_RESULT(no)
-                        cyrus_afs_sigvec="no"
+                        cyrus_cv_afs_sigvec="no"
                 ], [
                         dnl didn't link; pick up sigvec
                         AC_MSG_RESULT(yes)
-                        cyrus_afs_sigvec="yes"
+                        cyrus_cv_afs_sigvec="yes"
                 ])
         ])
-    if test "$cyrus_afs_sigvec" = yes; then
+    if test "$cyrus_cv_afs_sigvec" = yes; then
       if test "$cant_find_sigvec" = yes; then
         AC_MSG_WARN([Can't find a sigvec for AFS libraries which seem to need one.])
       else
-        AFS_LIBS="${AFS_LIBS} $cyrus_sigveclib"
+        AFS_LIBS="${AFS_LIBS} $cyrus_cv_sigveclib"
         AC_SUBST(AFS_LIBS)
         AC_SUBST(AFS_LDFLAGS)
         AC_DEFINE(HAVE_AFSKRB,[],[Should we build afskrb pts module?])
@@ -631,18 +778,18 @@ fi
 dnl if we were ambitious, we'd look more aggressively for the
 dnl krb4 install
 if test -d ${with_krb}; then
-   AC_CACHE_CHECK(for Kerberos includes, cyrus_krbinclude, [
+   AC_CACHE_CHECK(for Kerberos includes, cyrus_cv_krbinclude, [
      for krbhloc in include/kerberosIV include
      do
        if test -f ${with_krb}/${krbhloc}/krb.h ; then
-         cyrus_krbinclude=${with_krb}/${krbhloc}
+         cyrus_cv_krbinclude=${with_krb}/${krbhloc}
          break
        fi
      done
      ])
 
-   if test -n "${cyrus_krbinclude}"; then
-     CPPFLAGS="$CPPFLAGS -I${cyrus_krbinclude}"
+   if test -n "${cyrus_cv_krbinclude}"; then
+     CPPFLAGS="$CPPFLAGS -I${cyrus_cv_krbinclude}"
    fi
    CMU_ADD_LIBPATH(${with_krb}/lib)
 fi
@@ -745,11 +892,12 @@ dnl
 CMU_HAVE_ZLIB
 AC_MSG_CHECKING(for zlib)
 AC_MSG_RESULT($with_zlib)
+AC_SUBST(ZLIB)
 
 dnl
 dnl Test for Zephyr
 dnl
-AC_ARG_WITH(zephyr,[  --with-zephyr[=PATH]      enable Zephyr notification (installed on PATH)],
+AC_ARG_WITH(zephyr,[  --with-zephyr[=PATH]    enable Zephyr notification (installed on PATH)],
 	with_zephyr="${withval}")
 if test -z "$with_zephyr"; then
      if test -f /usr/local/lib/libzephyr.a; then
@@ -780,7 +928,7 @@ fi
 dnl
 dnl Set pidfile location
 dnl
-AC_ARG_WITH(pidfile,[  --with-pidfile[=PATH]     pidfile in PATH (/var/run/cyrus-master.pid)],
+AC_ARG_WITH(pidfile,[  --with-pidfile[=PATH]   pidfile in PATH (/var/run/cyrus-master.pid)],
 	[MASTERPIDFILE="$withval"],
 	[MASTERPIDFILE="/var/run/cyrus-master.pid"])
 MASTERPIDFILE="\"$MASTERPIDFILE\""
@@ -989,10 +1137,18 @@ dnl and compile perl/cyradm
     PERL="${with_perl}"
 dnl add perl cccdlflags when building libraries -- this ensures that the
 dnl libraries will be compiled as PIC if perl requires PIC objects
-dnl -- this is needed on NetBSD, but seems to cause problems on atleast Solaris --
-dnl    eval `${PERL} -V:cccdlflags`
-    PERL_CCCDLFLAGS="$cccdlflags"
-    AC_SUBST(PERL_CCCDLFLAGS)
+dnl -- this is needed on NetBSD and Linux, but seems to cause problems on atleast Solaris --
+    case "${target_os}" in
+        linux*|netbsd*)
+            AC_MSG_CHECKING(for perl cccdlflags needed on "${target_os}")
+            eval `${PERL} -V:cccdlflags`
+            PERL_CCCDLFLAGS="$cccdlflags"
+            AC_SUBST(PERL_CCCDLFLAGS)
+            AC_MSG_RESULT($PERL_CCCDLFLAGS)
+            ;;
+        *)
+            AC_MSG_WARN(skipping check for perl cccdlflags on "${target_os}")
+    esac
 fi
 
 dnl for timsieved
@@ -1052,7 +1208,7 @@ for flag in ${ldflags} ${default_ldflags}; do
 done
 
 IMAP_COM_ERR_LIBS="${COM_ERR_LIBS}"
-IMAP_LIBS="${LIB_SASL} ${LIBS}"
+IMAP_LIBS="${LIB_SASL} ${LIBS} ${SQL_LIBS}"
 
 AC_SUBST(LIB_RT)
 AC_SUBST(IMAP_COM_ERR_LIBS)
@@ -1069,16 +1225,15 @@ AC_SUBST(PERL_DEPSUBDIRS)
 AC_SUBST(PERL)
 
 AH_TOP([
-/* $Id: configure.in,v 1.297.2.3 2007/11/01 14:39:28 murch Exp $ */
-/* 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+/*
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -1087,14 +1242,15 @@ AH_TOP([
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -1108,6 +1264,8 @@ AH_TOP([
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: configure.in,v 1.297.2.4 2009/12/28 21:51:25 murch Exp $
  */
 
 #ifndef _CYRUS_IMAPD_CONFIG_H_
@@ -1221,6 +1379,27 @@ struct sockaddr_storage {
 
 #ifndef HAVE_SHUTDOWN
 #define shutdown(fd, mode) 0
+#endif
+
+/* *printf() macros */
+#if (SIZEOF_SIZE_T == SIZEOF_INT)
+#define SIZE_T_FMT "%u"
+#elif (SIZEOF_SIZE_T == SIZEOF_LONG)
+#define SIZE_T_FMT "%lu"
+#elif (SIZEOF_SIZE_T == SIZEOF_LONG_LONG_INT)
+#define SIZE_T_FMT "%llu"
+#else
+#error dont know what to use for SIZE_T_FMT
+#endif
+
+#if (SIZEOF_OFF_T == SIZEOF_LONG)
+#define OFF_T_FMT "%ld"
+#define strtoofft(nptr, endptr, base) strtol(nptr, endptr, base)
+#elif (SIZEOF_OFF_T == SIZEOF_LONG_LONG_INT)
+#define OFF_T_FMT "%lld"
+#define strtoofft(nptr, endptr, base) strtoll(nptr, endptr, base)
+#else
+#error dont know what to use for OFF_T_FMT
 #endif
 
 /* compile time options; think carefully before modifying */

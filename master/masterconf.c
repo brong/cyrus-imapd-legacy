@@ -1,14 +1,13 @@
 /* masterconfig.c -- Configuration routines for master process
- * $Id: masterconf.c,v 1.13 2006/11/30 17:11:23 murch Exp $
- * 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,7 +39,9 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: masterconf.c,v 1.13.2.1 2009/12/28 21:51:50 murch Exp $
  */
+
 #include <config.h>
 
 #include <stdio.h>
@@ -133,7 +135,7 @@ const char *masterconf_getstring(struct entry *e, const char *key,
 	} else {
 	    /* one word */
 	    for (i = 0; i < 255; i++) {
-		if (isspace((int) *p)) break;
+		if (Uisspace(*p)) break;
 		v[i] = *p++;
 	    }
 	}
@@ -150,8 +152,8 @@ int masterconf_getint(struct entry *e,
     const char *val = masterconf_getstring(e, key, NULL);
 
     if (!val) return def;
-    if (!isdigit((int) *val) && 
-	(*val != '-' || !isdigit((int) val[1]))) return def;
+    if (!Uisdigit(*val) && 
+	(*val != '-' || !Uisdigit(val[1]))) return def;
     return atoi(val);
 }
 
@@ -187,7 +189,7 @@ static void process_section(FILE *f, int *lnptr,
 	/* remove EOL character */
 	if (buf[strlen(buf)-1] == '\n') buf[strlen(buf)-1] = '\0';
 	/* remove starting whitespace */
-	for (p = buf; *p && isspace((int) *p); p++);
+	for (p = buf; *p && Uisspace(*p); p++);
 	
 	/* remove comments */
 	q = strchr(p, '#');
@@ -197,7 +199,7 @@ static void process_section(FILE *f, int *lnptr,
 	if (!*p) continue;
 	if (*p == '}') break;
 
-	for (q = p; isalnum((int) *q); q++) ;
+	for (q = p; Uisalnum(*q); q++) ;
 	if (q) { *q = '\0'; q++; }
 	
 	if (q - p > 0) {
@@ -236,7 +238,7 @@ void masterconf_getsection(const char *section, masterconf_process *f,
 	lineno++;
 
 	if (buf[strlen(buf)-1] == '\n') buf[strlen(buf)-1] = '\0';
-	for (p = buf; *p && isspace((int) *p); p++);
+	for (p = buf; *p && Uisspace(*p); p++);
 	
 	/* remove comments */
 	q = strchr(p, '#');
@@ -247,7 +249,7 @@ void masterconf_getsection(const char *section, masterconf_process *f,
 	
 	if (level == 0 &&
 	    *p == *section && !strncasecmp(p, section, seclen) &&
-	    !isalnum((int) p[seclen])) {
+	    !Uisalnum(p[seclen])) {
 	    for (p += seclen; *p; p++) {
 		if (*p == '{') level++;
 		if (*p == '}') level--;

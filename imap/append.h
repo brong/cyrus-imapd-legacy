@@ -1,14 +1,13 @@
 /* append.h -- Description of messages to be copied 
- * $Id: append.h,v 1.28.2.1 2007/11/01 14:39:31 murch Exp $ 
  *
- * Copyright (c) 1998, 2000 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- *
+ * $Id: append.h,v 1.28.2.2 2009/12/28 21:51:28 murch Exp $
  */
 
 #ifndef INCLUDED_APPEND_H
@@ -70,13 +70,13 @@ struct copymsg {
 struct appendstate {
     /* mailbox we're appending to */
     struct mailbox m;
-    char userid[MAX_MAILBOX_NAME+1];
+    char userid[MAX_MAILBOX_BUFFER];
 
     enum { APPEND_READY, APPEND_DONE } s;
 				/* current state of append */
 
     /* if we abort, where should we truncate the cache file? */
-    unsigned long orig_cache_len;
+    unsigned long orig_cache_size;
 
     int writeheader;		/* did we change the mailbox header? */
 
@@ -91,7 +91,7 @@ struct appendstate {
     int seen_alloced;
 
     /* the amount of quota we've used so far in this append */
-    int quota_used;
+    uquota_t quota_used;
 
     /* txn for updating quota */
     struct txn *tid;
@@ -103,16 +103,16 @@ struct stagemsg;
 
 extern int append_check(const char *name, int format, 
 			struct auth_state *auth_state,
-			long aclcheck, long quotacheck);
+			long aclcheck, quota_t quotacheck);
 
 /* appendstate must be allocated by client */
 extern int append_setup(struct appendstate *mailbox, const char *name,
 			int format, 
 			const char *userid, struct auth_state *auth_state,
-			long aclcheck, long quotacheck);
+			long aclcheck, quota_t quotacheck);
 
 extern int append_commit(struct appendstate *mailbox,
-			 long quotacheck,
+			 quota_t quotacheck,
 			 unsigned long *uidvalidity, 
 			 unsigned long *startuid, 
 			 unsigned long *num);

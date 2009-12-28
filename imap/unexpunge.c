@@ -1,13 +1,13 @@
 /* unexpunge.c -- Program to unexpunge messages
  *
- * Copyright (c) 1998-2005 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: unexpunge.c,v 1.2.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: unexpunge.c,v 1.2.2.2 2009/12/28 21:51:41 murch Exp $
  */
 
 #include <config.h>
@@ -87,6 +88,7 @@ void usage(void)
 {
     fprintf(stderr,
 	    "unexpunge [-C <altconfig>] -l <mailbox>\n"
+            "unexpunge [-C <altconfig>] -t time-interval [ -d ] [ -v ] mailbox\n"
 	    "unexpunge [-C <altconfig>] -a [-d] [-v] <mailbox>\n"
 	    "unexpunge [-C <altconfig>] -u [-d] [-v] <mailbox> <uid>...\n");
     exit(-1);
@@ -96,6 +98,7 @@ enum {
     MODE_UNKNOWN = -1,
     MODE_LIST,
     MODE_ALL,
+    MODE_TIME,
     MODE_UID
 };
 
@@ -123,7 +126,7 @@ void list_expunged(struct mailbox *mailbox,
     unsigned msgno;
     unsigned long uid, size, cache_offset;
     time_t internaldate, sentdate, last_updated;
-    const char *cacheitem;
+    cacherecord crec;
 
     for (msgno = 0; msgno < exists; msgno++) {
 	/* Jump to index record for this message */
@@ -143,22 +146,16 @@ void list_expunged(struct mailbox *mailbox,
 	printf("\tRecv: %s", ctime(&internaldate));
 	printf("\tExpg: %s", ctime(&last_updated));
 
-	cacheitem = mailbox->cache_base + cache_offset;
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip envelope */
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip body structure */
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip body */
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip binary body */
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip cached headers */
+	if (!mailbox_cacherecord_offset(mailbox, cache_offset, &crec)) {
+	    printf("\tERROR: cache record missing or corrupt, not printing cache details\n\n");
+	    continue;
+	}
 
-	printf("\tFrom: %s\n", cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip from */
-	printf("\tTo  : %s\n", cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip to */
-	printf("\tCc  : %s\n", cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip cc */
-	printf("\tBcc : %s\n", cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem); /* skip bcc */
-	printf("\tSubj: %s\n\n", cacheitem + CACHE_ITEM_SIZE_SKIP);
+	printf("\tFrom: %.*s\n", crec[CACHE_FROM].l, crec[CACHE_FROM].s);
+	printf("\tTo  : %.*s\n", crec[CACHE_TO].l, crec[CACHE_TO].s);
+	printf("\tCc  : %.*s\n", crec[CACHE_CC].l, crec[CACHE_CC].s);
+	printf("\tBcc : %.*s\n", crec[CACHE_BCC].l, crec[CACHE_BCC].s);
+	printf("\tSubj: %.*s\n\n", crec[CACHE_SUBJECT].l, crec[CACHE_SUBJECT].s);
     }
 }
 
@@ -432,12 +429,14 @@ int main(int argc, char *argv[])
     const char *lockfailaction;
     struct msg *msgs;
     unsigned numrestored = 0;
+    time_t last_update, time_since = time(NULL);
+    int len, secs = 0;
 
     if ((geteuid()) == 0 && (become_cyrus() != 0)) {
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((opt = getopt(argc, argv, "C:laudv")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:laudt:v")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -453,6 +452,32 @@ int main(int argc, char *argv[])
 	    mode = MODE_ALL;
 	    break;
 	
+	case 't':
+	    if (mode != MODE_UNKNOWN) usage();
+
+	    mode = MODE_TIME;
+            secs = atoi(optarg);
+            len  = strlen(optarg);
+            
+            if ((secs > 0) && (len > 1)) {
+                switch (optarg[len-1]) {
+                case 'm':
+                    secs *= 60;
+                    break;
+                case 'h':
+                    secs *= (60*60);
+                    break;
+                case 'd':
+                    secs *= (24*60*60);
+                    break;
+                case 'w':
+                    secs *= (7*24*60*60);
+                    break;
+                }
+            }
+            time_since = time(NULL) - secs;
+	    break;
+
 	case 'u':
 	    if (mode != MODE_UNKNOWN) usage();
 	    mode = MODE_UID;
@@ -580,6 +605,10 @@ int main(int argc, char *argv[])
 	    switch (mode) {
 	    case MODE_LIST: msgs[msgno].restore = 0; break;
 	    case MODE_ALL: msgs[msgno].restore = 1; break;
+            case MODE_TIME:
+                last_update = ntohl(*((bit32 *)(rec+OFFSET_LAST_UPDATED)));
+                msgs[msgno].restore = (last_update > time_since);
+                break;
 	    case MODE_UID:
 		/* see if this UID is in our list */
 		msgs[msgno].restore = bsearch(&uid, uids, nuids,
@@ -626,6 +655,8 @@ int main(int argc, char *argv[])
 
     if (!r) sync_log_mailbox(mailbox.name);
     mailbox_close(&mailbox);
+
+    sync_log_done();
 
     quotadb_close();
     quotadb_done();

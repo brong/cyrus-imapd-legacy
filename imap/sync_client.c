@@ -1,13 +1,13 @@
 /* sync_client.c -- Cyrus synchonization client
  *
- * Copyright (c) 1998-2005 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,10 +39,10 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: sync_client.c,v 1.2.2.3 2009/12/28 21:51:39 murch Exp $
+ *
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
- *
- * $Id: sync_client.c,v 1.2.2.2 2007/11/28 15:18:12 murch Exp $
  */
 
 #include <config.h>
@@ -87,6 +88,8 @@
 #include "backend.h"
 #include "xstrlcat.h"
 #include "xstrlcpy.h"
+#include "signals.h"
+#include "cyrusdb.h"
 
 /* signal to config.c */
 const int config_need_data = 0;  /* YYY */
@@ -128,6 +131,22 @@ static struct namespace   sync_namespace;
 static int verbose         = 0;
 static int verbose_logging = 0;
 static int connect_once    = 0;
+static int foreground      = 0;
+static int do_compress     = 0;
+
+static struct protocol_t csync_protocol =
+{ "csync", "csync",
+  { 1, "* OK" },
+  { NULL, NULL, "* OK", NULL,
+    { { "* SASL ", CAPA_AUTH },
+      { "* STARTTLS", CAPA_STARTTLS },
+      { NULL, 0 } } },
+  { "STARTTLS", "OK", "NO", 0 },
+  { "AUTHENTICATE", INT_MAX, 0, "OK", "NO", "+ ", "*", NULL, 0 },
+  { NULL, NULL, NULL },
+  { "NOOP", NULL, "OK" },
+  { "EXIT", NULL, "OK" }
+};
 
 static int do_meta(char *user);
 
@@ -228,8 +247,8 @@ static int find_reserve_messages(struct mailbox *mailbox,
 
         if (r) {
             syslog(LOG_ERR,
-                   "IOERROR: reading index entry for nsgno %lu of %s: %m",
-                   record.uid, mailbox->name);
+                   "IOERROR: reading index entry for msgno %lu of %s: %m",
+                   msgno, mailbox->name);
             return(IMAP_IOERROR);
         }
 
@@ -268,8 +287,8 @@ static int reserve_all_messages(struct mailbox *mailbox,
 
         if (r) {
             syslog(LOG_ERR,
-                   "IOERROR: reading index entry for nsgno %lu of %s: %m",
-                   record.uid, mailbox->name);
+                   "IOERROR: reading index entry for msgno %lu of %s: %m",
+                   msgno, mailbox->name);
             return(IMAP_IOERROR);
         }
 
@@ -682,40 +701,41 @@ static int folder_delete(char *name)
     return(sync_parse_code("DELETE", fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
 }
 
-static int user_addsub(char *user, char *name)
+static int set_sub(char *user, char *name, int add)
 {
+    char *cmd = add ? "ADDSUB" : "DELSUB";
+
     if (verbose) 
-        printf("ADDSUB %s %s\n", user, name);
+        printf("%s %s %s\n", cmd, user, name);
 
     if (verbose_logging)
-        syslog(LOG_INFO, "ADDSUB %s %s", user, name);
+        syslog(LOG_INFO, "%s %s %s", cmd, user, name);
 
-    prot_printf(toserver, "ADDSUB ");
+    sync_printastring(toserver, cmd);
+    prot_printf(toserver, " ");
     sync_printastring(toserver, user);
     prot_printf(toserver, " ");
     sync_printastring(toserver, name);
     prot_printf(toserver, "\r\n");
     prot_flush(toserver);
 
-    return(sync_parse_code("ADDSUB", fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
+    return(sync_parse_code(cmd, fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
 }
 
-static int user_delsub(char *user, char *name)
+static int user_sub(char *user, char *name)
 {
-    if (verbose) 
-        printf("DELSUB %s %s\n", user, name);
+    int r;
 
-    if (verbose_logging)
-        syslog(LOG_INFO, "DELSUB %s %s", user, name);
+    r = mboxlist_checksub(name, user);
 
-    prot_printf(toserver, "DELSUB ");
-    sync_printastring(toserver, user);
-    prot_printf(toserver, " ");
-    sync_printastring(toserver, name);
-    prot_printf(toserver, "\r\n");
-    prot_flush(toserver);
-
-    return(sync_parse_code("DELSUB", fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
+    switch (r) {
+    case CYRUSDB_OK:
+	return set_sub(user, name, 1);
+    case CYRUSDB_NOTFOUND:
+	return set_sub(user, name, 0);
+    default:
+	return r;
+    }
 }
 
 static int folder_setacl(char *name, char *acl)
@@ -730,7 +750,7 @@ static int folder_setacl(char *name, char *acl)
     return(sync_parse_code("SETACL", fromserver, SYNC_PARSE_EAT_OKLINE, NULL));
 }
 
-static int folder_setannotation(char *name, char *entry, char *userid,
+static int folder_setannotation(char *name, const char *entry, char *userid,
 				char *value)
 {
     prot_printf(toserver, "SETANNOTATION "); 
@@ -1356,7 +1376,7 @@ static int upload_messages_list(struct mailbox *mailbox,
     struct index_record record;
     struct sync_msg *msg;
     struct sync_index_list *index_list;
-    unsigned max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
+    int max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
 
     if (max_count <= 0) max_count = INT_MAX;
 
@@ -1372,14 +1392,14 @@ static int upload_messages_list(struct mailbox *mailbox,
 	/* Break UPLOAD into chunks of <=max_count messages */
 	index_list = sync_index_list_create();
 
-	for (; (index_list->count < max_count) &&
+	for (; (index_list->count < (unsigned) max_count) &&
 		 (msgno <= mailbox->exists); msgno++) {
 	    r = mailbox_read_index_record(mailbox, msgno, &record);
 
 	    if (r) {
 		syslog(LOG_ERR,
 		       "IOERROR: reading index entry for msgno %lu of %s: %m",
-		       record.uid, mailbox->name);
+		       msgno, mailbox->name);
 		return(IMAP_IOERROR);
 	    }
 
@@ -1430,7 +1450,9 @@ static int upload_messages_from(struct mailbox *mailbox,
     int r = 0;
     struct index_record record;
     struct sync_index_list *index_list;
-    unsigned max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
+    int max_count = config_getint(IMAPOPT_SYNC_BATCH_SIZE);
+
+    if (max_count <= 0) max_count = INT_MAX;
 
     if (chdir(mailbox->path)) {
         syslog(LOG_ERR, "Couldn't chdir to %s: %s",
@@ -1443,14 +1465,14 @@ static int upload_messages_from(struct mailbox *mailbox,
 	/* Break UPLOAD into chunks of <=max_count messages */
 	index_list = sync_index_list_create();
 
-	for (; (index_list->count <= max_count) &&
+	for (; (index_list->count <= (unsigned) max_count) &&
 		 (msgno <= mailbox->exists); msgno++) {
 	    r = mailbox_read_index_record(mailbox, msgno, &record);
 
 	    if (r) {
 		syslog(LOG_ERR,
 		       "IOERROR: reading index entry for msgno %lu of %s: %m",
-		       record.uid, mailbox->name);
+		       msgno, mailbox->name);
 		return(IMAP_IOERROR);
 	    }
 
@@ -1811,7 +1833,7 @@ int do_folders(struct sync_folder_list *client_list,
 	       int doing_user)
 {
     struct mailbox m;
-    int r = 0, mailbox_open = 0;
+    int r = 0, mailbox_open = 0, i;
     struct sync_rename_list *rename_list = sync_rename_list_create();
     struct sync_folder   *folder, *folder2;
 
@@ -1961,13 +1983,14 @@ int do_folders(struct sync_folder_list *client_list,
                 if (!r && (m.uidvalidity != folder2->uidvalidity))
                     r = folder_setuidvalidity(folder->name, m.uidvalidity);
 
-                if (!r &&
-                    (folder2->options ^ m.options) & OPT_IMAP_CONDSTORE) {
-                    r = folder_setannotation(m.name,
-					     "/vendor/cmu/cyrus-imapd/condstore",
+		for (i = 0; !r && annotate_mailbox_flags[i].name; i++) {
+		    if ((folder2->options ^ m.options) & annotate_mailbox_flags[i].flag) {
+                    	r = folder_setannotation(m.name,
+					     annotate_mailbox_flags[i].name,
 					     "",
-					     (m.options & OPT_IMAP_CONDSTORE) ?
+					     (m.options & annotate_mailbox_flags[i].flag) ?
 					     "true" : "false");
+		    }
 		}
 
 		if (!r && m.quota.root && !strcmp(m.name, m.quota.root))
@@ -2248,7 +2271,7 @@ int do_mailbox_preload(struct sync_folder *folder)
 
 int do_user_preload(char *user)
 {
-    char buf[MAX_MAILBOX_NAME+1];
+    char buf[MAX_MAILBOX_BUFFER];
     int r = 0;
     struct sync_folder_list *client_list = sync_folder_list_create();
     struct sync_folder *folder;
@@ -2282,7 +2305,7 @@ int do_user_preload(char *user)
 int do_user_main(char *user, struct sync_folder_list *server_list,
 		 int *vanishedp)
 {
-    char buf[MAX_MAILBOX_NAME+1];
+    char buf[MAX_MAILBOX_BUFFER];
     int r = 0;
     struct sync_folder_list *client_list = sync_folder_list_create();
 
@@ -2310,7 +2333,6 @@ int do_user_sub(char *user, struct sync_folder_list *server_list)
     struct sync_folder_list *client_list = sync_folder_list_create();
     struct sync_folder *c, *s;
     int n;
-    char buf[MAX_MAILBOX_NAME+1];
 
     /* Includes subsiduary nodes automatically */
     r = (sync_namespace.mboxlist_findsub)(&sync_namespace, "*", 1,
@@ -2334,9 +2356,7 @@ int do_user_sub(char *user, struct sync_folder_list *server_list)
 	       current client subscription, or we reach the end of the
 	       server list */
 	    do {
-		(sync_namespace.mboxname_tointernal)(&sync_namespace, s->name,
-						     user, buf);
-		if ((r = user_delsub(user, buf))) goto bail;
+		if ((r = set_sub(user, s->name, 0))) goto bail;
 		s = s->next;
 		if (!s) n = -1;		/* end of server list, we're done */
 		else if (!c) n = 1;	/* remove all server subscriptions */
@@ -2350,7 +2370,7 @@ int do_user_sub(char *user, struct sync_folder_list *server_list)
 	}
 	else if (c && n < 0) {
 	    /* add the current client subscription */
-	    if ((r = user_addsub(user, c->name))) goto bail;
+	    if ((r = set_sub(user, c->name, 1))) goto bail;
 	}
     }
 
@@ -2622,7 +2642,7 @@ int do_user_parse(char *user __attribute__((unused)),
 
 int do_user_work(char *user, int *vanishedp)
 {
-    char buf[MAX_MAILBOX_NAME+1];
+    char buf[MAX_MAILBOX_BUFFER];
     int r = 0, mailbox_open = 0;
     struct sync_folder_list *server_list      = sync_folder_list_create();
     struct sync_folder_list *server_sub_list  = sync_folder_list_create();
@@ -2908,7 +2928,6 @@ static int do_sync(const char *filename)
     struct sync_action_list *annot_list  = sync_action_list_create();
     struct sync_action_list *seen_list   = sync_action_list_create();
     struct sync_action_list *sub_list    = sync_action_list_create();
-    struct sync_action_list *unsub_list  = sync_action_list_create();
     struct sync_folder_list *folder_list = sync_folder_list_create();
     static struct buf type, arg1, arg2;
     char *arg1s, *arg2s;
@@ -2989,7 +3008,7 @@ static int do_sync(const char *filename)
         else if (!strcmp(type.s, "SUB"))
             sync_action_list_add(sub_list, arg2s, arg1s);
         else if (!strcmp(type.s, "UNSUB"))
-            sync_action_list_add(unsub_list, arg2s, arg1s);
+            sync_action_list_add(sub_list, arg2s, arg1s);
         else
             syslog(LOG_ERR, "Unknown action type: %s", type.s);
     }
@@ -2997,14 +3016,16 @@ static int do_sync(const char *filename)
     /* Optimise out redundant clauses */
 
     for (action = user_list->head ; action ; action = action->next) {
-	char inboxname[MAX_MAILBOX_NAME+1];
+	char inboxname[MAX_MAILBOX_BUFFER];
 
 	/* USER action overrides any MAILBOX, APPEND, ACL, QUOTA, ANNOTATION action on
 	   any of the user's mailboxes or any META, SIEVE, SEEN, SUB, UNSUB
 	   action for same user */
 	(sync_namespace.mboxname_tointernal)(&sync_namespace, "INBOX",
 					      action->user, inboxname);
-        remove_folder(inboxname, mailbox_list, 1);
+        /* breaks DELETED namespace renames
+        * remove_folder(inboxname, mailbox_list, 1);
+        */
         remove_folder(inboxname, append_list, 1);
         remove_folder(inboxname, acl_list, 1);
         remove_folder(inboxname, quota_list, 1);
@@ -3013,7 +3034,6 @@ static int do_sync(const char *filename)
         remove_meta(action->user, sieve_list);
         remove_meta(action->user, seen_list);
         remove_meta(action->user, sub_list);
-        remove_meta(action->user, unsub_list);
     }
     
     for (action = meta_list->head ; action ; action = action->next) {
@@ -3022,7 +3042,6 @@ static int do_sync(const char *filename)
         remove_meta(action->user, sieve_list);
         remove_meta(action->user, seen_list);
         remove_meta(action->user, sub_list);
-        remove_meta(action->user, unsub_list);
     }
 
     for (action = mailbox_list->head ; action ; action = action->next) {
@@ -3139,7 +3158,7 @@ static int do_sync(const char *filename)
     }
 
     for (action = sub_list->head ; action ; action = action->next) {
-        if (action->active && user_addsub(action->user, action->name)) {
+        if (action->active && user_sub(action->user, action->name)) {
             sync_action_list_add(meta_list, NULL, action->user);
             if (verbose) {
                 printf("  Promoting: SUB %s %s -> META %s\n",
@@ -3152,19 +3171,6 @@ static int do_sync(const char *filename)
         }
     }
 
-    for (action = unsub_list->head ; action ; action = action->next) {
-        if (action->active && user_delsub(action->user, action->name)) {
-            sync_action_list_add(meta_list, NULL, action->user);
-            if (verbose) {
-                printf("  Promoting: UNSUB %s %s -> META %s\n",
-                       action->user, action->name, action->user);
-            }
-            if (verbose_logging) {
-                syslog(LOG_INFO, "  Promoting: UNSUB %s %s -> META %s",
-                       action->user, action->name, action->name);
-            }
-        }
-    }
     for (action = mailbox_list->head ; action ; action = action->next) {
         if (!action->active)
             continue;
@@ -3180,12 +3186,12 @@ static int do_sync(const char *filename)
 	    if (r) {
 		/* promote failed personal mailboxes to USER */
 		struct sync_folder *folder;
-		char *userid, *p;
+		char *userid, *p, *useridp;
 
 		for (folder = folder_list->head; folder && folder->mark;
 		     folder = folder->next);
-		if (folder &&
-		    (userid = xstrdup(mboxname_isusermailbox(folder->name, 0)))) {
+		if (folder && (useridp = mboxname_isusermailbox(folder->name, 0))) {
+		    userid = xstrdup(useridp);
 		    if ((p = strchr(userid, '.'))) *p = '\0';
 		    folder->mark = 1;
 		    if (--folder_list->count == 0) r = 0;
@@ -3255,7 +3261,6 @@ static int do_sync(const char *filename)
     sync_action_list_free(&annot_list);
     sync_action_list_free(&seen_list);
     sync_action_list_free(&sub_list);
-    sync_action_list_free(&unsub_list);
     sync_folder_list_free(&folder_list);
 
     prot_free(input);
@@ -3383,7 +3388,7 @@ struct backend *replica_connect(struct backend *be, const char *servername,
     struct protoent *proto;
 
     for (wait = 15;; wait *= 2) {
-	be = backend_connect(be, servername, &protocol[PROTOCOL_CSYNC],
+	be = backend_connect(be, servername, &csync_protocol,
 			     "", cb, NULL);
 
 	if (be || connect_once || wait > 1000) break;
@@ -3418,6 +3423,22 @@ struct backend *replica_connect(struct backend *be, const char *servername,
 	}
     }
 
+#ifdef HAVE_ZLIB
+    /* check if we should compress */
+    if (do_compress || config_getswitch(IMAPOPT_SYNC_COMPRESS)) {
+        prot_printf(be->out, "COMPRESS DEFLATE\r\n");
+        prot_flush(be->out);
+
+        if (sync_parse_code("COMPRESS", be->in, SYNC_PARSE_EAT_OKLINE, NULL)) {
+	    syslog(LOG_ERR, "Failed to enable compression, continuing uncompressed");
+	}
+	else {
+	    prot_setcompress(be->in);
+	    prot_setcompress(be->out);
+        }
+    }
+#endif
+
     return be;
 }
 
@@ -3430,16 +3451,18 @@ void do_daemon(const char *sync_log_file, const char *sync_shutdown_file,
     int status;
     int restart;
 
-    /* fork a child so we can release from master */
-    if ((pid=fork()) < 0) fatal("fork failed", EC_SOFTWARE);
+    if (!foreground) {
+	/* fork a child so we can release from master */
+	if ((pid=fork()) < 0) fatal("fork failed", EC_SOFTWARE);
 
-    if (pid != 0) { /* parent */
-	cyrus_done();
-	exit(0);
+	if (pid != 0) { /* parent */
+	    cyrus_done();
+	    exit(0);
+	}
+	/* child */
     }
-    /* child */
 
-    if (timeout == 0) {
+    if (foreground || timeout == 0) {
         do_daemon_work(sync_log_file, sync_shutdown_file,
                        timeout, min_delta, &restart);
         return;
@@ -3550,7 +3573,7 @@ int main(int argc, char **argv)
 
     setbuf(stdout, NULL);
 
-    while ((opt = getopt(argc, argv, "C:vlS:F:f:w:t:d:rumso")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:vlS:F:f:w:t:d:rRumsoz")) != EOF) {
         switch (opt) {
         case 'C': /* alt config file */
             alt_config = optarg;
@@ -3593,6 +3616,8 @@ int main(int argc, char **argv)
             min_delta = atoi(optarg);
             break;
 
+        case 'R':
+	    foreground = 1;
         case 'r':
 	    if (mode != MODE_UNKNOWN)
 		fatal("Mutually exclusive options defined", EC_USAGE);
@@ -3616,6 +3641,14 @@ int main(int argc, char **argv)
 		fatal("Mutually exclusive options defined", EC_USAGE);
             mode = MODE_SIEVE;
             break;
+
+	case 'z':
+#ifdef HAVE_ZLIB
+	    do_compress = 1;
+#else
+	    fatal("Compress not available without zlib compiled in", EC_SOFTWARE);
+#endif
+	    break;
 
         default:
             usage("sync_client");
@@ -3746,7 +3779,7 @@ int main(int argc, char **argv)
     case MODE_MAILBOX:
     {
 	struct sync_folder_list *folder_list = sync_folder_list_create();
-	char mailboxname[MAX_MAILBOX_NAME+1];
+	char mailboxname[MAX_MAILBOX_BUFFER];
 
 	if (input_filename) {
 	    if ((file=fopen(input_filename, "r")) == NULL) {

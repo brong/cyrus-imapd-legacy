@@ -1,13 +1,13 @@
 /* cyr_expire.c -- Program to expire deliver.db entries and messages
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: cyr_expire.c,v 1.8.2.2 2007/11/08 20:27:59 murch Exp $
+ * $Id: cyr_expire.c,v 1.8.2.3 2009/12/28 21:51:29 murch Exp $
  */
 
 #include <config.h>
@@ -55,6 +56,8 @@
 #include <syslog.h>
 #include <errno.h>
 #include <signal.h>
+
+#include <sasl/sasl.h>
 
 #include "annotate.h"
 #include "cyrusdb.h"
@@ -146,7 +149,7 @@ int expire(char *name, int matchlen, int maycreate __attribute__((unused)),
 	   void *rock)
 {
     struct expire_rock *erock = (struct expire_rock *) rock;
-    char buf[MAX_MAILBOX_NAME+1] = "", *p;
+    char buf[MAX_MAILBOX_BUFFER] = "", *p;
     struct annotation_data attrib;
     int r, domainlen = 0;
 
@@ -271,8 +274,6 @@ int expire(char *name, int matchlen, int maycreate __attribute__((unused)),
 	    }
 
 	    erock->expire_mark = *expire_mark;
-
-	    expunge_flags |= EXPUNGE_FORCE;
 	}
 
 	r = mailbox_expunge(&mailbox, expire_cb, erock, expunge_flags, NULL);
@@ -323,7 +324,7 @@ int delete(char *name,
     p++;
 
     for (i = 0 ; i < 7; i++) {
-        if (!isxdigit(p[i])) return(0);
+        if (!Uisxdigit(p[i])) return(0);
     }
     if (p[8] != '\0') return(0);
 
@@ -348,7 +349,7 @@ int delete(char *name,
 int main(int argc, char *argv[])
 {
     extern char *optarg;
-    int opt, r = 0, expire_days = 0, expunge_days = 0, delete_days = 0;
+    int opt, r = 0, expire_days = 0, expunge_days = -1, delete_days = -1, do_expunge = 1;
     char *alt_config = NULL;
     char *find_prefix = NULL;
     char buf[100];
@@ -365,14 +366,14 @@ int main(int argc, char *argv[])
     memset(&erock, 0, sizeof(erock));
     memset(&drock, 0, sizeof(drock));
 
-    while ((opt = getopt(argc, argv, "C:D:E:X:p:va")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:D:E:X:p:vax")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
 	    break;
 
 	case 'D':
-	    if (delete_days) usage();
+	    if (delete_days >= 0) usage();
 	    delete_days = atoi(optarg);
 	    break;
 
@@ -382,8 +383,13 @@ int main(int argc, char *argv[])
 	    break;
 
 	case 'X':
-	    if (expunge_days) usage();
+	    if (expunge_days >= 0) usage();
 	    expunge_days = atoi(optarg);
+	    break;
+
+	case 'x':
+	    if (!do_expunge) usage();
+	    do_expunge = 0;
 	    break;
 
 	case 'p':
@@ -408,6 +414,7 @@ int main(int argc, char *argv[])
     if (!expire_days) usage();
 
     cyrus_init(alt_config, "cyr_expire", 0);
+    global_sasl_init(1, 0, NULL);
 
     annotatemore_init(0, NULL, NULL);
     annotatemore_open(NULL);
@@ -425,40 +432,47 @@ int main(int argc, char *argv[])
 	exit(1);
     }
 
-    /* xxx better way to determine a size for this table? */
-    construct_hash_table(&expire_table, 10000, 1);
+    if (do_expunge) {
+	/* xxx better way to determine a size for this table? */
+	construct_hash_table(&expire_table, 10000, 1);
 
-    /* expire messages from mailboxes,
-     * build a hash table of mailboxes in which we expired messages,
-     * and perform a cleanup of expunged messages
-     */
-    erock.table = &expire_table;
-    erock.expunge_mode = config_getenum(IMAPOPT_EXPUNGE_MODE);
-    erock.expunge_mark = time(0) - (expunge_days * 60 * 60 * 24);
+	/* expire messages from mailboxes,
+	 * build a hash table of mailboxes in which we expired messages,
+	 * and perform a cleanup of expunged messages
+	 */
+	erock.table = &expire_table;
+	erock.expunge_mode = config_getenum(IMAPOPT_EXPUNGE_MODE);
+	if (expunge_days == -1) {
+	    erock.expunge_mark = 0;
+	} else {
+	    erock.expunge_mark = time(0) - (expunge_days * 60 * 60 * 24);
 
-    if (erock.verbose && 
-	erock.expunge_mode != IMAP_ENUM_EXPUNGE_MODE_IMMEDIATE) {
-	fprintf(stderr,
-		"expunging deleted messages in mailboxes older than %d days\n",
-		expunge_days);
+	    if (erock.verbose && 
+		erock.expunge_mode != IMAP_ENUM_EXPUNGE_MODE_IMMEDIATE) {
+		fprintf(stderr,
+			"Expunging deleted messages in mailboxes older than %d days\n",
+			expunge_days);
+	    }
+	}
+
+	if (find_prefix) {
+	    strlcpy(buf, find_prefix, sizeof(buf));
+	} else {
+	    strlcpy(buf, "*", sizeof(buf));
+	}
+
+	mboxlist_findall(NULL, buf, 1, 0, 0, &expire, &erock);
+
+	syslog(LOG_NOTICE, "Expunged %lu out of %lu messages from %lu mailboxes",
+	       erock.deleted, erock.messages, erock.mailboxes);
+	if (erock.verbose) {
+	    fprintf(stderr, "\nExpunged %lu out of %lu messages from %lu mailboxes\n",
+		    erock.deleted, erock.messages, erock.mailboxes);
+	}
     }
 
-    if (find_prefix) {
-	strlcpy(buf, find_prefix, sizeof(buf));
-    } else {
-	strlcpy(buf, "*", sizeof(buf));
-    }
-    mboxlist_findall(NULL, buf, 1, 0, 0, &expire, &erock);
-
-    syslog(LOG_NOTICE, "expunged %lu out of %lu messages from %lu mailboxes",
-	   erock.deleted, erock.messages, erock.mailboxes);
-    if (erock.verbose) {
-	fprintf(stderr, "\nexpunged %lu out of %lu messages from %lu mailboxes\n",
-		erock.deleted, erock.messages, erock.mailboxes);
-    }
-
-    if (mboxlist_delayed_delete_isenabled() &&
-        (deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX))) {
+    if ((delete_days != -1) && mboxlist_delayed_delete_isenabled() &&
+	(deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX))) {
         struct delete_node *node;
         int count = 0;
         
@@ -507,6 +521,7 @@ int main(int argc, char *argv[])
     annotatemore_close();
     annotatemore_done();
     duplicate_done();
+    sasl_done();
     cyrus_done();
 
     exit(r);

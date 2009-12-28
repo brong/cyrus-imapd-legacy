@@ -1,30 +1,48 @@
 /* comparator.c -- comparator functions
  * Larry Greenfield
  * Ken Murchison (rewritten to handle relational ops and non-terminated text)
- * $Id: comparator.c,v 1.18.2.1 2007/11/01 14:39:39 murch Exp $
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Carnegie Mellon University
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: comparator.c,v 1.18.2.2 2009/12/28 21:51:54 murch Exp $
  */
-/***********************************************************
-        Copyright 1999 by Carnegie Mellon University
-
-                      All Rights Reserved
-
-Permission to use, copy, modify, and distribute this software and its
-documentation for any purpose and without fee is hereby granted,
-provided that the above copyright notice appear in all copies and that
-both that copyright notice and this permission notice appear in
-supporting documentation, and that the name of Carnegie Mellon
-University not be used in advertising or publicity pertaining to
-distribution of the software without specific, written prior
-permission.
-
-CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
-THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE FOR
-ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
-OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-******************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -39,6 +57,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "sieve.h"
 #include "bytecode.h"
 #include "xmalloc.h"
+#include "util.h"
 
 /*!!! uses B_CONTAINS not CONTAINS, etc, only works with bytecode*/
 
@@ -252,17 +271,30 @@ static int octet_matches(const char *text, size_t tlen, const char *pat,
 static int octet_regex(const char *text, size_t tlen, const char *pat,
                        void *rock __attribute__((unused)))
 {
-    if (!text[tlen]) {
-	/* NUL-terminated string */
-	return (!regexec((regex_t *) pat, text, 0, NULL, 0));
-    }
-    else {
-	/* regexec() requires a NUL-terminated string */
-	char *buf = (char *) xstrndup(text, tlen);
-	int r = !regexec((regex_t *) pat, buf, 0, NULL, 0);
-	free(buf);
-	return r;
-    }
+    int r;
+
+#ifdef REG_STARTEND
+    /* pcre, BSD, some linuxes support this handy trick */
+    regmatch_t pm[1];
+
+    pm[0].rm_so = 0;
+    pm[0].rm_eo = tlen;
+    r = !regexec((regex_t *) pat, text, 0, pm, REG_STARTEND);
+#else
+#ifdef HAVE_RX_POSIX_H
+    /* rx provides regnexec, that will work too */
+    r = !regnexec((regex_t *) pat, text, tlen, 0, NULL, 0);
+#else
+    /* regexec() requires a NUL-terminated string, and we have no
+     * guarantee that "text" is one.  Also, it may be only exactly
+     * tlen's length, so we can't safely check.  Always dup. */
+    char *buf = (char *) xstrndup(text, tlen);
+    r = !regexec((regex_t *) pat, buf, 0, NULL, 0);
+    free(buf);
+#endif /* HAVE_RX_POSIX_H */
+#endif /* REG_STARTEND */
+
+    return r;
 }
 #endif
 
@@ -312,14 +344,14 @@ static int ascii_numeric_cmp(const char *text, size_t tlen, const char *pat)
     unsigned text_digit_len;
     unsigned pat_digit_len;
 
-    if (isdigit((int) *pat)) {
-	if (isdigit((int) *text)) {
+    if (Uisdigit(*pat)) {
+	if (Uisdigit(*text)) {
 	    /* Count how many digits each string has */
 	    for (text_digit_len = 0;
-		 tlen-- && isdigit((int) text[text_digit_len]);
+		 tlen-- && Uisdigit(text[text_digit_len]);
 		 text_digit_len++);
 	    for (pat_digit_len = 0;
-		 isdigit((int) pat[pat_digit_len]);
+		 Uisdigit(pat[pat_digit_len]);
 		 pat_digit_len++);
 
 	    if (text_digit_len < pat_digit_len) {
@@ -362,7 +394,7 @@ static int ascii_numeric_cmp(const char *text, size_t tlen, const char *pat)
 	} else {
 	    return 1;
 	}
-    } else if (isdigit((int) *text)) {
+    } else if (Uisdigit(*text)) {
 	return -1;
     } else {
 	return 0; /* both not digits */

@@ -1,13 +1,13 @@
 /* libconfig.h -- Header for imapd.conf processing
- * $Id: libconfig.h,v 1.5.2.1 2007/11/01 14:39:36 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: libconfig.h,v 1.5.2.2 2009/12/28 21:51:45 murch Exp $
  */
 
 #ifndef INCLUDED_LIBCONFIG_H
@@ -68,6 +70,7 @@ extern const char *config_filename;
 extern const char *config_dir;
 extern const char *config_defpartition;
 extern const char *config_servername;
+extern enum enum_value config_serverinfo;
 extern const char *config_mupdate_server;
 extern const char *config_defdomain;
 extern const char *config_ident;
@@ -75,6 +78,8 @@ extern int config_hashimapspool;
 extern int config_implicitrights;
 extern enum enum_value config_virtdomains;
 extern enum enum_value config_mupdate_config;
+extern int config_maxquoted;
+extern int config_maxword;
 
 /* config requirement flags */
 #define CONFIG_NEED_PARTITION_DATA (1<<0)

@@ -1,13 +1,13 @@
 /* sync_server.c -- Cyrus synchonization server
  *
- * Copyright (c) 1998-2005 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,10 +39,10 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: sync_server.c,v 1.2.2.4 2009/12/28 21:51:40 murch Exp $
+ *
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
- *
- * $Id: sync_server.c,v 1.2.2.3 2007/11/28 15:18:12 murch Exp $
  */
 
 #include <config.h>
@@ -54,7 +55,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <assert.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/param.h>
@@ -70,6 +70,7 @@
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
 
+#include "assert.h"
 #include "acl.h"
 #include "annotate.h"
 #include "append.h"
@@ -89,6 +90,7 @@
 #include "retry.h"
 #include "seen.h"
 #include "spool.h"
+#include "statuscache.h"
 #include "telemetry.h"
 #include "tls.h"
 #include "user.h"
@@ -194,6 +196,10 @@ static void cmd_delete_sieve(char *user, char *name);
 void usage(void);
 void shut_down(int code) __attribute__ ((noreturn));
 
+#ifdef HAVE_ZLIB
+static void cmd_compress(char *alg);
+static int sync_compress_done = 0;
+#endif
 
 extern void setproctitle_init(int argc, char **argv, char **envp);
 extern int proc_register(const char *progname, const char *clienthost, 
@@ -332,6 +338,11 @@ int service_init(int argc __attribute__((unused)),
     /* Initialize the annotatemore extention */
     annotatemore_init(0, NULL, NULL);
     annotatemore_open(NULL);
+
+    /* Open the statuscache so we can invalidate seen states */
+    if (config_getswitch(IMAPOPT_STATUSCACHE)) {
+	statuscache_open(NULL);
+    }
 
     return 0;
 }
@@ -496,6 +507,11 @@ void shut_down(int code)
 {
     proc_cleanup();
 
+    if (config_getswitch(IMAPOPT_STATUSCACHE)) {
+	statuscache_close();
+	statuscache_done();
+    }
+
     seen_done();
     mboxlist_close();
     mboxlist_done();
@@ -623,10 +639,10 @@ static void cmdloop(void)
 	    continue;
 	}
 
-	if (islower((unsigned char) cmd.s[0])) 
+	if (Uislower(cmd.s[0])) 
 	    cmd.s[0] = toupper((unsigned char) cmd.s[0]);
 	for (p = &cmd.s[1]; *p; p++) {
-	    if (isupper((unsigned char) *p)) *p = tolower((unsigned char) *p);
+	    if (Uisupper(*p)) *p = tolower((unsigned char) *p);
 	}
 
 	/* Only Authenticate/Exit/Restart/Starttls
@@ -713,6 +729,17 @@ static void cmdloop(void)
 			   sync_atoul(arg7.s));
                 continue;
             }
+#ifdef HAVE_ZLIB
+	    else if (!strcmp(cmd.s, "Compress")) {
+		if (c != ' ') goto missingargs;
+		c = getword(sync_in, &arg1);
+		if (c == '\r') c = prot_getc(sync_in);
+		if (c != '\n') goto extraargs;
+
+		cmd_compress(arg1.s);
+		continue;
+	    }
+#endif
             break;
         case 'D':
             if (!strcmp(cmd.s, "Delete")) {
@@ -1315,6 +1342,29 @@ static void cmd_starttls(void)
 }
 #endif /* HAVE_SSL */
 
+#ifdef HAVE_ZLIB
+static void cmd_compress(char *alg)
+{
+    if (sync_compress_done) {
+        prot_printf(sync_out, "NO Compression already active: %s\r\n", alg);
+	return;
+    }
+    if (strcasecmp(alg, "DEFLATE")) {
+        prot_printf(sync_out, "NO Unknown compression algorithm: %s\r\n", alg);
+	return;
+    }
+    if (ZLIB_VERSION[0] != zlibVersion()[0]) {
+        prot_printf(sync_out, "NO Error initializing %s (incompatible zlib version)\r\n", alg);
+	return;
+    }
+    prot_printf(sync_out, "OK %s active\r\n", alg);
+    prot_flush(sync_out);
+    prot_setcompress(sync_in);
+    prot_setcompress(sync_out);
+    sync_compress_done = 1;
+}
+#endif
+
 #if 0
 static int
 user_master_is_local(char *user)
@@ -1367,10 +1417,10 @@ static void cmd_unlock(struct sync_lock *lock, int restart)
 		    error_message(r));
     } else if (restart) {
         prot_printf(sync_out, "OK [RESTART] Unlocked\r\n");
-        syslog(LOG_INFO, "Unlocked [RESTART]");
+        syslog(LOG_DEBUG, "Unlocked [RESTART]");
     } else {
         prot_printf(sync_out, "OK [CONTINUE] Unlocked\r\n");
-        syslog(LOG_INFO, "Unlocked");
+        syslog(LOG_DEBUG, "Unlocked");
     }
 }
 
@@ -1421,6 +1471,7 @@ static void cmd_reserve(char *mailbox_name,
     char *stage_msg_path;
     struct sync_message *message = NULL;
     struct message_guid tmp_guid;
+    unsigned long cache_size;
 
     if ((r = sync_message_list_newstage(message_list, mailbox_name))) {
 	eatline(sync_in,c);
@@ -1488,8 +1539,16 @@ static void cmd_reserve(char *mailbox_name,
 
         if (mailbox_copyfile(mailbox_msg_path, stage_msg_path, 0) != 0) {
             syslog(LOG_ERR, "IOERROR: Unable to link %s -> %s: %m",
-                   message->msg_path, mailbox_msg_path);
+                   mailbox_msg_path, stage_msg_path);
             i++;       /* Failed to reserve message. */
+            continue;
+        }
+
+        cache_size = mailbox_cacherecord_index(&m, msgno, 0);
+        if (!cache_size) {
+            syslog(LOG_ERR, "IOERROR: bogus cache record %s %d",
+                m.name, msgno);
+            i++;       /* Failed to read cache record */
             continue;
         }
 
@@ -1500,7 +1559,7 @@ static void cmd_reserve(char *mailbox_name,
         message->cache_offset = sync_message_list_cache_offset(message_list);
         message->content_lines = record.content_lines;
         message->cache_version = record.cache_version;
-        message->cache_size   = mailbox_cache_size(&m, msgno);
+        message->cache_size   = cache_size;
         
         sync_message_list_cache(message_list,
                                 (char *)(m.cache_base+record.cache_offset),
@@ -1597,7 +1656,7 @@ static void cmd_reset(char *user)
 {
     struct sync_folder_list *list = NULL;
     struct sync_folder *item;
-    char buf[MAX_MAILBOX_NAME+1];
+    char buf[MAX_MAILBOX_BUFFER];
     int r = 0;
     
     /* Nuke subscriptions */
@@ -1724,13 +1783,13 @@ seen_parse(const char *s, unsigned long *first_uidp, unsigned long *last_uidp)
 {
     unsigned long uid;
 
-    if (!isdigit(*s)) {
+    if (!Uisdigit(*s)) {
         *first_uidp = *last_uidp = 0L;
         return(NULL);
     }
 
     uid = 0;
-    while (isdigit(*s)) {
+    while (Uisdigit(*s)) {
         uid *= 10;
         uid += (*s++) -'0';
     }
@@ -1746,7 +1805,7 @@ seen_parse(const char *s, unsigned long *first_uidp, unsigned long *last_uidp)
 
     s++;
     uid = 0;
-    while (isdigit(*s)) {
+    while (Uisdigit(*s)) {
         uid *= 10;
         uid += (*s++) -'0';
     }
@@ -2183,17 +2242,19 @@ static void cmd_setseen_all(char *user, struct buf *data)
 	r = IMAP_IOERROR;
     }
 
-    if (!r && write(filefd, data->s, data->len) == -1) {
+    if (!r && retry_write(filefd, data->s, data->len) == -1) {
 	syslog(LOG_ERR, "IOERROR: writing %s: %m", fnamebuf);
 	r = IMAP_IOERROR;
     }
 
-    /* we were operating on the seen state, so merge it and cleanup */
-    if (!r) seen_merge(fnamebuf, seen_file);
+    /* new seen file from the master is in place */
+    if (filefd != -1) close(filefd);
+
+    /* overwrite the old seen file */
+    if (!r) rename(fnamebuf, seen_file);
+    else unlink(fnamebuf);
 
     free(seen_file);
-    unlink(fnamebuf);
-    if (filefd != -1) close(filefd);
 
     if (r)
         prot_printf(sync_out, "NO Setseen_all Failed on %s: %s\r\n",
@@ -2707,7 +2768,7 @@ static void cmd_rename(char *oldmailboxname, char *newmailboxname)
     int r;
 
     r = mboxlist_renamemailbox(oldmailboxname, newmailboxname, NULL,
-                               1, sync_userid, sync_authstate, 1);
+                               1, sync_userid, sync_authstate, 1, 1);
 
     if (r)
         prot_printf(sync_out, "NO Rename failed %s -> %s: %s\r\n",

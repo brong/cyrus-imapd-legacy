@@ -1,14 +1,13 @@
 /* imapd.h -- Common state for IMAP daemon
- * $Id: imapd.h,v 1.63.2.6 2007/12/13 18:12:42 murch Exp $
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: imapd.h,v 1.63.2.7 2009/12/28 21:51:33 murch Exp $
  */
 
 #ifndef INCLUDED_IMAPD_H
@@ -46,6 +47,7 @@
 
 #include "annotate.h"
 #include "charset.h"
+#include "hash.h"
 #include "mailbox.h"
 #include "prot.h"
 
@@ -247,6 +249,8 @@ struct listargs {
     unsigned ret;		/* Return options */
     const char *ref;		/* Reference name */
     struct strlist *pat;	/* Mailbox pattern(s) */
+    const char *scan;		/* SCAN content */
+    hash_table server_table;	/* for proxying SCAN */
 };
 
 /* Value for List command variant */
@@ -319,14 +323,14 @@ extern int index_store(struct mailbox *mailbox, char *sequence,
 extern int index_search(struct mailbox *mailbox,
 			struct searchargs *searchargs, int usinguid);
 extern int find_thread_algorithm(char *arg);
+extern int index_scan(struct mailbox *mailbox, const char *contents);
 extern int index_sort(struct mailbox *mailbox, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs, int usinguid);
 extern int index_thread(struct mailbox *mailbox, int algorithm,
 			struct searchargs *searchargs, int usinguid);
 extern int index_copy(struct mailbox *mailbox, char *sequence,
 		      int usinguid, char *name, char **copyuidp, int nolink);
-extern int index_status(struct mailbox *mailbox, char *name,
-			   int statusitems);
+extern int index_status(char *mboxname, char *name, unsigned statusitems);
 
 extern int index_getuids(struct mailbox *mailbox, unsigned lowuid);
 extern int index_getstate(struct mailbox *mailbox);
@@ -339,6 +343,10 @@ extern unsigned index_getuid(unsigned msgno);
 extern mailbox_decideproc_t index_expungeuidlist;
 
 /* See lib/charset.h for the definition of receiver. */
+extern void index_getsearchtext_single(struct mailbox* mailbox, unsigned msgno,
+                                       index_search_text_receiver_t receiver,
+                                       void* rock);
+
 extern void index_getsearchtext(struct mailbox* mailbox,
                                 index_search_text_receiver_t receiver,
                                 void* rock);

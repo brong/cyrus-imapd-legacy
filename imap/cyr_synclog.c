@@ -1,13 +1,13 @@
 /* cyr_synclog.c -- add a line to the sync log file for replication
- * 
- * Copyright (c) 1998-2007 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,11 +39,9 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- */
-/*
- * Originally written by Bron Gondwana <brong@fastmail.fm>
+ * $Id: cyr_synclog.c,v 1.1.2.2 2009/12/28 21:51:29 murch Exp $
  *
- * $Id: cyr_synclog.c,v 1.1.2.1 2007/11/01 14:39:31 murch Exp $
+ * Originally written by Bron Gondwana <brong@fastmail.fm>
  */
 
 #include <config.h>
@@ -55,6 +54,8 @@
 
 #include "global.h"
 #include "sync_log.h"
+#include "util.h"
+#include "xmalloc.h"
 
 /* config.c stuff */
 const int config_need_data = 0;
@@ -64,6 +65,10 @@ int main(int argc, char *argv[])
     char *alt_config = NULL;
     char cmd = '\0';
     char opt;
+
+    if ((geteuid()) == 0 && (become_cyrus() != 0)) {
+	fatal("must run as the Cyrus user", EC_USAGE);
+    }
 
     while ((opt = getopt(argc, argv, "C:uvmacqnsb")) != EOF) {
 	switch (opt) {
@@ -150,13 +155,17 @@ int main(int argc, char *argv[])
 	    sync_log_seen(argv[optind], argv[optind+1]);
 	    break;
 	case 'b': /* suBscription */
-	    sync_log_subscribe(argv[optind], argv[optind+1], argv[optind+2]);
+	    sync_log_subscribe(argv[optind], argv[optind+1]);
 	    break;
         default:
             /* just as is! */
             sync_log(argv[optind]);
             break;
     }
+
+    sync_log_done();
+
+    cyrus_done();
 
     return 0;
 }

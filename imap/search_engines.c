@@ -1,13 +1,13 @@
 /* search_engines.c -- Prefiltering routines for SEARCH
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: search_engines.c,v 1.6.2.1 2007/11/01 14:39:35 murch Exp $
+ * $Id: search_engines.c,v 1.6.2.2 2009/12/28 21:51:39 murch Exp $
  */
 
 #include <config.h>
@@ -160,6 +161,8 @@ static int search_strlist(SquatSearchIndex* index, struct mailbox* mailbox,
     memset(tmp, 0, len);
     if (squat_search_execute(index, s, strlen(s), fill_with_hits, &r)
         != SQUAT_OK) {
+      if (squat_get_last_error() == SQUAT_ERR_SEARCH_STRING_TOO_SHORT)
+        return 1; /* The rest of the search is still viable */
       syslog(LOG_DEBUG, "SQUAT string list search failed on string %s "
              "with part types %s", s, part_types);
       return 0;

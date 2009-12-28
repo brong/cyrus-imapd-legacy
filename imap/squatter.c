@@ -1,5 +1,6 @@
 /* squatter.c -- SQUAT-based message indexing tool
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -15,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
+ *    prior written permission. For permission or any legal
  *    details, please contact
- *      Office of Technology Transfer
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: squatter.c,v 1.16.2.2 2007/11/08 20:28:02 murch Exp $
+ * $Id: squatter.c,v 1.16.2.3 2009/12/28 21:51:39 murch Exp $
  */
 
 /*
@@ -121,10 +123,10 @@ void printastring(const char *s __attribute__((unused)))
 
 /* These stats are gathered 1) per mailbox and 2) for the whole operation. */
 typedef struct {
-  int indexed_bytes;    /* How many bytes of processed message text
+  unsigned long indexed_bytes;    /* How many bytes of processed message text
 			   have we indexed? */
-  int indexed_messages; /* How many messages have we indexed? */
-  int index_size;       /* How many bytes is the index using? */
+  unsigned long indexed_messages; /* How many messages have we indexed? */
+  unsigned long index_size;       /* How many bytes is the index using? */
   time_t start_time;    /* When did this operation start? */
   time_t end_time;      /* When did it end? */
 } SquatStats;
@@ -134,6 +136,7 @@ const int SKIP_FUZZ = 60;
 static int verbose = 0;
 static int mailbox_count = 0;
 static int skip_unmodified = 0;
+static int incremental_mode = 0;
 static SquatStats total_stats;
 
 static void start_stats(SquatStats* stats) {
@@ -148,8 +151,8 @@ static void stop_stats(SquatStats* stats) {
 }
 
 static void print_stats(FILE* out, SquatStats* stats) {
-  fprintf(out, "Indexed %d messages (%d bytes) "
-          "into %d index bytes in %d seconds\n",
+  fprintf(out, "Indexed %lu messages (%lu bytes) "
+          "into %lu index bytes in %d seconds\n",
           stats->indexed_messages, stats->indexed_bytes,
           stats->index_size, (int) (stats->end_time - stats->start_time));
 }
@@ -188,6 +191,99 @@ static void fatal_squat_error(const char* s)
 
   exit(98);
 }
+
+/* ====================================================================== */
+
+/* uid_info is used to track which messages exist in old squat index, by
+ * parsing document names (e.g: m456. is part of message UID 456).
+ */
+
+struct uid_item {
+  unsigned long uid;
+  int flagged;
+};
+
+struct uid_info {
+  struct uid_item *list;
+  unsigned long len;
+  unsigned long uidvalidity;
+  int valid;
+};
+
+static void uid_info_init(struct uid_info *uid_info, unsigned long exists)
+{
+  uid_info->list = xmalloc((exists+1)*sizeof(struct uid_item));
+  uid_info->len  = exists;
+  uid_info->uidvalidity = 0L;
+  uid_info->valid = 1;
+}
+
+static void uid_info_free(struct uid_info *uid_info)
+{
+  if (uid_info->list != NULL)
+    free(uid_info->list);
+
+  uid_info->list = NULL;
+}
+
+static void uid_item_init(struct uid_item *uid_item, unsigned long uid)
+{
+  uid_item->uid = uid;
+  uid_item->flagged = 0;
+}
+
+static struct uid_item *find_uid_item(struct uid_info *uid_info,
+                                      unsigned long uid)
+{
+  struct uid_item *list = uid_info->list;
+  unsigned long first = 0;
+  unsigned long last  = uid_info->len;
+
+  /* Binary chop on sorted array */
+  while (first < last) {
+    unsigned long middle = (first + last) / 2;
+
+    if (list[middle].uid == uid)
+      return(&list[middle]);
+    if (list[middle].uid < uid)
+      first = middle + 1;
+    else
+      last = middle;
+  }
+  return(NULL);
+}
+
+/* Populate uid_info map using document names from SquatSearchIndex backend */
+static int doc_check(void *closure, SquatListDoc const* doc)
+{
+  struct uid_info *uid_info = (struct uid_info *)closure;
+  struct uid_item *uid_item;
+  unsigned long uid;
+
+  /* validity will be replaced with new value in same slot */
+  if  (!strncmp(doc->doc_name, "validity.", 9)) {
+    uid_info->uidvalidity = strtoul(doc->doc_name+9, NULL, 10);
+    return(1);
+  }
+
+  if (!strchr("tfcbsmh", doc->doc_name[0])) {
+    syslog(LOG_ERR, "Invalid document name: %s", doc->doc_name);
+    uid_info->valid = 0;
+    return(1);
+  }
+
+  uid = strtoul(doc->doc_name+1, NULL, 10);
+  if ((uid > 0) && (uid_item=find_uid_item(uid_info, uid))) {
+    uid_item->flagged = 1;
+    return(1);
+  }
+
+  /* Remove this UID from the index */
+  return(0);
+}
+
+/* ====================================================================== */
+
 
 typedef struct {
   SquatStats* mailbox_stats;
@@ -287,22 +383,198 @@ static void stats_callback(void* closure __attribute__((unused)),
   }
 }
 
+/* Squat a single open mailbox */
+static int squat_single(struct mailbox *mailbox, int incremental,
+                        char *squat_file_name)
+{
+    char new_file_name[MAX_MAILBOX_PATH+1];
+    SquatStats stats;
+    SquatOptions options;
+    SquatReceiverData data;
+    SquatSearchIndex *old_index = NULL;
+    char uid_validity_buf[30];
+    struct index_record record;
+    struct uid_info  uid_info;
+    struct uid_item *uid_item;
+    struct stat index_file_info;
+    unsigned long lastuid;
+    unsigned msgno;
+    int new_index_fd = -1;
+    int old_index_fd = -1;
+    int r = 0;               /* Using IMAP_* not SQUAT_* return codes here */
+
+    uid_info_init(&uid_info, mailbox->exists);
+
+    strlcpy(new_file_name, squat_file_name, sizeof(new_file_name));
+    strlcat(new_file_name, ".NEW", sizeof(new_file_name));
+
+    if ((new_index_fd = open(new_file_name,
+                             O_CREAT|O_TRUNC|O_WRONLY, 0666)) < 0) {
+      fatal_syserror("Unable to create temporary index file");
+    }
+
+    options.option_mask = SQUAT_OPTION_TMP_PATH | SQUAT_OPTION_STATISTICS;
+    options.tmp_path = mailbox->path;
+    options.stats_callback = stats_callback;
+    options.stats_callback_closure = NULL;
+    data.index = squat_index_init(new_index_fd, &options);
+    if (data.index == NULL) {
+      fatal_squat_error("Initializing index");
+    }
+
+    if (mailbox_read_index_header(mailbox) != 0) {
+      r = IMAP_IOERROR;
+      goto bail;
+    }
+
+    lastuid  = 0;
+    uid_item = uid_info.list;
+    for (msgno = 1; msgno <= mailbox->exists ; msgno++) {
+      if ((r=mailbox_read_index_record(mailbox, msgno, &record)))
+        goto bail;
+      if (record.uid == 0) {
+        syslog(LOG_ERR, "Invalid UID 0 in index for %s: try reconstruct",
+               mailbox->name);
+        r = IMAP_IOERROR;
+        goto bail;
+      }
+      if ((msgno > 1) && (record.uid <= lastuid)) {
+        syslog(LOG_ERR,
+               "UID %lu out of order in index for %s: try reconstruct",
+               record.uid, mailbox->name);
+        r = IMAP_IOERROR;
+        goto bail;
+      }
+      uid_item_init(&uid_item[msgno-1], record.uid);
+      lastuid = record.uid;
+    }
+    /* Add zero UID as an end of list marker: uid_info_init() assigned space */
+    uid_item_init(&uid_item[mailbox->exists], 0);
+
+    /* Open existing index if it exists */
+    old_index_fd   = -1;
+    old_index = NULL;
+    if (incremental &&
+        ((old_index_fd = open(squat_file_name, O_RDONLY)) >= 0) &&
+        (old_index = squat_search_open(old_index_fd)) == NULL) {
+      close(old_index_fd);
+      old_index_fd = -1;
+    }
+
+    /* Fall back to full update if open() or squat_search_open() failed */
+    if (!old_index) incremental = 0;
+
+    if (incremental) {
+      /* Copy existing document names verbatim. They end up with the same
+       * doc_IDs as in the old index, which makes trie copying much simpler.
+       */
+      uid_info.valid       = 1;
+      uid_info.uidvalidity = 0L;
+      squat_index_add_existing(data.index, old_index, doc_check, &uid_info);
+
+      if (!uid_info.valid) {
+        syslog(LOG_ERR,
+               "Corrupt squat index for %s, retrying without incremental",
+               mailbox->name);
+        r = IMAP_IOERROR;
+        goto bail;
+      }
+
+      if (uid_info.uidvalidity != mailbox->uidvalidity) {
+        /* Squat file refers to old mailbox: force full rebuild */
+        r = IMAP_IOERROR;
+        goto bail;
+      }
+    } else {
+      /* write an empty document at the beginning to record the validity
+         nonce */
+      snprintf(uid_validity_buf, sizeof(uid_validity_buf), 
+               "validity.%ld", mailbox->uidvalidity);
+      if (squat_index_open_document(data.index, uid_validity_buf) != SQUAT_OK
+          || squat_index_close_document(data.index) != SQUAT_OK) {
+        fatal_squat_error("Writing index");
+      }
+    }
+
+    data.mailbox       = mailbox;
+    data.mailbox_stats = &stats;
+    start_stats(&stats);
+
+    uid_item =  uid_info.list;
+    index_operatemailbox(mailbox);
+    for (msgno = 1; msgno <= mailbox->exists ; msgno++) {
+      if ((r=mailbox_read_index_record(mailbox, msgno, &record))) {
+        index_closemailbox(mailbox);
+        goto bail;
+      }
+
+      /* Scan uid_item list for matching UID (ascending order, 0 termination) */
+      while (uid_item->uid && (uid_item->uid < record.uid))
+        uid_item++;
+
+      if ((uid_item->uid == record.uid) && uid_item->flagged)
+        continue;
+
+      /* This UID didn't appear in the old index file */
+      index_getsearchtext_single(mailbox, msgno, search_text_receiver, &data);
+      uid_item->flagged = 1;
+    }
+    index_closemailbox(mailbox);
+
+    if (squat_index_finish(data.index) != SQUAT_OK) {
+      if (incremental) {
+        syslog(LOG_ERR,
+               "Corrupt squat index %s, retrying without incremental update",
+               squat_file_name);
+        r = IMAP_IOERROR;
+        goto bail;
+      }
+      /* Just give up if not incremental */
+      fatal_squat_error("Closing index");
+    }
+
+    /* Check how big the resulting file is */
+    if (fstat(new_index_fd, &index_file_info) < 0) {
+      fatal_syserror("Unable to stat temporary index file");
+    }
+    stats.index_size        = index_file_info.st_size;
+    total_stats.index_size += index_file_info.st_size;
+
+    if (close(new_index_fd) < 0) {
+      fatal_syserror("Unable to complete writing temporary index file");
+    }
+    new_index_fd = -1;
+
+    /* OK, we successfully created the index under the temporary file name.
+       Let's rename it to make it the real index. */
+    if (rename(new_file_name, squat_file_name) < 0) {
+      fatal_syserror("Unable to rename temporary index file");
+    }
+
+    stop_stats(&stats);
+    if (verbose > 0) {
+      print_stats(stdout, &stats);
+    }
+
+ bail:
+    if (old_index)             squat_search_close(old_index);
+    if (old_index_fd >= 0)     close(old_index_fd);
+    if (new_index_fd >= 0)     close(new_index_fd);
+    uid_info_free(&uid_info);
+
+    return(r);
+}
+
 /* This is called once for each mailbox we're told to index. */
 static int index_me(char *name, int matchlen __attribute__((unused)),
 		    int maycreate __attribute__((unused)),
 		    void *rock) {
     struct mailbox m;
     int r;
-    SquatStats stats;
-    SquatReceiverData data;
     char squat_file_name[MAX_MAILBOX_PATH+1], *path;
-    char new_file_name[MAX_MAILBOX_PATH+1];
-    int fd;
-    SquatOptions options;
     struct stat squat_file_info;
     struct stat index_file_info;
-    char uid_validity_buf[30];
-    char extname[MAX_MAILBOX_NAME+1];
+    char extname[MAX_MAILBOX_BUFFER];
     int use_annot = *((int *) rock);
     int mbtype;
 
@@ -317,6 +589,9 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
             printf("error opening looking up %s: %s\n",
 		   extname, error_message(r));
         }
+        syslog(LOG_INFO, "error opening looking up %s: %s\n",
+               extname, error_message(r));
+
         return 1;
     }
     if (mbtype & MBTYPE_REMOTE) return 0;
@@ -324,7 +599,7 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
     /* make sure the mailbox (or an ancestor) has
        /vendor/cmu/cyrus-imapd/squat set to "true" */
     if (use_annot) {
-	char buf[MAX_MAILBOX_NAME+1] = "", *p;
+	char buf[MAX_MAILBOX_BUFFER] = "", *p;
 	struct annotation_data attrib;
 	int domainlen = 0;
 
@@ -359,9 +634,6 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
 	    return 0;
     }
 
-    data.mailbox_stats = &stats;
-    data.mailbox = &m;
-
     /* First we have to jump through hoops to open the mailbox and its
        Cyrus index. */
     memset(&m, 0, sizeof(struct mailbox));
@@ -370,6 +642,8 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
         if (verbose) {
             printf("error opening %s: %s\n", extname, error_message(r));
         }
+        syslog(LOG_INFO, "error opening %s: %s\n", extname, error_message(r));
+
         return 1;
     }
 
@@ -379,6 +653,9 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
         if (verbose) {
             printf("error locking index %s: %s\n", extname, error_message(r));
         }
+        syslog(LOG_INFO, "error locking index %s: %s\n",
+               extname, error_message(r));
+
         mailbox_close(&m);
         return 1;
     }
@@ -405,74 +682,48 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
         }
     }
 
-    strlcpy(new_file_name, squat_file_name, sizeof(new_file_name));
-    strlcat(new_file_name, ".NEW", sizeof(new_file_name));
-
     syslog(LOG_INFO, "indexing mailbox %s... ", extname);
     if (verbose > 0) {
       printf("Indexing mailbox %s... ", extname);
     }
 
-    if ((fd = open(new_file_name,
-		   O_CREAT | O_TRUNC | O_WRONLY, S_IREAD | S_IWRITE))
-        < 0) {
-      fatal_syserror("Unable to create temporary index file");
+    if (!incremental_mode || (squat_single(&m, 1, squat_file_name) != 0)) {
+      /* Fall back to complete squat */
+      squat_single(&m, 0, squat_file_name);
     }
 
-    options.option_mask = SQUAT_OPTION_TMP_PATH | SQUAT_OPTION_STATISTICS;
-    options.tmp_path = m.path;
-    options.stats_callback = stats_callback;
-    options.stats_callback_closure = NULL;
-    data.index = squat_index_init(fd, &options);
-    if (data.index == NULL) {
-      fatal_squat_error("Initializing index");
-    }
-
-    /* write an empty document at the beginning to record the validity
-       nonce */
-    snprintf(uid_validity_buf, sizeof(uid_validity_buf), 
-	     "validity.%ld", m.uidvalidity);
-    if (squat_index_open_document(data.index, uid_validity_buf) != SQUAT_OK
-        || squat_index_close_document(data.index) != SQUAT_OK) {
-      fatal_squat_error("Writing index");
-    }
-
-    start_stats(&stats);
-
-    mailbox_read_index_header(&m);
-    index_operatemailbox(&m);
-
-    index_getsearchtext(&m, search_text_receiver, &data);
-
-    index_closemailbox(&m);
     mailbox_close(&m);
-
     mailbox_count++;
 
-    if (squat_index_finish(data.index) != SQUAT_OK) {
-      fatal_squat_error("Closing index");
-    }
+    return 0;
+}
 
-    /* Check how big the resulting file is */
-    if (fstat(fd, &index_file_info) < 0) {
-      fatal_syserror("Unable to stat temporary index file");
-    }
-    stats.index_size = index_file_info.st_size;
-    total_stats.index_size += index_file_info.st_size;
+struct tmpnode {
+    struct tmpnode *next;
+    char *name;
+};
+struct tmplist {
+    struct tmpnode *head;
+    struct tmpnode *tail;
+};
 
-    if (close(fd) < 0) {
-      fatal_syserror("Unable to complete writing temporary index file");
-    }
+static int addmbox(char *name,
+		   int matchlen __attribute__((unused)),
+		   int maycreate __attribute__((unused)),
+		   void *rock)
+{
+    struct tmplist **lptr = (struct tmplist **) rock;
+    struct tmplist *l = *lptr;
+    struct tmpnode *n = xmalloc(sizeof (struct tmpnode));
 
-    /* OK, we successfully created the index under the temporary file name.
-       Let's rename it to make it the real index. */
-    if (rename(new_file_name, squat_file_name) < 0) {
-      fatal_syserror("Unable to rename temporary index file");
-    }
+    n->next = NULL;
+    n->name = xstrdup(name);
 
-    stop_stats(&stats);
-    if (verbose > 0) {
-      print_stats(stdout, &stats);
+    if (l->head) {
+        l->tail->next = n;
+        l->tail = l->tail->next;
+    } else {
+        l->head = l->tail = n;
     }
 
     return 0;
@@ -493,7 +744,7 @@ int main(int argc, char **argv)
 
     setbuf(stdout, NULL);
 
-    while ((opt = getopt(argc, argv, "C:rsav")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:rsiav")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
           alt_config = optarg;
@@ -509,6 +760,10 @@ int main(int argc, char **argv)
 
 	case 's': /* skip unmodifed */
 	  skip_unmodified = 1;
+          break;
+
+	case 'i': /* incremental mode */
+	  incremental_mode = 1;
           break;
 
 	case 'a': /* use /squat annotation */
@@ -539,6 +794,12 @@ int main(int argc, char **argv)
     start_stats(&total_stats);
 
     if (optind == argc) {
+        struct tmplist *l;
+        struct tmpnode *current;
+
+        l = xmalloc(sizeof(struct tmplist));
+        l->head = l->tail = NULL;
+
 	if (rflag) {
 	    fprintf(stderr, "please specify a mailbox to recurse from\n");
 	    exit(EC_USAGE);
@@ -546,7 +807,12 @@ int main(int argc, char **argv)
 	assert(!rflag);
 	strlcpy(buf, "*", sizeof(buf));
 	(*squat_namespace.mboxlist_findall)(&squat_namespace, buf, 1,
-					    0, 0, index_me, &use_annot);
+					    0, 0, addmbox, &l);
+
+        for (current = l->head; current; current = current->next) {
+            index_me(current->name, strlen(current->name), 0, &use_annot);
+            /* Ignore errors: most will be mailboxes moving around */
+        }
     }
 
     for (i = optind; i < argc; i++) {

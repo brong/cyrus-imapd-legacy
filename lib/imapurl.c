@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,10 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * derived from chris newman's code */
-
-/* $Id: imapurl.c,v 1.12.2.1 2007/11/01 14:39:36 murch Exp $ */
+ * $Id: imapurl.c,v 1.12.2.2 2009/12/28 21:51:44 murch Exp $
+ *
+ * derived from chris newman's code
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -51,6 +53,7 @@
 
 #include "imapurl.h"
 #include "xmalloc.h"
+#include "util.h"
 
 /* hexadecimal lookup table */
 static const char hex[] = "0123456789ABCDEF";
@@ -197,7 +200,7 @@ static void MailboxToURL(char *dst, const char *src)
  *  dst should be about twice the length of src to deal with non-hex
  *  coded URLs
  */
-static int URLtoMailbox(char *dst, char *src)
+int URLtoMailbox(char *dst, char *src)
 {
     unsigned int utf8pos = 0, utf8total, i, c, utf7mode, bitstogo, utf16flag;
     unsigned long ucs4 = 0, bitbuf = 0;
@@ -367,7 +370,7 @@ int imapurl_fromURL(struct imapurl *url, const char *s)
     int step = 0;  /* used to force correct ordering of url parts */
 
     memset(url, 0, sizeof(struct imapurl));
-    url->freeme = xmalloc(3 * strlen(s) + 3); /* space for copy of URL +
+    url->freeme = xmalloc(6 * strlen(s) + 3); /* space for copy of URL +
 						 decoded mailbox */
     src = strcpy(url->freeme, s);
 
@@ -464,7 +467,7 @@ int imapurl_fromURL(struct imapurl *url, const char *s)
 		src += 19;
 		if (*src == '.') {
 		    /* skip fractional secs */
-		    while (isdigit((int) *(++src)));
+		    while (Uisdigit(*(++src)));
 		}
 
 		/* handle offset */

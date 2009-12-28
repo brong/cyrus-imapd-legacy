@@ -4,15 +4,12 @@
 <head>
 <meta name="generator" content="HTML Tidy, see www.w3.org" />
 <title>Cyrus IMAP Server FAQ</title>
-<!-- $Id: faq.html,v 1.37 2006/11/30 17:11:16 murch Exp $ -->
+<!-- $Id: faq.html,v 1.37.2.1 2009/12/28 21:51:27 murch Exp $ -->
 </head>
 <body>
 <h1>Cyrus IMAP Server FAQ</h1>
 
 <ul>
-<li><b>Using PAM</b> Under Linux when using PAM and shadow
-passwords, /etc/shadow needs to be readable by the Cyrus user.</li>
-
 <li><b>POP-Before-SMTP</b> It is not included in the default distribution
 because there is already a standard way of doing this with SMTP AUTH.
 Any good MTA and/or MUA should support SMTP AUTH, so we shouldn't have
@@ -48,7 +45,7 @@ href="altnamespace.html#unixhiersep">UNIX hierarchy
 convention</a>.</li>
 
 <li><b>renaming users</b> - Supported, but try to make sure that the
-user is not, and can not login when doing the rename.  Otherwise
+user is not, and cannot login when doing the rename.  Otherwise
 user-meta may get corrupted and/or out of sync.</li>
 
 <li><b>plus addressing</b> - Plus addressing allows direct delivery
@@ -75,9 +72,70 @@ need to conform to the hierarchy separator appropriate to your site.
 href="install-perf.html">the performance guide</a>.</li>
 </ul>
 
+<h2>General Questions</h2>
+
+<dl compact="compact">
+<dt><b>Q:</b> What are the advantages of LMTP?</dt>
+
+<dd>
+<p><b>A:</b> LMTP protocol differs from SMTP in that it causes the
+   Cyrus to return, after the final "." of the DATA command, one
+   reply for each recipient.  If, for example, a server is given a
+   transaction for two recipients, delivery to the first succeeds, and
+   delivery to the second encounters a temporary failure condition,
+   the MTA will get a separate response for each recipient and
+   will only have to reattempt to deliver it to the second recipient.
+   If using SMTP, only a single temporary failure response would be
+   returned, and the entire transaction would have to be reattempted.
+<p>Furthermore, LMTP is superior to invoking command-line delivery
+agents from the MTA in that most ESMTP extensions are supported by
+LMTP, without having to extend any interfaces.
+<p>Lastly, because LMTP can be run over TCP, it allows you to run SMTP
+(and spam/virus scanning) and mailbox access on separate servers, thus
+allowing better scalability.
+</dd>
+
+<dt><b>Q:</b> How do I configure my MTA?</dt>
+
+<dd>
+<p><b>A:</b> See <a href="install-configure.html#mta">Configuring the
+Mail Transfer Agent</a>
+</dd>
+
+<dt><b>Q:</b> How should I configure partitions to deal
+with a large number of users?</dt>
+
+<dd>
+<p><b>A:</b> The key is not to over-subscribe any partitions. Avoid
+putting too many users on any one partition, such that read/write
+performance becomes unacceptable. Good RAID performance (plenty of
+read/write cache, and perhaps RAID 10 instead of RAID 5) will improve
+the number of users a partition can serve.  To benefit from multiple
+partitions, each should be on its own set of disks, served by an
+unsaturated interface (FC, SCSI, SAS, SATA, etc) to the host running
+Cyrus.
+<p>See <a href="install-perf.html">the performance guide</a> or general
+performance guidelines.  Also see <tt>metapartition_files</tt> and
+<tt>metapartition-name</tt> in <tt>imapd.conf.5</tt> for additional
+configuration options which can help with performance, especially if
+you have access to high-speed storage (faster than disks).
+</dd>
+</dl>
+
 <h2>Troubleshooting</h2>
 
 <dl compact="compact">
+<dt><b>Q:</b> Why doesn't <tt>imapd/pop3d/nntpd/lmtpd/timsieved</tt>
+advertise PLAIN or plaintext login commands?</dt>
+
+<dd>
+<p><b>A:</b> Unless otherwise configured, Cyrus services only advertise
+PLAIN or plaintext login commands on encrypted connections
+(SSL-wrapped connections or after a successful STARTTLS command).
+This behavior can be changed with the use of the
+<tt>allowplaintext</tt> option in <tt>imapd.conf.5</tt>.
+</dd>
+
 <dt><b>Q:</b> I'm getting syslog'd messages from the master process
 saying processes are "signaled to death by 10". What's up?</dt>
 
@@ -202,12 +260,12 @@ What's wrong?
 
 <dd>
 <p><b>A:</b> Nothing is wrong. These messages are logged whenever
-Berkeley db encounters lock contention, but isn't necessarily a
-problem by themselves. This is especially likely when you have an
+Berkeley DB encounters lock contention, but aren't necessarily
+problems. This is especially likely when you have an
 empty or small duplicate delivery database and are receiving a large
 volume of e-mail.</p>
 
-<p>Berkeley db 4.0 has a bug where the number of lockers isn't
+<p>Berkeley DB 4.0 has a bug where the number of lockers isn't
 decremented properly, causing this number to be unreliable.</p>
 </dd>
 
@@ -216,13 +274,13 @@ that I receive are being changed to 'X's.  What's going on?</dt>
 
 <dd>
 <p><b>A:</b> 8-bit characters are illegal in message headers.  Following
-the principal of &quot;be liberal in what you accept, and strict in what you
-send&quot; cyrus converts them to Xs.  (Without a character set, having
+the principle of &quot;be liberal in what you accept, and strict in what you
+send&quot;, Cyrus converts them to Xs.  (Without a character set, having
 the 8-bit characters replaced with Xs is just as good as having them be any
 other 8-bit character, especially for sorting and searching).
 Alternatively, you can set &quot;reject8bit: t&quot; in <tt>imapd.conf</tt> to
 reject the messages outright.  It might
-also be reasonable for cyrus to support the use of a default character set,
+also be reasonable for Cyrus to support the use of a default character set,
 however thus far no one has done the work to do so (it would also involve
 QP-encoding the corrupted headers).
 </p>
@@ -233,7 +291,7 @@ I'm using a client with a 'trash folder'.</dt>
 
 <dd>
 <p><b>A:</b>
-Trash folders, as they are commonly implemented (as an actual IMAP mailbox),
+Trash folders, as they are commonly implemented (as actual IMAP mailboxes),
 do not fit the IMAP delete/expunge model very well.  In fact, naive
 client implementations will get stuck in a situation where they cannot
 delete a message from a mailbox because they try to COPY it to the trash
@@ -272,7 +330,7 @@ mechanisms that you require.</p>
 </dl>
 
 <hr />
-last modified: $Date: 2006/11/30 17:11:16 $ <br />
+last modified: $Date: 2009/12/28 21:51:27 $ <br />
 <a href="index.html">Return</a> to the Cyrus IMAP Server Home Page
 </body>
 </html>

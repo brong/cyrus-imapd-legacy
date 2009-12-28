@@ -1,13 +1,13 @@
 /* master.c -- IMAP master process to handle recovery, checkpointing, spawning
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: master.c,v 1.104.2.2 2009/12/28 21:51:50 murch Exp $
  */
-
-/* $Id: master.c,v 1.104.2.1 2007/11/01 14:39:37 murch Exp $ */
 
 #include <config.h>
 
@@ -86,10 +87,17 @@
 #if defined(HAVE_NETSNMP)
   #include <net-snmp/net-snmp-config.h>
   #include <net-snmp/net-snmp-includes.h>
-  #include <net-snmp/agent/agent_module_config.h>
   #include <net-snmp/agent/net-snmp-agent-includes.h>
+#if defined(HAVE_NET_SNMP_AGENT_AGENT_MODULE_CONFIG_H)
+    #include <net-snmp/agent/agent_module_config.h>
+#endif
 
   #include "cyrusMasterMIB.h"
+
+
+  /* Use our own definitions for these */
+  #undef TOUPPER
+  #undef TOLOWER
 
 #elif defined(HAVE_UCDSNMP)
   #include <ucd-snmp/ucd-snmp-config.h>
@@ -138,6 +146,8 @@ struct event {
     char *name;
     time_t mark;
     time_t period;
+    time_t hour;
+    time_t min;
     int periodic;
     char *const *exec;
     struct event *next;
@@ -768,9 +778,26 @@ void spawn_schedule(time_t now)
 	    if(a->periodic) {
 		a->mark = now + a->period;
 	    } else {
+		struct tm *tm;
+		int delta;
 		/* Daily Event */
 		while(a->mark <= now) {
-			a->mark += a->period;
+		    a->mark += a->period;
+		}
+		/* check for daylight savings fuzz... */
+		tm = localtime(&(a->mark));
+		if (tm->tm_hour != a->hour || tm->tm_min != a->min) {
+		    /* calculate the same time on the new day */
+		    tm->tm_hour = a->hour;
+		    tm->tm_min = a->min;
+		    delta = mktime(tm) - a->mark;
+		    /* bring it within half a period either way */
+		    while (delta > (a->period/2)) delta -= a->period;
+		    while (delta < -(a->period/2)) delta += a->period;
+		    /* update the time */
+		    a->mark += delta;
+		    /* and let us know about the change */
+		    syslog(LOG_NOTICE, "timezone shift for %s - altering schedule by %d seconds", a->name, delta);
 		}
 	    }
 	    /* reschedule a */
@@ -910,6 +937,7 @@ void init_janitor(void)
     
     evt->name = xstrdup("janitor periodic wakeup call");
     evt->period = 10;
+    evt->periodic = 1;
     evt->mark = time(NULL) + 2;
     schedule_event(evt);
 }
@@ -959,7 +987,7 @@ void child_janitor(time_t now)
     }
 }
 
-static volatile int gotsigchld = 0;
+static volatile sig_atomic_t gotsigchld = 0;
 
 void sigchld_handler(int sig __attribute__((unused)))
 {
@@ -1242,13 +1270,13 @@ static char **tokenize(char *p)
 
     if (!p || !*p) return NULL; /* sanity check */
     while (*p) {
-	while (*p && isspace((int) *p)) p++; /* skip whitespace */
+	while (*p && Uisspace(*p)) p++; /* skip whitespace */
 
 	if (!(i % 10)) tokens = xrealloc(tokens, (i+10) * sizeof(char *));
 
 	/* got a token */
 	tokens[i++] = p;
-	while (*p && !isspace((int) *p)) p++;
+	while (*p && !Uisspace(*p)) p++;
 
 	/* p is whitespace or end of cmd */
 	if (*p) *p++ = '\0';
@@ -1444,6 +1472,8 @@ void add_event(const char *name, struct entry *e, void *rock)
 
 	period = 86400; /* 24 hours */
 	evt->periodic = 0;
+	evt->hour = hour;
+	evt->min = min;
 	tm->tm_hour = hour;
 	tm->tm_min = min;
 	tm->tm_sec = 0;

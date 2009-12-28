@@ -1,14 +1,13 @@
 /* mupdate-client.c -- cyrus murder database clients
  *
- * $Id: mupdate-client.c,v 1.48.2.1 2007/11/01 14:39:34 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: mupdate-client.c,v 1.48.2.2 2009/12/28 21:51:37 murch Exp $
  */
 
 #include <config.h>
@@ -75,11 +77,27 @@
 #include "mupdate.h"
 #include "prot.h"
 #include "protocol.h"
+#include "util.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 
 const char service_name[] = "mupdate";
+
+static struct protocol_t mupdate_protocol =
+{ "mupdate", "mupdate",
+  { 1, "* OK" },
+  { NULL, NULL, "* OK", NULL,
+    { { "* AUTH ", CAPA_AUTH },
+      { "* STARTTLS", CAPA_STARTTLS },
+      { "* COMPRESS \"DEFLATE\"", CAPA_COMPRESS },
+      { NULL, 0 } } },
+  { "S01 STARTTLS", "S01 OK", "S01 NO", 0 },
+  { "A01 AUTHENTICATE", INT_MAX, 1, "A01 OK", "A01 NO", "", "*", NULL, 0 },
+  { "Z01 COMPRESS \"DEFLATE\"", NULL, "Z01 OK" },
+  { "N01 NOOP", NULL, "N01 OK" },
+  { "Q01 LOGOUT", NULL, "Q01 " }
+};
 
 int mupdate_connect(const char *server,
 		    const char *port __attribute__((unused)),
@@ -112,7 +130,7 @@ int mupdate_connect(const char *server,
 			       config_getstring(IMAPOPT_MUPDATE_PASSWORD));
     }
 
-    h->conn = backend_connect(NULL, server, &protocol[PROTOCOL_MUPDATE],
+    h->conn = backend_connect(NULL, server, &mupdate_protocol,
 			      "", cbs, &status);
 
     /* xxx unclear that this is correct, but it prevents a memory leak */
@@ -168,20 +186,23 @@ int mupdate_activate(mupdate_handle *handle,
 {
     int ret;
     enum mupdate_cmd_response response;
+    const char *p;
     
     if (!handle) return MUPDATE_BADPARAM;
     if (!mailbox || !server || !acl) return MUPDATE_BADPARAM;
     if (!handle->saslcompleted) return MUPDATE_NOAUTH;
 
+    /* make sure we don't have a double server!partition */
+    if ((p = strchr(server, '!')) && strchr(p+1, '!')) return MUPDATE_BADPARAM;
+
     if (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_REPLICATED) {
 	/* we don't care about the server part, everything is local */
-	const char *part = strchr(server, '!');
-
-	if (part) server = part + 1;
+	if (p) server = p + 1;
     }
 
     prot_printf(handle->conn->out,
-		"X%u ACTIVATE {%d+}\r\n%s {%d+}\r\n%s {%d+}\r\n%s\r\n", 
+		"X%u ACTIVATE {" SIZE_T_FMT "+}\r\n%s"
+		" {" SIZE_T_FMT "+}\r\n%s {" SIZE_T_FMT "+}\r\n%s\r\n", 
 		handle->tagn++, strlen(mailbox), mailbox, 
 		strlen(server), server, strlen(acl), acl);
 
@@ -200,20 +221,22 @@ int mupdate_reserve(mupdate_handle *handle,
 {
     int ret;
     enum mupdate_cmd_response response;
+    const char *p;
     
     if (!handle) return MUPDATE_BADPARAM;
     if (!mailbox || !server) return MUPDATE_BADPARAM;
     if (!handle->saslcompleted) return MUPDATE_NOAUTH;
 
+    /* make sure we don't have a double server!partition */
+    if ((p = strchr(server, '!')) && strchr(p+1, '!')) return MUPDATE_BADPARAM;
+
     if (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_REPLICATED) {
 	/* we don't care about the server part, everything is local */
-	const char *part = strchr(server, '!');
-
-	if (part) server = part + 1;
+	if (p) server = p + 1;
     }
 
     prot_printf(handle->conn->out,
-		"X%u RESERVE {%d+}\r\n%s {%d+}\r\n%s\r\n",
+		"X%u RESERVE {" SIZE_T_FMT "+}\r\n%s {" SIZE_T_FMT "+}\r\n%s\r\n",
 		handle->tagn++, strlen(mailbox), mailbox, 
 		strlen(server), server);
 
@@ -232,20 +255,22 @@ int mupdate_deactivate(mupdate_handle *handle,
 {
     int ret;
     enum mupdate_cmd_response response;
+    const char *p;
     
     if (!handle) return MUPDATE_BADPARAM;
     if (!mailbox || !server) return MUPDATE_BADPARAM;
     if (!handle->saslcompleted) return MUPDATE_NOAUTH;
 
+    /* make sure we don't have a double server!partition */
+    if ((p = strchr(server, '!')) && strchr(p+1, '!')) return MUPDATE_BADPARAM;
+
     if (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_REPLICATED) {
 	/* we don't care about the server part, everything is local */
-	const char *part = strchr(server, '!');
-
-	if (part) server = part + 1;
+	if (p) server = p + 1;
     }
 
     prot_printf(handle->conn->out,
-		"X%u DEACTIVATE {%d+}\r\n%s {%d+}\r\n%s\r\n",
+		"X%u DEACTIVATE {" SIZE_T_FMT "+}\r\n%s {" SIZE_T_FMT "+}\r\n%s\r\n",
 		handle->tagn++, strlen(mailbox), mailbox, 
 		strlen(server), server);
 
@@ -270,7 +295,7 @@ int mupdate_delete(mupdate_handle *handle,
     if (!handle->saslcompleted) return MUPDATE_NOAUTH;
 
     prot_printf(handle->conn->out,
-		"X%u DELETE {%d+}\r\n%s\r\n", handle->tagn++, 
+		"X%u DELETE {" SIZE_T_FMT "+}\r\n%s\r\n", handle->tagn++, 
 		strlen(mailbox), mailbox);
 
     ret = mupdate_scarf(handle, mupdate_scarf_one, NULL, 1, &response);
@@ -339,7 +364,7 @@ int mupdate_find(mupdate_handle *handle, const char *mailbox,
     if(!handle || !mailbox || !target) return MUPDATE_BADPARAM;
 
     prot_printf(handle->conn->out,
-		"X%u FIND {%d+}\r\n%s\r\n", handle->tagn++, 
+		"X%u FIND {" SIZE_T_FMT "+}\r\n%s\r\n", handle->tagn++, 
 		strlen(mailbox), mailbox);
 
     memset(&(handle->mailboxdata_buf), 0, sizeof(handle->mailboxdata_buf));
@@ -372,7 +397,7 @@ int mupdate_list(mupdate_handle *handle, mupdate_callback callback,
 
     if(prefix) {
 	prot_printf(handle->conn->out,
-		    "X%u LIST {%d+}\r\n%s\r\n", handle->tagn++,
+		    "X%u LIST {" SIZE_T_FMT "+}\r\n%s\r\n", handle->tagn++,
 		    strlen(prefix), prefix);
     } else {
 	prot_printf(handle->conn->out,
@@ -478,11 +503,11 @@ int mupdate_scarf(mupdate_handle *handle,
 	    break;
 	}
 	
-	if (islower((unsigned char) handle->cmd.s[0])) {
+	if (Uislower(handle->cmd.s[0])) {
 	    handle->cmd.s[0] = toupper((unsigned char) handle->cmd.s[0]);
 	}
 	for (p = &(handle->cmd.s[1]); *p; p++) {
-	    if (islower((unsigned char) *p))
+	    if (Uislower(*p))
 		*p = toupper((unsigned char) *p);
 	}
 	

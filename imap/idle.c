@@ -1,12 +1,12 @@
-/* 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+/*
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -36,9 +37,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: idle.c,v 1.3.2.1 2009/12/28 21:51:29 murch Exp $
  */
-
-/* $Id: idle.c,v 1.3 2006/11/30 17:11:17 murch Exp $ */
 
 #include <config.h>
 
@@ -77,14 +78,14 @@ static int idle_remote_len = 0;
 /*
  * Send a message to idled
  */
-static int idle_send_msg(int msg, struct mailbox *mailbox)
+static int idle_send_msg(int msg, const char *mboxname)
 {
     idle_data_t idledata;
 
     /* fill the structure */
     idledata.msg = msg;
     idledata.pid = getpid();
-    strcpy(idledata.mboxname, mailbox ? mailbox->name : ".");
+    strncpy(idledata.mboxname, mboxname ? mboxname : ".", sizeof(idledata.mboxname));
 
     /* send */
     if (sendto(notify_sock, (void *) &idledata,
@@ -100,12 +101,12 @@ static int idle_send_msg(int msg, struct mailbox *mailbox)
 /*
  * Notify idled of a mailbox change
  */
-void idle_notify(struct mailbox *mailbox)
+void idle_notify(const char *mboxname)
 {
     /* We should try to determine if we need to send this
      * (ie, is an imapd is IDLE on 'mailbox'?).
      */
-    idle_send_msg(IDLE_NOTIFY, mailbox);
+    idle_send_msg(IDLE_NOTIFY, mboxname);
 }
 
 /*
@@ -229,21 +230,21 @@ int idle_init(idle_updateproc_t *proc)
     return 1;
 }
 
-void idle_start(struct mailbox *mailbox)
+void idle_start(const char *mboxname)
 {
     idle_started = 1;
 
     /* Tell idled that we're idling */
-    if (notify_sock == -1 || !idle_send_msg(IDLE_INIT, mailbox)) {
+    if (notify_sock == -1 || !idle_send_msg(IDLE_INIT, mboxname)) {
 	/* otherwise, we'll poll with SIGALRM */
 	alarm(idle_period);
     }
 }
 
-void idle_done(struct mailbox *mailbox)
+void idle_done(const char *mboxname)
 {
     /* Tell idled that we're done idling */
-    if (notify_sock != -1) idle_send_msg(IDLE_DONE, mailbox);
+    if (notify_sock != -1) idle_send_msg(IDLE_DONE, mboxname);
 
     /* Cancel alarm */
     alarm(0);

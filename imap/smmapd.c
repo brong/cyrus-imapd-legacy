@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +15,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -36,6 +37,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: smmapd.c,v 1.14.2.2 2009/12/28 21:51:39 murch Exp $
  *
  * smmapd.c -- sendmail socket map daemon
  *
@@ -71,8 +74,6 @@
  * In case of errors (status TEMP, TIMEOUT or PERM) the result field
  * may contain an explanatory message.
  *
- *
- * $Id: smmapd.c,v 1.14.2.1 2007/11/01 14:39:35 murch Exp $
  */
 
 #include <config.h>
@@ -224,7 +225,7 @@ int service_main(int argc __attribute__((unused)),
 int verify_user(const char *key, long quotacheck,
 		struct auth_state *authstate)
 {
-    char rcpt[MAX_MAILBOX_NAME+1], namebuf[MAX_MAILBOX_NAME+1] = "";
+    char rcpt[MAX_MAILBOX_BUFFER], namebuf[MAX_MAILBOX_BUFFER] = "";
     char *user = rcpt, *domain = NULL, *mailbox = NULL;
     int r = 0;
 
@@ -353,7 +354,7 @@ int verify_user(const char *key, long quotacheck,
                return r;
             }
 
-            sprintf(buf,"%d:cyrus %s,%c",strlen(key)+6,key,4);
+            sprintf(buf,SIZE_T_FMT ":cyrus %s,%c",strlen(key)+6,key,4);
             sendto(soc,buf,strlen(buf),0,(struct sockaddr *)&sin,sizeof(sin));
 
             x = sizeof(sfrom);
@@ -448,17 +449,17 @@ int begin_handling(void)
             break;
 
 	case 0:
-	    prot_printf(map_out, "%d:OK %s,", 3+strlen(key), key);
+	    prot_printf(map_out, SIZE_T_FMT ":OK %s,", 3+strlen(key), key);
 	    break;
 
 	case IMAP_MAILBOX_NONEXISTENT:
-	    prot_printf(map_out, "%d:NOTFOUND %s,",
+	    prot_printf(map_out, SIZE_T_FMT ":NOTFOUND %s,",
 			9+strlen(error_message(r)), error_message(r));
 	    break;
 
 	case IMAP_QUOTA_EXCEEDED:
 	    if (!config_getswitch(IMAPOPT_LMTP_OVER_QUOTA_PERM_FAILURE)) {
-		prot_printf(map_out, "%d:TEMP %s,", strlen(error_message(r))+5,
+		prot_printf(map_out, SIZE_T_FMT ":TEMP %s,", strlen(error_message(r))+5,
 			    error_message(r));
 		break;
 	    }
@@ -466,11 +467,11 @@ int begin_handling(void)
 
 	default:
 	    if (errstring)
-		prot_printf(map_out, "%d:PERM %s (%s),",
+		prot_printf(map_out, SIZE_T_FMT ":PERM %s (%s),",
 			    5+strlen(error_message(r))+3+strlen(errstring),
 			    error_message(r), errstring);
 	    else
-		prot_printf(map_out, "%d:PERM %s,",
+		prot_printf(map_out, SIZE_T_FMT ":PERM %s,",
 			    5+strlen(error_message(r)), error_message(r));
 	    break;
 	}

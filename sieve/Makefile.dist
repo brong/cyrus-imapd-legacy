@@ -1,4 +1,4 @@
-# $Id: Makefile.dist,v 1.8.2.1 2007/11/01 14:39:39 murch Exp $
+# $Id: Makefile.dist,v 1.8.2.2 2009/12/28 21:51:53 murch Exp $
 
 YFLAGS = -d
 

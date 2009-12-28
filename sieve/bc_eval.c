@@ -1,28 +1,46 @@
 /* bc_eval.c - evaluate the bytecode
- * $Id: bc_eval.c,v 1.8.2.1 2007/11/01 14:39:39 murch Exp $
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Carnegie Mellon University
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: bc_eval.c,v 1.8.2.2 2009/12/28 21:51:53 murch Exp $
  */
-/***********************************************************
-        Copyright 2001 by Carnegie Mellon University
-
-                      All Rights Reserved
-
-Permission to use, copy, modify, and distribute this software and its
-documentation for any purpose and without fee is hereby granted,
-provided that the above copyright notice appear in all copies and that
-both that copyright notice and this permission notice appear in
-supporting documentation, and that the name of Carnegie Mellon
-University not be used in advertising or publicity pertaining to
-distribution of the software without specific, written prior
-permission.
-
-CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
-THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
-FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE FOR
-ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
-OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-******************************************************************/
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -40,6 +58,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "util.h"
 
 #include <string.h>
 #include <ctype.h>
@@ -237,7 +256,7 @@ static int shouldRespond(void * m, sieve_interp_t *interp,
     if (interp->getheader(m, buf, &body) == SIEVE_OK) {
 	/* we don't deal with comments, etc. here */
 	/* skip leading white-space */
-	while (*body[0] && isspace((int) *body[0])) body[0]++;
+	while (*body[0] && Uisspace(*body[0])) body[0]++;
 	if (strcasecmp(body[0], "no")) l = SIEVE_DONE;
     }
 
@@ -247,7 +266,7 @@ static int shouldRespond(void * m, sieve_interp_t *interp,
     if (interp->getheader(m, buf, &body) == SIEVE_OK) {
 	/* we don't deal with comments, etc. here */
 	/* skip leading white-space */
-	while (*body[0] && isspace((int) *body[0])) body[0]++;
+	while (*body[0] && Uisspace(*body[0])) body[0]++;
 	if (!strcasecmp(body[0], "junk") ||
 	    !strcasecmp(body[0], "bulk") ||
 	    !strcasecmp(body[0], "list"))
@@ -481,7 +500,7 @@ static int eval_bc_test(sieve_interp_t *interp,
 	int comparator=ntohl(bc[i+3].value);
 	int apart=ntohl(bc[i+4].value);
 	int count=0;
-	char scount[3];
+	char scount[21];
 	int isReg = (match==B_REGEX);
 	int ctag = 0;
 	regex_t *reg;
@@ -650,7 +669,7 @@ static int eval_bc_test(sieve_interp_t *interp,
 	int relation=ntohl(bc[i+2].value);
 	int comparator=ntohl(bc[i+3].value);
 	int count=0;	
-	char scount[3];
+	char scount[21];
 	int isReg = (match==B_REGEX);
 	int ctag = 0;
 	regex_t *reg;
@@ -771,7 +790,7 @@ static int eval_bc_test(sieve_interp_t *interp,
 	int transform=ntohl(bc[i+4].value);
 	/* ntohl(bc[i+5].value) is the now unused 'offset' */
 	int count=0;
-	char scount[3];
+	char scount[21];
 	int isReg = (match==B_REGEX);
 	int ctag = 0;
 	regex_t *reg;

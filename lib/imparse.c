@@ -1,14 +1,13 @@
 /* imparse.c -- IMxP client-side parsing routines
- $Id: imparse.c,v 1.12 2003/02/13 20:15:40 rjs3 Exp $
- 
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,13 +39,15 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- *
+ * $Id: imparse.c,v 1.12.8.1 2009/12/28 21:51:44 murch Exp $
  */
+
 #include <config.h>
 #include <stdio.h>
 #include <ctype.h>
 
 #include "imparse.h"
+#include "util.h"
 
 /*
  * Parse a word from the string starting at the pointer pointed to by 's'.
@@ -62,7 +64,7 @@ char **retval;
     *retval = *s;
     for (;;) {
 	c = *(*s)++;
-	if (!c || isspace(c) || c == '(' || c == ')' || c == '\"') {
+	if (!c || Uisspace(c) || c == '(' || c == ')' || c == '\"') {
 	    (*s)[-1] = '\0';
 	    return c;
 	}
@@ -130,7 +132,7 @@ char **retval;
     case '{':
 	/* Literal */
         (*s)++;
-        while (isdigit(c = *(*s)++)) {
+        while (Uisdigit(c = *(*s)++)) {
             sawdigit = 1;
             len = len*10 + c - '0';
         }
@@ -177,26 +179,26 @@ int imparse_issequence(const char* s)
     while ((c = *s)) {
 	if (c == ',') {
 	    if (!len) return 0;
-	    if (!isdigit((int) s[-1]) && s[-1] != '*') return 0;
+	    if (!Uisdigit(s[-1]) && s[-1] != '*') return 0;
 	    sawcolon = 0;
 	}
 	else if (c == ':') {
 	    if (sawcolon || !len) return 0;
-	    if (!isdigit((int) s[-1]) && s[-1] != '*') return 0;
+	    if (!Uisdigit(s[-1]) && s[-1] != '*') return 0;
 	    sawcolon = 1;
 	}
 	else if (c == '*') {
 	    if (len && s[-1] != ',' && s[-1] != ':') return 0;
-	    if (isdigit((int) s[1])) return 0;
+	    if (Uisdigit(s[1])) return 0;
 	}
-	else if (!isdigit(c)) {
+	else if (!Uisdigit(c)) {
 	    return 0;
 	}
 	s++;
 	len++;
     }
     if (len == 0) return 0;
-    if (!isdigit((int) s[-1]) && s[-1] != '*') return 0;
+    if (!Uisdigit(s[-1]) && s[-1] != '*') return 0;
     return 1;
 }
 
@@ -207,7 +209,7 @@ int imparse_isnumber(const char *s)
 {
     if (!*s) return 0;
     for (; *s; s++) {
-	if (!isdigit((int) *s)) return 0;
+	if (!Uisdigit(*s)) return 0;
     }
     return 1;
 }

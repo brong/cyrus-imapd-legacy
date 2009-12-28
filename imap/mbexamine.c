@@ -1,13 +1,13 @@
 /* mbexamine.c -- examine the contents of a mailbox index and cache
  *
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -16,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +38,9 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: mbexamine.c,v 1.12.2.2 2009/12/28 21:51:35 murch Exp $
  */
-
-/* $Id: mbexamine.c,v 1.12.2.1 2007/11/01 14:39:33 murch Exp $ */
 
 #include <config.h>
 
@@ -107,6 +108,7 @@ const int config_need_data = 0;
 
 /* forward declarations */
 int do_examine(char *name, int matchlen, int maycreate, void *rock);
+int do_quota(char *name, int matchlen, int maycreate, void *rock);
 void usage(void);
 void shut_down(int code);
 
@@ -120,6 +122,7 @@ int main(int argc, char **argv)
     int opt, i, r;
     char buf[MAX_MAILBOX_PATH+1];
     char *alt_config = NULL;
+    int quotachk = 0;
 
     if ((geteuid()) == 0 && (become_cyrus() != 0)) {
 	fatal("must run as the Cyrus user", EC_USAGE);
@@ -129,7 +132,7 @@ int main(int argc, char **argv)
     assert(INDEX_HEADER_SIZE == (OFFSET_SPARE4+4));
     assert(INDEX_RECORD_SIZE == (OFFSET_MODSEQ+4));
 
-    while ((opt = getopt(argc, argv, "C:u:s:")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:u:s:q")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -144,6 +147,10 @@ int main(int argc, char **argv)
 	case 's':
 	    if(wantvalue) usage();
 	    wantvalue = atoi(optarg);
+	    break;
+
+	case 'q':
+	    quotachk = 1;
 	    break;
 	    
 	default:
@@ -168,15 +175,17 @@ int main(int argc, char **argv)
     if (optind == argc) {
 	strlcpy(buf, "*", sizeof(buf));
 	(*recon_namespace.mboxlist_findall)(&recon_namespace, buf, 1, 0, 0,
-					    do_examine, NULL);
+					    quotachk ? do_quota : do_examine,
+					    NULL);
     }
 
     for (i = optind; i < argc; i++) {
 	/* Handle virtdomains and separators in mailboxname */
 	(*recon_namespace.mboxname_tointernal)(&recon_namespace, argv[i],
 					       NULL, buf);
-	(*recon_namespace.mboxlist_findall)(&recon_namespace, buf, 1, 0,
-					    0, do_examine, NULL);
+	(*recon_namespace.mboxlist_findall)(&recon_namespace, buf, 1, 0, 0,
+					    quotachk ? do_quota : do_examine,
+					    NULL);
     }
 
     mboxlist_close();
@@ -189,7 +198,8 @@ void usage(void)
 {
     fprintf(stderr,
 	    "usage: mbexamine [-C <alt_config>] [-s seqnum] mailbox...\n"
-	    "       mbexamine [-C <alt_config>] [-u uid] mailbox...\n");
+	    "       mbexamine [-C <alt_config>] [-u uid] mailbox...\n"
+	    "       mbexamine [-C <alt_config>] -q mailbox...\n");
     exit(EC_USAGE);
 }    
 
@@ -206,8 +216,9 @@ int do_examine(char *name,
     int flag = 0;
     char ext_name_buf[MAX_MAILBOX_PATH+1];
     struct mailbox mailbox;
-    const char *index_base;
-    long int start_offset, record_size;
+    struct index_record record;
+    cacherecord crec;
+    int j;
     
     signals_poll();
 
@@ -309,91 +320,163 @@ int do_examine(char *name,
 
     printf("\n Message Info:\n");
 
-    index_base = mailbox.index_base;
-    start_offset = mailbox.start_offset;
-    record_size = mailbox.record_size;
-    
     for(i=1; i<=mailbox.exists; i++) {
-	const char *cacheitem;
-	int j;
+	mailbox_read_index_record(&mailbox, i, &record);
 
 	if(wantvalue) {
 	    if(!wantuid) {
 		if(i != wantvalue) continue;
 	    } else {
-		if(UID(i) != wantvalue) continue;
+		if(record.uid != wantvalue) continue;
 	    }
 	    flag = 1;
 	}
 
-	printf("%06d> UID:%08d   INT_DATE:%d SENTDATE:%d SIZE:%-6d\n",
-	       i, UID(i), INTERNALDATE(i), SENTDATE(i),
-	       SIZE(i));
-	printf("      > HDRSIZE:%-6d LASTUPD :%ld SYSFLAGS:%08X",
-	       HEADER_SIZE(i), LAST_UPDATED(i), SYSTEM_FLAGS(i));
+	printf("%06d> UID:%08ld   INT_DATE:%ld SENTDATE:%ld SIZE:%-6ld\n",
+	       i, record.uid, record.internaldate,
+	       record.sentdate, record.size);
+	printf("      > HDRSIZE:%-6ld LASTUPD :%ld SYSFLAGS:%08X",
+	       record.header_size, record.last_updated,
+	       record.system_flags);
 	if (mailbox.minor_version >= 5)
-	    printf("   LINES:%-6d\n", CONTENT_LINES(i));
+	    printf("   LINES:%-6ld\n", record.content_lines);
 
 	if (mailbox.minor_version >= 6)
-	    printf("      > CACHEVER:%-2d", CACHE_VERSION(i));
+	    printf("      > CACHEVER:%-2ld", record.cache_version);
 
 	if (mailbox.minor_version >= 7) {
-	    printf(" GUID: %s", message_guid_encode(GUID(i)));
+	    printf(" GUID:%s", message_guid_encode(&record.guid));
 	}
 
 	if (mailbox.minor_version >= 8) {
-	    printf(" MODSEQ:" MODSEQ_FMT, MODSEQ(i));
+	    printf(" MODSEQ:" MODSEQ_FMT, record.modseq);
 	}
 
 	printf("\n");
 
 	printf("      > USERFLAGS:");
 	for(j=(MAX_USER_FLAGS/32)-1; j>=0; j--) {
-	    printf(" %08X", USER_FLAGS(i,j));
+	    printf(" %08X", record.user_flags[j]);
 	}
 	printf("\n");
 
-	cacheitem = mailbox.cache_base + CACHE_OFFSET(i);
-	
-	printf(" Envel>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("BdyStr>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("  Body>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
+	if (mailbox_cacherecord_offset(&mailbox, record.cache_offset, &crec)) {
+	    printf(" Envel>{%d}%.*s\n", crec[CACHE_ENVELOPE].l, 
+		crec[CACHE_ENVELOPE].l, crec[CACHE_ENVELOPE].s);
+	    printf("BdyStr>{%d}%.*s\n", crec[CACHE_BODYSTRUCTURE].l,
+		crec[CACHE_BODYSTRUCTURE].l, crec[CACHE_BODYSTRUCTURE].s);
+	    printf("  Body>{%d}%.*s\n", crec[CACHE_BODY].l,
+		crec[CACHE_BODY].l, crec[CACHE_BODY].s);
 
 #if 0
-	/* xxx print out machine-readable bodystructure? */
-	printf(" Sects>\n");
+	    /* xxx print out machine-readable bodystructure? */
+	    printf(" Sects>\n");
 #endif
 
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("CacHdr>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("  From>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("    To>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("    Cc>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("   Bcc>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
-	cacheitem = CACHE_ITEM_NEXT(cacheitem);
-	printf("Subjct>{%d}%s\n", CACHE_ITEM_LEN(cacheitem),
-	       cacheitem + CACHE_ITEM_SIZE_SKIP);
+	    printf("CacHdr>{%d}%.*s\n", crec[CACHE_HEADERS].l,
+		crec[CACHE_HEADERS].l, crec[CACHE_HEADERS].s);
+	    printf("  From>{%d}%.*s\n", crec[CACHE_FROM].l,
+		crec[CACHE_FROM].l, crec[CACHE_FROM].s);
+	    printf("    To>{%d}%.*s\n", crec[CACHE_TO].l,
+		crec[CACHE_TO].l, crec[CACHE_TO].s);
+	    printf("    Cc>{%d}%.*s\n", crec[CACHE_CC].l,
+		crec[CACHE_CC].l, crec[CACHE_CC].s);
+	    printf("   Bcc>{%d}%.*s\n", crec[CACHE_BCC].l,
+		crec[CACHE_BCC].l, crec[CACHE_BCC].s);
+	    printf("Subjct>{%d}%.*s\n", crec[CACHE_SUBJECT].l,
+		crec[CACHE_SUBJECT].l, crec[CACHE_SUBJECT].s);
+	}
 
 	if(flag) break;
     }
 
     if(wantvalue && !flag) {
 	printf("Desired message not found\n");
+    }
+
+ done:
+    mailbox_close(&mailbox);
+
+    return r;
+}
+
+/*
+ * mboxlist_findall() callback function to examine a mailbox quota usage
+ */
+int do_quota(char *name,
+	       int matchlen __attribute__((unused)),
+	       int maycreate __attribute__((unused)),
+	       void *rock __attribute__((unused)))
+{
+    unsigned i;
+    int r = 0;
+    char ext_name_buf[MAX_MAILBOX_PATH+1];
+    struct mailbox mailbox;
+    struct index_record record;
+    uquota_t total = 0;
+    char fnamebuf[MAILBOX_FNAME_LEN];
+    struct stat sbuf;
+    
+    signals_poll();
+
+    /* Convert internal name to external */
+    (*recon_namespace.mboxname_toexternal)(&recon_namespace, name,
+					   "cyrus", ext_name_buf);
+    printf("Examining %s...", ext_name_buf);
+
+    /* Open/lock header */
+    r = mailbox_open_header(name, 0, &mailbox);
+    if (r) {
+	return r;
+    }
+    if (mailbox.header_fd != -1) {
+	(void) mailbox_lock_header(&mailbox);
+    }
+    mailbox.header_lock_count = 1;
+
+    if (chdir(mailbox.path) == -1) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    /* Attempt to open/lock index */
+    r = mailbox_open_index(&mailbox);
+    if (r) {
+	goto done;
+    } else {
+	(void) mailbox_lock_index(&mailbox);
+    }
+    mailbox.index_lock_count = 1;
+
+    for(i=1; i<=mailbox.exists; i++) {
+	mailbox_read_index_record(&mailbox, i, &record);
+
+	strlcpy(fnamebuf, mailbox.path, sizeof(fnamebuf));
+	strlcat(fnamebuf, "/", sizeof(fnamebuf));
+	mailbox_message_get_fname(&mailbox, record.uid,
+				  fnamebuf + strlen(fnamebuf),
+				  sizeof(fnamebuf) - strlen(fnamebuf));
+
+	if (stat(fnamebuf, &sbuf) != 0) {
+	    syslog(LOG_WARNING,
+		   "Can not open message file %s -- skipping\n", fnamebuf);
+	    continue;
+	}
+
+	if (record.size != (unsigned) sbuf.st_size) {
+	    printf("  Message %lu has INCORRECT size in index record\n", record.uid);
+	    r = 0;
+	    goto done;
+	}
+
+	total += sbuf.st_size;
+    }
+
+    if (mailbox.quota_mailbox_used != total) {
+	printf("  Mailbox has INCORRECT total quota usage\n");
+    }
+    else {
+	printf("  Mailbox has CORRECT total quota usage\n");
     }
 
  done:

@@ -1,14 +1,13 @@
 /* mupdate-slave.c -- cyrus murder database clients
  *
- * $Id: mupdate-slave.c,v 1.28.2.1 2007/11/01 14:39:34 murch Exp $
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -38,6 +38,8 @@
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ *
+ * $Id: mupdate-slave.c,v 1.28.2.2 2009/12/28 21:51:37 murch Exp $
  */
 
 #include <config.h>
@@ -74,6 +76,7 @@
 #include "assert.h"
 #include "imparse.h"
 #include "iptostring.h"
+#include "mpool.h"
 #include "mupdate.h"
 #include "exitcodes.h"
 
@@ -173,15 +176,29 @@ static void mupdate_listen(mupdate_handle *handle, int pingtimeout)
     int waiting_for_noop = 0;
     int kick_fds[KICK_FDS_LEN];
     int num_kick_fds = 0;
+    struct mbent_queue remote_boxes;
+    struct mpool *pool;
+    int r;
     
     if (!handle || !handle->saslcompleted) return;
+
+    pool = new_mpool(131072); /* Arbitrary, but large (128k) */
+
+    /* first get the list of remote mailboxes from the mupdate master */
+    r = mupdate_synchronize_remote(handle, &remote_boxes, pool);
+    if (r) {
+	free_mpool(pool);
+	return;
+    }
 
     /* don't handle connections (and drop current connections)
      * while we sync */
     mupdate_unready();
 
-    /* First, resync the database */
-    if(mupdate_synchronize(handle)) return;
+    /* Now, resync the database by comparing the remote mbox with our local*/
+    r = mupdate_synchronize(&remote_boxes, pool);
+    free_mpool(pool);
+    if (r) return;
 
     mupdate_signal_db_synced();
     

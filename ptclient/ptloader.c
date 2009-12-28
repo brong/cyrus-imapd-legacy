@@ -1,14 +1,13 @@
 /* ptloader.c -- group loader daemon
- */
-/*
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -17,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -39,6 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: ptloader.c,v 1.42.2.3 2009/12/28 21:51:53 murch Exp $
  */
 
 #include <config.h>
@@ -65,9 +66,6 @@
 #include "retry.h"
 #include "xmalloc.h"
 #include "ptloader.h"
-
-static char rcsid[] __attribute__((unused)) = 
-      "$Id: ptloader.c,v 1.42.2.2 2007/11/16 12:33:52 murch Exp $";
 
 struct pts_module *pts_modules[] = {
 #ifdef HAVE_LDAP
@@ -148,7 +146,7 @@ int service_init(int argc, char *argv[], char **envp __attribute__((unused)))
     /* set signal handlers */
     signal(SIGPIPE, SIG_IGN);
 
-    syslog(LOG_NOTICE, "starting: $Id: ptloader.c,v 1.42.2.2 2007/11/16 12:33:52 murch Exp $");
+    syslog(LOG_NOTICE, "starting: $Id: ptloader.c,v 1.42.2.3 2009/12/28 21:51:53 murch Exp $");
 
     while ((opt = getopt(argc, argv, "d:")) != EOF) {
 	switch (opt) {
@@ -205,7 +203,6 @@ int service_main_fd(int c, int argc __attribute__((unused)),
 		    char **argv __attribute__((unused)),
 		    char **envp __attribute__((unused)))
 {
-    char keyinhex[512];
     const char *reply = NULL;
     char user[PTS_DB_KEYSIZE];
     int rc, dsize;
@@ -234,16 +231,14 @@ int service_main_fd(int c, int argc __attribute__((unused)),
 
     memset(&user, 0, sizeof(user));
     if (read(c, &user, size) < 0) {
-        syslog(LOG_ERR, "socket(user; size = %d; key = %s): %m", 
-	       size, keyinhex);
+        syslog(LOG_ERR, "socket(user; size = %d): %m", size);
         reply = "Error reading request (user)";
         goto sendreply;
     }
 
     if (ptclient_debug) {
-	syslog(LOG_DEBUG, "user %s, cacheid %s", user, keyinhex);
+	syslog(LOG_DEBUG, "user %s", user);
     }
-
 
     newstate = ptsmodule_make_authstate(user, size, &reply, &dsize);
 
@@ -262,7 +257,7 @@ int service_main_fd(int c, int argc __attribute__((unused)),
     }
 
  sendreply:
-    if (retry_write(c, reply, strlen(reply)) <0) {
+    if (retry_write(c, reply, strlen(reply) + 1) <0) {
 	syslog(LOG_WARNING, "retry_write: %m");
     }
     close(c);

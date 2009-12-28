@@ -1,12 +1,13 @@
 /* global.c -- Configuration routines
- * Copyright (c) 1998-2003 Carnegie Mellon University.  All rights reserved.
+ *
+ * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -15,14 +16,15 @@
  *
  * 3. The name "Carnegie Mellon University" must not be used to
  *    endorse or promote products derived from this software without
- *    prior written permission. For permission or any other legal
- *    details, please contact  
- *      Office of Technology Transfer
+ *    prior written permission. For permission or any legal
+ *    details, please contact
  *      Carnegie Mellon University
- *      5000 Forbes Avenue
- *      Pittsburgh, PA  15213-3890
- *      (412) 268-4387, fax: (412) 268-7395
- *      tech-transfer@andrew.cmu.edu
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
  *
  * 4. Redistributions of any form whatsoever must retain the following
  *    acknowledgment:
@@ -37,9 +39,8 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ * $Id: global.c,v 1.20.2.2 2009/12/28 21:51:29 murch Exp $
  */
-
-/* $Id: global.c,v 1.20.2.1 2007/11/01 14:39:31 murch Exp $ */
 
 #include <config.h>
 
@@ -48,6 +49,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <syslog.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
@@ -71,6 +73,7 @@
 #include "mutex.h"
 #include "prot.h" /* for PROT_BUFSIZE */
 #include "util.h"
+#include "wildmat.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
@@ -84,7 +87,7 @@ static enum {
 static int cyrus_init_nodb = 0;
 
 int config_fulldirhash;				/* 0 */
-int config_implicitrights;			/* "lca" */
+int config_implicitrights;			/* "lkxa" */
 unsigned long config_metapartition_files;	/* 0 */
 struct cyrusdb_backend *config_mboxlist_db;
 struct cyrusdb_backend *config_quota_db;
@@ -95,6 +98,8 @@ struct cyrusdb_backend *config_mboxkey_db;
 struct cyrusdb_backend *config_duplicate_db;
 struct cyrusdb_backend *config_tlscache_db;
 struct cyrusdb_backend *config_ptscache_db;
+struct cyrusdb_backend *config_statuscache_db;
+struct cyrusdb_backend *config_userdeny_db;
 
 /* Called before a cyrus application starts (but after command line parameters
  * are read) */
@@ -147,11 +152,11 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 
     /* Look up default partition */
     config_defpartition = config_getstring(IMAPOPT_DEFAULTPARTITION);
-    for (p = (char *)config_defpartition; *p; p++) {
-	if (!isalnum((unsigned char) *p))
+    for (p = (char *)config_defpartition; p && *p; p++) {
+	if (!Uisalnum(*p))
 	  fatal("defaultpartition option contains non-alphanumeric character",
 		EC_CONFIG);
-	if (isupper((unsigned char) *p)) *p = tolower((unsigned char) *p);
+	if (Uisupper(*p)) *p = tolower((unsigned char) *p);
     }
 
     /* Look up umask */
@@ -190,6 +195,10 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 	    cyrusdb_fromname(config_getstring(IMAPOPT_TLSCACHE_DB));
 	config_ptscache_db =
 	    cyrusdb_fromname(config_getstring(IMAPOPT_PTSCACHE_DB));
+	config_statuscache_db =
+	    cyrusdb_fromname(config_getstring(IMAPOPT_STATUSCACHE_DB));
+	config_userdeny_db =
+	    cyrusdb_fromname(config_getstring(IMAPOPT_USERDENY_DB));
 
 	/* configure libcyrus as needed */
 	libcyrus_config_setstring(CYRUSOPT_CONFIG_DIR, config_dir);
@@ -221,6 +230,18 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 			       config_getint(IMAPOPT_BERKELEY_TXNS_MAX));
 	libcyrus_config_setstring(CYRUSOPT_DELETERIGHT,
 				  config_getstring(IMAPOPT_DELETERIGHT));
+	libcyrus_config_setstring(CYRUSOPT_SQL_DATABASE,
+				  config_getstring(IMAPOPT_SQL_DATABASE));
+	libcyrus_config_setstring(CYRUSOPT_SQL_ENGINE,
+				  config_getstring(IMAPOPT_SQL_ENGINE));
+	libcyrus_config_setstring(CYRUSOPT_SQL_HOSTNAMES,
+				  config_getstring(IMAPOPT_SQL_HOSTNAMES));
+	libcyrus_config_setstring(CYRUSOPT_SQL_USER,
+				  config_getstring(IMAPOPT_SQL_USER));
+	libcyrus_config_setstring(CYRUSOPT_SQL_PASSWD,
+				  config_getstring(IMAPOPT_SQL_PASSWD));
+	libcyrus_config_setswitch(CYRUSOPT_SQL_USESSL,
+				  config_getswitch(IMAPOPT_SQL_USESSL));
 
 	/* Not until all configuration parameters are set! */
 	libcyrus_init();
@@ -338,7 +359,7 @@ int global_authisa(struct auth_state *authstate, enum imapopt opt)
     while (*val) {
 	char *p;
 	
-	for (p = (char *) val; *p && !isspace((int) *p); p++);
+	for (p = (char *) val; *p && !Uisspace(*p); p++);
 	len = p-val;
 	if(len >= sizeof(buf))
 	    len = sizeof(buf) - 1;
@@ -349,7 +370,7 @@ int global_authisa(struct auth_state *authstate, enum imapopt opt)
 	    return 1;
 	}
 	val = p;
-	while (*val && isspace((int) *val)) val++;
+	while (*val && Uisspace(*val)) val++;
     }
 
     return 0;
@@ -480,7 +501,7 @@ static int acl_ok(const char *user, struct auth_state *authstate)
 {
     struct namespace namespace;
     char *acl;
-    char bufuser[MAX_MAILBOX_NAME], inboxname[MAX_MAILBOX_NAME];
+    char bufuser[MAX_MAILBOX_BUFFER], inboxname[MAX_MAILBOX_BUFFER];
     int r;
 
     /* Set namespace */
@@ -510,6 +531,124 @@ static int acl_ok(const char *user, struct auth_state *authstate)
     return r;
 }
 
+#define DENYDB config_userdeny_db
+#define FNAME_USERDENYDB "/user_deny.db"
+#define USERDENY_VERSION 2
+
+/*
+ * access_ok() checks to see if 'user' is allowed access to 'service'
+ * Returns 1 if so, 0 if not.
+ */
+int access_ok(const char *user, const char *service, char *msgbuf, int size)
+{
+    static char *fname = NULL;
+    struct db *db = NULL;
+    int r, ret = 1;  /* access always granted by default */
+
+    if (!fname) {
+	/* create path to database */
+	fname = xmalloc(strlen(config_dir) + sizeof(FNAME_USERDENYDB) + 1);
+	strcpy(fname, config_dir);
+	strcat(fname, FNAME_USERDENYDB);
+    }
+
+    /* try to open database */
+    r = DENYDB->open(fname, 0, &db);
+    if (r) {
+	/* ignore non-existent DB, report all other errors */
+	if (errno != ENOENT) {
+	    syslog(LOG_WARNING, "DENYDB_ERROR: error opening '%s': %s",
+		   fname, cyrusdb_strerror(r));
+	}
+
+    } else {
+	/* fetch entry for user */
+	const char *data = NULL;
+	int datalen;
+
+	syslog(LOG_DEBUG, "fetching user_deny.db entry for '%s'", user);
+	do {
+	    r = DENYDB->fetch(db, user, strlen(user), &data, &datalen, NULL);
+	} while (r == CYRUSDB_AGAIN);
+
+	if (r || !data || !datalen) {
+	    /* ignore non-existent/empty entry, report all other errors */
+	    if (r != CYRUSDB_NOTFOUND) {
+		syslog(LOG_WARNING,
+		       "DENYDB_ERROR: error reading entry '%s': %s",
+		       user, cyrusdb_strerror(r));
+	    }
+	} else {
+	    /* parse the data */
+	    char *buf, *wild;
+	    unsigned long version;
+
+	    buf = xstrndup(data, datalen);  /* use a working copy */
+
+	    /* check version */
+	    if (((version = strtoul(buf, &wild, 10)) < 1) ||
+		(version > USERDENY_VERSION)) {
+		syslog(LOG_WARNING,
+		       "DENYDB_ERROR: invalid version for entry '%s': %lu",
+		       user, version);
+	    } else if (*wild++ != '\t') {
+		syslog(LOG_WARNING,
+		       "DENYDB_ERROR: missing wildmat for entry '%s'", user);
+	    } else {
+		char *pat, *msg = "Access to this service has been blocked";
+		int not;
+
+		/* check if we have a deny message */
+		switch (version) {
+		case USERDENY_VERSION:
+		    if ((msg = strchr(wild, '\t'))) *msg++ = '\0';
+		    break;
+		}
+
+		/* scan wildmat right to left for a match against our service */
+		syslog(LOG_DEBUG, "wild: '%s'   service: '%s'", wild, service);
+		do {
+		    /* isolate next pattern */
+		    if ((pat = strrchr(wild, ','))) {
+			*pat++ = '\0';
+		    } else {
+			pat = wild;
+		    }
+
+		    /* XXX  trim leading & trailing whitespace? */
+
+		    /* is it a negated pattern? */
+		    not = (*pat == '!');
+		    if (not) ++pat;
+
+		    syslog(LOG_DEBUG, "pat %d:'%s'", not, pat);
+
+		    /* see if pattern matches our service */
+		    if (wildmat(service, pat)) {
+			/* match ==> we're done */
+			ret = not;
+			if (msgbuf) strlcpy(msgbuf, msg, size);
+			break;
+		    }
+
+		    /* continue until we reach head of wildmat */
+		} while (pat != wild);
+	    }
+
+	    free(buf);
+	}
+
+
+	r = DENYDB->close(db);
+	if (r) {
+	    syslog(LOG_WARNING, "DENYDB_ERROR: error closing: %s",
+		   cyrusdb_strerror(r));
+	}
+    }
+
+    return ret;
+}
+
 /* should we allow users to proxy?  return SASL_OK if yes,
    SASL_BADAUTH otherwise */
 int mysasl_proxy_policy(sasl_conn_t *conn,
@@ -532,12 +671,12 @@ int mysasl_proxy_policy(sasl_conn_t *conn,
 	realm++;
 	while (*val) {
 	    if (!strncasecmp(val, realm, strlen(realm)) &&
-		(!val[strlen(realm)] || isspace((int) val[strlen(realm)]))) {
+		(!val[strlen(realm)] || Uisspace(val[strlen(realm)]))) {
 		break;
 	    }
 	    /* not this realm, try next one */
-	    while (*val && !isspace((int) *val)) val++;
-	    while (*val && isspace((int) *val)) val++;
+	    while (*val && !Uisspace(*val)) val++;
+	    while (*val && Uisspace(*val)) val++;
 	}
 	if (!*val) {
 	    sasl_seterror(conn, 0, "cross-realm login %s denied",
@@ -562,6 +701,19 @@ int mysasl_proxy_policy(sasl_conn_t *conn,
 	}
 
 	return SASL_OK;
+    }
+
+    /* is requested_user denied access?  authenticated admins are exempt */
+    if (!userisadmin && !access_ok(requested_user, config_ident, NULL, 0)) {
+	syslog(LOG_ERR, "user '%s' denied access to service '%s'",
+	       requested_user, config_ident);
+	sasl_seterror(conn, SASL_NOLOG,
+		      "user '%s' is denied access to service '%s'",
+		      requested_user, config_ident);
+
+	auth_freestate(authstate);
+
+	return SASL_NOAUTHZ;
     }
 
     if (alen != rlen || strncmp(auth_identity, requested_user, alen)) {
@@ -661,4 +813,65 @@ int shutdown_file(char *buf, int size)
     syslog(LOG_DEBUG, "Shutdown file: %s, closing connection", buf);
 
     return 1;
+}
+
+struct part_stats {
+    char name[MAX_PARTITION_LEN+1]; /* name of part with most space */
+    unsigned long avail;	/* 1k free blocks on freeest part */
+    unsigned long tavail;	/* total 1k free blocks on server */
+    unsigned long fsid[512];	/* array of file system IDs */
+    unsigned nfsid;		/* number of file system IDs */
+};
+
+/*
+ * config_foreachoverflowstring() callback which finds spool partition
+ * with the most available space and totals the space available on
+ * all partitions.
+ */
+static void get_part_stats(const char *key, const char *val, void *rock)
+{
+    struct part_stats *stats = (struct part_stats *) rock;
+    struct statvfs s;
+    unsigned long avail;
+    unsigned i;
+
+    /* not a partition-* config option */
+    if (strncmp("partition-", key, 10)) return;
+
+    /* can't stat the given path */
+    if (statvfs(val, &s)) return;
+
+    /* eliminate duplicate filesystems */
+    for (i = 0; i < stats->nfsid; i++) {
+	if (s.f_fsid == stats->fsid[i]) return;
+    }
+    stats->fsid[stats->nfsid++] = s.f_fsid;
+
+    /* calculate avail space in 1k blocks */
+    avail = (unsigned long) (s.f_bavail * (s.f_frsize / 1024.0));
+
+    /* add to total */
+    stats->tavail += avail;
+
+    if (avail > stats->avail) {
+	/* this part has the most avail space */
+	stats->avail = avail;
+	strlcpy(stats->name, key+10, MAX_PARTITION_LEN);
+    }
+}
+
+/*
+ * Returns the name of the spool partition with the most available space.
+ * Optionally returns the total amount of available space on the server
+ * (all partitions) in 1k blocks.
+ */
+char *find_free_partition(unsigned long *tavail)
+{
+    static struct part_stats stats;
+
+    memset(&stats, 0, sizeof(struct part_stats));
+    config_foreachoverflowstring(get_part_stats, &stats);
+
+    if (tavail) *tavail = stats.tavail;
+    return stats.name;
 }
