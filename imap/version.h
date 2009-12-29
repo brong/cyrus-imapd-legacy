@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: version.h,v 1.141.2.9 2009/12/28 21:51:41 murch Exp $
+ * $Id: version.h,v 1.141.2.10 2009/12/29 16:02:31 murch Exp $
  */
 
 #define _CYRUS_VERSION "v2.4.0"
@@ -62,7 +62,7 @@ enum {
 
 /* CAPABILITIES are defined here, not including TLS/SASL ones,
    and those that are configurable */
-#define CAPA_PREAUTH_STRING "IMAP4 IMAP4rev1 LITERAL+ ID ENABLE"
+#define CAPA_PREAUTH_STRING "IMAP4rev1 LITERAL+ ID ENABLE"
 
 #ifdef HAVE_SSL
 #define CAPA_URLAUTH " URLAUTH URLAUTH=BINARY"

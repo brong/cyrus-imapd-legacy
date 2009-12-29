@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: imapd.c,v 1.502.2.17 2009/12/28 21:51:29 murch Exp $
+ * $Id: imapd.c,v 1.502.2.18 2009/12/29 16:02:28 murch Exp $
  */
 
 #include <config.h>
@@ -281,8 +281,6 @@ void cmd_append(char *tag, char *name, const char *cur_name);
 void cmd_select(char *tag, char *cmd, char *name);
 void cmd_close(char *tag, char *cmd);
 void cmd_fetch(char *tag, char *sequence, int usinguid);
-void cmd_partial(const char *tag, const char *msgno, char *data,
-		 const char *start, const char *count);
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
 void cmd_sort(char *tag, int usinguid);
@@ -296,7 +294,6 @@ void cmd_undump(char *tag, char *name);
 void cmd_xfer(char *tag, char *name, char *toserver, char *topart);
 void cmd_rename(char *tag, char *oldname, char *newname, char *partition);
 void cmd_reconstruct(const char *tag, const char *name, int recursive);
-void cmd_find(char *tag, char *namespace, char *pattern);
 void getlistargs(char *tag, struct listargs *listargs);
 void cmd_list(char *tag, struct listargs *listargs);
 void cmd_changesub(char *tag, char *namespace, char *name, int add);
@@ -369,8 +366,6 @@ void appendsearchargs(struct searchargs *s, struct searchargs *s1,
 			 struct searchargs *s2);
 void freesearchargs(struct searchargs *s);
 static void freesortcrit(struct sortcrit *s);
-
-static int mailboxdata(char *name, int matchlen, int maycreate, void *rock);
 
 static int set_haschildren(char *name, int matchlen, int maycreate,
 			   int *attributes);
@@ -1064,7 +1059,7 @@ void cmdloop()
     int c;
     int ret;
     int usinguid, havepartition, havenamespace, recursive;
-    static struct buf tag, cmd, arg1, arg2, arg3, arg4;
+    static struct buf tag, cmd, arg1, arg2, arg3;
     char *p, shut[MAX_MAILBOX_PATH+1];
     const char *err;
 
@@ -1199,20 +1194,6 @@ void cmdloop()
 		cmd_append(tag.s, arg1.s, NULL);
 
 		snmp_increment(APPEND_COUNT, 1);
-	    }
-	    else goto badcmd;
-	    break;
-
-	case 'B':
-	    if (!strcmp(cmd.s, "Bboard")) {
-		if (c != ' ') goto missingargs;
-		c = getastring(imapd_in, imapd_out, &arg1);
-		if (c == EOF) goto missingargs;
-		prot_ungetc(c, imapd_in);
-
-		cmd_select(tag.s, cmd.s, arg1.s);
-
-		snmp_increment(BBOARD_COUNT, 1);
 	    }
 	    else goto badcmd;
 	    break;
@@ -1378,17 +1359,6 @@ void cmdloop()
 		cmd_fetch(tag.s, arg1.s, usinguid);
 
 		snmp_increment(FETCH_COUNT, 1);
-	    }
-	    else if (!strcmp(cmd.s, "Find")) {
-		c = getword(imapd_in, &arg1);
-		if (c != ' ') goto missingargs;
-		c = getastring(imapd_in, imapd_out, &arg2);
-		if (c == EOF) goto missingargs;
-		if (c == '\r') c = prot_getc(imapd_in);
-		if (c != '\n') goto extraargs;
-		cmd_find(tag.s, arg1.s, arg2.s);
-
-		snmp_increment(FIND_COUNT, 1);
 	    }
 	    else goto badcmd;
 	    break;
@@ -1618,27 +1588,6 @@ void cmdloop()
 		cmd_namespace(tag.s);
 
 		/* xxxx snmp_increment(NAMESPACE_COUNT, 1); */
-	    }
-	    else goto badcmd;
-	    break;
-
-	case 'P':
-	    if (!strcmp(cmd.s, "Partial")) {
-		if (!imapd_mailbox && !backend_current) goto nomailbox;
-		if (c != ' ') goto missingargs;
-		c = getword(imapd_in, &arg1);
-		if (c != ' ') goto missingargs;
-		c = getword(imapd_in, &arg2);
-		if (c != ' ') goto missingargs;
-		c = getword(imapd_in, &arg3);
-		if (c != ' ') goto missingargs;
-		c = getword(imapd_in, &arg4);
-		if (c == '\r') c = prot_getc(imapd_in);
-		if (c != '\n') goto extraargs;
-
-		cmd_partial(tag.s, arg1.s, arg2.s, arg3.s, arg4.s);
-
-		/* xxxx snmp_increment(PARTIAL_COUNT, 1); */
 	    }
 	    else goto badcmd;
 	    break;
@@ -3463,7 +3412,7 @@ void cmd_select(char *tag, char *cmd, char *name)
     char *sequence = NULL, *match_seq = NULL, *match_uid = NULL;
 
     c = prot_getc(imapd_in);
-    if (cmd[0] != 'B' && c == ' ') {
+    if (c == ' ') {
 	static struct buf arg, parm1, parm2;
 
 	c = prot_getc(imapd_in);
@@ -3557,14 +3506,8 @@ void cmd_select(char *tag, char *cmd, char *name)
 	protgroup_delete(protin, backend_current->in);
     }
 
-    if (cmd[0] == 'B') {
-	/* BBoard namespace is empty */
-	r = IMAP_MAILBOX_NONEXISTENT;
-    }
-    else {
-	r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
-						   imapd_userid, mailboxname);
-    }
+    r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
+					       imapd_userid, mailboxname);
 
     if (!r) {
 	r = mlookup(tag, name, mailboxname, &mbtype, NULL, NULL,
@@ -4334,131 +4277,6 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 }
 
 #undef PARSE_PARTIAL /* cleanup */
-
-/*
- * Perform a PARTIAL command
- */
-void cmd_partial(const char *tag, const char *msgno, char *data,
-		 const char *start, const char *count)
-{
-    const char *pc;
-    char *p;
-    struct fetchargs fetchargs;
-    char *section;
-    int prev;
-    int fetchedsomething;
-
-    if (backend_current) {
-	/* remote mailbox */
-	prot_printf(backend_current->out, "%s Partial %s %s %s %s\r\n",
-		    tag, msgno, data, start, count);
-	pipe_including_tag(backend_current, tag, 0);
-	return;
-    }
-
-    /* local mailbox */
-    memset(&fetchargs, 0, sizeof(struct fetchargs));
-
-    for (pc = msgno; *pc; pc++) {
-	if (!Uisdigit(*pc)) break;
-    }
-    if (*pc || !*msgno) {
-	prot_printf(imapd_out, "%s BAD Invalid message number\r\n", tag);
-	return;
-    }
-
-    lcase(data);
-    if (!strcmp(data, "rfc822")) {
-	fetchargs.fetchitems = FETCH_RFC822|FETCH_SETSEEN;
-    }
-    else if (!strcmp(data, "rfc822.header")) {
-	fetchargs.fetchitems = FETCH_HEADER;
-    }
-    else if (!strcmp(data, "rfc822.peek")) {
-	fetchargs.fetchitems = FETCH_RFC822;
-    }
-    else if (!strcmp(data, "rfc822.text")) {
-	fetchargs.fetchitems = FETCH_TEXT|FETCH_SETSEEN;
-    }
-    else if (!strcmp(data, "rfc822.text.peek")) {
-	fetchargs.fetchitems = FETCH_TEXT;
-    }
-    else if (!strncmp(data, "body[", 5) ||
-	     !strncmp(data, "body.peek[", 10)) {
-	p = section = data + 5;
-	if (!strncmp(p, "peek[", 5)) {
-	    p = section += 5;
-	}
-	else {
-	    fetchargs.fetchitems = FETCH_SETSEEN;
-	}
-	while (Uisdigit(*p) || *p == '.') {
-	    if (*p == '.' && (p == section || !Uisdigit(p[1]))) break;
-	    p++;
-	}
-	if (p == section || *p != ']' || p[1]) {
-	    prot_printf(imapd_out, "%s BAD Invalid body section\r\n", tag);
-	    freestrlist(fetchargs.bodysections);
-	    return;
-	}
-	*(p+1) = '\0'; /* Keep the closing bracket in place */
-	appendstrlist(&fetchargs.bodysections, section);
-    }
-    else {
-	prot_printf(imapd_out, "%s BAD Invalid Partial item\r\n", tag);
-	freestrlist(fetchargs.bodysections);
-	return;
-    }
-
-    for (pc = start; *pc; pc++) {
-	if (!Uisdigit(*pc)) break;
-	prev = fetchargs.start_octet;
-	fetchargs.start_octet = fetchargs.start_octet*10 + *pc - '0';
-	if(fetchargs.start_octet < prev) {
-	    fetchargs.start_octet = 0;
-	    break;
-	}
-    }
-    if (*pc || !fetchargs.start_octet) {
-	prot_printf(imapd_out, "%s BAD Invalid starting octet\r\n", tag);
-	freestrlist(fetchargs.bodysections);
-	return;
-    }
-    fetchargs.start_octet--;	/* Normalize to be 0-based */
-    
-    prev = fetchargs.octet_count;
-    for (pc = count; *pc; pc++) {
-	if (!Uisdigit(*pc)) break;
-	prev = fetchargs.octet_count;
-	fetchargs.octet_count = fetchargs.octet_count*10 + *pc - '0';
-	if(fetchargs.octet_count < prev) {
-	    prev = -1;
-	    break;
-	}
-    }
-    if (*pc || !*count || prev == -1) {
-	prot_printf(imapd_out, "%s BAD Invalid octet count\r\n", tag);
-	freestrlist(fetchargs.bodysections);
-	return;
-    }
-
-    fetchargs.fetchitems |= FETCH_IS_PARTIAL;
-
-    index_fetch(imapd_mailbox, msgno, 0, &fetchargs, &fetchedsomething);
-
-    index_check(imapd_mailbox, 0, config_getswitch(IMAPOPT_FLUSHSEENSTATE));
-
-    if (fetchedsomething) {
-	prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		    error_message(IMAP_OK_COMPLETED));
-    } else {
-	prot_printf(imapd_out,
-		    "%s BAD Invalid sequence in PARTIAL command\r\n",
-		    tag);
-    }
-
-    freestrlist(fetchargs.bodysections);
-}
 
 /*
  * Parse and perform a STORE/UID STORE command
@@ -6052,66 +5870,7 @@ void cmd_reconstruct(const char *tag, const char *name, int recursive)
     }
 }	
 
-/*
- * Perform a FIND command
- */
-void cmd_find(char *tag, char *namespace, char *pattern)
-{
-    char *p;
-    lcase(namespace);
-
-    for (p = pattern; *p; p++) {
-	if (*p == '%') *p = '?';
-    }
-
-    if (!strcasecmp(namespace, "mailboxes")) {
-	if (backend_inbox || (backend_inbox = proxy_findinboxserver())) {
-	    /* remote INBOX */
-	    prot_printf(backend_inbox->out, 
-			"%s Lsub \"\" {" SIZE_T_FMT "+}\r\n%s\r\n",
-			tag, strlen(pattern), pattern);
-	    pipe_lsub(backend_inbox, tag, 0, "MAILBOX");
-	} else {
-	    /* local INBOX */
-	    int force = config_getswitch(IMAPOPT_ALLOWALLSUBSCRIBE);
-
-	    /* Translate any separators in pattern */
-	    mboxname_hiersep_tointernal(&imapd_namespace, pattern,
-					config_virtdomains ?
-					strcspn(pattern, "@") : 0);
-
-	    (*imapd_namespace.mboxlist_findsub)(&imapd_namespace, pattern,
-						imapd_userisadmin, imapd_userid,
-						imapd_authstate, mailboxdata,
-						NULL, force);
-	}
-    }
-    else if (!strcasecmp(namespace, "all.mailboxes")) {
-	/* Translate any separators in pattern */
-	mboxname_hiersep_tointernal(&imapd_namespace, pattern,
-				    config_virtdomains ?
-				    strcspn(pattern, "@") : 0);
-
-	(*imapd_namespace.mboxlist_findall)(&imapd_namespace, pattern,
-					    imapd_userisadmin, imapd_userid,
-					    imapd_authstate, mailboxdata, NULL);
-    }
-    else if (!strcasecmp(namespace, "bboards")
-	     || !strcasecmp(namespace, "all.bboards")) {
-	;
-    }
-    else {
-	prot_printf(imapd_out, "%s BAD Invalid FIND subcommand\r\n", tag);
-	return;
-    }
-
-    imapd_check(backend_inbox, 0, 0);
-
-    prot_printf(imapd_out, "%s OK %s\r\n", tag,
-		error_message(IMAP_OK_COMPLETED));
-}
-
-/* no times the callbacks for findall/findsub have been called */
+/* number of times the callbacks for findall/findsub have been called */
 static int list_callback_calls;
 
 /*
@@ -9795,22 +9554,6 @@ static void freesortcrit(struct sortcrit *s)
 	i++;
     } while (s[i].key != SORT_SEQUENCE);
     free(s);
-}
-
-/*
- * Issue a MAILBOX untagged response
- */
-static int mailboxdata(char *name,
-		       int matchlen __attribute__((unused)),
-		       int maycreate __attribute__((unused)),
-		       void *rock __attribute__((unused)))
-{
-    char mboxname[MAX_MAILBOX_BUFFER];
-
-    (*imapd_namespace.mboxname_toexternal)(&imapd_namespace, name,
-					   imapd_userid, mboxname);
-    prot_printf(imapd_out, "* MAILBOX %s\r\n", mboxname);
-    return 0;
 }
 
 static int set_haschildren(char *name, int matchlen,
