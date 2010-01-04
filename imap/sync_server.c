@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: sync_server.c,v 1.2.2.4 2009/12/28 21:51:40 murch Exp $
+ * $Id: sync_server.c,v 1.2.2.5 2010/01/04 16:29:02 murch Exp $
  *
  * Original version written by David Carter <dpc22@cam.ac.uk>
  * Rewritten and integrated into Cyrus by Ken Murchison <ken@oceana.com>
@@ -366,6 +366,12 @@ static void dobanner(void)
 	if (tls_enabled() && !sync_starttls_done) {
 	    prot_printf(sync_out, "* STARTTLS\r\n");
 	}
+
+#ifdef HAVE_ZLIB
+	if (!sync_compress_done && !sync_starttls_done) {
+	    prot_printf(sync_out, "* COMPRESS DEFLATE\r\n");
+	}
+#endif
     }
 
     prot_printf(sync_out,
