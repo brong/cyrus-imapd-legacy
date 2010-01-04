@@ -41,7 +41,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: imtest.c,v 1.110.2.7 2009/12/28 21:51:41 murch Exp $
+ * $Id: imtest.c,v 1.110.2.8 2010/01/04 16:29:30 murch Exp $
  */
 
 #include "config.h"
@@ -2229,7 +2229,8 @@ void usage(char *prog, char *prot)
 	       "             (specify \"\" to not use TLS for authentication)\n");
 #endif /* HAVE_SSL */
 #ifdef HAVE_ZLIB
-    if (!strcasecmp(prot, "imap") || !strcasecmp(prot, "mupdate")) {
+    if (!strcasecmp(prot, "imap") || !strcasecmp(prot, "mupdate") ||
+	!strcasecmp(prot, "csync")) {
 	printf("  -q       : Enable %s COMPRESSion"
 	       " (before last authentication attempt)\n", prot);
     }
@@ -2308,10 +2309,10 @@ static struct protocol_t protocols[] = {
     },
     { "csync", NULL, "csync",
       { 1, "* OK", NULL },
-      { NULL , "* OK", "* STARTTLS", "* SASL ", NULL, NULL },
+      { NULL , "* OK", "* STARTTLS", "* SASL ", "* COMPRESS DEFLATE", NULL },
       { "STARTTLS", "OK", "NO", 1 },
       { "AUTHENTICATE", INT_MAX, 0, "OK", "NO", "+ ", "*", NULL, 0 },
-      { NULL, NULL, NULL, },
+      { "COMPRESS DEFLATE", "OK", "NO" },
       NULL, { "EXIT", "OK" }, NULL, NULL, NULL
     },
     { NULL, NULL, NULL,
