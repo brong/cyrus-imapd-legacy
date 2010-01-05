@@ -38,7 +38,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: imapd.c,v 1.502.2.18 2009/12/29 16:02:28 murch Exp $
+ * $Id: imapd.c,v 1.502.2.19 2010/01/05 00:16:56 murch Exp $
  */
 
 #include <config.h>
@@ -10264,16 +10264,20 @@ void cmd_urlfetch(char *tag)
 	c = getastring(imapd_in, imapd_out, &arg);
 	prot_putc(' ', imapd_out);
 	printstring(arg.s);
-	prot_putc(' ', imapd_out);
 
 	if (extended) {
 	    while (c == ' ') {
 		c = getword(imapd_in, &param);
 
 		ucase(param.s);
-		if (!strcmp(param.s, "BINARY")) {
+		if (!strcmp(param.s, "BODY")) {
+		    if (params & (URLFETCH_BODY | URLFETCH_BINARY)) goto badext;
+		    params |= URLFETCH_BODY;
+		} else if (!strcmp(param.s, "BINARY")) {
+		    if (params & (URLFETCH_BODY | URLFETCH_BINARY)) goto badext;
 		    params |= URLFETCH_BINARY;
 		} else if (!strcmp(param.s, "BODYPARTSTRUCTURE")) {
+		    if (params & URLFETCH_BODYPARTSTRUCTURE) goto badext;
 		    params |= URLFETCH_BODYPARTSTRUCTURE;
 		} else {
 		    goto badext;
@@ -10428,7 +10432,7 @@ void cmd_urlfetch(char *tag)
 		       (index_getuid(msgno) != url.uid)) {
 		r = IMAP_BADURL;
 	    } else {
-		r = index_urlfetch(mailbox, msgno, 0, url.section,
+		r = index_urlfetch(mailbox, msgno, params, url.section,
 				   url.start_octet, url.octet_count,
 				   imapd_out, NULL);
 	    }
@@ -10441,7 +10445,7 @@ void cmd_urlfetch(char *tag)
 	    }
 	}
 
-	if (r) prot_printf(imapd_out, "NIL");
+	if (r) prot_printf(imapd_out, " NIL");
 
     } while (c == ' ');
 
@@ -10460,7 +10464,7 @@ void cmd_urlfetch(char *tag)
     return;
 
   badext:
-    prot_printf(imapd_out, "NIL\r\n");
+    prot_printf(imapd_out, " NIL\r\n");
     prot_printf(imapd_out,
 		"%s BAD Invalid extended URLFETCH parameters\r\n", tag);
     eatline(imapd_in, c);

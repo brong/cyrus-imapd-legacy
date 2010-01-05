@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: imapd.h,v 1.63.2.7 2009/12/28 21:51:33 murch Exp $
+ * $Id: imapd.h,v 1.63.2.8 2010/01/05 00:17:03 murch Exp $
  */
 
 #ifndef INCLUDED_IMAPD_H
@@ -298,8 +298,9 @@ enum {
 
 /* Bitmask for urlfetch params */
 enum {
-    URLFETCH_BINARY =			(1<<0),
-    URLFETCH_BODYPARTSTRUCTURE =	(1<<1)
+    URLFETCH_BODY =			(1<<0),
+    URLFETCH_BINARY =			(1<<1),
+    URLFETCH_BODYPARTSTRUCTURE =	(1<<2)
 };
 
 extern struct protstream *imapd_out, *imapd_in;

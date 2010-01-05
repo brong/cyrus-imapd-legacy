@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: index.c,v 1.219.2.10 2009/12/28 21:51:33 murch Exp $
+ * $Id: index.c,v 1.219.2.11 2010/01/05 00:17:03 murch Exp $
  */
 
 #include <config.h>
@@ -3225,15 +3225,26 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 	size = CACHE_ITEM_BIT32(cacheitem + CACHE_ITEM_SIZE_SKIP);
     }
 
-    /* Handle BINARY request */
-    if (params & URLFETCH_BINARY) {
+    /* Handle extended URLFETCH parameters */
+    if (params & URLFETCH_BODYPARTSTRUCTURE) {
+	prot_printf(pout, " (BODYPARTSTRUCTURE");
+	/* XXX Calculate body part structure */
+	prot_printf(pout, ")");
+    }
+
+    if (params & URLFETCH_BODY) {
+	prot_printf(pout, " (BODY");
+    }
+    else if (params & URLFETCH_BINARY) {
 	int encoding = CACHE_ITEM_BIT32(cacheitem + 2 * 4) & 0xff;
+
+	prot_printf(pout, " (BINARY");
 
 	data = charset_decode_mimebody(data, size, encoding,
 				       &decbuf, 0, (int *) &size);
 	if (!data) {
 	    /* failed to decode */
-	    r = IMAP_NO_UNKNOWN_CTE;
+	    prot_printf(pout, " NIL)");
 	    goto done;
 	}
     }
@@ -3252,10 +3263,10 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 
 	if (domain == DOMAIN_BINARY) {
 	    /* Write size of literal8 */
-	    prot_printf(pout, "~{%u}\r\n", n);
+	    prot_printf(pout, " ~{%u}\r\n", n);
 	} else {
 	    /* Write size of literal */
-	    prot_printf(pout, "{%u}\r\n", n);
+	    prot_printf(pout, " {%u}\r\n", n);
 	}
     }
 
@@ -3266,6 +3277,9 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
 
     /* End of non-text literal -- tell the protstream about it */
     if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
+
+    /* Complete extended URLFETCH response */
+    if (params & (URLFETCH_BODY | URLFETCH_BINARY)) prot_printf(pout, ")");
 
   done:
     /* Close the message file */
