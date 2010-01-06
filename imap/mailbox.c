@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: mailbox.c,v 1.163.2.4 2009/12/28 21:51:34 murch Exp $
+ * $Id: mailbox.c,v 1.163.2.5 2010/01/06 16:36:49 murch Exp $
  */
 
 #include <config.h>
@@ -219,6 +219,11 @@ const struct mailbox_header_cache mailbox_cache_headers[] = {
     { "sender", BIT32_MAX },
     { "subject", BIT32_MAX },
     { "to", BIT32_MAX },
+
+    /* signatures tend to be large, and are useless without the body */
+    { "dkim-signature", BIT32_MAX },
+    { "domainkey-signature", BIT32_MAX },
+    { "domainkey-x509", BIT32_MAX },
 
     /* older versions of PINE (before 4.56) need message-id in the cache too
      * though technically it is a waste of space because it is in
