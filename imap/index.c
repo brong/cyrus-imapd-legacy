@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: index.c,v 1.219.2.11 2010/01/05 00:17:03 murch Exp $
+ * $Id: index.c,v 1.219.2.12 2010/01/06 16:04:48 murch Exp $
  */
 
 #include <config.h>
@@ -3229,6 +3229,7 @@ int index_urlfetch(struct mailbox *mailbox, unsigned msgno,
     if (params & URLFETCH_BODYPARTSTRUCTURE) {
 	prot_printf(pout, " (BODYPARTSTRUCTURE");
 	/* XXX Calculate body part structure */
+	prot_printf(pout, " NIL");
 	prot_printf(pout, ")");
     }
 
