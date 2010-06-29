@@ -65,6 +65,7 @@
 
 #include "assert.h"
 #include "exitcodes.h"
+#include "imparse.h"
 #include "libcyr_cfg.h"
 #include "map.h"
 #include "nonblock.h"
@@ -214,7 +215,7 @@ sasl_conn_t *conn;
 
     if (s->write && s->ptr != s->buf) {
 	/* flush any pending output */
-	if(prot_flush_internal(s,0) == EOF)
+	if (prot_flush_internal(s, 0) == EOF)
 	    return EOF;
     }
    
@@ -709,7 +710,7 @@ int prot_fill(struct protstream *s)
 
 	time(&newtime);
 	snprintf(timebuf, sizeof(timebuf), "<%ld<", newtime);
-	write(s->logfd, timebuf, strlen(timebuf));
+	n = write(s->logfd, timebuf, strlen(timebuf));
 
 	left = s->cnt;
 	ptr = s->ptr;
@@ -750,7 +751,7 @@ static void prot_flush_log(struct protstream *s)
 	
 	time(&newtime);
 	snprintf(timebuf, sizeof(timebuf), ">%ld>", newtime);
-	write(s->logfd, timebuf, strlen(timebuf));
+	n = write(s->logfd, timebuf, strlen(timebuf));
 
 	do {
 	    n = write(s->logfd, ptr, left);
@@ -763,7 +764,7 @@ static void prot_flush_log(struct protstream *s)
 	    }
 	} while (left);
 
-	fsync(s->logfd);
+	(void)fsync(s->logfd);
     }
 }
 
@@ -1047,7 +1048,7 @@ int prot_flush_internal(struct protstream *s, int force)
  done:
     /* are we done with the big buffer? If so, free it. This includes
      * when we exit with error */
-    if(s->big_buffer != PROT_NO_FD &&
+    if (s->big_buffer != PROT_NO_FD &&
        (s->bigbuf_pos == s->bigbuf_len || s->error)) {
 	map_free(&(s->bigbuf_base), &(s->bigbuf_siz));
 	close(s->big_buffer);
@@ -1055,7 +1056,7 @@ int prot_flush_internal(struct protstream *s, int force)
 	s->big_buffer = PROT_NO_FD;
     }
 
-    if(force) {
+    if (force) {
 	/* we don't need to call nonblock() again, because it will be
 	 * set correctly on the next prot_flush_internal() anyway */
 	s->dontblock = save_dontblock;
@@ -1158,7 +1159,7 @@ int prot_printf(struct protstream *s, const char *fmt, ...)
 	prot_write(s, fmt, percent-fmt);
 	switch (*++percent) {
 	case '%':
-	    prot_putc('%', s);
+	    (void)prot_putc('%', s);
 	    break;
 
 	case 'l':
@@ -1224,7 +1225,7 @@ int prot_printf(struct protstream *s, const char *fmt, ...)
 
 	case 'c':
 	    i = va_arg(pvar, int);
-	    prot_putc(i, s);
+	    (void)prot_putc(i, s);
 	    break;
 
 	default:
@@ -1236,6 +1237,54 @@ int prot_printf(struct protstream *s, const char *fmt, ...)
     va_end(pvar);
     if (s->error || s->eof) return EOF;
     return 0;
+}
+
+int prot_printliteral(struct protstream *out, const char *s, size_t size)
+{
+    int r;
+    r = prot_printf(out, "{" SIZE_T_FMT "+}\r\n", size);
+    if (r) return r;
+    return prot_write(out, s, size);
+}
+
+/*
+ * Print 's' as a quoted-string or literal (but not an atom)
+ */
+int prot_printstring(struct protstream *out, const char *s)
+{
+    const char *p;
+    int len = 0;
+
+    if (!s) return prot_printf(out, "NIL");
+
+    /* Look for any non-QCHAR characters */
+    for (p = s; *p && len < 1024; p++) {
+	len++;
+	if (*p & 0x80 || *p == '\r' || *p == '\n'
+	    || *p == '\"' || *p == '%' || *p == '\\') break;
+    }
+
+    /* if it's too long, literal it */
+    if (*p || len >= 1024) {
+	return prot_printliteral(out, s, strlen(s));
+    }
+
+    return prot_printf(out, "\"%s\"", s);
+}
+
+/*
+ * Print 's' as an atom, quoted-string, or literal
+ */
+int prot_printastring(struct protstream *out, const char *s)
+{
+    if (!s) return prot_printf(out, "NIL");
+
+    /* special cases for atoms */
+    if (!*s) return prot_printf(out, "\"\"");
+    if (imparse_isatom(s)) return prot_printf(out, "%s", s);
+
+    /* not an atom, so pass to printstring */
+    return prot_printstring(out, s);
 }
 
 /*
@@ -1548,8 +1597,11 @@ struct protstream *protgroup_getelement(struct protgroup *group,
 					size_t element) 
 {
     assert(group);
-    if(element >= group->next_element) return NULL;
-    else return group->group[element];
+
+    if (element >= group->next_element)
+	return NULL;
+
+    return group->group[element];
 }
 
 /* function versions of the macros */
@@ -1564,9 +1616,9 @@ int prot_getc(struct protstream *s)
     if (s->cnt > 0) {
 	--s->cnt;
 	return *(s->ptr)++;
-    } else {
-	return prot_fill(s);
     }
+
+    return prot_fill(s);
 }
 
 int prot_ungetc(int c, struct protstream *s)
@@ -1585,9 +1637,9 @@ int prot_putc(int c, struct protstream *s)
     assert(s->cnt > 0);
 
     *s->ptr++ = c;
-    if (--s->cnt == 0) {
+
+    if (--s->cnt == 0)
 	return prot_flush_internal(s,0);
-    } else {
-	return 0;
-    }
+
+    return 0;
 }

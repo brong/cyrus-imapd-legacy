@@ -295,19 +295,13 @@ callback_search(struct imclient *imclient,
 	       struct imclient_reply *reply)
 {
     uid_list_t *uids = (uid_list_t *) rock;
-    char *s;
+    const char *s;
     unsigned long num;
 
     s = reply->text;
 
     while (Uisdigit(*s)) {
-	num = 0;
-	
-	while ((*s!='\0') && (*s!=' '))
-	{
-	    num = num*10 + (*s-'0');
-	    s++;
-	}
+	num = parsenum(s, &s);
 
 	if (uids->size >= uids->allocsize)
 	{
@@ -324,7 +318,6 @@ callback_search(struct imclient *imclient,
 	if (*s == '\0') break;
 	s++;
     }
-   
 }
 
 static int send_delete(const char *mbox, const char *uidlist)

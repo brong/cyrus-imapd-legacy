@@ -80,6 +80,8 @@ struct quota {
     int limit;			/* in QUOTA_UNITS */
 };
 
+extern void quota_setroot(struct quota *quota, const char *root);
+
 extern int quota_read(struct quota *quota, struct txn **tid, int wrlock);
 
 extern void quota_commit(struct txn **tid);
@@ -91,6 +93,8 @@ extern int quota_write(struct quota *quota, struct txn **tid);
 extern int quota_delete(struct quota *quota, struct txn **tid);
 
 extern int quota_findroot(char *ret, size_t retlen, const char *name);
+
+extern void quota_free(struct quota *quota);
 
 /* open the quotas db */
 void quotadb_open(char *name);

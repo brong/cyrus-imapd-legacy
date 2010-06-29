@@ -1,4 +1,4 @@
-/* mboxlist.c -- Mailbox list manipulation routines
+/* uboxlist.c -- Mailbox list manipulation routines
  *
  * Copyright (c) 1994-2008 Carnegie Mellon University.  All rights reserved.
  *
@@ -75,6 +75,7 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "user.h"
 
 #include "mboxname.h"
 #include "mupdate-client.h"
@@ -105,38 +106,6 @@ struct change_rock {
     struct txn **tid;
 };
 
-#define FNAME_SUBSSUFFIX ".sub"
-
-/*
- * Convert a partition into a path
- */
-int mboxlist_getpath(const char *partition, const char *name, 
-		     char **pathp, char **mpathp)
-{
-    static char pathresult[MAX_MAILBOX_PATH+1];
-    static char mpathresult[MAX_MAILBOX_PATH+1];
-    const char *root;
-
-    assert(partition && pathp);
-
-    root = config_partitiondir(partition);
-    if (!root) return IMAP_PARTITION_UNKNOWN;
-
-    mailbox_hash_mbox(pathresult, sizeof(pathresult), root, name);
-    *pathp = pathresult;
-
-    if (mpathp) {
-	root = config_metapartitiondir(partition);
-	if (!root) *mpathp = NULL;
-	else {
-	    mailbox_hash_mbox(mpathresult, sizeof(mpathresult), root, name);
-	    *mpathp = mpathresult;
-	}
-    }
-
-    return 0;
-}
-
 char *mboxlist_makeentry(int mbtype, const char *part, const char *acl)
 {
     char *mboxent = (char *) xmalloc(sizeof(char) * 
@@ -153,9 +122,7 @@ char *mboxlist_makeentry(int mbtype, const char *part, const char *acl)
  * is placed in the char * pointed to by it.  If 'acl' is non-nil, a pointer
  * to the mailbox ACL is placed in the char * pointed to by it.
  */
-static int mboxlist_mylookup(const char *name, int *typep,
-			     char **pathp, char **mpathp,
-			     char **partp, char **aclp, 
+static int mboxlist_mylookup(const char *name, struct mboxlist_entry *entry,
 			     struct txn **tid, int wrlock)
 {
     int acllen;
@@ -181,9 +148,13 @@ static int mboxlist_mylookup(const char *name, int *typep,
     }
     switch (r) {
     case CYRUSDB_OK:
+	/* no entry required, just checking if it exists */
+	if (!entry) break;
+
 	/* copy out interesting parts */
 	mbtype = strtol(data, &p, 10);
-	if (typep) *typep = mbtype;
+	entry->name = name;
+	entry->mbtype = mbtype;
 
 	if (*p == ' ') p++;
 	q = partition;
@@ -192,42 +163,17 @@ static int mboxlist_mylookup(const char *name, int *typep,
 	}
 	*q = '\0';
 	p++;
+	entry->partition = partition;
 
-	if (partp) {
-	    *partp = partition;
+	acllen = datalen - (p - data);
+	if (acllen >= aclresultalloced) {
+	    aclresultalloced = acllen + 100;
+	    aclresult = xrealloc(aclresult, aclresultalloced);
 	}
+	memcpy(aclresult, p, acllen);
+	aclresult[acllen] = '\0';
+	entry->acl = aclresult;
 
-	/* construct pathname if requested */
-	if (pathp) {
-	    if (mbtype & MBTYPE_REMOTE) {
-		*pathp = partition;
-		if (mpathp) *mpathp = NULL;
-	    } else if (mbtype & MBTYPE_MOVING) {
-		char *part = strchr(partition, '!');
-		
-		if(!part) return IMAP_SYS_ERROR;
-		else part++; /* skip the !, go to the beginning
-				of the partition name */
-		r = mboxlist_getpath(part, name, pathp, mpathp);
-		if(r) return r;
-	    } else {
-		r = mboxlist_getpath(partition, name, pathp, mpathp);
-		if(r) return r;
-	    }
-	}
-
-	/* the rest is ACL; return it if requested */
-	if (aclp) {
-	    acllen = datalen - (p - data);
-	    if (acllen >= aclresultalloced) {
-		aclresultalloced = acllen + 100;
-		aclresult = xrealloc(aclresult, aclresultalloced);
-	    }
-	    memcpy(aclresult, p, acllen);
-	    aclresult[acllen] = '\0';
-
-	    *aclp = aclresult;
-	}
 	break;
 
     case CYRUSDB_AGAIN:
@@ -255,27 +201,21 @@ static int mboxlist_mylookup(const char *name, int *typep,
  * If 'acl' is non-nil, a pointer to the mailbox ACL is placed in the char
  * pointed to by it.
  */
-int mboxlist_lookup(const char *name, char **aclp, struct txn **tid)
+int mboxlist_lookup(const char *name, struct mboxlist_entry *entry, struct txn **tid)
 {
-    return mboxlist_mylookup(name, NULL, NULL, NULL, NULL, aclp, tid, 0);
-}
-
-int mboxlist_detail(const char *name, int *typep, char **pathp, char **mpathp,
-		    char **partp, char **aclp, struct txn **tid) 
-{
-    return mboxlist_mylookup(name, typep, pathp, mpathp, partp, aclp, tid, 0);
+    return mboxlist_mylookup(name, entry, tid, 0);
 }
 
 int mboxlist_findstage(const char *name, char *stagedir, size_t sd_len) 
 {
     const char *root;
-    char *partition;
+    struct mboxlist_entry mbentry;
     int r;
 
     assert(stagedir != NULL);
 
     /* Find mailbox */
-    r = mboxlist_mylookup(name, NULL, NULL, NULL, &partition, NULL, NULL, 0);
+    r = mboxlist_lookup(name, &mbentry, NULL);
     switch (r) {
     case 0:
 	break;
@@ -284,7 +224,7 @@ int mboxlist_findstage(const char *name, char *stagedir, size_t sd_len)
 	break;
     }
 	    
-    root = config_partitiondir(partition);
+    root = config_partitiondir(mbentry.partition);
     if (!root) return IMAP_PARTITION_UNKNOWN;
 	
     snprintf(stagedir, sd_len, "%s/stage./", root);
@@ -292,14 +232,15 @@ int mboxlist_findstage(const char *name, char *stagedir, size_t sd_len)
     return 0;
 }
 
-int mboxlist_update(char *name, int flags, const char *part, const char *acl,
-		    int localonly)
+int mboxlist_update(const char *name, int mbtype, 
+		    const char *part, const char *uniqueid,
+		    const char *acl, int localonly)
 {
     int r = 0, r2 = 0;
     char *mboxent = NULL;
     struct txn *tid = NULL;
     
-    mboxent = mboxlist_makeentry(flags, part, acl);
+    mboxent = mboxlist_makeentry(mbtype, part, acl);
     r = DB->store(mbdb, name, strlen(name), mboxent, strlen(mboxent), &tid);
     free(mboxent);
     mboxent = NULL;
@@ -348,29 +289,29 @@ int mboxlist_update(char *name, int flags, const char *part, const char *acl,
  */
 /* xxx shouldn't we be using mbtype or getting rid of it entirely? */
 static int
-mboxlist_mycreatemailboxcheck(char *name,
+mboxlist_mycreatemailboxcheck(const char *mboxname,
 			      int new_mbtype __attribute__((unused)),
-			      char *partition, 
-			      int isadmin, char *userid, 
-			      struct auth_state *auth_state, 
+			      const char *partition,
+			      int isadmin, const char *userid,
+			      struct auth_state *auth_state,
 			      char **newacl, char **newpartition,
 			      int RMW, int localonly, int force_user_create,
 			      struct txn **tid)
 {
     int r;
+    struct mboxlist_entry mbentry;
+    char *name = xstrdup(mboxname);
     char *mbox = name;
     char *p;
-    char *acl;
     char *defaultacl, *identifier, *rights;
     char parent[MAX_MAILBOX_BUFFER];
     unsigned long parentlen;
     char *parentname = NULL;
-    char *parentpartition = NULL;
-    char *parentacl = NULL;
     unsigned long parentpartitionlen = 0;
     unsigned long parentacllen = 0;
-    int mbtype;
     int user_folder_limit;
+    char *ourpartition;
+    char *ouracl;
     
     /* Check for invalid name/partition */
     if (partition && strlen(partition) > MAX_PARTITION_LEN) {
@@ -381,7 +322,7 @@ mboxlist_mycreatemailboxcheck(char *name,
 	mbox = p + 1;
     }
     r = mboxname_policycheck(mbox);
-    if (r) return r;
+    if (r && !force_user_create) return r;
 
     /* you must be a real admin to create a local-only mailbox */
     if(!isadmin && localonly) return IMAP_PERMISSION_DENIED;
@@ -394,17 +335,17 @@ mboxlist_mycreatemailboxcheck(char *name,
     }
 
     /* Check to see if new mailbox exists */
-    r = mboxlist_mylookup(name, &mbtype, NULL, NULL, NULL, &acl, tid, RMW);
+    r = mboxlist_mylookup(name, &mbentry, tid, RMW);
     switch (r) {
     case 0:
-	if(mbtype & MBTYPE_RESERVE)
+	if(mbentry.mbtype & MBTYPE_RESERVE)
 	    r = IMAP_MAILBOX_RESERVED;
 	else
 	    r = IMAP_MAILBOX_EXISTS;
 	
 	/* Lie about error if privacy demands */
 	if (!isadmin && 
-	    !(cyrus_acl_myrights(auth_state, acl) & ACL_LOOKUP)) {
+	    !(cyrus_acl_myrights(auth_state, mbentry.acl) & ACL_LOOKUP)) {
 	    r = IMAP_PERMISSION_DENIED;
 	}
 
@@ -424,16 +365,15 @@ mboxlist_mycreatemailboxcheck(char *name,
     while ((parentlen==0) && (p = strrchr(parent, '.')) && !strchr(p, '!')) {
 	*p = '\0';
 
-	r = mboxlist_mylookup(parent, NULL, NULL, NULL, &parentpartition, 
-			      &parentacl, tid, 0);
+	r = mboxlist_mylookup(parent, &mbentry, tid, 0);
 	switch (r) {
 	case 0:
 	  parentlen = strlen(parent);
 	  parentname = parent;
 
-	  parentpartitionlen = strlen(parentpartition);
+	  parentpartitionlen = strlen(mbentry.partition);
 
-	  parentacllen = strlen(parentacl);
+	  parentacllen = strlen(mbentry.acl);
 	  break;
 
 	case IMAP_MAILBOX_NONEXISTENT:
@@ -445,10 +385,10 @@ mboxlist_mycreatemailboxcheck(char *name,
 	}
     }
 
-    /* check the folder limit */
+    /* check the folder limit - XXX bogus for two reasons! (user is admin, domain check failure) */
     if (!isadmin && (user_folder_limit = config_getint(IMAPOPT_USER_FOLDER_LIMIT))) {
 	char buf[MAX_MAILBOX_NAME+1];
-	strncpy(buf, mbox, strlen(mbox));
+	strncpy(buf, mbox, MAX_MAILBOX_NAME);
 	if (!strncmp(buf, "user.", 5)) {
 	    char *firstdot = strchr(buf+5, '.');
 	    if (firstdot) *firstdot = '\0';
@@ -464,23 +404,23 @@ mboxlist_mycreatemailboxcheck(char *name,
     if (parentlen != 0) {
 	/* check acl */
 	if (!isadmin &&
-	    !(cyrus_acl_myrights(auth_state, parentacl) & ACL_CREATE)) {
+	    !(cyrus_acl_myrights(auth_state, mbentry.acl) & ACL_CREATE)) {
 	    return IMAP_PERMISSION_DENIED;
 	}
 
       	/* Copy partition, if not specified */
 	if (partition == NULL) {
-	    partition = xmalloc(parentpartitionlen + 1);
-	    memcpy(partition, parentpartition, parentpartitionlen);
-	    partition[parentpartitionlen] = '\0';
+	    ourpartition = xmalloc(parentpartitionlen + 1);
+	    memcpy(ourpartition, mbentry.partition, parentpartitionlen);
+	    ourpartition[parentpartitionlen] = '\0';
 	} else {
-	    partition = xstrdup(partition);
+	    ourpartition = xstrdup(partition);
 	}
 
 	/* Copy ACL */
-	acl = xmalloc(parentacllen + 1);
-	memcpy(acl, parentacl, parentacllen);
-	acl[parentacllen] = '\0';
+	ouracl = xmalloc(parentacllen + 1);
+	memcpy(ouracl, mbentry.acl, parentacllen);
+	ouracl[parentacllen] = '\0';
 
 	/* Canonicalize case of parent prefix */
 	strncpy(name, parent, strlen(parent));
@@ -489,12 +429,13 @@ mboxlist_mycreatemailboxcheck(char *name,
 	    return IMAP_PERMISSION_DENIED;
 	}
 	
-	acl = xstrdup("");
+	ouracl = xstrdup("");
 	if (!strncmp(mbox, "user.", 5)) {
 	    char *firstdot = strchr(mbox+5, '.');
 	    if (!force_user_create && firstdot) {
 		/* Disallow creating user.X.* when no user.X */
-		free(acl);
+		free(name);
+		free(ouracl);
 		return IMAP_PERMISSION_DENIED;
 	    }
 
@@ -525,7 +466,7 @@ mboxlist_mycreatemailboxcheck(char *name,
 		sprintf(identifier+strlen(identifier),
 			"@%.*s", (int) (mbox - name - 1), name);
 	    }
-	    cyrus_acl_set(&acl, identifier, ACL_MODE_SET, ACL_ALL,
+	    cyrus_acl_set(&ouracl, identifier, ACL_MODE_SET, ACL_ALL,
 		    (cyrus_acl_canonproc_t *)0, (void *)0);
 	    free(identifier);
 	} else {
@@ -542,14 +483,14 @@ mboxlist_mycreatemailboxcheck(char *name,
 		p = rights;
 		while (*p && !Uisspace(*p)) p++;
 		if (*p) *p++ = '\0';
-		cyrus_acl_set(&acl, identifier, ACL_MODE_SET, cyrus_acl_strtomask(rights),
+		cyrus_acl_set(&ouracl, identifier, ACL_MODE_SET, cyrus_acl_strtomask(rights),
 			(cyrus_acl_canonproc_t *)0, (void *)0);
 		identifier = p;
 	    }
 	    free(defaultacl);
 	}
 
-	if (!partition) {  
+	if (!partition) { 
 	    if (config_mupdate_server &&
 		(config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_STANDARD) &&
 		!config_getstring(IMAPOPT_PROXYSERVERS)) {
@@ -569,22 +510,24 @@ mboxlist_mycreatemailboxcheck(char *name,
 		}
 	    }
 	}
-	if (partition) partition = xstrdup(partition);
+	if (partition) ourpartition = xstrdup(partition);
     }
 
-    if (newpartition) *newpartition = partition;
-    else free(partition);
-    if (newacl) *newacl = acl;
-    else free(acl);
+    if (newpartition) *newpartition = ourpartition;
+    else free(ourpartition);
+    if (newacl) *newacl = ouracl;
+    else free(ouracl);
 
     return 0;
 }
 
 int
-mboxlist_createmailboxcheck(char *name, int mbtype, char *partition, 
-			    int isadmin, char *userid, 
+mboxlist_createmailboxcheck(const char *name, int mbtype,
+			    const char *partition, 
+			    int isadmin, const char *userid, 
 			    struct auth_state *auth_state, 
-			    char **newacl, char **newpartition, int forceuser)
+			    char **newacl, char **newpartition,
+			    int forceuser)
 {
     return mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin,
 					 userid, auth_state, newacl, 
@@ -605,19 +548,22 @@ mboxlist_createmailboxcheck(char *name, int mbtype, char *partition,
  *
  */
 
-int mboxlist_createmailbox(char *name, int mbtype, char *partition, 
-			   int isadmin, char *userid, 
-			   struct auth_state *auth_state,
-			   int localonly, int forceuser, int dbonly)
+int mboxlist_createmailbox_full(const char *name, int mbtype,
+				const char *partition,
+				int isadmin, const char *userid,
+				struct auth_state *auth_state,
+				int options, unsigned uidvalidity,
+				const char *copyacl, const char *uniqueid,
+				int localonly, int forceuser, int dbonly)
 {
     int r;
-    char *acl = NULL;
     char *newpartition = NULL;
     struct txn *tid = NULL;
     mupdate_handle *mupdate_h = NULL;
     char *mboxent = NULL;
     int newreserved = 0; /* made reserved entry in local mailbox list */
     int madereserved = 0; /* made reserved entry on mupdate server */
+    char *acl = NULL;
 
     /* Must be atleast MAX_PARTITION_LEN + 30 for partition, need
      * MAX_PARTITION_LEN + HOSTNAME_SIZE + 2 for mupdate location */
@@ -626,29 +572,34 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
  retry:
     tid = NULL;
 
-    /* 2. verify ACL's to best of ability (CRASH: abort) */
-    r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, 
-				      userid, auth_state, 
-				      &acl, &newpartition, 1, localonly,
-				      forceuser, &tid);
-    switch (r) {
-    case 0:
-	break;
-    case IMAP_AGAIN:
-	goto retry;
-    default:
-	goto done;
+    if (copyacl) {
+	newpartition = xstrdup(partition);
+	acl = xstrdup(copyacl);
+    }
+    else {
+	/* 2. verify ACL's to best of ability (CRASH: abort) */
+	r = mboxlist_mycreatemailboxcheck(name, mbtype, partition, isadmin, 
+					  userid, auth_state, 
+					  &acl, &newpartition, 1, localonly,
+					  forceuser, &tid);
+	switch (r) {
+	case 0:
+	    break;
+	case IMAP_AGAIN:
+	    goto retry;
+	default:
+	    goto done;
+	}
     }
 
     /* You can't explicitly create a MOVING or RESERVED mailbox */
-    if(mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
+    if (mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
 	r = IMAP_MAILBOX_NOTSUPPORTED;
 	goto done;
     }
 
     /* 3a. Reserve mailbox in local database */
-    mboxent = mboxlist_makeentry(mbtype | MBTYPE_RESERVE,
-				 newpartition, acl);
+    mboxent = mboxlist_makeentry(mbtype | MBTYPE_RESERVE, newpartition, acl);
     r = DB->store(mbdb, name, strlen(name), 
 		  mboxent, strlen(mboxent), &tid);
     free(mboxent);
@@ -689,11 +640,11 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
  done: /* All checks compete.  Time to fish or cut bait. */
     if (!r && !dbonly && !(mbtype & MBTYPE_REMOTE)) {
 	/* Filesystem Operations */
-	r = mailbox_create(name, newpartition, acl, NULL,
-			   ((mbtype & MBTYPE_NETNEWS) ?
-			    MAILBOX_FORMAT_NETNEWS :
-			    MAILBOX_FORMAT_NORMAL), 
+	r = mailbox_create(name, newpartition, acl, uniqueid,
+			   options, uidvalidity,
 			   NULL);
+	if (!r && mboxname_isusermailbox(name, 1))
+	    sync_log_user(mboxname_to_userid(name));
     }
 
     if (r) { /* CREATE failed */ 
@@ -776,13 +727,39 @@ int mboxlist_createmailbox(char *name, int mbtype, char *partition,
 	}
     }
 
-    if(config_mupdate_server && mupdate_h) mupdate_disconnect(&mupdate_h);
+    if (mupdate_h) mupdate_disconnect(&mupdate_h);
 
     if (acl) free(acl);
     if (newpartition) free(newpartition);
     if (mboxent) free(mboxent);
    
     return r;
+}
+
+int mboxlist_createmailbox(const char *name, int mbtype,
+			   const char *partition, 
+			   int isadmin, const char *userid, 
+			   struct auth_state *auth_state,
+			   int localonly, int forceuser, int dbonly)
+{
+    int options = config_getint(IMAPOPT_MAILBOX_DEFAULT_OPTIONS) | OPT_POP3_NEW_UIDL;
+    unsigned uidvalidity = time(0);
+    return mboxlist_createmailbox_full(name, mbtype, partition,
+				       isadmin, userid, auth_state,
+				       options, uidvalidity, NULL, NULL,
+				       localonly, forceuser, dbonly);
+}
+
+int mboxlist_createsync(const char *name, int mbtype,
+			const char *partition,
+			const char *userid, struct auth_state *auth_state,
+			int options, unsigned uidvalidity,
+			const char *acl, const char *uniqueid)
+{
+    return mboxlist_createmailbox_full(name, mbtype, partition,
+				       1, userid, auth_state,
+				       options, uidvalidity, acl, uniqueid,
+				       0, 1, 0);
 }
 
 /* insert an entry for the proxy */
@@ -841,8 +818,7 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
     int r;
     struct txn **tid;
     struct txn *lcl_tid = NULL;
-    int mbtype;
-    char *part;
+    struct mboxlist_entry mbentry;
 
     if(in_tid) {
 	tid = in_tid;
@@ -851,7 +827,7 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
     }
 
  retry:
-    r = mboxlist_mylookup(name, &mbtype, NULL, NULL, &part, NULL, tid, 1);
+    r = mboxlist_mylookup(name, &mbentry, tid, 1);
     switch (r) {
     case 0:
 	break;
@@ -864,7 +840,7 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
 	goto done;
     }
 
-    if((mbtype & MBTYPE_REMOTE) && !strchr(part, '!')) {
+    if((mbentry.mbtype & MBTYPE_REMOTE) && !strchr(mbentry.partition, '!')) {
 	syslog(LOG_ERR,
 	       "mboxlist_deleteremote called on non-remote mailbox: %s",
 	       name);
@@ -897,7 +873,7 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
     }
 
  done:
-    if(r && !in_tid) {
+    if(r && !in_tid && tid) {
 	/* Abort the transaction if it is still in progress */
 	DB->abort(mbdb, *tid);
     }
@@ -911,25 +887,20 @@ int mboxlist_deleteremote(const char *name, struct txn **in_tid)
  * XXX local_only?
  */
 int
-mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid, 
-                               struct auth_state *auth_state, int checkacl,
-                               int local_only __attribute__((unused)),
+mboxlist_delayed_deletemailbox(const char *name, int isadmin,
+			       const char *userid,
+			       struct auth_state *auth_state, int checkacl,
+			       int local_only __attribute__((unused)),
 			       int force)
 {
+    struct mboxlist_entry mbentry;
     char newname[MAX_MAILBOX_BUFFER];
-    char *path, *mpath;
-    char *acl;
-    char *partition;
     int r;
-    long access;
+    long myrights;
     int isremote = 0;
-    int mbtype;
-    const char *p;
-    const char *deletedprefix = config_getstring(IMAPOPT_DELETEDPREFIX);
-    size_t domainlen = 0;
-    struct timeval tv;
+    char *p;
 
-    if(!isadmin && force) return IMAP_PERMISSION_DENIED;
+    if (!isadmin && force) return IMAP_PERMISSION_DENIED;
 
     /* Check for request to delete a user:
        user.<x> with no dots after it */
@@ -948,25 +919,24 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid,
     }
 
     do {
-        r = mboxlist_mylookup(name, &mbtype,
-                              &path, &mpath, &partition, &acl, NULL, 1);
+        r = mboxlist_mylookup(name, &mbentry, NULL, 1);
     } while (r == IMAP_AGAIN);
 
-    if (r) return(r);
+    if (r) return r;
 
-    isremote = mbtype & MBTYPE_REMOTE;
+    isremote = mbentry.mbtype & MBTYPE_REMOTE;
 
     /* are we reserved? (but for remote mailboxes this is okay, since
      * we don't touch their data files at all) */
-    if(!isremote && (mbtype & MBTYPE_RESERVE) && !force) {
-	return(IMAP_MAILBOX_RESERVED);
+    if(!isremote && (mbentry.mbtype & MBTYPE_RESERVE) && !force) {
+	return IMAP_MAILBOX_RESERVED;
     }
 
     /* check if user has Delete right (we've already excluded non-admins
      * from deleting a user mailbox) */
     if (checkacl) {
-	access = cyrus_acl_myrights(auth_state, acl);
-	if(!(access & ACL_DELETEMBOX)) {
+	myrights = cyrus_acl_myrights(auth_state, mbentry.acl);
+	if (!(myrights & ACL_DELETEMBOX)) {
 	    /* User has admin rights over their own mailbox namespace */
 	    if (mboxname_userownsmailbox(userid, name) &&
 		(config_implicitrights & ACL_ADMIN)) {
@@ -974,29 +944,20 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid,
 	    }
 	    
 	    /* Lie about error if privacy demands */
-	    r = (isadmin || (access & ACL_LOOKUP)) ?
+	    r = (isadmin || (myrights & ACL_LOOKUP)) ?
 		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    return(r);
 	}
     }
 
-    if (config_virtdomains && (p = strchr(name, '!')))
-        domainlen = p - name + 1;    
-
-    gettimeofday( &tv, NULL );
-
-    if (domainlen && domainlen < sizeof(newname))
-	strncpy(newname, name, domainlen);
-    snprintf(newname+domainlen, sizeof(newname)-domainlen, "%s.%s.%X",
-             deletedprefix, name+domainlen, (unsigned) tv.tv_sec);
+    /* get the deleted name */
+    mboxname_todeleted(name, newname, 1);
 
     /* Get mboxlist_renamemailbox to do the hard work. No ACL checks needed */
-    r = mboxlist_renamemailbox((char *)name, newname, partition,
+    r = mboxlist_renamemailbox((char *)name, newname, mbentry.partition,
                                1 /* isadmin */, userid,
                                auth_state, force, 1);
 
-    /* don't forget to log the rename! */
-    sync_log_mailbox_double((char *)name, newname);
     return r;
 }
 
@@ -1013,19 +974,18 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin, char *userid,
  * 7. delete from mupdate
  *
  */
-int mboxlist_deletemailbox(const char *name, int isadmin, char *userid, 
+int mboxlist_deletemailbox(const char *name, int isadmin,
+			   const char *userid,
 			   struct auth_state *auth_state, int checkacl,
 			   int local_only, int force)
 {
+    struct mboxlist_entry mbentry;
     int r;
-    char *acl;
-    long access;
-    struct mailbox mailbox;
+    long myrights;
+    struct mailbox *mailbox;
     int deletequotaroot = 0;
-    char *path, *mpath;
     struct txn *tid = NULL;
     int isremote = 0;
-    int mbtype;
     const char *p;
     mupdate_handle *mupdate_h = NULL;
 
@@ -1048,7 +1008,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	if (!isadmin) { r = IMAP_PERMISSION_DENIED; goto done; }
     }
 
-    r = mboxlist_mylookup(name, &mbtype, &path, &mpath, NULL, &acl, &tid, 1);
+    r = mboxlist_mylookup(name, &mbentry, &tid, 1);
     switch (r) {
     case 0:
 	break;
@@ -1061,11 +1021,11 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	goto done;
     }
 
-    isremote = mbtype & MBTYPE_REMOTE;
+    isremote = mbentry.mbtype & MBTYPE_REMOTE;
 
     /* are we reserved? (but for remote mailboxes this is okay, since
      * we don't touch their data files at all) */
-    if(!isremote && (mbtype & MBTYPE_RESERVE) && !force) {
+    if(!isremote && (mbentry.mbtype & MBTYPE_RESERVE) && !force) {
 	r = IMAP_MAILBOX_RESERVED;
 	goto done;
     }
@@ -1073,8 +1033,8 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
     /* check if user has Delete right (we've already excluded non-admins
      * from deleting a user mailbox) */
     if(checkacl) {
-	access = cyrus_acl_myrights(auth_state, acl);
-	if(!(access & ACL_DELETEMBOX)) {
+	myrights = cyrus_acl_myrights(auth_state, mbentry.acl);
+	if(!(myrights & ACL_DELETEMBOX)) {
 	    /* User has admin rights over their own mailbox namespace */
 	    if (mboxname_userownsmailbox(userid, name) &&
 		(config_implicitrights & ACL_ADMIN)) {
@@ -1082,7 +1042,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	    }
 	    
 	    /* Lie about error if privacy demands */
-	    r = (isadmin || (access & ACL_LOOKUP)) ?
+	    r = (isadmin || (myrights & ACL_LOOKUP)) ?
 		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    goto done;
 	}
@@ -1090,7 +1050,7 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 
     /* Lock the mailbox if it isn't a remote mailbox */
     if(!r && !isremote) {
-	r = mailbox_open_locked(name, path, mpath, acl, 0, &mailbox, 0);
+	r = mailbox_open_iwl(name, &mailbox);
 	if(r && !force) goto done;
     }
     
@@ -1135,17 +1095,16 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	    syslog(LOG_ERR,
 		   "MUPDATE: can't delete mailbox entry '%s'", name);
 	}
-	mupdate_disconnect(&mupdate_h);
     }
 
     if ((r && !force) || isremote) goto done;
 
-    if (!r || force) r = mailbox_delete(&mailbox, deletequotaroot);
+    if (!r || force) r = mailbox_delete(mailbox, deletequotaroot);
 
     /*
      * See if we have to remove mailbox's quota root
      */
-    if (!r && mailbox.quota.root != NULL) {
+    if (!r && mailbox->quota.root != NULL) {
 	/* xxx look for any other mailboxes in this quotaroot */
     }
 
@@ -1166,6 +1125,8 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
 	}
     }
 
+    if (mupdate_h) mupdate_disconnect(&mupdate_h);
+
     return r;
 }
 
@@ -1173,21 +1134,19 @@ int mboxlist_deletemailbox(const char *name, int isadmin, char *userid,
  * Rename/move a single mailbox (recursive renames are handled at a
  * higher level)
  */
-int mboxlist_renamemailbox(char *oldname, char *newname, char *partition, 
-			   int isadmin, char *userid, 
-			   struct auth_state *auth_state, int forceuser,
-                           int ignorequota)
+int mboxlist_renamemailbox(const char *oldname, const char *newname, 
+			   const char *partition, int isadmin, 
+			   const char *userid, struct auth_state *auth_state,
+			   int forceuser, int ignorequota)
 {
+    struct mboxlist_entry mbentry;
     int r;
-    long access;
+    long myrights;
     int isusermbox = 0; /* Are we renaming someone's inbox */
     int partitionmove = 0;
-    int mbtype;
-    char *oldpath = NULL, *oldmpath = NULL;
-    int oldopen = 0, newopen = 0, newreserved = 0;
-    struct mailbox oldmailbox;
-    struct mailbox newmailbox;
-    char *oldacl = NULL, *newacl = NULL;
+    int oldopen = 0, newreserved = 0;
+    struct mailbox *oldmailbox;
+    char *newacl = NULL;
     const char *root = NULL;
     struct txn *tid = NULL;
     char *newpartition = NULL;
@@ -1197,10 +1156,16 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     mupdate_handle *mupdate_h = NULL;
     int madenew = 0;
 
+    if (0) {
  retry:
+	/* clean up variables */
+	free(newacl);
+	newacl = NULL;
+	free(newpartition);
+	newpartition = NULL;
+    }
     /* 1. get path & acl from mboxlist */
-    r = mboxlist_mylookup(oldname, &mbtype, &oldpath, &oldmpath,
-			  NULL, &oldacl, &tid, 1);
+    r = mboxlist_mylookup(oldname, &mbentry, &tid, 1);
     switch (r) {
     case 0:
 	break;
@@ -1210,27 +1175,35 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	goto done;
     }
 
-    if(mbtype & MBTYPE_RESERVE) {
+    if(mbentry.mbtype & MBTYPE_RESERVE) {
 	r = IMAP_MAILBOX_RESERVED;
 	goto done;
     }
 
     /* make a copy of the old ACL so it doesn't get overwritten
        by another call to mboxlist_mylookup() */
-    newacl = xstrdup(oldacl);
+    newacl = xstrdup(mbentry.acl);
+
+    myrights = cyrus_acl_myrights(auth_state, mbentry.acl);
 
     /* 2. verify acls */
-    if (!strcmp(oldname, newname) && !(mbtype & MBTYPE_REMOTE)) {
+    if (!strcmp(oldname, newname) && !(mbentry.mbtype & MBTYPE_REMOTE)) {
+	char *oldpath;
+	/* grab a copy of the path for comparison - static buffer */
+	r = mailbox_getpath(mbentry.partition, mbentry.name, &oldpath, NULL);
+	if (r) goto done;
+	
 	/* Attempt to move mailbox across partition */
 	if (!isadmin) {
 	    r = IMAP_PERMISSION_DENIED;
 	    goto done;
-	} else if (!partition) {	  
+	} else if (!mbentry.partition) {
 	    r = IMAP_PARTITION_UNKNOWN;
 	    goto done;
 	}
 
 	partitionmove = 1;
+	/* this is OK because it uses a different static buffer */
 	root = config_partitiondir(partition);
 	if (!root) {
 	    r = IMAP_PARTITION_UNKNOWN;
@@ -1246,8 +1219,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	if (!strncmp(p, userid, config_virtdomains ? strcspn(userid, "@") :
 		     strlen(userid))) {
 	    /* Special case of renaming inbox */
-	    access = cyrus_acl_myrights(auth_state, oldacl);
-	    if (!(access & ACL_DELETEMBOX)) {
+	    if (!(myrights & ACL_DELETEMBOX)) {
 	      r = IMAP_PERMISSION_DENIED;
 	      goto done;
 	    }
@@ -1256,9 +1228,8 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 		    mboxname_isusermailbox(newname, 1)) ||
 		   mboxname_isdeletedmailbox(newname)) {
 	    /* Special case of renaming a user */
-	    access = cyrus_acl_myrights(auth_state, oldacl);
-	    if (!(access & ACL_DELETEMBOX) && !isadmin) {
-		r = (isadmin || (access & ACL_LOOKUP)) ?
+	    if (!(myrights & ACL_DELETEMBOX) && !isadmin) {
+		r = (isadmin || (myrights & ACL_LOOKUP)) ?
 		    IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 		goto done;
 	    }
@@ -1268,16 +1239,15 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    goto done;
 	}
     } else {
-	access = cyrus_acl_myrights(auth_state, oldacl);
-	if (!(access & ACL_DELETEMBOX) && !isadmin) {
-	    r = (isadmin || (access & ACL_LOOKUP)) ?
+	if (!(myrights & ACL_DELETEMBOX) && !isadmin) {
+	    r = (isadmin || (myrights & ACL_LOOKUP)) ?
 		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    goto done;
 	}
     }
 
     /* We don't support renaming mailboxes in transit */
-    if(!r && (mbtype & MBTYPE_MOVING)) {
+    if(!r && (mbentry.mbtype & MBTYPE_MOVING)) {
 	r = IMAP_MAILBOX_NOTSUPPORTED;
 	goto done;
     }
@@ -1312,13 +1282,17 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    goto done;
 	    break;
 	}
-    } else {
+    }
+    else if (partition) {
 	newpartition = xstrdup(partition);
+    }
+    else {
+	newpartition = xstrdup(mbentry.partition);
     }
 
     /* 3a. mark as reserved in the local DB */
     if(!r && !partitionmove) {
-	mboxent = mboxlist_makeentry(mbtype | MBTYPE_RESERVE,
+	mboxent = mboxlist_makeentry(mbentry.mbtype | MBTYPE_RESERVE,
 				     newpartition, newacl);
 
 	r = DB->store(mbdb, newname, strlen(newname), 
@@ -1339,7 +1313,7 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
     }
 
     /* 4. Open mupdate connection and reserve new name (if needed) */ 
-    if(!r && config_mupdate_server) {	
+    if(!r && config_mupdate_server) {
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
 	    syslog(LOG_ERR,
@@ -1367,27 +1341,18 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 
     /* 5. Lock oldname/oldpath */
 
-    if(!r) {
-	r = mailbox_open_locked(oldname, oldpath, oldmpath, oldacl, auth_state,
-				&oldmailbox, 0);
-	if (r) {
-	    goto done;
-	} else {
-	    oldopen = 1;
-	}
+    if (!r) {
+	r = mailbox_open_iwl(oldname, &oldmailbox);
+	if (r) goto done;
+	oldopen = 1;
     }
 
     /* 6. Copy mailbox */
-    if (!(mbtype & MBTYPE_REMOTE)) {
+    if (!(mbentry.mbtype & MBTYPE_REMOTE)) {
 	/* Rename the actual mailbox */
-	r = mailbox_rename_copy(&oldmailbox, newname, newpartition,
-				NULL, NULL, &newmailbox,
+	r = mailbox_rename_copy(oldmailbox, newname, newpartition,
 				isusermbox ? userid : NULL, ignorequota);
-	if (r) {
-	    goto done;
-	} else {
-	    newopen = 1;
-	}
+	if (r) goto done;
     }
 
     if (!isusermbox) {
@@ -1403,14 +1368,13 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	    syslog(LOG_ERR, "DBERROR: error deleting %s: %s",
 		   oldname, cyrusdb_strerror(r));
 	    r = IMAP_IOERROR;
-	    if (newopen) mailbox_close(&newmailbox);
 	    goto done;
 	    break;
 	}
     }
 
     /* 7a. create new entry */
-    mboxent = mboxlist_makeentry(mbtype, newpartition, newacl);
+    mboxent = mboxlist_makeentry(mbentry.mbtype, newpartition, newacl);
 
     /* 7b. put it into the db */
     r = DB->store(mbdb, newname, strlen(newname), 
@@ -1529,20 +1493,24 @@ int mboxlist_renamemailbox(char *oldname, char *newname, char *partition,
 	}
     }
 
-    if(newopen) mailbox_close(&newmailbox);
-    if(config_mupdate_server) mupdate_disconnect(&mupdate_h);
+    if (mupdate_h) mupdate_disconnect(&mupdate_h);
 
-    if(oldopen) {
-	if(!r)
-	    mailbox_rename_cleanup(&oldmailbox,isusermbox);
-
-	mailbox_close(&oldmailbox);
+    if (oldopen) {
+	if (r) {
+	    mailbox_close(&oldmailbox);
+	} else {
+	    /* unlocks and closes for us! */
+	    mailbox_rename_cleanup(oldmailbox, isusermbox);
+	}
     }
     
     /* free memory */
     if (newacl) free(newacl);	/* we're done with the new ACL */
     if (newpartition) free(newpartition);
     if (mboxent) free(mboxent);
+
+    /* log the rename */
+    sync_log_mailbox_double(oldname, newname);
     
     return r;
 }
@@ -1566,19 +1534,18 @@ int mboxlist_setacl(const char *name, const char *identifier,
 		    int isadmin, const char *userid, 
 		    struct auth_state *auth_state)
 {
+    struct mboxlist_entry mbentry;
     int useridlen = strlen(userid), domainlen = 0;
     char *cp, ident[256];
     const char *domain = NULL;
     int r;
-    int access;
+    int myrights;
     int mode = ACL_MODE_SET;
     int isusermbox = 0, anyoneuseracl = 1;
-    struct mailbox mailbox;
+    struct mailbox *mailbox;
     int mailbox_open = 0;
-    char *acl, *newacl = NULL;
-    char *partition, *path, *mpath;
+    char *newacl = NULL;
     char *mboxent = NULL;
-    int mbtype;
     struct txn *tid = NULL;
 
     if (config_virtdomains) {
@@ -1634,35 +1601,29 @@ int mboxlist_setacl(const char *name, const char *identifier,
     /* 1. Start Transaction */
     /* lookup the mailbox to make sure it exists and get its acl */
     do {
-	r = mboxlist_mylookup(name, &mbtype, &path, &mpath,
-			      &partition, &acl, &tid, 1);
-    } while(r == IMAP_AGAIN);    
+	r = mboxlist_mylookup(name, &mbentry, &tid, 1);
+    } while(r == IMAP_AGAIN);
 
     /* Can't do this to an in-transit or reserved mailbox */
-    if(!r && mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
+    if(!r && mbentry.mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
 	r = IMAP_MAILBOX_NOTSUPPORTED;
     }
 
     /* if it is not a remote mailbox, we need to unlock the mailbox list,
      * lock the mailbox, and re-lock the mailboxes list */
     /* we must do this to obey our locking rules */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
+    if (!r && !(mbentry.mbtype & MBTYPE_REMOTE)) {
 	DB->abort(mbdb, tid);
 	tid = NULL;
 
 	/* open & lock mailbox header */
-        r = mailbox_open_header_path(name, path, mpath,
-				     acl, NULL, &mailbox, 0);
+        r = mailbox_open_iwl(name, &mailbox);
+
 	if (!r) {
 	    mailbox_open = 1;
-	    r = mailbox_lock_header(&mailbox);
-	} 
-
-	if(!r) {
 	    do {
 		/* lookup the mailbox to make sure it exists and get its acl */
-		r = mboxlist_mylookup(name, &mbtype, &path, NULL,
-				      &partition, &acl, &tid, 1);
+		r = mboxlist_mylookup(name, &mbentry, &tid, 1);
 	    } while( r == IMAP_AGAIN );
 	}
 
@@ -1671,9 +1632,9 @@ int mboxlist_setacl(const char *name, const char *identifier,
 
     /* 2. Check Rights */
     if (!r && !isadmin) {
-	access = cyrus_acl_myrights(auth_state, acl);
-	if (!(access & ACL_ADMIN)) {
-	    r = (access & ACL_LOOKUP) ?
+	myrights = cyrus_acl_myrights(auth_state, mbentry.acl);
+	if (!(myrights & ACL_ADMIN)) {
+	    r = (myrights & ACL_LOOKUP) ?
 		IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    goto done;
 	}
@@ -1688,7 +1649,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
     /* 3. Set DB Entry */
     if(!r) {
 	/* Make change to ACL */
-	newacl = xstrdup(acl);
+	newacl = xstrdup(mbentry.acl);
 	if (rights && *rights) {
 	    /* rights are present and non-empty */
 	    mode = ACL_MODE_SET;
@@ -1718,7 +1679,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
 
     if(!r) {
 	/* ok, change the database */
-	mboxent = mboxlist_makeentry(mbtype, partition, newacl);
+	mboxent = mboxlist_makeentry(mbentry.mbtype, mbentry.partition, newacl);
 
 	do {
 	    r = DB->store(mbdb, name, strlen(name),
@@ -1734,10 +1695,9 @@ int mboxlist_setacl(const char *name, const char *identifier,
 
     /* 4. Change backup copy (cyrus.header) */
     /* we already have it locked from above */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
-	if(mailbox.acl) free(mailbox.acl);
-	mailbox.acl = xstrdup(newacl);
-	r = mailbox_write_header(&mailbox);
+    if (!r && !(mbentry.mbtype & MBTYPE_REMOTE)) {
+	mailbox_set_acl(mailbox, newacl);
+	r = mailbox_commit(mailbox, 0);
     }
 
     /* 5. Commit transaction */
@@ -1756,7 +1716,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
 	/* commit the update to MUPDATE */
 	char buf[MAX_PARTITION_LEN + HOSTNAME_SIZE + 2];
 
-	snprintf(buf, sizeof(buf), "%s!%s", config_servername, partition);
+	snprintf(buf, sizeof(buf), "%s!%s", config_servername, mbentry.partition);
 
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
@@ -1787,7 +1747,7 @@ int mboxlist_setacl(const char *name, const char *identifier,
     if (mailbox_open) mailbox_close(&mailbox);
     if (mboxent) free(mboxent);
     if (newacl) free(newacl);
-    
+
     return r;
 }
 
@@ -1802,49 +1762,41 @@ int mboxlist_setacl(const char *name, const char *identifier,
  *
  */
 int
-mboxlist_sync_setacls(char *name, char *newacl)
+mboxlist_sync_setacls(const char *name, const char *newacl)
 {
+    struct mboxlist_entry mbentry;
     int r;
-    struct mailbox mailbox;
+    struct mailbox *mailbox = NULL;
     int mailbox_open = 0;
-    char *acl;
-    char *partition, *path, *mpath;
     char *mboxent = NULL;
-    int mbtype;
     struct txn *tid = NULL;
 
     /* 1. Start Transaction */
     /* lookup the mailbox to make sure it exists and get its acl */
     do {
-	r = mboxlist_mylookup(name, &mbtype, &path, &mpath,
-			      &partition, &acl, &tid, 1);
+	r = mboxlist_mylookup(name, &mbentry, &tid, 1);
     } while(r == IMAP_AGAIN);    
 
     /* Can't do this to an in-transit or reserved mailbox */
-    if(!r && mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
+    if(!r && mbentry.mbtype & (MBTYPE_MOVING | MBTYPE_RESERVE)) {
 	r = IMAP_MAILBOX_NOTSUPPORTED;
     }
 
     /* if it is not a remote mailbox, we need to unlock the mailbox list,
      * lock the mailbox, and re-lock the mailboxes list */
     /* we must do this to obey our locking rules */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
+    if (!r && !(mbentry.mbtype & MBTYPE_REMOTE)) {
 	DB->abort(mbdb, tid);
 	tid = NULL;
 
 	/* open & lock mailbox header */
-        r = mailbox_open_header_path(name, path, mpath,
-				     acl, NULL, &mailbox, 0);
-	if (!r) {
-	    mailbox_open = 1;
-	    r = mailbox_lock_header(&mailbox);
-	} 
+        r = mailbox_open_iwl(name, &mailbox);
 
 	if(!r) {
+	    mailbox_open = 1;
 	    do {
 		/* lookup the mailbox to make sure it exists and get its acl */
-		r = mboxlist_mylookup(name, &mbtype, &path, &mpath,
-				      &partition, &acl, &tid, 1);
+		r = mboxlist_mylookup(name, &mbentry, &tid, 1);
 	    } while( r == IMAP_AGAIN );
 	}
 
@@ -1854,7 +1806,7 @@ mboxlist_sync_setacls(char *name, char *newacl)
     /* 3. Set DB Entry */
     if(!r) {
 	/* ok, change the database */
-	mboxent = mboxlist_makeentry(mbtype, partition, newacl);
+	mboxent = mboxlist_makeentry(mbentry.mbtype, mbentry.partition, newacl);
 
 	do {
 	    r = DB->store(mbdb, name, strlen(name),
@@ -1870,10 +1822,10 @@ mboxlist_sync_setacls(char *name, char *newacl)
 
     /* 4. Change backup copy (cyrus.header) */
     /* we already have it locked from above */
-    if (!r && !(mbtype & MBTYPE_REMOTE)) {
-	if(mailbox.acl) free(mailbox.acl);
-	mailbox.acl = xstrdup(newacl);
-	r = mailbox_write_header(&mailbox);
+    if (!r && mailbox) {
+	if(mailbox->acl) free(mailbox->acl);
+	mailbox->acl = xstrdup(newacl);
+	mailbox_write_header(mailbox, 1);
     }
 
     /* 5. Commit transaction */
@@ -1891,7 +1843,7 @@ mboxlist_sync_setacls(char *name, char *newacl)
         mupdate_handle *mupdate_h = NULL;
 	/* commit the update to MUPDATE */
 	char buf[MAX_PARTITION_LEN + HOSTNAME_SIZE + 2];
-	sprintf(buf, "%s!%s", config_servername, partition);
+	sprintf(buf, "%s!%s", config_servername, mbentry.partition);
 
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if(r) {
@@ -1921,7 +1873,8 @@ mboxlist_sync_setacls(char *name, char *newacl)
     }
     if (mailbox_open) mailbox_close(&mailbox);
     if (mboxent) free(mboxent);
-    
+    /* we don't free newacl here because we didn't create it */
+
     return r;
 }
 
@@ -2157,7 +2110,7 @@ static int find_cb(void *rockp,
  */
 /* Find all mailboxes that match 'pattern'. */
 int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
-		     const char *pattern, int isadmin, char *userid, 
+		     const char *pattern, int isadmin, const char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock)
 {
     struct find_rock cbrock;
@@ -2333,7 +2286,7 @@ int mboxlist_findall(struct namespace *namespace __attribute__((unused)),
 }
 
 int mboxlist_findall_alt(struct namespace *namespace,
-			 const char *pattern, int isadmin, char *userid,
+			 const char *pattern, int isadmin, const char *userid,
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock)
 {
@@ -2560,9 +2513,10 @@ int mboxlist_setquota(const char *root, int newquota, int force)
     char pattern[MAX_MAILBOX_PATH+1];
     struct quota quota;
     int have_mailbox = 1;
-    int r, t;
+    int r;
     struct txn *tid = NULL;
     struct change_rock crock;
+    struct mboxlist_entry mbentry;
 
     if (!root[0] || root[0] == '.' || strchr(root, '/')
 	|| strchr(root, '*') || strchr(root, '%') || strchr(root, '?')) {
@@ -2571,7 +2525,7 @@ int mboxlist_setquota(const char *root, int newquota, int force)
     
     memset(&quota, 0, sizeof(struct quota));
 
-    quota.root = (char *) root;
+    quota_setroot(&quota, root);
     r = quota_read(&quota, &tid, 1);
 
     if (!r) {
@@ -2601,25 +2555,26 @@ int mboxlist_setquota(const char *root, int newquota, int force)
 	strlcat(pattern, ".*", sizeof(pattern));
 
 	/* look for a top-level mailbox in the proposed quotaroot */
-	r = mboxlist_detail(quota.root, &t, NULL, NULL, NULL, NULL, NULL);
+	r = mboxlist_lookup(quota.root, &mbentry, NULL);
 	if (r) {
 	    if (!force && r == IMAP_MAILBOX_NONEXISTENT) {
 		/* look for a child mailbox in the proposed quotaroot */
-		mboxlist_findall(NULL, pattern, 1, NULL, NULL,
+		 mboxlist_findall(NULL, pattern, 1, NULL, NULL,
 				 child_cb, (void *) &force);
 	    }
 
 	    /* are we going to force the create anyway? */
-	    if(!force) return r;
+	    if (!force) goto fail;
 	    else {
 		have_mailbox = 0;
-		t = 0;
+		mbentry.mbtype = 0;
 	    }
 	}
 
-	if(t & (MBTYPE_REMOTE | MBTYPE_MOVING)) {
+	if (mbentry.mbtype & (MBTYPE_REMOTE | MBTYPE_MOVING)) {
 	    /* Can't set quota on a remote mailbox */
-	    return IMAP_MAILBOX_NOTSUPPORTED;
+	    r = IMAP_MAILBOX_NOTSUPPORTED;
+	    goto fail;
 	}
     }
 
@@ -2627,18 +2582,24 @@ int mboxlist_setquota(const char *root, int newquota, int force)
     quota.used = 0;
     quota.limit = newquota;
     r = quota_write(&quota, &tid);
-    if (r) return r;
+    if (r) goto fail;
 
     crock.quota = &quota;
     crock.tid = &tid;
     /* top level mailbox */
-    if(have_mailbox)
+    if (have_mailbox)
 	mboxlist_changequota(quota.root, 0, 0, &crock);
     /* submailboxes - we're using internal names here */
     mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_changequota, &crock);
     
     r = quota_write(&quota, &tid);
-    if (!r) quota_commit(&tid);
+    if (r) goto fail;
+
+    quota_commit(&tid);
+    sync_log_quota(quota.root);
+
+fail:
+    quota_free(&quota);
 
     return r;
 }
@@ -2657,13 +2618,16 @@ int mboxlist_unsetquota(const char *root)
 	return IMAP_MAILBOX_BADNAME;
     }
     
-    quota.root = (char *) root;
+    quota_setroot(&quota, root);
     r = quota_read(&quota, NULL, 0);
-    if (r == IMAP_QUOTAROOT_NONEXISTENT) {
+    if (r) {
+	quota_free(&quota);
 	/* already unset */
-	return 0;
+	if (r == IMAP_QUOTAROOT_NONEXISTENT)
+	    return 0;
+	else
+	    return r;
     }
-    else if (r) return r;
 
     /*
      * Have to remove it from all affected mailboxes
@@ -2682,34 +2646,24 @@ int mboxlist_unsetquota(const char *root)
     mboxlist_findall(NULL, pattern, 1, 0, 0, mboxlist_rmquota, (void *)root);
 
     r = quota_delete(&quota, NULL);
+    if (!r) sync_log_quota(quota.root);
+    quota_free(&quota);
 
     return r;
-}
-
-/*
- * Retrieve internal information, for reconstructing mailboxes file
- */
-void mboxlist_getinternalstuff(const char **listfnamep __attribute__((unused)),
-			       const char **newlistfnamep __attribute__((unused)), 
-			       const char **basep __attribute__((unused)),
-			       unsigned long * sizep __attribute__((unused)))
-{
-    printf("yikes! don't reconstruct me!\n");
-    abort();
 }
 
 /*
  * ACL access canonicalization routine which ensures that 'owner'
  * retains lookup, administer, and create rights over a mailbox.
  */
-int mboxlist_ensureOwnerRights(rock, identifier, access)
+int mboxlist_ensureOwnerRights(rock, identifier, myrights)
 void *rock;
 const char *identifier;
-int access;
+int myrights;
 {
     char *owner = (char *)rock;
-    if (strcmp(identifier, owner) != 0) return access;
-    return access|config_implicitrights;
+    if (strcmp(identifier, owner) != 0) return myrights;
+    return myrights|config_implicitrights;
 }
 
 /*
@@ -2721,36 +2675,26 @@ static int mboxlist_rmquota(const char *name,
 			    void *rock)
 {
     int r;
-    struct mailbox mailbox;
+    struct mailbox *mailbox;
     const char *oldroot = (const char *) rock;
 
     assert(rock != NULL);
 
-    r = mailbox_open_header(name, 0, &mailbox);
+    r = mailbox_open_iwl(name, &mailbox);
     if (r) goto error_noclose;
 
-    r = mailbox_lock_header(&mailbox);
-    if (r) goto error;
-
-    r = mailbox_open_index(&mailbox);
-    if (r) goto error;
-
-    r = mailbox_lock_index(&mailbox);
-    if (r) goto error;
-
-    if (mailbox.quota.root) {
-	if (strlen(mailbox.quota.root) != strlen(oldroot)
-	    || strcmp(mailbox.quota.root, oldroot)) {
+    if (mailbox->quota.root) {
+	if (strlen(mailbox->quota.root) != strlen(oldroot)
+	    || strcmp(mailbox->quota.root, oldroot)) {
 	    /* Part of a different quota root */
 	    mailbox_close(&mailbox);
 	    return 0;
 	}
 
 	/* Need to clear the quota root */
-	free(mailbox.quota.root);
-	mailbox.quota.root = NULL;
+	quota_free(&mailbox->quota);
 
-	r = mailbox_write_header(&mailbox);	
+	r = mailbox_commit(mailbox, 1);
 	if(r) goto error;
     }
 
@@ -2776,62 +2720,56 @@ static int mboxlist_changequota(const char *name,
 				void *rock)
 {
     int r;
-    struct mailbox mailbox;
+    struct mailbox *mailbox;
     struct change_rock *crock = (struct change_rock *) rock;
     struct quota *mboxlist_newquota = crock->quota;
     struct txn **tid = crock->tid;
 
     assert(rock != NULL);
 
-    r = mailbox_open_header(name, 0, &mailbox);
+    r = mailbox_open_iwl(name, &mailbox);
     if (r) goto error_noclose;
 
-    r = mailbox_lock_header(&mailbox);
-    if (r) goto error;
-
-    r = mailbox_open_index(&mailbox);
-    if (r) goto error;
-
-    r = mailbox_lock_index(&mailbox);
-    if (r) goto error;
-
-    if (mailbox.quota.root) {
-	if (strlen(mailbox.quota.root) >= strlen(mboxlist_newquota->root)) {
+    if (mailbox->quota.root) {
+	if (strlen(mailbox->quota.root) >= strlen(mboxlist_newquota->root)) {
 	    /* Part of a child quota root */
 	    mailbox_close(&mailbox);
 	    return 0;
 	}
 
-	r = quota_read(&mailbox.quota, tid, 1);
+	r = quota_read(&mailbox->quota, tid, 1);
 	if (r) goto error;
-	if (mailbox.quota.used >= mailbox.quota_mailbox_used) {
-	    mailbox.quota.used -= mailbox.quota_mailbox_used;
+	if (mailbox->quota.used >= mailbox->i.quota_mailbox_used) {
+	    mailbox->quota.used -= mailbox->i.quota_mailbox_used;
 	}
 	else {
-	    mailbox.quota.used = 0;
+	    mailbox->quota.used = 0;
 	}
-	r = quota_write(&mailbox.quota, tid);
+
+	r = quota_write(&mailbox->quota, tid);
 	if (r) {
 	    syslog(LOG_ERR,
 		   "LOSTQUOTA: unable to record free of " UQUOTA_T_FMT " bytes in quota %s",
-		   mailbox.quota_mailbox_used, mailbox.quota.root);
+		   mailbox->i.quota_mailbox_used, mailbox->quota.root);
 	}
-	free(mailbox.quota.root);
+
+	quota_free(&mailbox->quota);
     }
 
-    mailbox.quota.root = xstrdup(mboxlist_newquota->root);
-    r = mailbox_write_header(&mailbox);
+    quota_setroot(&mailbox->quota, mboxlist_newquota->root);
+
+    r = mailbox_commit(mailbox, 1);
     if (r) goto error;
 
-    mboxlist_newquota->used += mailbox.quota_mailbox_used;
-    mailbox_close(&mailbox);
-    return 0;
+    mboxlist_newquota->used += mailbox->i.quota_mailbox_used;
 
  error:
     mailbox_close(&mailbox);
+
  error_noclose:
-    syslog(LOG_ERR, "LOSTQUOTA: unable to change quota root for %s to %s: %s",
-	   name, mboxlist_newquota->root, error_message(r));
+    if (r)
+	syslog(LOG_ERR, "LOSTQUOTA: unable to change quota root for %s to %s: %s",
+	       name, mboxlist_newquota->root, error_message(r));
 
     /* Note, we're a callback, and it's not a huge tragedy if we
      * fail, so we don't ever return a failure */
@@ -2848,7 +2786,7 @@ void mboxlist_init(int myflags)
     }
 }
 
-void mboxlist_open(char *fname)
+void mboxlist_open(const char *fname)
 {
     int ret, flags;
     char *tofree = NULL;
@@ -2856,12 +2794,12 @@ void mboxlist_open(char *fname)
     /* create db file name */
     if (!fname) {
 	size_t fname_len = strlen(config_dir)+strlen(FNAME_MBOXLIST)+1;
-	
-	fname = xmalloc(fname_len);
-	tofree = fname;
 
-	strlcpy(fname, config_dir, fname_len);
-	strlcat(fname, FNAME_MBOXLIST, fname_len);
+	tofree = xmalloc(fname_len);
+	strlcpy(tofree, config_dir, fname_len);
+	strlcat(tofree, FNAME_MBOXLIST, fname_len);
+
+	fname = tofree;
     }
 
     flags = CYRUSDB_CREATE;
@@ -2902,31 +2840,6 @@ void mboxlist_done(void)
     /* DB->done() handled by cyrus_done() */
 }
 
-/* hash the userid to a file containing the subscriptions for that user */
-char *mboxlist_hash_usersubs(const char *userid)
-{
-    char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_DOMAINDIR) +
-			  sizeof(FNAME_USERDIR) + strlen(userid) +
-			  sizeof(FNAME_SUBSSUFFIX) + 10);
-    char c, *domain;
-
-    if (config_virtdomains && (domain = strchr(userid, '@'))) {
-	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
-	*domain = '\0';  /* split user@domain */
-	c = (char) dir_hash_c(userid, config_fulldirhash);
-	sprintf(fname, "%s%s%c/%s%s%c/%s%s", config_dir, FNAME_DOMAINDIR, d,
-		domain+1, FNAME_USERDIR, c, userid, FNAME_SUBSSUFFIX);
-	*domain = '@';  /* replace '@' */
-    }
-    else {
-	c = (char) dir_hash_c(userid, config_fulldirhash);
-	sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
-		FNAME_SUBSSUFFIX);
-    }
-
-    return fname;
-}
-
 /*
  * Open the subscription list for 'userid'.
  * 
@@ -2937,11 +2850,11 @@ static int
 mboxlist_opensubs(const char *userid,
 		  struct db **ret)
 {
-    int r = 0,flags;
+    int r = 0, flags;
     char *subsfname;
 
     /* Build subscription list filename */
-    subsfname = mboxlist_hash_usersubs(userid);
+    subsfname = user_hash_subs(userid);
 
     flags = CYRUSDB_CREATE;
     if (config_getswitch(IMAPOPT_IMPROVED_MBOXLIST_SORT)) {
@@ -2973,7 +2886,7 @@ static void mboxlist_closesubs(struct db *sub)
  */
 int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
 		     const char *pattern, int isadmin __attribute__((unused)),
-		     char *userid, struct auth_state *auth_state, 
+		     const char *userid, struct auth_state *auth_state, 
 		     int (*proc)(), void *rock, int force)
 {
     struct db *subs = NULL;
@@ -3124,7 +3037,7 @@ int mboxlist_findsub(struct namespace *namespace __attribute__((unused)),
 
 int mboxlist_findsub_alt(struct namespace *namespace,
 			 const char *pattern, int isadmin __attribute__((unused)),
-			 char *userid, struct auth_state *auth_state, 
+			 const char *userid, struct auth_state *auth_state, 
 			 int (*proc)(), void *rock, int force)
 {
     struct db *subs = NULL;
@@ -3368,8 +3281,8 @@ int mboxlist_checksub(const char *name, const char *userid)
 int mboxlist_changesub(const char *name, const char *userid, 
 		       struct auth_state *auth_state, int add, int force)
 {
+    struct mboxlist_entry mbentry;
     int r;
-    char *acl;
     struct db *subs;
     
     if ((r = mboxlist_opensubs(userid, &subs)) != 0) {
@@ -3378,11 +3291,11 @@ int mboxlist_changesub(const char *name, const char *userid,
 
     if (add && !force) {
 	/* Ensure mailbox exists and can be seen by user */
-	if ((r = mboxlist_lookup(name, &acl, NULL))!=0) {
+	if ((r = mboxlist_lookup(name, &mbentry, NULL))!=0) {
 	    mboxlist_closesubs(subs);
 	    return r;
 	}
-	if ((cyrus_acl_myrights(auth_state, acl) & ACL_LOOKUP) == 0) {
+	if ((cyrus_acl_myrights(auth_state, mbentry.acl) & ACL_LOOKUP) == 0) {
 	    mboxlist_closesubs(subs);
 	    return IMAP_MAILBOX_NONEXISTENT;
 	}
@@ -3406,6 +3319,7 @@ int mboxlist_changesub(const char *name, const char *userid,
 	break;
     }
 
+    sync_log_subscribe(userid, name);
     mboxlist_closesubs(subs);
     return r;
 }
@@ -3448,8 +3362,8 @@ mboxlist_count_addmbox(char *name __attribute__((unused)),
 
 /* Count how many children a mailbox has */
 int
-mboxlist_count_inferiors(char *mailboxname, int isadmin, char *userid,
-                         struct auth_state *authstate)
+mboxlist_count_inferiors(const char *mailboxname, int isadmin,
+			 const char *userid, struct auth_state *authstate)
 {
     int count = 0;
     char mailboxname2[MAX_MAILBOX_BUFFER];

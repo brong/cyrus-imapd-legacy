@@ -84,7 +84,7 @@ static struct sync_log_target *sync_target = NULL;
 void sync_log_init(void)
 {
     struct sync_log_target *item = NULL;
-    char *names;
+    const char *names;
     char *copy;
     char *start;
     char *end;
@@ -114,6 +114,11 @@ void sync_log_init(void)
 	snprintf(sync_target->file, MAX_MAILBOX_PATH,
 	         "%s/sync/log", config_dir);
     }
+}
+
+void sync_log_suppress(void)
+{
+    sync_log_enabled = 0;
 }
 
 void sync_log_done(void)
@@ -180,7 +185,7 @@ static void sync_log_base(const char *string, int len)
 	    syslog(LOG_ERR, "Partial write to %s: %d out of %d only written",
 		   item->file, rc, len);
 
-	fsync(fd); /* paranoia */
+	(void)fsync(fd); /* paranoia */
 	close(fd);
 	item = item->next;
     }
@@ -246,6 +251,7 @@ void sync_log(char *fmt, ...)
 	case 'd':
 	    ival = va_arg(ap, int);
 	    len += snprintf(buf+len, BUFSIZE-len, "%d", ival);
+	    break;
 	case 's':
 	    sval = va_arg(ap, const char *);
 	    sval = sync_quote_name(sval);

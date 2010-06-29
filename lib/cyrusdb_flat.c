@@ -453,7 +453,7 @@ static int foreach(struct db *db,
 
 	    if(mytid) {
 		/* transaction present, this means we do the slow way */
-		if (keylen > savebuflen) {
+		if (!savebuf || keylen > savebuflen) {
 		    int dblsize = 2 * savebuflen;
 		    int addsize = keylen + 32;
 		    
@@ -606,7 +606,7 @@ static int mystore(struct db *db,
 	syslog(LOG_ERR, "IOERROR: writing %s: %m", fnamebuf);
 	close(writefd);
 	if (mytid) abort_txn(db, *mytid);
-        /* xxx return error ? */
+        return CYRUSDB_IOERROR;
     }
     r = 0;
 

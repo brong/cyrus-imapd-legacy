@@ -45,6 +45,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
+#include "exitcodes.h"
 #include "sequence.h"
 #include "string.h"
 #include "util.h"
@@ -59,8 +60,7 @@ void seq_readinit(struct seq_listreader *seq, const char *list)
     seq->prev = 0;
     seq->state = seq_noseq;
     if (!list) return; /* NULL => empty */
-    while (cyrus_isdigit((int) *(seq->ptr))) 
-	seq->next = seq->next * 10 + *(seq->ptr)++ - '0';
+    seq->next = parsenum(seq->ptr, &seq->ptr);
 }
 
 int seq_ismember(struct seq_listreader *seq, unsigned long num)
@@ -68,9 +68,7 @@ int seq_ismember(struct seq_listreader *seq, unsigned long num)
     /* if we're being asked out of order, restart the reader */
     if (num < seq->prev) {
 	seq->ptr = seq->base;
-	seq->next = 0;
-	while (cyrus_isdigit((int) *(seq->ptr))) 
-	    seq->next = seq->next * 10 + *(seq->ptr)++ - '0';
+	seq->next = parsenum(seq->ptr, &seq->ptr);
     }
 
     /* list is finished - can't be any more members */
@@ -98,9 +96,7 @@ int seq_ismember(struct seq_listreader *seq, unsigned long num)
 	    seq->next = ULONG_MAX;
 	    return 1;
 	} 
-	seq->next = 0;
-	while (cyrus_isdigit((int) *(seq->ptr))) 
-	    seq->next = seq->next * 10 + *(seq->ptr)++ - '0';
+	seq->next = parsenum(seq->ptr, &seq->ptr);
     }
 
     /* in the current range - is it an on or off? */
@@ -108,6 +104,32 @@ int seq_ismember(struct seq_listreader *seq, unsigned long num)
 	return (seq->state == seq_inseq);
 
     return 1; /* exact match */
+}
+
+unsigned long seq_getnext(struct seq_listreader *seq)
+{
+    unsigned long num = 0;
+
+    num = seq->prev + 1;
+
+    /* if this is a member, then it's next */
+    if (seq_ismember(seq, num))
+	return num;
+
+    /* are there more members? */
+    if (!seq->next)
+	return 0;
+
+    /* then the next one must be a member */
+    num = seq->next;
+
+    /* call "ismember" anyway, because it will set prev and parse
+     * the next number if required */
+    if (seq_ismember(seq, num))
+	return num;
+
+    /* should never happen */
+    return 0;
 }
 
 void seq_listinit(struct seq_listbuilder *seq, int flags)
@@ -124,8 +146,6 @@ void seq_listinit(struct seq_listbuilder *seq, int flags)
 /* caller to free when done! */
 char *seq_listdone(struct seq_listbuilder *seq)
 {
-    char *res;
-
     /* should always be space, because we alloc 30 chars slop, and inseq
      * implies we didn't write anything last add */
     if (seq->state == seq_inseq)
@@ -169,6 +189,8 @@ void seq_listadd(struct seq_listbuilder *seq, unsigned long num, int inseq)
 	case seq_seen1:
 	    seq->state = seq_inseq;
 	    break;
+	default:
+	    break;
 	}
 	/* remember the last number that was in the sequence */
 	seq->prev = num;
@@ -181,6 +203,8 @@ void seq_listadd(struct seq_listbuilder *seq, unsigned long num, int inseq)
 	case seq_seen1:
 	    seq->state = seq_noseq;
 	    break;
+	default:
+	    break;
 	}
     }
 }
@@ -190,8 +214,11 @@ void seq_listadd(struct seq_listbuilder *seq, unsigned long num, int inseq)
  * that number in the string */
 int seq_lastnum(const char *list, const char **numstart)
 {
-    const char *tail, *p;
+    const char *tail;
     int retval = 0;
+
+    if (numstart)
+	*numstart = list;
 
     /* empty */
     if (!list) return 0;
@@ -205,8 +232,7 @@ int seq_lastnum(const char *list, const char **numstart)
 	tail--;
 
     /* read the number */
-    for (p = tail; *p; p++)
-	retval = retval * 10 + *p - '0';
+    retval = parsenum(tail, NULL);
 
     if (numstart)
 	*numstart = tail;

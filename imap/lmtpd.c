@@ -235,7 +235,7 @@ int service_init(int argc __attribute__((unused)),
 
     /* Set namespace */
     if ((r = mboxname_init_namespace(&lmtpd_namespace, 0)) != 0) {
-	syslog(LOG_ERR, error_message(r));
+	syslog(LOG_ERR, "%s", error_message(r));
 	fatal(error_message(r), EC_CONFIG);
     }
 
@@ -423,7 +423,7 @@ int fuzzy_match(char *mboxname)
    sure it's up to date */
 static int mlookup(const char *name, char **server, char **aclp, void *tid)
 {
-    int r, type;
+    int r;
 
     if (server) *server = NULL;
 
@@ -443,28 +443,29 @@ static int mlookup(const char *name, char **server, char **aclp, void *tid)
 	    fatal("error communicating with MUPDATE server", EC_TEMPFAIL);
 	}
 
-	type |= MBTYPE_REMOTE;
-	if (server) *server = (char *) mailboxdata->server;
 	if (aclp) *aclp = (char *) mailboxdata->acl;
+	if (server) *server = (char *) mailboxdata->server;
     }
     else {
+	struct mboxlist_entry mbentry;
 	/* do a local lookup and kick the slave if necessary */
-	r = mboxlist_detail(name, &type, NULL, NULL, server, aclp, tid);
+	r = mboxlist_lookup(name, &mbentry, tid);
 	if (r == IMAP_MAILBOX_NONEXISTENT && config_mupdate_server) {
 	    kick_mupdate();
-	    r = mboxlist_detail(name, &type, NULL, NULL, server, aclp, tid);
+	    r = mboxlist_lookup(name, &mbentry, tid);
 	}
-    }
 
-    if (type & MBTYPE_REMOTE) {
-	/* xxx hide the fact that we are storing partitions */
-	if (server && *server) {
-	    char *c;
-	    c = strchr(*server, '!');
-	    if (c) *c = '\0';
+	if (aclp) *aclp = mbentry.acl;
+	if (server) {
+	    if (mbentry.mbtype & MBTYPE_REMOTE) {
+		char *c;
+		/* xxx hide the fact that we are storing partitions */
+		*server = mbentry.partition;
+		c = strchr(*server, '!');
+		if (c) *c = '\0';
+	    }
 	}
     }
-    else if (server) *server = NULL;
 
     return r;
 }
@@ -497,14 +498,14 @@ int deliver_mailbox(FILE *f,
     unsigned long uid;
     const char *notifier;
 
-    r = append_setup(&as, mailboxname, MAILBOX_FORMAT_NORMAL,
+    r = append_setup(&as, mailboxname,
 		     authuser, authstate, acloverride ? 0 : ACL_POST, 
 		     quotaoverride ? (long) -1 :
 		     config_getswitch(IMAPOPT_LMTP_STRICT_QUOTA) ?
 		     (long) size : 0);
 
     /* check for duplicate message */
-    if (!r && id && dupelim && !(as.m.options & OPT_IMAP_DUPDELIVER) &&
+    if (!r && id && dupelim && !(as.mailbox->i.options & OPT_IMAP_DUPDELIVER) &&
 	duplicate_check(id, strlen(id), mailboxname, strlen(mailboxname))) {
 	duplicate_log(id, mailboxname, "delivery");
 	append_abort(&as);
@@ -523,7 +524,7 @@ int deliver_mailbox(FILE *f,
 
 	/* check for duplicate again in case of delivery during setup */
 	if (r ||
-	    (id && dupelim && !(as.m.options & OPT_IMAP_DUPDELIVER) &&
+	    (id && dupelim && !(as.mailbox->i.options & OPT_IMAP_DUPDELIVER) &&
 	     duplicate_check(id, strlen(id), mailboxname, strlen(mailboxname)))) {
 	    append_abort(&as);
                     
@@ -533,8 +534,6 @@ int deliver_mailbox(FILE *f,
 		return 0;
 	    }         
 	} else {
-	    int sharedseen = (as.m.options & OPT_IMAP_SHAREDSEEN);
-
 	    r = append_commit(&as, quotaoverride ? -1 : 0, NULL, &uid, NULL);
 	    if (!r) {
 		syslog(LOG_INFO, "Delivered: %s to mailbox: %s", id, mailboxname);
@@ -542,19 +541,6 @@ int deliver_mailbox(FILE *f,
 		if (dupelim && id) {
 		    duplicate_mark(id, strlen(id), mailboxname, 
 				   strlen(mailboxname), now, uid);
-		}
-
-		sync_log_append(mailboxname);
-
-		if (user) {
-		    /* check if the \Seen flag has been set on this message */
-		    while (nflags) {
-			if (!strcmp(flag[--nflags], "\\seen")) {
-			    sync_log_seen(sharedseen ? "anyone" : user,
-					  mailboxname);
-			    break;
-			}
-		    }
 		}
 	    }
 	}
@@ -1048,7 +1034,7 @@ static int verify_user(const char *user, const char *domain, char *mailbox,
 		    IMAP_PERMISSION_DENIED : IMAP_MAILBOX_NONEXISTENT;
 	    }
 	} else if (!r) {
-	    r = append_check(namebuf, MAILBOX_FORMAT_NORMAL, authstate,
+	    r = append_check(namebuf, authstate,
 			     aclcheck, (quotacheck < 0)
 			     || config_getswitch(IMAPOPT_LMTP_STRICT_QUOTA) ?
 			     quotacheck : 0);
