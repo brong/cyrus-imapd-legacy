@@ -129,12 +129,12 @@ void statuscache_fill(struct statuscache_data *scdata, struct mailbox *mailbox,
     scdata->index_ino = mailbox->index_ino;
     scdata->index_size = mailbox->index_size;
 
-    scdata->messages = mailbox->exists;
+    scdata->messages = mailbox->i.exists;
     scdata->recent = num_recent;
-    scdata->uidnext = mailbox->last_uid+1;
-    scdata->uidvalidity = mailbox->uidvalidity;
+    scdata->uidnext = mailbox->i.last_uid+1;
+    scdata->uidvalidity = mailbox->i.uidvalidity;
     scdata->unseen = num_unseen;
-    scdata->highestmodseq = mailbox->highestmodseq;
+    scdata->highestmodseq = mailbox->i.highestmodseq;
 }
 
 void statuscache_done(void)
@@ -158,11 +158,12 @@ int statuscache_lookup(const char *mboxname, const char *userid,
 		       unsigned statusitems,
 		       struct statuscache_data *scdata)
 {
+    struct mboxlist_entry mbentry;
     int keylen, datalen, r = 0;
     const char *data = NULL, *dend;
     char *p, *key = statuscache_buildkey(mboxname, userid, &keylen);
     unsigned version;
-    char *path, *mpath;
+    char *fname = NULL;
     struct stat istat;
 
     /* Don't access DB if it hasn't been opened */
@@ -215,8 +216,10 @@ int statuscache_lookup(const char *mboxname, const char *userid,
     }
 
     /* Check status of index file */
-    r = mboxlist_detail(mboxname, NULL, &path, &mpath, NULL, NULL, NULL);
-    if (!r) r = mailbox_stat(path, mpath, NULL, &istat, NULL);
+    r = mboxlist_lookup(mboxname, &mbentry, NULL);
+    if (!r) fname = mboxname_metapath(mbentry.partition, mbentry.name, META_INDEX, 0);
+    if (!fname) r = IMAP_MAILBOX_BADFORMAT;
+    if (!r) if (stat(fname, &istat) == -1) r = IMAP_IOERROR;
 
     if (!r &&
 	(istat.st_mtime != scdata->index_mtime ||

@@ -360,7 +360,7 @@ static int myfetch(struct db *db, char *quota_path,
     if (data) *data = NULL;
     if (datalen) *datalen = 0;
 
-    if (!data) {
+    if (!data || !datalen) {
 	/* just check if the key exists */
 	struct stat sbuf;
 
@@ -484,7 +484,7 @@ static const char *path_to_qr(const char *path, char *buf)
     return qr;
 }
 
-static int compar_qr(const void *v1, const void *v2)
+static int compar_qr(__const void *v1, __const void *v2)
 {
     const char *qr1, *qr2;
     char qrbuf1[MAX_QUOTA_PATH+1], qrbuf2[MAX_QUOTA_PATH+1];

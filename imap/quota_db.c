@@ -71,6 +71,17 @@ struct db *qdb;
 
 static int quota_dbopen = 0;
 
+void quota_setroot(struct quota *quota, const char *root)
+{
+    quota->root = xstrdup(root);
+}
+
+void quota_free(struct quota *quota)
+{
+    free(quota->root);
+    quota->root = NULL;
+}
+
 /*
  * Read the quota entry 'quota'
  */
@@ -91,9 +102,8 @@ int quota_read(struct quota *quota, struct txn **tid, int wrlock)
 
     switch (r) {
     case CYRUSDB_OK:
-	if (!data ||
-	    sscanf(data, UQUOTA_T_FMT " %d",
-		   &quota->used, &quota->limit) != 2) {
+	if (!*data || sscanf(data, UQUOTA_T_FMT " %d", 
+			     &quota->used, &quota->limit) != 2) {
             char *buf = xstrndup(data, datalen);
             syslog(LOG_ERR, "DBERROR: parsed bogus quota data <%s> for %s",
                buf, quota->root);

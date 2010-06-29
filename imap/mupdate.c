@@ -1482,16 +1482,15 @@ void database_log(const struct mbent *mb, struct txn **mytid)
  * a non-null pool implies we should use the mpool functionality */
 struct mbent *database_lookup(const char *name, struct mpool *pool) 
 {
-    char *part, *acl;
-    int type;
+    struct mboxlist_entry mbentry;
     struct mbent *out;
     
     if(!name) return NULL;
     
-    if(mboxlist_detail(name, &type, NULL, NULL, &part, &acl, NULL))
+    if(mboxlist_lookup(name, &mbentry, NULL);
 	return NULL;
 
-    if(type & MBTYPE_RESERVE) {
+    if(mbentry.mbtype & MBTYPE_RESERVE) {
 	if(!pool) out = xmalloc(sizeof(struct mbent) + 1);
 	else out = mpool_malloc(pool, sizeof(struct mbent) + 1);
 	out->t = SET_RESERVE;
@@ -2540,11 +2539,4 @@ void free_mbent(struct mbent *p)
     free(p->server);
     free(p->mailbox);
     free(p);
-}
-
-void printstring(const char *s __attribute__((unused)))
-{
-    /* needed to link against annotate.o */
-    fatal("printstring() executed, but its not used for MUPDATE!",
-	  EC_SOFTWARE);
 }

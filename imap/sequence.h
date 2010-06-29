@@ -88,6 +88,7 @@ struct seq_listreader {
 
 extern void seq_readinit(struct seq_listreader *seq, const char *list);
 extern int seq_ismember(struct seq_listreader *seq, unsigned long num);
+extern unsigned long seq_getnext(struct seq_listreader *seq);
 extern void seq_listinit(struct seq_listbuilder *seq, int flags);
 extern void seq_listadd(struct seq_listbuilder *seq, 
 			unsigned long num, int inseq);
