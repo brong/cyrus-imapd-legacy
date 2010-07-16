@@ -160,6 +160,7 @@ void fatal(const char* s, int code)
     }
     recurse_code = code;
     syslog(LOG_ERR, "Fatal error: %s", s);
+    abort();
 
     shut_down(code);
 }
@@ -410,7 +411,8 @@ int begin_handling(void)
 	    return 1;
 	}
 
-	c = getnum(map_in, &len);
+	prot_ungetc(c, map_in);
+	c = getint32(map_in, &len);
 	if (c == EOF) {
 	    errstring = prot_error(map_in);
 	    r = IMAP_IOERROR;

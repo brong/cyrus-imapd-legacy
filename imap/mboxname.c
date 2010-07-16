@@ -47,6 +47,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include "assert.h"
 #include "exitcodes.h"
@@ -59,6 +60,15 @@
 
 #include "mboxname.h"
 #include "mboxlist.h"
+#include "lock.h"
+
+struct mboxlocklist {
+    struct mboxlocklist *next;
+    struct mboxlock l;
+    int nopen;
+};
+
+static struct mboxlocklist *open_mboxlocks = NULL;
 
 /* Mailbox patterns which the design of the server prohibits */
 static char *badmboxpatterns[] = {
@@ -99,6 +109,145 @@ static const char index_mod64[256] = {
 #define CHARMOD64(c)  (index_mod64[(unsigned char)(c)])
 
 
+static struct mboxlocklist *create_lockitem(const char *name)
+{
+    struct mboxlocklist *item = xmalloc(sizeof(struct mboxlocklist));
+    item->next = open_mboxlocks;
+    open_mboxlocks = item;
+
+    item->nopen = 1;
+    item->l.name = xstrdup(name);
+    item->l.lock_fd = -1;
+    item->l.locktype = 0;
+
+    return item;
+}
+
+struct mboxlocklist *find_lockitem(const char *name)
+{
+    struct mboxlocklist *item;
+    struct mboxlocklist *previtem = NULL;
+
+    /* remove from the active list */
+    for (item = open_mboxlocks; item; item = item->next) {
+	if (!strcmp(name, item->l.name))
+	    return item;
+	previtem = item;
+    }
+
+    return NULL;
+}
+
+void remove_lockitem(struct mboxlocklist *remitem)
+{
+    struct mboxlocklist *item;
+    struct mboxlocklist *previtem = NULL;
+
+    for (item = open_mboxlocks; item; item = item->next) {
+	if (item == remitem) {
+	    if (previtem)
+		previtem->next = item->next;
+	    else
+		open_mboxlocks = item->next;
+	    if (item->l.lock_fd != -1)
+		close(item->l.lock_fd);
+	    free(item->l.name);
+	    free(item);
+	    return;
+	}
+	previtem = item;
+    }
+
+    fatal("didn't find item in list", EC_SOFTWARE);
+}
+
+/* name locking support */
+
+int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
+		  int locktype)
+{
+    const char *fname;
+    int r = 0;
+    struct mboxlocklist *lockitem;
+
+    fname = mboxname_lockpath(mboxname);
+    if (!fname)
+	return IMAP_MAILBOX_BADNAME;
+
+    lockitem = find_lockitem(mboxname);
+
+    /* already open?  just use this one */
+    if (lockitem) {
+	/* can't change locktype! */
+	if (lockitem->l.locktype != locktype)
+	    return IMAP_MAILBOX_LOCKED;
+
+	lockitem->nopen++;
+	goto done;
+    }
+
+    lockitem = create_lockitem(mboxname);
+
+    /* assume success, and only create directory on failure.
+     * More efficient on a common codepath */
+    lockitem->l.lock_fd = open(fname, O_CREAT | O_TRUNC | O_RDWR, 0666);
+    if (lockitem->l.lock_fd == -1) {
+	if (cyrus_mkdir(fname, 0755) == -1) {
+	    r = IMAP_IOERROR;
+	    goto done;
+	}
+	lockitem->l.lock_fd = open(fname, O_CREAT | O_TRUNC | O_RDWR, 0666);
+    }
+    /* but if it still didn't succeed, we have problems */
+    if (lockitem->l.lock_fd == -1) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    switch (locktype) {
+    case LOCK_SHARED:
+	r = lock_shared(lockitem->l.lock_fd);
+	if (!r) lockitem->l.locktype = LOCK_SHARED;
+	break;
+    case LOCK_EXCLUSIVE:
+	r = lock_blocking(lockitem->l.lock_fd);
+	if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
+	break;
+    case LOCK_NONBLOCKING:
+	r = lock_nonblocking(lockitem->l.lock_fd);
+	if (r == -1) r = IMAP_MAILBOX_LOCKED;
+	if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
+	break;
+    default:
+	fatal("unknown lock type", EC_SOFTWARE);
+    }
+
+done:
+    if (r) remove_lockitem(lockitem);
+    else *mboxlockptr = &lockitem->l;
+
+    return r;
+}
+
+void mboxname_release(struct mboxlock **mboxlockptr)
+{
+    struct mboxlocklist *lockitem;
+    struct mboxlock *lock = *mboxlockptr;
+
+    lockitem = find_lockitem(lock->name);
+    assert(lockitem && &lockitem->l == lock);
+
+    *mboxlockptr = NULL;
+
+    if (lockitem->nopen > 1) {
+	lockitem->nopen--;
+	return;
+    }
+
+    remove_lockitem(lockitem);
+}
+
+
 /*
  * Convert the external mailbox 'name' to an internal name.
  * If 'userid' is non-null, it is the name of the current user.
@@ -114,10 +263,12 @@ static int mboxname_tointernal(struct namespace *namespace, const char *name,
 {
     char *cp;
     char *atp;
+    char *mbresult;
     int userlen, domainlen = 0, namelen;
 
     /* Blank the result, just in case */
     result[0] = '\0';
+    result[MAX_MAILBOX_BUFFER-1] = '\0';
 
     userlen = userid ? strlen(userid) : 0;
     namelen = strlen(name);
@@ -129,9 +280,7 @@ static int mboxname_tointernal(struct namespace *namespace, const char *name,
 	    /* don't prepend default domain */
 	    if (!(config_defdomain && !strcasecmp(config_defdomain, cp+1))) {
 		domainlen = strlen(cp+1)+1;
-		if (domainlen > MAX_MAILBOX_NAME) 
-		    return IMAP_MAILBOX_BADNAME; 
-		sprintf(result, "%s!", cp+1);
+		snprintf(result, MAX_MAILBOX_BUFFER, "%s!", cp+1);
 	    }
 	}
 	if ((cp = strrchr(name, '@'))) {
@@ -153,9 +302,7 @@ static int mboxname_tointernal(struct namespace *namespace, const char *name,
 		    return IMAP_MAILBOX_BADNAME;
 		}
 		domainlen = strlen(cp+1)+1;
-		if (domainlen > MAX_MAILBOX_NAME) 
-		    return IMAP_MAILBOX_BADNAME; 
-		sprintf(result, "%s!", cp+1);
+		snprintf(result, MAX_MAILBOX_BUFFER, "%s!", cp+1);
 	    }
 
 	    atp = strchr(name, '@');
@@ -168,7 +315,7 @@ static int mboxname_tointernal(struct namespace *namespace, const char *name,
 	/* if no domain specified, we're in the default domain */
     }
 
-    result += domainlen;
+    mbresult = result + domainlen;
 
     /* Personal (INBOX) namespace */
     if ((name[0] == 'i' || name[0] == 'I') &&
@@ -180,25 +327,26 @@ static int mboxname_tointernal(struct namespace *namespace, const char *name,
 	    return IMAP_MAILBOX_BADNAME;
 	}
 
-	if (domainlen+namelen+userlen > MAX_MAILBOX_BUFFER) {
-	    return IMAP_MAILBOX_BADNAME;
-	}
-
-	sprintf(result, "user.%.*s%.*s", userlen, userid, namelen-5, name+5);
+	snprintf(mbresult, MAX_MAILBOX_BUFFER - domainlen,
+		 "user.%.*s%.*s", userlen, userid, namelen-5, name+5);
 
 	/* Translate any separators in userid+mailbox */
-	mboxname_hiersep_tointernal(namespace, result+5+userlen, 0);
-	return 0;
+	mboxname_hiersep_tointernal(namespace, mbresult+5+userlen, 0);
     }
 
-    /* Other Users & Shared namespace */
-    if (domainlen+namelen > MAX_MAILBOX_BUFFER) {
+    else {
+	/* Other Users & Shared namespace */
+	snprintf(mbresult, MAX_MAILBOX_BUFFER - domainlen,
+		 "%.*s", namelen, name);
+
+	/* Translate any separators in mailboxname */
+	mboxname_hiersep_tointernal(namespace, mbresult, 0);
+    }
+
+    if (result[MAX_MAILBOX_BUFFER-1] != '\0') {
+	syslog(LOG_ERR, "IOERROR: long mailbox name attempt: %s", name);
 	return IMAP_MAILBOX_BADNAME;
     }
-    sprintf(result, "%.*s", namelen, name);
-
-    /* Translate any separators in mailboxname */
-    mboxname_hiersep_tointernal(namespace, result, 0);
     return 0;
 }
 
@@ -751,9 +899,10 @@ int mboxname_policycheck(const char *name)
      * A thorough fix might remove the prefix and timestamp
      * then continue with the check
      */
-   if (!mboxname_isdeletedmailbox(name)) {
-    if (strlen(name) > MAX_MAILBOX_NAME) return IMAP_MAILBOX_BADNAME;
-   }
+    if (!mboxname_isdeletedmailbox(name)) {
+	if (strlen(name) > MAX_MAILBOX_NAME)
+	    return IMAP_MAILBOX_BADNAME;
+    }
     for (i = 0; i < NUM_BADMBOXPATTERNS; i++) {
 	g = glob_init(badmboxpatterns[i], 0);
 	if (GLOB_TEST(g, name) != -1) {
@@ -891,7 +1040,7 @@ void mboxname_hash(char *buf, size_t buf_len,
 /* note: mboxname must be internal */
 char *mboxname_datapath(const char *partition, const char *mboxname, unsigned long uid)
 {
-    static char pathresult[MAX_MAILBOX_PATH];
+    static char pathresult[MAX_MAILBOX_PATH+1];
     const char *root;
 
     root = config_partitiondir(partition);
@@ -908,11 +1057,36 @@ char *mboxname_datapath(const char *partition, const char *mboxname, unsigned lo
 	int len = strlen(pathresult);
 	snprintf(pathresult + len, MAX_MAILBOX_PATH - len, "/%lu.", uid);
     }
+    pathresult[MAX_MAILBOX_PATH] = '\0';
 
-    if (strlen(pathresult) >= MAX_MAILBOX_PATH)
+    if (strlen(pathresult) == MAX_MAILBOX_PATH)
 	return NULL;
 
     return pathresult;
+}
+
+char *mboxname_lockpath(const char *mboxname)
+{
+    static char lockresult[MAX_MAILBOX_PATH+1];
+    char basepath[MAX_MAILBOX_PATH+1];
+    const char *root = config_getstring(IMAPOPT_MBOXNAME_LOCKPATH);
+    int len;
+
+    if (!root) {
+	snprintf(basepath, MAX_MAILBOX_PATH, "%s/lock", config_dir);
+	root = basepath;
+    }
+
+    mboxname_hash(lockresult, MAX_MAILBOX_PATH, root, mboxname);
+
+    len = strlen(lockresult);
+    snprintf(lockresult + len, MAX_MAILBOX_PATH - len, "%s", ".lock");
+    lockresult[MAX_MAILBOX_PATH] = '\0';
+
+    if (strlen(lockresult) == MAX_MAILBOX_PATH)
+	return NULL;
+
+    return lockresult;
 }
 
 char *mboxname_metapath(const char *partition, const char *mboxname,
@@ -951,11 +1125,6 @@ char *mboxname_metapath(const char *partition, const char *mboxname,
 	snprintf(confkey, 256, "metadir-squat-%s", partition);
 	metaflag = IMAP_ENUM_METAPARTITION_FILES_SQUAT;
 	filename = FNAME_SQUAT;
-	break;
-    case META_LOCK:
-	snprintf(confkey, 256, "metadir-lock-%s", partition);
-	metaflag = IMAP_ENUM_METAPARTITION_FILES_LOCK;
-	filename = FNAME_LOCK;
 	break;
     case 0:
 	break;

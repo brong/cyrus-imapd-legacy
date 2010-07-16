@@ -110,17 +110,10 @@ int append_check(const char *name,
 		 struct auth_state *auth_state,
 		 long aclcheck, quota_t quotacheck)
 {
-    struct mboxlist_entry mbentry;
     struct mailbox *mailbox;
     int myrights;
     int r;
-    
-    /* Is mailbox moved? */
-    r = mboxlist_lookup(name, &mbentry, NULL);
-    if (r) return r;
-
-    if (mbentry.mbtype & MBTYPE_MOVING)
-	return IMAP_MAILBOX_MOVED;
+    struct quota q;
 
     r = mailbox_open_irl(name, &mailbox);
     if (r) return r;
@@ -133,11 +126,11 @@ int append_check(const char *name,
 	goto done;
     }
 
-    r = quota_read(&mailbox->quota, NULL, 0);
+    q.root = mailbox->quotaroot;
+    r = quota_read(&q, NULL, 0);
     if (!r) {
-	if (mailbox->quota.limit >= 0 && quotacheck >= 0 &&
-	    mailbox->quota.used + quotacheck > 
-	    ((uquota_t) mailbox->quota.limit * QUOTA_UNITS)) {
+	if (q.limit >= 0 && quotacheck >= 0 &&
+	    q.used + quotacheck > ((uquota_t) q.limit * QUOTA_UNITS)) {
 	    r = IMAP_QUOTA_EXCEEDED;
 	}
     }
@@ -166,6 +159,7 @@ int append_setup(struct appendstate *as, const char *name,
 		 long aclcheck, quota_t quotacheck)
 {
     int r;
+    struct quota q;
 
     r = mailbox_open_iwl(name, &as->mailbox);
     if (r) return r;
@@ -179,11 +173,11 @@ int append_setup(struct appendstate *as, const char *name,
 	return r;
     }
 
-    r = quota_read(&as->mailbox->quota, NULL, 1);
+    q.root = as->mailbox->quotaroot;
+    r = quota_read(&q, NULL, 1);
     if (!r) {
-	if (as->mailbox->quota.limit >= 0 && quotacheck >= 0 &&
-	    as->mailbox->quota.used + quotacheck > 
-	    ((uquota_t) as->mailbox->quota.limit * QUOTA_UNITS)) {
+	if (q.limit >= 0 && quotacheck >= 0 &&
+	    q.used + quotacheck > ((uquota_t) q.limit * QUOTA_UNITS)) {
 	    r = IMAP_QUOTA_EXCEEDED;
 	}
     }
@@ -207,12 +201,9 @@ int append_setup(struct appendstate *as, const char *name,
 	return r;
     }
 
-    /* store original size to truncate if append is aborted */
-    as->orig_cache_size = as->mailbox->cache_size;
-
     /* initialize seen list creator */
     as->internalseen = mailbox_internal_seen(as->mailbox, as->userid);
-    seq_listinit(&as->seen_seq, SEQ_SPARSE);
+    as->seen_seq = seqset_init(0, SEQ_SPARSE);
 
     /* zero out metadata */
     as->nummsg = 0;
@@ -228,7 +219,8 @@ int append_commit(struct appendstate *as,
 		  quota_t quotacheck __attribute__((unused)),
 		  unsigned long *uidvalidity, 
 		  unsigned long *start,
-		  unsigned long *num)
+		  unsigned long *num,
+		  struct mailbox **mailboxptr)
 {
     int r = 0;
     
@@ -245,15 +237,15 @@ int append_commit(struct appendstate *as,
     as->mailbox->cache_dirty = 1;
 
     /* set seen state */
-    if (!seq_isempty(&as->seen_seq)) {
-	char *seen = seq_listdone(&as->seen_seq);
-	if (as->userid[0])
-	    append_addseen(as->mailbox, as->userid, seen);
+    if (as->seen_seq->len && as->userid[0]) {
+	char *seen = seqset_cstring(as->seen_seq);
+	append_addseen(as->mailbox, as->userid, seen);
 	free(seen);
     }
+    seqset_free(as->seen_seq);
     
     /* Write out index header & synchronize to disk. */
-    r = mailbox_commit(as->mailbox, 0);
+    r = mailbox_commit(as->mailbox);
     if (r) {
 	syslog(LOG_ERR, "IOERROR: commiting mailbox append %s: %s",
 	       as->mailbox->name, error_message(r));
@@ -261,7 +253,12 @@ int append_commit(struct appendstate *as,
 	return r;
     }
 
-    mailbox_close(&as->mailbox);
+    if (mailboxptr) {
+	*mailboxptr = as->mailbox;
+    }
+    else {
+	mailbox_close(&as->mailbox);
+    }
 
     as->s = APPEND_DONE;
 
@@ -272,30 +269,16 @@ int append_commit(struct appendstate *as,
 int append_abort(struct appendstate *as)
 {
     int r = 0;
-    unsigned long uid;
 
     if (as->s == APPEND_DONE) return 0;
     as->s = APPEND_DONE;
 
-    /* unlink message files that were created */
-    for (uid = as->baseuid; uid < as->baseuid + as->nummsg; uid++) {
-	char *fname = mailbox_message_fname(as->mailbox, uid);
-	if (unlink(fname) < 0) {
-	    /* hmmm, never got appended? */
-	    /* r = IMAP_IOERROR; */
-	}
-    }
-
-    /* truncate the cache */
-    r = ftruncate(as->mailbox->cache_fd, as->orig_cache_size);
+    /* XXX - clean up neatly so we don't crash and burn here... */
 
     /* close mailbox */
     mailbox_close(&as->mailbox);
 
-    if (!seq_isempty(&as->seen_seq)) {
-	char *seen = seq_listdone(&as->seen_seq);
-	free(seen);
-    }
+    seqset_free(as->seen_seq);
 
     return r;
 }
@@ -738,7 +721,7 @@ void append_setseen(struct appendstate *as, struct index_record *record)
     if (as->internalseen)
 	record->system_flags |= FLAG_SEEN;
     else
-	seq_listadd(&as->seen_seq, record->uid, 1);
+	seqset_add(as->seen_seq, record->uid, 1);
 }
 
 /*
@@ -753,7 +736,7 @@ static int append_addseen(struct mailbox *mailbox,
     int r;
     struct seen *seendb;
     struct seendata sd;
-    int last_seen;
+    unsigned int last_seen;
     char *tail;
     int newlen;
     int start;

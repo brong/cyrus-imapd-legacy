@@ -670,7 +670,7 @@ static void imclient_input(struct imclient *imclient, char *buf, int len)
     char *endreply;
     const char *p;
     size_t parsed;
-    size_t literallen;
+    uint32_t literallen;
     size_t keywordlen;
     int keywordindex;
     struct imclient_cmdcallback **cmdcb, *cmdcbtemp;
@@ -845,7 +845,8 @@ static void imclient_input(struct imclient *imclient, char *buf, int len)
 		    charclass[(unsigned char)p[-1]] != 2) {
 
 		    /* Parse the size of the literal */
-		    literallen = parsenum(p+1, &p);
+		    if (parseuint32(p+1, &p, &literallen))
+			literallen = 0;
 
 		    /* Do a continue to read literal & following line */
 		    imclient->replyliteralleft = literallen;
@@ -915,7 +916,8 @@ static void imclient_input(struct imclient *imclient, char *buf, int len)
 		    charclass[(unsigned char)p[-1]] != 2) {
 
 		    /* Parse the size of the literal */
-		    literallen = parsenum(p+1, &p);
+		    if (parseuint32(p+1, &p, &literallen))
+			literallen = 0;
 
 		    /* Do a continue to read literal & following line */
 		    imclient->replyliteralleft = literallen;

@@ -95,15 +95,32 @@ static int update_record_from_cache(struct mailbox *mailbox,
 				    struct index_record *record)
 {
     int r;
+    bit32 crc;
 
-    r = mailbox_cacherecord(mailbox, record);
+    r = mailbox_open_cache(mailbox);
     if (r) return r;
 
+    if (!record->cache_offset)
+	return IMAP_IOERROR;
+
+    r = cache_parserecord(&mailbox->cache_buf,
+			  record->cache_offset, &record->crec);
+    if (r) return r;
+
+    crc = crc32_buf(cache_buf(record));
+    if (record->cache_crc) {
+	if (crc != record->cache_crc)
+	    return IMAP_MAILBOX_CRC;
+    }
+    else {
+	record->cache_crc = crc;
+    }
+
     /* extract the date for GMTIME field */
-    if (record->crec.buf[CACHE_ENVELOPE].len > 2) {
+    if (cacheitem_size(record, CACHE_ENVELOPE) > 2) {
 	char *envtokens[NUMENVTOKENS];
-	char *tmpenv = xstrndup(record->crec.buf[CACHE_ENVELOPE].s + 1,
-				record->crec.buf[CACHE_ENVELOPE].len - 2);
+	char *tmpenv = xstrndup(cacheitem_base(record, CACHE_ENVELOPE) + 1,
+				cacheitem_size(record, CACHE_ENVELOPE) - 2);
 	parse_cached_envelope(tmpenv, envtokens, VECTOR_SIZE(envtokens));
 	record->gmtime = message_parse_date(envtokens[ENV_DATE],
 			 PARSE_TIME|PARSE_ZONE|PARSE_NOCREATE|PARSE_GMT);
@@ -117,37 +134,21 @@ static int update_record_from_cache(struct mailbox *mailbox,
     return 0;
 }
 
-static int update_record_parse(struct mailbox *mailbox,
-			       struct index_record *record)
-{
-    struct body *body = NULL;
-    FILE *f;
-    int r;
-
-    f = fopen(mailbox_message_fname(mailbox, record->uid), "r");
-    if (!f) return IMAP_IOERROR;
-    r = message_parse_file(f, NULL, NULL, &body);
-    if (!r) r = message_write_cache(record, body);
-    if (body) message_free_body(body);
-    fclose(f);
-
-    return r;
-}
-
 static int upgrade_index_record(struct mailbox *mailbox,
 				const char *buf,
 				int old_version,
-				struct index_record *record)
+				struct index_record *record,
+				int record_size)
 {
     indexbuffer_t rbuf;
     char *recordbuf = (char *)rbuf.buf;
     int recalc = 0;
 
     memset(recordbuf, 0, INDEX_RECORD_SIZE);
-    if (INDEX_RECORD_SIZE < mailbox->i.record_size)
+    if (INDEX_RECORD_SIZE < record_size)
 	memcpy(recordbuf, buf, INDEX_RECORD_SIZE);
     else
-	memcpy(recordbuf, buf, mailbox->i.record_size);
+	memcpy(recordbuf, buf, record_size);
 
     /* CONTENT_LINES added with minor version 5 */
     /* CACHE_VERSION added with minor version 6 */
@@ -175,8 +176,10 @@ static int upgrade_index_record(struct mailbox *mailbox,
 	    recalc = 1;
     }
 
-    if (recalc)
-	return update_record_parse(mailbox, record);
+    if (recalc) {
+	char *fname = mailbox_message_fname(mailbox, record->uid);
+	return message_parse(fname, record);
+    }
 
     return 0;
 }
@@ -187,6 +190,7 @@ static int upgrade_index_record(struct mailbox *mailbox,
 int upgrade_index(struct mailbox *mailbox)
 {
     unsigned recno, erecno;
+    unsigned long oldmapnum;
     unsigned long oldnum_records;
     unsigned long expunge_num = 0;
     unsigned uid;
@@ -198,28 +202,11 @@ int upgrade_index(struct mailbox *mailbox)
     char *rbuf = (char *)recordbuf.buf;
     int newindex_fd = -1;
     char *fname;
-    struct seendata sd;
-    struct seen *seendb;
-    struct seq_listreader seq;
+    struct seqset *seq = NULL;
     struct index_record record;
     struct index_record *expunge_records = NULL;
     struct index_record *recordptr;
-    int have_exclusive = 0;
     int r, n;
-
-    memset(&sd, 0, sizeof(struct seendata));
-
-    if (mailbox->locktype == LOCK_EXCLUSIVE) {
-	have_exclusive = 1;
-    }
-    else {
-	/* get an exclusive lock */
-	r = mailbox_get_lock(mailbox, LOCK_EXCLUSIVE);
-	if (r) return r;
-
-	/* re-open the index file, it may have changed */
-	r = mailbox_open_index(mailbox);
-    }
 
     if (mailbox->index_size < OFFSET_NUM_RECORDS)
 	return IMAP_MAILBOX_BADFORMAT;
@@ -228,6 +215,12 @@ int upgrade_index(struct mailbox *mailbox)
     oldstart_offset = ntohl(*((bit32 *)(mailbox->index_base+OFFSET_START_OFFSET)));
     oldrecord_size = ntohl(*((bit32 *)(mailbox->index_base+OFFSET_RECORD_SIZE)));
     oldnum_records = ntohl(*((bit32 *)(mailbox->index_base+OFFSET_NUM_RECORDS)));
+    oldmapnum = (mailbox->index_size - oldstart_offset) / oldrecord_size;
+    if (oldmapnum < oldnum_records) {
+	syslog(LOG_ERR, "upgrade: %s map doesn't fit, shrinking index %lu to %lu",
+	       mailbox->name, oldnum_records, oldmapnum);
+	oldnum_records = oldmapnum;
+    }
 
     /* check if someone else already upgraded the index! */
     if (oldminor_version == MAILBOX_MINOR_VERSION)
@@ -273,7 +266,10 @@ int upgrade_index(struct mailbox *mailbox)
 	mailbox->i.options = config_getint(IMAPOPT_MAILBOX_DEFAULT_OPTIONS);
 
     if (oldminor_version < 12) {
-	unsigned erecno;
+	struct seen *seendb;
+	struct seendata sd;
+	unsigned long erecno;
+	unsigned long emapnum;
 	bit32 eversion, eoffset, esize;
 	char *owner_userid;
 	struct stat sbuf;
@@ -291,28 +287,37 @@ int upgrade_index(struct mailbox *mailbox)
 
 	r = mailbox_read_header(mailbox, NULL);
 	if (r) goto fail;
-	mailbox->i.num_records = 0;
+
+	/* NEW HEADER FIELDS */
+
+	/* we'll set this if there are expunged records */
 	mailbox->i.first_expunged = 0;
-	mailbox->i.last_repack_time = 0;
+	/* we can't know about deletions before the current modseq */
+	mailbox->i.deletedmodseq = mailbox->i.highestmodseq;
+	/* we're repacking now! */
+	mailbox->i.last_repack_time = time(NULL);
+	/* bootstrap CRC matching */
 	mailbox->i.header_file_crc = mailbox->header_file_crc;
+
+	/* set up seen tracking for user inside the mailbox */
 	if (!owner_userid) {
 	    r = IMAP_MAILBOX_NONEXISTENT;
 	} else {
-	    r = seen_open(owner_userid, SEEN_CREATE, &seendb);
+	    r = seen_open(owner_userid, SEEN_SILENT, &seendb);
 	    if (!r) {
 		r = seen_read(seendb, mailbox->uniqueid, &sd);
 		seen_close(seendb);
 	    }
 	}
 	if (r) { /* no seen data? */
-	    mailbox->i.recentuid = 0;
-	    mailbox->i.recenttime = 0;
-	    seq_readinit(&seq, NULL);
+	    mailbox->i.recentuid = mailbox->i.last_uid;
+	    mailbox->i.recenttime = time(NULL);
 	}
 	else {
 	    mailbox->i.recentuid = sd.lastuid;
 	    mailbox->i.recenttime = sd.lastchange;
-	    seq_readinit(&seq, sd.seenuids);
+	    seq = seqset_parse(sd.seenuids, NULL, sd.lastuid);
+	    seen_freedata(&sd);
 	}
 
 	/* check for expunge */
@@ -328,19 +333,32 @@ int upgrade_index(struct mailbox *mailbox)
 		    &expunge_len, sbuf.st_size, "expunge",
 		    mailbox->name);
 
+	/* use the expunge file's header information just in case
+	 * versions are skewed for some reason */
 	eversion = ntohl(*((bit32 *)(expunge_base+OFFSET_MINOR_VERSION)));
 	eoffset = ntohl(*((bit32 *)(expunge_base+OFFSET_START_OFFSET)));
 	esize = ntohl(*((bit32 *)(expunge_base+OFFSET_RECORD_SIZE)));
 	expunge_num = ntohl(*((bit32 *)(expunge_base+OFFSET_NUM_RECORDS)));
 	expunge_records = xmalloc(expunge_num * sizeof(struct index_record));
-
-	for (erecno = 1; erecno <= expunge_num; erecno++) {
-	    bufp = expunge_base + eoffset + (erecno-1)*esize;
-	    upgrade_index_record(mailbox, bufp, eversion,
-				 &expunge_records[erecno-1]);
-	    expunge_records[erecno-1].system_flags |= FLAG_EXPUNGED;
+	emapnum = (sbuf.st_size - eoffset) / esize;
+	if (emapnum < expunge_num) {
+	    syslog(LOG_ERR, "IOERROR: %s map doesn't fit, shrinking expunge %lu to %lu",
+		   mailbox->name, expunge_num, emapnum);
+	    expunge_num = emapnum;
 	}
 
+	for (erecno = 1; erecno <= expunge_num; erecno++) {
+	    struct index_record *record = &expunge_records[erecno-1];
+	    bufp = expunge_base + eoffset + (erecno-1)*esize;
+	    upgrade_index_record(mailbox, bufp, eversion, record, esize);
+	    record->system_flags |= FLAG_EXPUNGED;
+	    if (!mailbox->i.first_expunged ||
+		mailbox->i.first_expunged > record->last_updated)
+		mailbox->i.first_expunged = record->last_updated;
+	}
+
+	/* expunge files were not sorted.  So sort them now for easier
+	 * interleaving */
 	qsort(expunge_records, expunge_num, 
 	      sizeof(struct index_record), &sort_record);
 
@@ -385,22 +403,29 @@ no_expunge:
 	    recordptr = &expunge_records[erecno-1];
 	    erecno++;
 	}
+
 	/* case: index record is lower uid */
 	else if (erecno > expunge_num || uid <= expunge_records[erecno-1].uid) {
-	    upgrade_index_record(mailbox, bufp, oldminor_version, &record);
+	    upgrade_index_record(mailbox, bufp, oldminor_version, &record,
+				 oldrecord_size);
 	    recno++;
 	    if (erecno <= expunge_num && uid == expunge_records[erecno-1].uid)
 		erecno++; /* duplicate UID - skip expunge record */
 	    recordptr = &record;
 	}
+
 	/* case: expunge record is lower uid */
 	else {
 	    recordptr = &expunge_records[erecno-1];
 	    erecno++;
 	}
 
-	if (oldminor_version < 12 && seq_ismember(&seq, recordptr->uid))
+	if (oldminor_version < 12 && seqset_ismember(seq, recordptr->uid))
 	    recordptr->system_flags |= FLAG_SEEN;
+
+	/* write the cache record if necessary */
+	r = mailbox_append_cache(mailbox, recordptr);
+	if (r) goto fail;
 
 	mailbox_index_update_counts(mailbox, recordptr, 1);
 	mailbox_index_record_to_buf(recordptr, (unsigned char *)rbuf);
@@ -433,13 +458,16 @@ no_expunge:
 	   oldminor_version, MAILBOX_MINOR_VERSION);
 
 done:
-    seen_freedata(&sd);
+    seqset_free(seq);
     free(expunge_records);
 
-    if (!have_exclusive) {
-	r = mailbox_get_lock(mailbox, LOCK_SHARED);
-	if (r) return r;
-    }
+    /* commit the cache first so it doesn't stay "dirty" */
+    mailbox_commit_cache(mailbox);
+
+    /* special case, completely forgiven from being clean... */
+    mailbox->i.dirty = 0;
+    mailbox->quota_dirty = 0;
+    mailbox->modseq_dirty = 0;
 
     /* it's definitely changed! */
     r = mailbox_open_index(mailbox);
@@ -449,7 +477,7 @@ done:
 
 fail:
     if (newindex_fd != -1) close(newindex_fd);
-    seen_freedata(&sd);
+    seqset_free(seq);
     free(expunge_records);
 
     syslog(LOG_ERR, "Index upgrade failed: %s", mailbox->name);

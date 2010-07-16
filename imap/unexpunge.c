@@ -136,16 +136,16 @@ void list_expunged(struct mailbox *mailbox)
 	    continue;
 	}
 
-	printf("\tFrom: %.*s\n", record.crec.buf[CACHE_FROM].len,
-		record.crec.buf[CACHE_FROM].s);
-	printf("\tTo  : %.*s\n", record.crec.buf[CACHE_TO].len,
-		record.crec.buf[CACHE_TO].s);
-	printf("\tCc  : %.*s\n", record.crec.buf[CACHE_CC].len,
-		record.crec.buf[CACHE_CC].s);
-	printf("\tBcc : %.*s\n", record.crec.buf[CACHE_BCC].len,
-		record.crec.buf[CACHE_BCC].s);
-	printf("\tSubj: %.*s\n\n", record.crec.buf[CACHE_SUBJECT].len,
-		record.crec.buf[CACHE_SUBJECT].s);
+	printf("\tFrom: %.*s\n", cacheitem_size(&record, CACHE_FROM),
+		cacheitem_base(&record, CACHE_FROM));
+	printf("\tTo  : %.*s\n", cacheitem_size(&record, CACHE_TO),
+		cacheitem_base(&record, CACHE_TO));
+	printf("\tCc  : %.*s\n", cacheitem_size(&record, CACHE_CC),
+		cacheitem_base(&record, CACHE_CC));
+	printf("\tBcc : %.*s\n", cacheitem_size(&record, CACHE_BCC),
+		cacheitem_base(&record, CACHE_BCC));
+	printf("\tSubj: %.*s\n\n", cacheitem_size(&record, CACHE_SUBJECT),
+		cacheitem_base(&record, CACHE_SUBJECT));
     }
 }
 
@@ -224,7 +224,7 @@ int restore_expunged(struct mailbox *mailbox, int mode, unsigned long *uids,
     if (*numrestored) {
 	int i;
 	/* commit first */
-	mailbox_commit(mailbox, 0);
+	mailbox_commit(mailbox);
 
 	/* then complete the unlinks once safe to do so */
 	for (i = 0; i < *numrestored; i++) {

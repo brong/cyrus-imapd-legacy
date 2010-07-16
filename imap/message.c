@@ -337,6 +337,26 @@ int allow_null;
     }
 }
 
+int message_parse(const char *fname, struct index_record *record)
+{
+    struct body *body = NULL;
+    FILE *f;
+    int r;
+
+    f = fopen(fname, "r");
+    if (!f) return IMAP_IOERROR;
+
+    r = message_parse_file(f, NULL, NULL, &body);
+    if (!r) {
+        r = message_create_record(record, body);
+        message_free_body(body);
+    }
+
+    if (f) fclose(f);
+
+    return r;
+}
+
 /*
  * Parse the message 'infile'.
  *
@@ -537,44 +557,49 @@ void message_fetch_part(struct message_content *msg,
 /*
  * Appends the message's cache information to the cache file
  * and fills in appropriate information in the index record pointed to
- * by 'message_index'.
+ * by 'record'.
  */
 int
-message_create_record(message_index, body)
-struct index_record *message_index;
+message_create_record(record, body)
+struct index_record *record;
 struct body *body;
 {
     if (config_getenum(IMAPOPT_INTERNALDATE_HEURISTIC) 
 	    == IMAP_ENUM_INTERNALDATE_HEURISTIC_RECEIVEDHEADER) {
+	time_t newdate = 0;
 	if (body->received_date)
-	    message_index->internaldate = message_parse_date(body->received_date,
+	    newdate = message_parse_date(body->received_date,
 		PARSE_DATE|PARSE_TIME|PARSE_ZONE|PARSE_NOCREATE|PARSE_GMT);
+	if (newdate)
+	    record->internaldate = newdate;
     }
 
-    message_index->sentdate = message_parse_date(body->date, PARSE_NOCREATE);
-    if (!message_index->sentdate) {
-	struct tm *tm = localtime(&message_index->internaldate);
+    if (!record->internaldate)
+	record->internaldate = time(NULL);
+
+    /* used for sent time searching, truncated to day with no TZ */
+    record->sentdate = message_parse_date(body->date, PARSE_NOCREATE);
+    if (!record->sentdate) {
+	struct tm *tm = localtime(&record->internaldate);
 	/* truncate to the day */
 	tm->tm_sec = 0;
 	tm->tm_min = 0;
 	tm->tm_hour = 0;
-	message_index->sentdate = mktime(tm);
+	record->sentdate = mktime(tm);
     }
 
-    message_index->size = body->header_size + body->content_size;
-    message_index->header_size = body->header_size;
-    message_index->gmtime =
-	message_parse_date(body->date, PARSE_TIME|PARSE_ZONE|PARSE_NOCREATE|PARSE_GMT);
-    if (!message_index->gmtime)
-	message_index->gmtime = message_index->internaldate;
-    message_index->content_lines = body->content_lines;
+    /* used for sent time sorting, full gmtime of Date: header */
+    record->gmtime =
+	message_parse_date(body->date, PARSE_DATE|PARSE_TIME|PARSE_ZONE|PARSE_NOCREATE|PARSE_GMT);
+    if (!record->gmtime)
+	record->gmtime = record->internaldate;
 
-    message_write_cache(message_index, body);
+    record->size = body->header_size + body->content_size;
+    record->header_size = body->header_size;
+    record->content_lines = body->content_lines;
+    message_guid_copy(&record->guid, &body->guid);
 
-    /* Copy in GUID unless GUID already assigned to the message
-     * (allows parent to decide which source of GUIDs to use)
-     */
-    message_guid_copy(&message_index->guid, &body->guid);
+    message_write_cache(record, body);
 
     return 0;
 }
@@ -2088,22 +2113,19 @@ int *boundaryct;
  * to 'outfile'.
  */
 int
-message_write_cache(message_index, body)
-struct index_record *message_index;
+message_write_cache(record, body)
+struct index_record *record;
 struct body *body;
 {
-    static struct buf cache_buffer;
+    static struct buf cacheitem_buffer;
     struct ibuf ib[10];
     struct body toplevel;
-    const char *base;
     char *subject;
-    int offset[10];
-    int sizes[10];
     int len;
     int i;
 
     /* initialise data structures */
-    buf_reset(&cache_buffer);
+    buf_reset(&cacheitem_buffer);
     for (i = 0; i < 10; i++)
 	message_ibuf_init(&ib[i]);
 
@@ -2130,25 +2152,22 @@ struct body *body;
     /* append the records to the buffer */
     for (i = 0; i < 10; i++) {
 	message_ibuf_pad(&ib[i]);
-	sizes[i] = ib[i].end - ib[i].start;
-	buf_appendbit32(&cache_buffer, sizes[i]);
-	offset[i] = buf_len(&cache_buffer);
-	buf_appendmap(&cache_buffer, ib[i].start, (sizes[i] + 3) & ~3);
+	record->crec.item[i].len = ib[i].end - ib[i].start;
+	buf_appendbit32(&cacheitem_buffer, record->crec.item[i].len);
+	record->crec.item[i].offset = buf_len(&cacheitem_buffer);
+	buf_appendmap(&cacheitem_buffer, ib[i].start, (record->crec.item[i].len + 3) & ~3);
 	message_ibuf_free(&ib[i]);
     }
 
-    buf_getmap(&cache_buffer, &base, &len);
+    len = buf_len(&cacheitem_buffer);
 
     /* copy the fields into the message */
-    message_index->cache_offset = 0; /* calculate on write! */
-    message_index->cache_version = MAILBOX_CACHE_MINOR_VERSION;
-    message_index->cache_crc = crc32_map(base, len);
-    message_index->crec.base = base;
-    message_index->crec.len = len;
-    for (i = 0; i < 10; i++) {
-	message_index->crec.buf[i].s = (char *)base + offset[i];
-	message_index->crec.buf[i].len = sizes[i];
-    }
+    record->cache_offset = 0; /* calculate on write! */
+    record->cache_version = MAILBOX_CACHE_MINOR_VERSION;
+    record->cache_crc = crc32_map(cacheitem_buffer.s, len); /* XXX - hacky */
+    record->crec.base = &cacheitem_buffer;
+    record->crec.offset = 0; /* we're at the start of the buffer */
+    record->crec.len = len;
 
     return 0;
 }
@@ -2867,17 +2886,14 @@ void parse_cached_envelope(char *env, char *tokens[], int tokens_size)
 		if(i>=tokens_size) break;
 		tokens[i++] = c;	/* start of string */
 	    }
-	    while (*c != '"') {		/* find close quote */
-		if (*c == '\0') {
-		    /* Oops, bad string. */
-		    fatal("Quoted string w/o end quote in parse_cached_envelope",
-			  EC_SOFTWARE);
-		}
+	    while (*c && *c != '"') {		/* find close quote */
 		if (*c == '\\') c++;	/* skip quoted-specials */
-		c++;
+		if (*c) c++;
 	    }
-	    if (!ncom) *c = '\0';	/* end of string */
-	    c++;			/* skip close quote */
+	    if (*c) {
+		if (!ncom) *c = '\0';	/* end of string */
+		c++;			/* skip close quote */
+	    }
 	    break;
 	case '{':			/* literal */
 	    c++;			/* skip open brace */

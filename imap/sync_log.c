@@ -193,40 +193,53 @@ static void sync_log_base(const char *string, int len)
 
 static const char *sync_quote_name(const char *name)
 {
-    static char buf[MAX_MAILBOX_BUFFER]; /* 2 * MAX_MAILBOX_NAME + 3 */
-    const char *s;
-    char *p = buf;
+    static char buf[MAX_MAILBOX_BUFFER+3]; /* "x2 plus \0 */
     char c;
-    int  need_quote = 0;
+    int src;
+    int dst = 0;
+    int need_quote = 0;
 
-    if (!name || !*name) return "\"\"";
+    /* initial quote */
+    buf[dst++] = '"';
 
-    s = name;
-    while ((c=*s++)) {
-        if ((c == ' ') || (c == '\t') || (c == '\\') || (c == '\"') ||
-            (c == '(') || (c == ')')  || (c == '{')  || (c == '}'))
-            need_quote = 1;
-        else if ((c == '\r') || (c == '\n'))
-            fatal("Illegal line break in folder name", EC_IOERR);
+    /* degenerate case - no name is the empty string, quote it */
+    if (!name || !*name) {
+	need_quote = 1;
+	goto end;
     }
 
-    if ((s-name) > MAX_MAILBOX_NAME+64) /* XXX: hope that's safe! */
-        fatal("word too long", EC_IOERR);
+    for (src = 0; name[src]; src++) {
+	c = name[src];
+	if ((c == '\r') || (c == '\n'))
+	    fatal("Illegal line break in folder name", EC_IOERR);
 
-    if (!need_quote) return(name);
+	/* quoteable characters */
+	if ((c == '\\') || (c == '\"') || (c == '{') || (c == '}')) {
+	    need_quote = 1;
+	    buf[dst++] = '\\';
+	}
 
-    s = name;
-    *p++ = '\"';
-    while ((c=*s++)) {
-        if ((c == '\\') || (c == '\"') || (c == '{') || (c == '}'))
-            *p++ = '\\';
-        *p++ = c;
+	/* non-atom characters */
+	else if ((c == ' ') || (c == '\t') || (c == '(') || (c == ')')) {
+	    need_quote = 1;
+	}
+
+	buf[dst++] = c;
+
+	if (dst > MAX_MAILBOX_BUFFER)
+	    fatal("word too long", EC_IOERR);
     }
 
-    *p++ = '\"';
-    *p++ = '\0';
-    
-    return(buf);
+end:
+    if (need_quote) {
+	buf[dst++] = '\"';
+	buf[dst] = '\0';
+	return buf;
+    }
+    else {
+	buf[dst] = '\0';
+	return buf + 1; /* skip initial quote */
+    }
 }
 
 #define BUFSIZE 4096

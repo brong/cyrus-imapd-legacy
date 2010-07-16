@@ -78,16 +78,13 @@ struct appendstate {
     enum { APPEND_READY, APPEND_DONE } s;
 				/* current state of append */
 
-    /* if we abort, where should we truncate the cache file? */
-    unsigned long orig_cache_size;
-
     int nummsg;    /* number of messages appended pending commit.
 		      from as->baseuid ... m.baseuid + nummsg - 1 */
     unsigned baseuid; 
 
     /* set seen on these message on commit */
     int internalseen;
-    struct seq_listbuilder seen_seq;
+    struct seqset *seen_seq;
 };
 
 /* add helper function to determine uid range appended? */
@@ -107,8 +104,9 @@ extern int append_commit(struct appendstate *as,
 			 quota_t quotacheck,
 			 unsigned long *uidvalidity, 
 			 unsigned long *startuid, 
-			 unsigned long *num);
-extern int append_abort(struct appendstate *mailbox);
+			 unsigned long *num,
+			 struct mailbox **mailboxptr);
+extern int append_abort(struct appendstate *as);
 
 /* creates a new stage and returns stage file corresponding to mailboxname */
 extern FILE *append_newstage(const char *mailboxname, time_t internaldate,

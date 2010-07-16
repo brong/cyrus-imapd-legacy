@@ -138,9 +138,7 @@ struct uniqmailid * find_uniqid (char * mailboxname, char * mailboxid);
 
 extern cyrus_acl_canonproc_t mboxlist_ensureOwnerRights;
 
-int code = 0;
-int syncflag = 0;
-int make_changes = 1;
+int reconstruct_flags = RECONSTRUCT_MAKE_CHANGES | RECONSTRUCT_DO_STAT;
 
 int main(int argc, char **argv)
 {
@@ -165,7 +163,7 @@ int main(int argc, char **argv)
     assert(INDEX_HEADER_SIZE == (OFFSET_HEADER_CRC+4));
     assert(INDEX_RECORD_SIZE == (OFFSET_RECORD_CRC+4));
 
-    while ((opt = getopt(argc, argv, "C:p:rmfsx")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:kp:rmfsxgGq")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -183,16 +181,36 @@ int main(int argc, char **argv)
 	    mflag = 1;
 	    break;
 
+	case 'n':
+	    reconstruct_flags &= ~RECONSTRUCT_MAKE_CHANGES;
+	    break;
+
+	case 'g':
+	    fprintf(stderr, "deprecated option -g used\n");
+	    break;
+
+	case 'G':
+	    reconstruct_flags |= RECONSTRUCT_ALWAYS_PARSE;
+	    break;
+
 	case 'f':
 	    fflag = 1;
 	    break;
 
-	case 's':
-	    syncflag = 1;
-	    break;
- 
 	case 'x':
 	    xflag = 1;
+	    break;
+
+	case 'k':
+	    fprintf(stderr, "deprecated option -k used\n");
+	    break;
+
+	case 's':
+	    reconstruct_flags &= ~RECONSTRUCT_DO_STAT;
+	    break;
+
+	case 'q':
+	    reconstruct_flags |= RECONSTRUCT_QUIET;
 	    break;
 
 	default:
@@ -209,8 +227,7 @@ int main(int argc, char **argv)
 	fatal(error_message(r), EC_CONFIG);
     }
 
-    if (syncflag)
-	sync_log_init();
+    sync_log_init();
 
     if (mflag) {
 	if (rflag || fflag || optind != argc) {
@@ -254,7 +271,7 @@ int main(int argc, char **argv)
 		r = mboxlist_lookup(buf, NULL, NULL);
 	    } while (r == IMAP_AGAIN);
 
-	    if(r != IMAP_MAILBOX_NONEXISTENT) {
+	    if (r != IMAP_MAILBOX_NONEXISTENT) {
 		fprintf(stderr,
 			"Mailbox %s already exists.  Cannot specify -p.\n",
 			argv[i]);
@@ -263,7 +280,7 @@ int main(int argc, char **argv)
 
 	    /* Does the suspected path *look* like a mailbox? */
 	    fname = mboxname_metapath(start_part, buf, META_HEADER, 0);
-	    if(stat(fname, &sbuf) < 0) {
+	    if (stat(fname, &sbuf) < 0) {
 		fprintf(stderr,
 			"%s does not appear to be a mailbox (no %s).\n",
 			argv[i], fname);
@@ -354,8 +371,7 @@ int main(int argc, char **argv)
 	free(p);
     }
 
-    if (syncflag)
-	sync_log_done();
+    sync_log_done();
 
     mboxlist_close();
     mboxlist_done();
@@ -365,7 +381,7 @@ int main(int argc, char **argv)
 
     cyrus_done();
 
-    return code;
+    return 0;
 }
 
 void usage(void)
@@ -389,15 +405,10 @@ do_reconstruct(char *name,
     int r;
     char buf[MAX_MAILBOX_NAME];
     static char lastname[MAX_MAILBOX_NAME] = "";
-    int flags = 0;
     struct mailbox *mailbox;
-    char unique_buf[32];
     char outpath[MAX_MAILBOX_PATH];
 
     signals_poll();
-
-    if (make_changes)
-	flags |= RECONSTRUCT_MAKE_CHANGES;
 
     /* don't repeat */
     if (matchlen == (int) strlen(lastname) &&
@@ -409,7 +420,7 @@ do_reconstruct(char *name,
     strncpy(lastname, name, matchlen);
     lastname[matchlen] = '\0';
 
-    r = mailbox_reconstruct(lastname, flags);
+    r = mailbox_reconstruct(lastname, reconstruct_flags);
     if (r) {
 	com_err(lastname, r, "%s",
 		(r == IMAP_IOERROR) ? error_message(errno) : NULL);
@@ -422,13 +433,6 @@ do_reconstruct(char *name,
 	return 0;
     }
 
-    if (find_uniqid(lastname, mailbox->uniqueid)) {
-	mailbox_make_uniqueid(lastname, mailbox->i.uidvalidity,
-			      unique_buf, sizeof(unique_buf));
-	free (mailbox->uniqueid);
-	mailbox->uniqueid = xstrdup(unique_buf);
-	mailbox_commit(mailbox, 1);
-    }
     if (!add_uniqid(lastname, mailbox->uniqueid)) {
 	syslog (LOG_ERR, "Failed adding mailbox: %s unique id: %s\n",
 		mailbox->name, mailbox->uniqueid );
@@ -437,7 +441,8 @@ do_reconstruct(char *name,
     /* Convert internal name to external */
     (*recon_namespace.mboxname_toexternal)(&recon_namespace, lastname,
 					   NULL, buf);
-    printf("%s\n", buf);
+    if (!(reconstruct_flags & RECONSTRUCT_QUIET))
+	printf("%s\n", buf);
 
     strncpy(outpath, mailbox_meta_fname(mailbox, META_HEADER), MAX_MAILBOX_NAME);
     mailbox_close(&mailbox);

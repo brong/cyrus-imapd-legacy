@@ -111,19 +111,19 @@ static void printfile(struct protstream *out, struct dlist *dl)
 
     f = fopen(dl->sval, "r");
     if (!f) {
-	syslog(LOG_ERR, "Failed to read file %s", dl->sval);
+	syslog(LOG_ERR, "IOERROR: Failed to read file %s", dl->sval);
 	prot_printf(out, "NIL");
 	return;
     }
     if (fstat(fileno(f), &sbuf) == -1) {
-	syslog(LOG_ERR, "Failed to stat file %s", dl->sval);
+	syslog(LOG_ERR, "IOERROR: Failed to stat file %s", dl->sval);
 	prot_printf(out, "NIL");
 	fclose(f);
 	return;
     }
     size = sbuf.st_size;
     if (size != dl->nval) {
-	syslog(LOG_ERR, "Size mismatch %s (%lu != " MODSEQ_FMT ")",
+	syslog(LOG_ERR, "IOERROR: Size mismatch %s (%lu != " MODSEQ_FMT ")",
 	       dl->sval, size, dl->nval);
 	prot_printf(out, "NIL");
 	fclose(f);
@@ -295,7 +295,8 @@ struct dlist *dlist_buf(struct dlist *dl, const char *name,
 {
     struct dlist *i = dlist_child(dl, name);
     i->type = DL_BUF;
-    i->sval = xstrndup(val, len);
+    i->sval = xmalloc(len);
+    memcpy(i->sval, val, len);
     i->nval = len;
     return i;
 }
@@ -428,6 +429,9 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 	buf_setcstr(&kbuf, "");
 	c = prot_getc(in);
     }
+    
+    /* connection dropped? */
+    if (c == EOF) goto fail;
 
     /* check what sort of value we have */
     if (c == '(') {
@@ -439,8 +443,8 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 	    c = dlist_parse(&di, 0, in);
 	    if (di) dlist_stitch(dl, di);
 	    c = next_nonspace(in, c);
+	    if (c == EOF) goto fail;
 	}
-	if (c != ')') goto fail;
 	c = prot_getc(in);
     }
     else if (c == '%') {
@@ -455,8 +459,8 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 		c = dlist_parse(&di, 1, in);
 		if (di) dlist_stitch(dl, di);
 		c = next_nonspace(in, c);
+		if (c == EOF) goto fail;
 	    }
-	    if (c != ')') goto fail;
 	}
 	else if (c == '{') {
 	    struct message_guid tmp_guid;
@@ -467,7 +471,7 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 	    if (c != ' ') goto fail;
 	    c = getastring(in, NULL, &gbuf);
 	    if (c != ' ') goto fail;
-	    c = getunum(in, &size);
+	    c = getuint32(in, &size);
 	    if (c != '}') goto fail;
 	    c = prot_getc(in);
 	    if (c == '\r') c = prot_getc(in);

@@ -87,6 +87,7 @@
 #include "notify.h"
 #include "prot.h"
 #include "proxy.h"
+#include "statuscache.h"
 #include "telemetry.h"
 #include "tls.h"
 #include "util.h"
@@ -228,6 +229,9 @@ int service_init(int argc __attribute__((unused)),
 	/* Initialize the annotatemore db (for sieve on shared mailboxes) */
 	annotatemore_init(0, NULL, NULL);
 	annotatemore_open(NULL);
+
+	/* setup for statuscache invalidation */
+	statuscache_open(NULL);
 
 	/* setup for sending IMAP IDLE notifications */
 	idle_enabled();
@@ -522,26 +526,20 @@ int deliver_mailbox(FILE *f,
 	r = append_fromstage(&as, &content->body, stage, now,
 			     (const char **) flag, nflags, !singleinstance);
 
-	/* check for duplicate again in case of delivery during setup */
-	if (r ||
-	    (id && dupelim && !(as.mailbox->i.options & OPT_IMAP_DUPDELIVER) &&
-	     duplicate_check(id, strlen(id), mailboxname, strlen(mailboxname)))) {
+	if (r) {
 	    append_abort(&as);
-                    
-	    if (!r) {
-		/* duplicate message */
-		duplicate_log(id, mailboxname, "delivery");
-		return 0;
-	    }         
 	} else {
-	    r = append_commit(&as, quotaoverride ? -1 : 0, NULL, &uid, NULL);
+	    struct mailbox *mailbox;
+	    r = append_commit(&as, quotaoverride ? -1 : 0, NULL, &uid,
+			      NULL, &mailbox);
 	    if (!r) {
-		syslog(LOG_INFO, "Delivered: %s to mailbox: %s", id, mailboxname);
-
+		syslog(LOG_INFO, "Delivered: %s to mailbox: %s",
+		       id, mailboxname);
 		if (dupelim && id) {
 		    duplicate_mark(id, strlen(id), mailboxname, 
 				   strlen(mailboxname), now, uid);
 		}
+		mailbox_close(&mailbox);
 	    }
 	}
     }
@@ -950,6 +948,9 @@ void shut_down(int code)
 
 	annotatemore_close();
 	annotatemore_done();
+
+	statuscache_close();
+	statuscache_done();
     }
 
 #ifdef HAVE_SSL

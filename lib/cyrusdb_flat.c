@@ -271,7 +271,7 @@ static int starttxn_or_refetch(struct db *db, struct txn **mytid)
 	/* no txn, but let's try to be reasonably up-to-date */
 
 	if (stat(db->fname, &sbuf) == -1) {
-	    syslog(LOG_ERR, "IOERROR: stating %s: %m", db->fname);
+	    syslog(LOG_ERR, "IOERROR: stating flat %s: %m", db->fname);
 	    return CYRUSDB_IOERROR;
 	}
 
@@ -287,7 +287,7 @@ static int starttxn_or_refetch(struct db *db, struct txn **mytid)
 	    dup2(newfd, db->fd);
 	    close(newfd);
 	    if (stat(db->fname, &sbuf) == -1) {
-		syslog(LOG_ERR, "IOERROR: stating %s: %m", db->fname);
+		syslog(LOG_ERR, "IOERROR: stating flat %s: %m", db->fname);
 		return CYRUSDB_IOERROR;
 	    }
 	    

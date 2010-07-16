@@ -79,6 +79,16 @@ struct namespace {
 			    void *rock, int force);
 };
 
+struct mboxlock {
+    char *name;
+    int lock_fd;
+    int locktype;
+};
+
+int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
+		  int locktype);
+void mboxname_release(struct mboxlock **mboxlockptr);
+
 /* Create namespace based on config options. */
 int mboxname_init_namespace(struct namespace *namespace, int isadmin);
 
@@ -135,6 +145,8 @@ char *mboxname_datapath(const char *partition,
 char *mboxname_metapath(const char *partition,
 			const char *mboxname,
 			int metafile, int isnew);
+
+char *mboxname_lockpath(const char *mboxname);
 
 /*
  * Return nonzero if (internal) mailbox 'name' consists of legal characters.

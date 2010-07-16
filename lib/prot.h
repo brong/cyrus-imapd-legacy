@@ -123,6 +123,8 @@ struct protstream {
     time_t timeout_mark;
     struct protstream *flushonread;
 
+    int can_unget;
+
     /* Events */
     prot_readcallback_t *readcallback_proc;
     void *readcallback_rock;
@@ -153,10 +155,6 @@ struct protgroup; /* Opaque protgroup structure */
 extern int prot_getc(struct protstream *s);
 extern int prot_ungetc(int c, struct protstream *s);
 extern int prot_putc(int c, struct protstream *s);
-
-#define prot_getc(s) ((s)->cnt > 0 ? (--(s)->cnt, (int)*(s)->ptr++) : prot_fill(s))
-#define prot_ungetc(c, s) ((s)->cnt++, (*--(s)->ptr = (c)))
-#define prot_putc(c, s) ((*(s)->ptr++ = (c)), --(s)->cnt == 0 ? prot_flush_internal(s,0) : 0)
 
 /* The following two macros control the blocking nature of
  * the protstream.

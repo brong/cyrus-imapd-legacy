@@ -1484,22 +1484,29 @@ struct mbent *database_lookup(const char *name, struct mpool *pool)
 {
     struct mboxlist_entry mbentry;
     struct mbent *out;
+    int r;
     
-    if(!name) return NULL;
+    if (!name) return NULL;
     
-    if(mboxlist_lookup(name, &mbentry, NULL);
-	return NULL;
+    r = mboxlist_lookup(name, &mbentry, NULL);
 
-    if(mbentry.mbtype & MBTYPE_RESERVE) {
+    switch (r) {
+    case IMAP_MAILBOX_RESERVED:
 	if(!pool) out = xmalloc(sizeof(struct mbent) + 1);
 	else out = mpool_malloc(pool, sizeof(struct mbent) + 1);
 	out->t = SET_RESERVE;
 	out->acl[0] = '\0';
-    } else {
+	break;
+
+    case 0:
 	if(!pool) out = xmalloc(sizeof(struct mbent) + strlen(acl));
 	else out = mpool_malloc(pool, sizeof(struct mbent) + strlen(acl));
 	out->t = SET_ACTIVE;
 	strcpy(out->acl, acl);
+	break;
+
+    default:
+	return NULL;
     }
 
     out->mailbox = (pool) ? mpool_strdup(pool, name) : xstrdup(name);

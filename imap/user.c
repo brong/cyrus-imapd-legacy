@@ -416,12 +416,11 @@ int user_renameacl(char *name, char *olduser, char *newuser)
 int user_copyquotaroot(char *oldname, char *newname)
 {
     int r = 0;
-    struct quota quota;
+    struct quota q;
 
-    quota_setroot(&quota, oldname);
-    r = quota_read(&quota, NULL, 0);
-    if (!r) mboxlist_setquota(newname, quota.limit, 0);
-    quota_free(&quota);
+    q.root = oldname;
+    r = quota_read(&q, NULL, 0);
+    if (!r) mboxlist_setquota(newname, q.limit, 0);
 
     return r;
 }
@@ -447,13 +446,13 @@ static int find_cb(void *rockp,
 		  const char *data __attribute__((unused)),
 		   int datalen __attribute__((unused)))
 {
-    struct quota quota_root;
-    struct txn **tid = ((struct find_rock *) rockp)->tid;
+    char *root;
     int r;
 
-    quota_root.root = (char *) xstrndup(key, keylen);
-    r = quota_delete(&quota_root, tid);
-    free(quota_root.root); 
+    root = xstrndup(key, keylen);
+    r = quota_deleteroot(root);
+    free(root); 
+
     return r;
 }
 

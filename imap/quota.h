@@ -73,7 +73,7 @@ typedef long quota_t;
 extern struct db *qdb;
 
 struct quota {
-    char *root;
+    const char *root;
 
     /* Information in quota entry */
     uquota_t used;
@@ -90,7 +90,7 @@ extern void quota_abort(struct txn **tid);
 
 extern int quota_write(struct quota *quota, struct txn **tid);
 
-extern int quota_delete(struct quota *quota, struct txn **tid);
+extern int quota_deleteroot(const char *quotaroot);
 
 extern int quota_findroot(char *ret, size_t retlen, const char *name);
 

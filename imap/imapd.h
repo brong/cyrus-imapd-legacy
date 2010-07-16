@@ -179,8 +179,8 @@ struct searchargs {
     bit32 system_flags_unset;
     bit32 user_flags_set[MAX_USER_FLAGS/32];
     bit32 user_flags_unset[MAX_USER_FLAGS/32];
-    struct seq_set *sequence;
-    struct seq_set *uidsequence;
+    struct seqset *sequence;
+    struct seqset *uidsequence;
     struct strlist *from;
     struct strlist *to;
     struct strlist *cc;
@@ -302,7 +302,5 @@ enum {
 };
 
 extern struct protstream *imapd_out, *imapd_in;
-
-extern mailbox_decideproc_t index_expungeuidlist;
 
 #endif /* INCLUDED_IMAPD_H */

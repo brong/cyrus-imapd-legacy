@@ -80,10 +80,6 @@ int sync_parse_type(const char *source);
 int sync_parse_response(const char *name, struct protstream *in,
 			struct dlist **klp);
 
-int sync_getliteral_size(struct protstream *input,
-                         struct protstream *output,
-                         size_t *sizep);
-
 #define SYNC_PARSE_EAT_OKLINE   (1)
 #define SYNC_PARSE_NOEAT_OKLINE (0)
 
@@ -128,7 +124,6 @@ struct sync_reserve_list {
     struct sync_reserve *head;
     struct sync_reserve *tail;
     int hash_size;
-    int npart;
 };
 
 struct sync_reserve_list *sync_reserve_list_create(int hash_size);
@@ -393,9 +388,11 @@ struct dlist *sync_parseline(struct protstream *in);
 int addmbox(char *name, int matchlen, int maycreate, void *rock);
 int addmbox_sub(char *name, int matchlen, int maycreate, void *rock);
 
-struct dlist *sync_mailbox(struct mailbox *mailbox,
-			   struct sync_folder *remote,
-			   int printrecords);
+int sync_mailbox(struct mailbox *mailbox,
+		 struct sync_folder *remote,
+		 struct sync_msgid_list *part_list,
+		 struct dlist *kl, struct dlist *kupload,
+		 int printrecords);
 
 int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 		 struct index_record *record);
