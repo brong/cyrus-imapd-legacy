@@ -262,7 +262,7 @@ static void send_lmtp_error(struct protstream *pout, int r)
     case MUPDATE_BADPARAM:
     default:
 	/* Some error we're not expecting. */
-	prot_printf(pout, "554 5.0.0 Unexpected internal error\r\n");
+	prot_printf(pout, "451 4.3.0 Unexpected internal error\r\n");
 	break;
     }
 }

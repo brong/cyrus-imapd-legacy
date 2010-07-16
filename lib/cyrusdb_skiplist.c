@@ -654,7 +654,7 @@ static int read_lock(struct db *db)
 	    lock_unlock(db->fd);
 	    return CYRUSDB_IOERROR;
 	}
-	
+
 	if (stat(db->fname, &sbuffile) == -1) {
 	    syslog(LOG_ERR, "IOERROR: stat %s: %m", db->fname);
 	    lock_unlock(db->fd);

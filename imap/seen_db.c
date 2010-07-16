@@ -167,8 +167,9 @@ int seen_open(const char *user,
 
     /* open the seendb corresponding to user */
     fname = seen_getpath(user);
+    if (flags & SEEN_CREATE) cyrus_mkdir(fname, 0755);
     r = (DB->open)(fname, dbflags, &seendb->db);
-    if (r != 0) {
+    if (r) {
 	if (!(flags & SEEN_SILENT)) {
 	    int level = (flags & SEEN_CREATE) ? LOG_ERR : LOG_DEBUG;
 	    syslog(level, "DBERROR: opening %s: %s", fname, 

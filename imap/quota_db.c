@@ -71,17 +71,6 @@ struct db *qdb;
 
 static int quota_dbopen = 0;
 
-void quota_setroot(struct quota *quota, const char *root)
-{
-    quota->root = xstrdup(root);
-}
-
-void quota_free(struct quota *quota)
-{
-    free(quota->root);
-    quota->root = NULL;
-}
-
 /*
  * Read the quota entry 'quota'
  */
@@ -195,18 +184,14 @@ int quota_write(struct quota *quota, struct txn **tid)
 /*
  * Remove the quota root 'quota'
  */
-int quota_delete(struct quota *quota, struct txn **tid)
+int quota_deleteroot(const char *quotaroot)
 {
-    int qrlen, r;
+    int qrlen;
 
-    if (!quota->root) return 0;
-
-    qrlen = strlen(quota->root);
+    qrlen = strlen(quotaroot);
     if (!qrlen) return IMAP_QUOTAROOT_NONEXISTENT;
 
-    r = QDB->delete(qdb, quota->root, qrlen, tid, 0);
-
-    return r;
+    return QDB->delete(qdb, quotaroot, qrlen, NULL, 0);
 }
 
 /*

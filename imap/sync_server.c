@@ -1212,13 +1212,28 @@ static int do_mailbox(struct dlist *kin,
     }
 
     if (strcmp(mailbox->uniqueid, uniqueid)) {
-	mailbox_close(&mailbox);
 	syslog(LOG_ERR, "Mailbox uniqueid changed %s - retry", mboxname);
+	mailbox_close(&mailbox);
 	return IMAP_MAILBOX_MOVED;
     }
 
-    if (strcmp(mailbox->acl, acl))
-	mboxlist_sync_setacls(mboxname, acl);
+    /* skip out now, it's going to mismatch for sure! */
+    if (highestmodseq < mailbox->i.highestmodseq) {
+	syslog(LOG_ERR, "higher modseq on replica %s - "
+	       MODSEQ_FMT " < " MODSEQ_FMT,
+	       mboxname, highestmodseq, mailbox->i.highestmodseq);
+	mailbox_close(&mailbox);
+	return IMAP_MAILBOX_CRC;
+    }
+
+    if (strcmp(mailbox->acl, acl)) {
+	mailbox_set_acl(mailbox, acl);
+	r = mboxlist_sync_setacls(mboxname, acl);
+	if (r) {
+	    mailbox_close(&mailbox);
+	    return r;
+	}
+    }
 
     /* now we're committed to writing something no matter what happens! */
 
@@ -1282,11 +1297,8 @@ static int do_mailbox(struct dlist *kin,
     }
 
  done:
-    if (r) {
-	/* truncate the appends at least... can't help the modseq issues */
-	mailbox->i.num_records = old_num_records;
-    }
-    else {
+    if (!r) {
+	mailbox_index_dirty(mailbox);
 	mailbox->i.last_uid = last_uid;
 	mailbox->i.highestmodseq = highestmodseq;
 	mailbox->i.recentuid = recentuid;
@@ -1297,10 +1309,11 @@ static int do_mailbox(struct dlist *kin,
 	/* mailbox->i.options = options; ... not really, there's unsyncable stuff in here */
     }
 
-    mailbox_commit(mailbox, 1);
     /* try re-calculating the CRC on mismatch... */
-    if (mailbox->i.sync_crc != sync_crc)
-	mailbox_recalc_sync_crc(mailbox);
+    if (mailbox->i.sync_crc != sync_crc) {
+	mailbox_index_recalc(mailbox);
+    }
+    mailbox_commit(mailbox);
     newcrc = mailbox->i.sync_crc;
     mailbox_close(&mailbox);
 
@@ -1352,12 +1365,11 @@ static void print_quota(struct quota *q)
 
 static int quota_work(const char *root)
 {
-    struct quota quota;
+    struct quota q;
 
-    quota_setroot(&quota, root);
-    if (!quota_read(&quota, NULL, 0))
-	print_quota(&quota);
-    quota_free(&quota);
+    q.root = root;
+    if (!quota_read(&q, NULL, 0))
+	print_quota(&q);
 
     return 0;
 }
@@ -1374,41 +1386,42 @@ static int mailbox_cb(char *name,
 {
     struct sync_name_list *qrl = (struct sync_name_list *)rock;
     struct mailbox *mailbox;
-    struct dlist *kl;
+    struct dlist *kl = dlist_kvlist(NULL, "MAILBOX");
     int r;
 
     r = mailbox_open_irl(name, &mailbox);
     /* doesn't exist?  Probably not finished creating or removing yet */
     if (r == IMAP_MAILBOX_NONEXISTENT) return 0;
+    if (r == IMAP_MAILBOX_RESERVED) return 0;
     if (r) return r;
 
-    if (qrl && mailbox->quota.root &&
-	 !sync_name_lookup(qrl, mailbox->quota.root))
-	sync_name_list_add(qrl, mailbox->quota.root);
+    if (qrl && mailbox->quotaroot &&
+	 !sync_name_lookup(qrl, mailbox->quotaroot))
+	sync_name_list_add(qrl, mailbox->quotaroot);
 
-    kl = sync_mailbox(mailbox, 0, 0);
-    sync_send_response(kl, sync_out);
+    r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 0);
+    if (!r) sync_send_response(kl, sync_out);
     dlist_free(&kl);
     mailbox_close(&mailbox);
 
-    return 0;
+    return r;
 }
 
 static int do_getfullmailbox(struct dlist *kin)
 {
     struct mailbox *mailbox;
-    struct dlist *kl;
+    struct dlist *kl = dlist_kvlist(NULL, "MAILBOX");
     int r;
 
     r = mailbox_open_irl(kin->sval, &mailbox);
     if (r) return r;
 
-    kl = sync_mailbox(mailbox, 0, 1);
-    sync_send_response(kl, sync_out);
+    r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 1);
+    if (!r) sync_send_response(kl, sync_out);
     dlist_free(&kl);
     mailbox_close(&mailbox);
 
-    return 0;
+    return r;
 }
 
 static int do_getmailboxes(struct dlist *kin)
@@ -1473,7 +1486,7 @@ static int user_sub(const char *userid)
     for (item = list->head; item; item = item->next) {
 	r = (sync_namespacep->mboxname_tointernal)(sync_namespacep, item->name,
 						   userid, buf);
-        if (r) return r;
+        if (r) continue;
 	dlist_atom(kl, "MBOXNAME", buf);
     }
     if (kl->head)
@@ -1926,7 +1939,7 @@ static int do_expunge(struct dlist *kin)
 	    if (r) goto done;
 	}
     }
-    r = mailbox_commit(mailbox, 0);
+    r = mailbox_commit(mailbox);
 
 done:
     mailbox_close(&mailbox);

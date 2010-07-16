@@ -745,20 +745,10 @@ static void annotation_get_size(const char *int_mboxname,
 				void *rock __attribute__((unused))) 
 {
     struct mailbox *mailbox;
-    struct index_record record;
-    int r = 0;
-    unsigned recno;
-#ifdef HAVE_LONG_LONG_INT
-    unsigned long long totsize = 0;
-# define SIZE_FMT "%llu"
-#else
-    unsigned long totsize = 0;
-# define SIZE_FMT "%lu"
-#endif
     char value[21];
     struct annotation_data attrib;
 
-    if(!int_mboxname || !ext_mboxname || !fdata || !mbrock)
+    if (!int_mboxname || !ext_mboxname || !fdata || !mbrock)
 	fatal("annotation_get_size called with bad parameters",
 	      EC_TEMPFAIL);
     
@@ -774,21 +764,13 @@ static void annotation_get_size(const char *int_mboxname,
         !(cyrus_acl_myrights(fdata->auth_state, mbrock->acl) & ACL_READ)))
 	return;
 
-    if (mailbox_open_irl(int_mboxname, &mailbox) != 0)
+    if (mailbox_open_irl(int_mboxname, &mailbox))
 	return;
 
-    if (!r) {
-	for (recno = 1; recno <= mailbox->i.num_records; recno++) {
-	    if ((r = mailbox_read_index_record(mailbox, recno, &record))!=0)
-		break;
-	    totsize += record.size;
-	}
-    }
+    if (snprintf(value, sizeof(value), QUOTA_T_FMT, mailbox->i.quota_mailbox_used) == -1)
+	return;
 
     mailbox_close(&mailbox);
-
-    if (r || snprintf(value, sizeof(value), SIZE_FMT, totsize) == -1)
-	return;
 
     memset(&attrib, 0, sizeof(attrib));
 
@@ -1735,6 +1717,7 @@ static int annotation_set_mailboxopt(const char *int_mboxname,
 {
     struct mailbox *mailbox;
     int flag = 0, r = 0, i;
+    unsigned long oldopts;
 
     /* Check entry */
     for (i = 0; annotate_mailbox_flags[i].name; i++) {
@@ -1756,13 +1739,18 @@ static int annotation_set_mailboxopt(const char *int_mboxname,
     r = mailbox_open_iwl(int_mboxname, &mailbox);
     if (r) return r;
 
+    oldopts = mailbox->i.options;
+
     if (!strcmp(entry->shared.value, "true")) {
 	mailbox->i.options |= flag;
     } else {
 	mailbox->i.options &= ~flag;
     }
 
-    r = mailbox_commit(mailbox, 1);
+    if (oldopts != mailbox->i.options) {
+	mailbox_index_dirty(mailbox);
+	r = mailbox_commit(mailbox);
+    }
 
     mailbox_close(&mailbox);
 

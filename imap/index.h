@@ -69,27 +69,29 @@
  */
 #define LOAD_IDS	256
 
+struct vanished_params {
+    unsigned long uidvalidity;
+    modseq_t modseq;
+    const char *match_seq;
+    const char *match_uid;
+    const char *sequence;
+};
+
 struct index_init {
     const char *userid;
     struct auth_state *authstate;
     struct protstream *out;
     int examine_mode;
     int qresync;
-    unsigned long uidvalidity;
-    modseq_t modseq;
-    const char *match_seq;
-    const char *match_uid;
-    const char *sequence;
     int select;
+    struct vanished_params vanished;
 };
 
-/* XXX - check alignment? */
 struct index_map {
-    unsigned recno;
-    unsigned uid;
-    modseq_t seen_modseq;
-    char isseen;
-    char isrecent;
+    struct index_record record;
+    modseq_t told_modseq;
+    int isseen:1;
+    int isrecent:1;
 };
 
 struct index_state {
@@ -98,20 +100,19 @@ struct index_state {
     unsigned exists;
     unsigned long last_uid;
     modseq_t highestmodseq;
-    modseq_t expungedmodseq;
-    modseq_t checkmodseq;
+    modseq_t delayed_modseq;
     struct index_map *map;
     unsigned mapsize;
-    unsigned recentuid;
     int internalseen;
     int skipped_expunge;
     int seen_dirty;
     int keepingseen;
     int examining;
     int myrights;
-    int numrecent;
+    unsigned numrecent;
+    unsigned numunseen;
     unsigned firstnotseen;
-    unsigned allseen;
+    int havenewrecords;
     char *flagname[MAX_USER_FLAGS];
     char *userid;
     struct protstream *out;
@@ -206,17 +207,16 @@ extern int index_copy(struct index_state *state,
 		      char *name, 
 		      char **copyuidp,
 		      int nolink);
-extern int index_status(struct index_state *state, struct protstream *out,
-			char *userid, char *mboxname,
-			char *name, unsigned statusitems);
 extern int find_thread_algorithm(char *arg);
 
 extern int index_open(const char *name, struct index_init *init,
 		      struct index_state **stateptr);
+extern int index_status(struct index_state *state, struct statusdata *sdata);
 extern int index_close(struct index_state **stateptr);
 extern unsigned index_finduid(struct index_state *state, unsigned uid);
 extern unsigned index_getuid(struct index_state *state, unsigned msgno);
-extern void index_check(struct index_state *state, int usinguid);
+extern modseq_t index_highestmodseq(struct index_state *state);
+extern int index_check(struct index_state *state, int usinguid, int printuid);
 extern int index_urlfetch(struct index_state *state, unsigned msgno,
 			  unsigned params, const char *section,
 			  unsigned long start_octet, unsigned long octet_count,
@@ -231,14 +231,11 @@ extern unsigned long index_getlines(struct index_state *state, unsigned msgno);
 extern int index_copy_remote(struct index_state *state, char *sequence, 
 			     int usinguid, struct protstream *pout);
 
-void appendsequencelist(struct index_state *state, struct seq_set **l,
+void appendsequencelist(struct index_state *state, struct seqset **l,
 			char *sequence, int usinguid);
-void freesequencelist(struct seq_set *l);
-extern int index_expunge(struct index_state *state, int usinguid, char *uidsequence);
-
-extern struct seq_set *index_parse_sequence(struct index_state *state,
-					    const char *sequence, int usinguid,
-					    struct seq_set *set);
+void freesequencelist(struct seqset *l);
+extern int index_expunge(struct index_state *state, int usinguid,
+			 char *uidsequence, int isclose);
 
 /* See lib/charset.h for the definition of receiver. */
 extern void index_getsearchtext_single(struct index_state *state, unsigned msgno,

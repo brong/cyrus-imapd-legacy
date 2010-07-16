@@ -328,7 +328,7 @@ static int myopen(const char *fname, int flags, struct db **ret)
 
     if (r == -1) {
 	int level = (flags & CYRUSDB_CREATE) ? LOG_ERR : LOG_DEBUG;
-	syslog(level, "IOERROR: stating %s: %m", db->path);
+	syslog(level, "IOERROR: stating quota %s: %m", db->path);
 	free_db(db);
 	return CYRUSDB_IOERROR;
     }

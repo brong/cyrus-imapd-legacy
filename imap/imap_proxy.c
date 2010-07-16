@@ -794,7 +794,8 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	}
 
 	/* read seqno */
-	c = getunum(backend_current->in, &seqno);
+	prot_ungetc(c, backend_current->in);
+	c = getuint32(backend_current->in, &seqno);
 	if (seqno == 0 || c != ' ') {
 	    /* we suck and won't handle this case */
 	    c = EOF; break;
@@ -850,7 +851,7 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	    case 'u': case 'U': /* uid */
 		c = chomp(backend_current->in, "id");
 		if (c != ' ') { c = EOF; }
-		else c = getunum(backend_current->in, &uidno);
+		else c = getuint32(backend_current->in, &uidno);
 		break;
 	    default: /* hmm, don't like the smell of it */
 		c = EOF;
@@ -936,7 +937,8 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	}
 
 	/* read seqno */
-	c = getunum(backend_current->in, &seqno);
+	prot_ungetc(c, backend_current->in);
+	c = getuint32(backend_current->in, &seqno);
 	if (seqno == 0 || c != ' ') {
 	    /* we suck and won't handle this case */
 	    c = EOF; break;
@@ -981,7 +983,7 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 	    case 'u': case 'U':
 		c = chomp(backend_current->in, "id");
 		if (c != ' ') { c = EOF; }
-		else c = getunum(backend_current->in, &uidno);
+		else c = getuint32(backend_current->in, &uidno);
 		break;
 
 	    case 'r': case 'R':
@@ -992,7 +994,7 @@ void proxy_copy(const char *tag, char *sequence, char *name, int myrights,
 		    eatline(backend_current->in, c);
 		    c = EOF;
 		}
-		else c = getnum(backend_current->in, &sz);
+		else c = getint32(backend_current->in, &sz);
 		if (c == '}') c = prot_getc(backend_current->in);
 		if (c == '\r') c = prot_getc(backend_current->in);
 		if (c != '\n') c = EOF;
@@ -1126,7 +1128,7 @@ int proxy_catenate_url(struct backend *s, struct imapurl *url, FILE *f,
 	}
 
 	/* read uidvalidity */
-	c = getunum(s->in, &uidvalidity);
+	c = getuint32(s->in, &uidvalidity);
 	if (c != ']') { c = EOF; break; }
 	eatline(s->in, c); /* we don't care about the rest of the line */
     }
@@ -1162,7 +1164,7 @@ int proxy_catenate_url(struct backend *s, struct imapurl *url, FILE *f,
 	if (c != ' ') { /* protocol error */ c = EOF; break; }
 	    
 	/* read seqno */
-	c = getunum(s->in, &seqno);
+	c = getuint32(s->in, &seqno);
 	if (seqno == 0 || c != ' ') {
 	    /* we suck and won't handle this case */
 	    c = EOF; break;
@@ -1181,7 +1183,7 @@ int proxy_catenate_url(struct backend *s, struct imapurl *url, FILE *f,
 		c = chomp(s->in, "id");
 		if (c != ' ') { c = EOF; }
 		else {
-		    c = getunum(s->in, &uid);
+		    c = getuint32(s->in, &uid);
 		    if (uid != url->uid) {
 			/* not our response */
 			eatline(s->in, c);
@@ -1196,7 +1198,7 @@ int proxy_catenate_url(struct backend *s, struct imapurl *url, FILE *f,
 		if (c == ']') c = prot_getc(s->in);
 		if (c == ' ') c = prot_getc(s->in);
 		if (c == '{') {
-		    c = getunum(s->in, &sz);
+		    c = getuint32(s->in, &sz);
 		    if (c == '}') c = prot_getc(s->in);
 		    if (c == '\r') c = prot_getc(s->in);
 		    if (c != '\n') c = EOF;
@@ -1423,7 +1425,7 @@ char *find_free_server()
 		    }
 
 		    /* read uidvalidity */
-		    c = getunum(be->in, &avail);
+		    c = getuint32(be->in, &avail);
 		    if (c != '\"') { c = EOF; break; }
 		    eatline(be->in, c); /* we don't care about the rest of the line */
 		}

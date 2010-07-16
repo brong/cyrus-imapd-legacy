@@ -714,47 +714,6 @@ void sync_quota_list_free(struct sync_quota_list **lp)
 
 /* ====================================================================== */
 
-int sync_getliteral_size(struct protstream *input,
-			 struct protstream *output,
-			 size_t *sizep)
-{
-    static struct buf arg;            /* Relies on zeroed BSS */
-    size_t size    = 0;
-    int   sawdigit = 0;
-    int   isnowait = 0;
-    int   c        = getword(input, &arg);
-    const char *p  = arg.s;
-
-    if (c == EOF) return(IMAP_IOERROR);
-
-    if ((p == NULL) || (*p != '{'))
-        return(IMAP_PROTOCOL_ERROR);
-
-    /* Read size from literal */
-    size = parsenum(p, &p);
-    if (*p == '+') {
-        isnowait++;
-        p++;
-    }
-
-    if (c == '\r') c = prot_getc(input);
-	
-    if (*p != '}' || p[1] || c != '\n' || !sawdigit)
-        return(IMAP_PROTOCOL_ERROR);
-
-    if (!isnowait) {
-        /* Tell client to send the message */
-        prot_printf(output, "+ go ahead\r\n");
-        prot_flush(output);
-    }
-
-    *sizep = size;
-
-    return(0);
-}
-
-/* ====================================================================== */
-
 char *sync_sieve_get_path(const char *userid, char *sieve_path, size_t psize)
 {
     char *domain;
@@ -1408,11 +1367,12 @@ struct dlist *sync_parseline(struct protstream *in)
     return NULL;
 }
 
-struct dlist *sync_mailbox(struct mailbox *mailbox,
-			    struct sync_folder *remote,
-			    int printrecords)
+int sync_mailbox(struct mailbox *mailbox,
+		 struct sync_folder *remote,
+		 struct sync_msgid_list *part_list,
+		 struct dlist *kl, struct dlist *kupload,
+		 int printrecords)
 {
-    struct dlist *kl = dlist_new("MAILBOX");
 
     dlist_atom(kl, "UNIQUEID", mailbox->uniqueid);
     dlist_atom(kl, "MBOXNAME", mailbox->name);
@@ -1427,17 +1387,21 @@ struct dlist *sync_mailbox(struct mailbox *mailbox,
     dlist_atom(kl, "ACL", mailbox->acl);
     dlist_atom(kl, "OPTIONS", sync_encode_options(mailbox->i.options));
     dlist_num(kl, "SYNC_CRC", mailbox->i.sync_crc);
-    if (mailbox->quota.root) 
-	dlist_atom(kl, "QUOTAROOT", mailbox->quota.root);
+    if (mailbox->quotaroot) 
+	dlist_atom(kl, "QUOTAROOT", mailbox->quotaroot);
 
     if (printrecords) {
 	struct index_record record;
 	struct dlist *il;
 	struct dlist *rl = dlist_list(kl, "RECORD");
+	struct stat sbuf;
+	const char *fname;
+	struct sync_msgid *msgid;
 	unsigned recno;
 	for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+	    /* we can't send bogus records, just skip them! */
 	    if (mailbox_read_index_record(mailbox, recno, &record))
-		goto done;
+		continue;
 
 	    if (remote && record.uid <= remote->last_uid) {
 		if (record.modseq <= remote->highestmodseq)
@@ -1457,14 +1421,32 @@ struct dlist *sync_mailbox(struct mailbox *mailbox,
 	    dlist_date(il, "INTERNALDATE", record.internaldate);
 	    dlist_num(il, "SIZE", record.size);
 	    dlist_atom(il, "GUID", message_guid_encode(&record.guid));
+
+	    /* if we're not uploading messages, skip the upload check */
+	    if (!part_list || !kupload) continue;
+
+	    /* is it already reserved? */
+	    msgid = sync_msgid_lookup(part_list, &record.guid);
+	    if (!msgid || !msgid->mark) {
+		/* have to make sure the file exists */
+		fname = mailbox_message_fname(mailbox, record.uid);
+		if (!fname) return IMAP_MAILBOX_BADNAME;
+		if (stat(fname, &sbuf) < 0) {
+		    syslog(LOG_ERR, "IOERROR: failed to stat file %s", fname);
+		    return IMAP_IOERROR;
+		}
+		if (sbuf.st_size != record.size) {
+		    syslog(LOG_ERR, "IOERROR: size mismatch %s %lu (%lu != %lu)",
+			   mailbox->name, record.uid, sbuf.st_size, record.size);
+		    return IMAP_IOERROR;
+		}
+		dlist_file(kupload, "MESSAGE", mailbox->part, &record.guid,
+			   record.size, fname);
+	    }
 	}
     }
 
-    return kl;
-
-done:
-    dlist_free(&kl);
-    return NULL;
+    return 0;
 }
 
 int sync_parse_response(const char *cmd, struct protstream *in,
@@ -1535,8 +1517,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 {
     const char *fname, *destname;
     struct message_guid tmp_guid;
-    struct body *body;
-    FILE *file;
+    int internaldate = record->internaldate;
     int r;
 
     message_guid_copy(&tmp_guid, &record->guid);
@@ -1549,17 +1530,16 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
-    file = fopen(fname, "r");
-    if (!file) {
-	syslog(LOG_ERR, "IOERROR: Failed to open %s", fname);
-	return IMAP_IOERROR;
+    r = message_parse(fname, record);
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: failed to parse %s", fname);
+	return r;
     }
 
-    body = NULL;
-    message_parse_file(file, NULL, NULL, &body);
-    message_create_record(record, body);
-    message_free_body(body);
-    fclose(file);
+    if (!message_guid_compare(&tmp_guid, &record->guid)) {
+	syslog(LOG_ERR, "IOERROR: guid mismatch on parse %s", fname);
+	return IMAP_MAILBOX_CRC;
+    }
 
     destname = mailbox_message_fname(mailbox, record->uid);
     cyrus_mkdir(destname, 0755);
@@ -1570,7 +1550,10 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
-    r = mailbox_append_index_record(mailbox, record);
+    /* repair broken internaldate if requried */
+    if (!record->internaldate)
+	record->internaldate = internaldate;
 
-    return r;
+    record->silent = 1;
+    return mailbox_append_index_record(mailbox, record);
 }

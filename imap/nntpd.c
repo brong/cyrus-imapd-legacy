@@ -209,7 +209,7 @@ static void free_wildmats(struct wildmat *wild);
 static void cmdloop(void);
 static int open_group(char *name, int has_prefix,
 		      struct backend **ret, int *postable);
-static int parserange(char *str, unsigned long *uid, unsigned long *last,
+static int parserange(char *str, uint32_t *uid, uint32_t *last,
 		      char **msgid, struct backend **be);
 static time_t parse_datetime(char *datestr, char *timestr, char *gmt);
 static void cmd_article(int part, char *msgid, unsigned long uid);
@@ -795,7 +795,7 @@ static void cmdloop(void)
     static struct buf cmd, arg1, arg2, arg3, arg4;
     char *p, *result, buf[1024];
     const char *err;
-    unsigned long uid, last;
+    uint32_t uid, last;
     struct backend *be;
 
     allowanonymous = config_getswitch(IMAPOPT_ALLOWANONYMOUSLOGIN);
@@ -1596,7 +1596,7 @@ static int find_msgid(char *msgid, char **mailbox, unsigned long *uid)
     return 1;
 }
 
-static int parserange(char *str, unsigned long *uid, unsigned long *last,
+static int parserange(char *str, uint32_t *uid, uint32_t *last,
 		      char **msgid, struct backend **ret)
 {
     const char *p = NULL;
@@ -1633,12 +1633,14 @@ static int parserange(char *str, unsigned long *uid, unsigned long *last,
     else if (backend_current)
 	*ret = backend_current;
     else if (!group_state) goto noopengroup;
-    else if ((*uid = parsenum(str, &p)) <= 0) goto badrange;
+    else if (parseuint32(str, &p, uid) || uid == 0) goto badrange;
     else if (p && *p) {
 	/* extra stuff, check for range */
 	if (!last || (*p != '-')) goto badrange;
-	if (*++p)
-	    *last = parsenum(p, NULL);
+	if (*++p) {
+	    if (parseuint32(p, NULL, *last))
+		*last = 0;
+	}
 	else
 	    *last = index_getuid(group_state, nntp_exists);
     }
@@ -3323,7 +3325,7 @@ static int deliver(message_data_t *msg)
 		    }            
 		}                
 		else {           
-		    r = append_commit(&as, 0, NULL, &uid, NULL);
+		    r = append_commit(&as, 0, NULL, &uid, NULL, NULL);
 		}
 	    }
 

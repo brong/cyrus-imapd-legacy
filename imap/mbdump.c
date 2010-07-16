@@ -279,18 +279,17 @@ int dump_mailbox(const char *tag, const char *mbname, int uid_start,
     /* The first member is either a number (if it is a quota root), or NIL
      * (if it isn't) */
     {
-	struct quota quota;
+	struct quota q;
 
-	quota_setroot(&quota, mbname);
-	r = quota_read(&quota, NULL, 0);
+	q.root = mbname;
+	r = quota_read(&q, NULL, 0);
 
 	if (!r) {
-	    prot_printf(pout, "%d", quota.limit);
+	    prot_printf(pout, "%d", q.limit);
 	} else {
 	    prot_printf(pout, "NIL");
 	    if (r == IMAP_QUOTAROOT_NONEXISTENT) r = 0;
 	}
-	quota_free(&quota);
     }
 
     /* Dump cyrus data files */
@@ -456,11 +455,9 @@ int undump_mailbox(const char *mbname,
 {
     struct buf file, data;
     char c;
-    uquota_t quotaused = 0;
     int r = 0;
     int curfile = -1;
     struct mailbox *mailbox;
-    struct index_record record;
     char sieve_path[2048];
     int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
     int domainlen = 0;
@@ -555,7 +552,7 @@ int undump_mailbox(const char *mbname,
 	if(!strncmp(file.s, "A-", 2)) {
 	    /* Annotation */
 	    size_t contentsize;
-	    time_t modtime = 0;
+	    uint32_t modtime = 0;
 	    int i;
 	    char *tmpuserid;
 	    const char *ptr;
@@ -587,8 +584,9 @@ int undump_mailbox(const char *mbname,
 		free(tmpuserid);
 		goto done;
 	    }
-	    modtime = parsenum(data.s, &ptr);
-	    if (*ptr) {
+
+	    r = parseuint32(data.s, &ptr, &modtime);
+	    if (r || *ptr) {
 		r = IMAP_PROTOCOL_ERROR;
 		free(tmpuserid);
 		goto done;
@@ -810,61 +808,6 @@ int undump_mailbox(const char *mbname,
     free(contenttype);
     free(seen_file);
     free(mboxkey_file);
-
-    if (r) return r;
-
-    /*
-     * Set mtimes of message files to INTERNALDATE.  This allows later
-     * reconstructs to recover INTERNALDATE from the filesystem.
-     */
-    r = mailbox_open_irl(mbname, &mailbox);
-    if (!r) {
-	struct timeval times[ 2 ];
-        char *fname;
-	unsigned long recno;
- 
-	for (recno = 1; recno <= mailbox->i.num_records; recno++) {
-	    mailbox_read_index_record(mailbox, recno, &record);
-	    /*
-	     * We calculate the usage here to avoid counting expunged
-	     * messages that may have been included in the undump.
-	     */
-	    quotaused += record.size;
-
-	    fname = mailbox_message_fname(mailbox, record.uid);
-	    times[ 0 ].tv_sec = record.internaldate;
-	    times[ 0 ].tv_usec = 0;
-	    times[ 1 ].tv_sec = record.internaldate;
-	    times[ 1 ].tv_usec = 0;
-	    (void)utimes( fname, times );
-	}
-    }
-
-    if(!r && quotaused) {
-	struct quota quota;
-	char quota_root[MAX_MAILBOX_BUFFER];
-	struct txn *tid = NULL;
-	
-	if (quota_findroot(quota_root, sizeof(quota_root), mbname)) {
-	    /* update the quota file */
-	    memset(&quota, 0, sizeof(quota));
-	    quota_setroot(&quota, quota_root);
-	    r = quota_read(&quota, &tid, 1);
-	    if(!r) {
-		quota.used += quotaused;
-		r = quota_write(&quota, &tid);
-		if (!r) quota_commit(&tid);
-	    } else {
-		syslog(LOG_ERR, "could not lock quota file for %s (%s)",
-		       quota_root, error_message(r));
-	    }
-	    if(r) {
-		syslog(LOG_ERR, "failed writing quota file for %s (%s)",
-		       quota_root, error_message(r));
-	    }
-	    quota_free(&quota);
-	}
-    }
 
     mailbox_close(&mailbox);
     

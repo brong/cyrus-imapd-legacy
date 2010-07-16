@@ -908,8 +908,8 @@ static void cmdloop(void)
 		if (msgno <= popd_exists)
 		    mailbox_expunge(popd_mailbox, expungedeleted, NULL, NULL);
 
-		mailbox_commit(popd_mailbox, 0);
-		mailbox_unlock_index(popd_mailbox);
+		mailbox_commit(popd_mailbox);
+		mailbox_unlock_index(popd_mailbox, NULL);
 
 done:
 		prot_printf(popd_out, "+OK\r\n");
@@ -1031,16 +1031,29 @@ done:
 	}
 	else if (!strcmp(inputbuf, "top")) {
 	    const char *p = arg;
-	    int lines;
+	    uint32_t num;
+	    uint32_t lines;
+	    int r;
+
+	    while (*p && Uisspace(*p)) {
+		p++;
+	    }
 
 	    /* special case, can't just parse_msgno */
-	    if (arg) msgno = parsenum(p, &p);
-	    if (!arg) prot_printf(popd_out, "-ERR Missing argument\r\n");
+	    r = parseuint32(p, &p, &num);
+	    if (r || !*p) {
+		prot_printf(popd_out, "-ERR Missing argument\r\n");
+	    }
 	    else {
-		while (*arg && !Uisspace(*arg))
-		    arg++;
-		lines = parsenum(p, &p);
-		if (*p) {
+		msgno = num;
+		/* skip over whitespace */
+		while (*p && Uisspace(*p)) {
+		    p++;
+		}
+		if (parseuint32(p, &p, &lines)) {
+		    prot_printf(popd_out, "-ERR Invalid number of lines\r\n");
+		}
+		else if (*p) {
 		    prot_printf(popd_out, "-ERR Unexpected extra argument\r\n");
 		}
 		else if (msg_exists_or_err(msgno)) {
@@ -1054,8 +1067,10 @@ done:
 	else if (!strcmp(inputbuf, "uidl")) {
 	    if (arg) {
 		msgno = parse_msgno(&arg);
-		if (msgno)
+		if (msgno) {
+		    prot_printf(popd_out, "+OK ");
 		    uidl_msg(msgno);
+		}
 	    }
 	    else {
 		prot_printf(popd_out, "+OK unique-id listing follows\r\n");
@@ -1075,7 +1090,17 @@ done:
 unsigned parse_msgno(char **ptr)
 {
     const char *p;
-    int msgno = parsenum(*ptr, &p);
+    uint32_t msgno;
+    int r;
+
+    p = *ptr;
+
+    /* skip leading whitespace */
+    while (*p && Uisspace(*p)) {
+	p++;
+    }
+
+    r = parseuint32(p, &p, &msgno);
 
     if (*p) {
 	prot_printf(popd_out, "-ERR Unexpected extra argument\r\n");
@@ -1617,7 +1642,7 @@ int openinbox(void)
     int r, log_level = LOG_ERR;
     const char *statusline = NULL;
     struct mboxlist_entry mbentry;
-    struct statuscache_data scdata;
+    struct statusdata sdata;
 
     /* Translate any separators in userid
        (use a copy since we need the original userid for AUTH to backend) */
@@ -1687,8 +1712,8 @@ int openinbox(void)
 	}
     }
     else if (config_getswitch(IMAPOPT_STATUSCACHE) &&
-	     !(r = statuscache_lookup(inboxname, userid, STATUS_MESSAGES, &scdata)) &&
-	     !scdata.messages) {
+	     !(r = statuscache_lookup(inboxname, userid, STATUS_MESSAGES, &sdata)) &&
+	     !sdata.messages) {
 	/* local mailbox (empty) -- don't bother opening the mailbox */
 	syslog(LOG_INFO, "optimized mode for empty maildrop: %s", popd_userid);
 
@@ -1702,7 +1727,7 @@ int openinbox(void)
 
 	popd_login_time = time(0);
 
-	r = mailbox_open_irl(inboxname, &popd_mailbox);
+	r = mailbox_open_iwl(inboxname, &popd_mailbox);
 	popd_myrights = cyrus_acl_myrights(popd_authstate, popd_mailbox->acl);
 	if (r) {
 	    sleep(3);
@@ -1770,7 +1795,7 @@ int openinbox(void)
 	proc_register("pop3d", popd_clienthost, popd_userid,
 		      popd_mailbox->name);
 	/* finished our initial read */
-	mailbox_unlock_index(popd_mailbox);
+	mailbox_unlock_index(popd_mailbox, NULL);
 
 	/* Update the statuscache entry if the maildrop is empty */
 	if (config_getswitch(IMAPOPT_STATUSCACHE) && !popd_exists) {
@@ -1779,9 +1804,10 @@ int openinbox(void)
 	    unsigned statusitems = STATUS_MESSAGES | STATUS_UIDNEXT |
 		STATUS_UIDVALIDITY | STATUS_HIGHESTMODSEQ;
 
-	    statuscache_fill(&scdata, popd_mailbox, statusitems, 0, 0);
+	    statuscache_fill(&sdata, popd_userid, popd_mailbox,
+			     statusitems, 0, 0);
 	    mailbox_close(&popd_mailbox);
-	    statuscache_update(inboxname, popd_userid, &scdata);
+	    statuscache_update(inboxname, &sdata);
 	}
     }
 

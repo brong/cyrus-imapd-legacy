@@ -106,6 +106,7 @@ struct fix_rock {
 
 struct quotaentry {
     struct quota quota;
+    char *allocname;
     int refcount;
     int deleted;
     uquota_t newused;
@@ -118,7 +119,7 @@ int buildquotalist(char *domain, char **roots, int nroots,
 		   struct fix_rock *frock);
 int fixquota_mailbox(char *name, int matchlen, int maycreate, void *rock);
 int fixquota(struct fix_rock *frock);
-int fixquota_fixroot(struct mailbox *mailbox, char *root);
+int fixquota_fixroot(struct mailbox *mailbox, const char *root);
 int fixquota_finish(int thisquota, struct txn **tid, unsigned long *count);
 
 #define QUOTAGROW 300
@@ -246,7 +247,7 @@ static int found_match(char *name, int matchlen, int maycreate, void *frock)
     }
 
     /* See if the mailbox name corresponds to a quotaroot */
-    quota_setroot(&quota[quota_num].quota, name);
+    quota[quota_num].quota.root = name;
     do {
 	r = quota_read(&quota[quota_num].quota, NULL, 0);
     } while (r == IMAP_AGAIN);
@@ -254,7 +255,9 @@ static int found_match(char *name, int matchlen, int maycreate, void *frock)
     switch (r) {
     case 0:
 	/* Its a quotaroot! */
-	quota_setroot(&quota[quota_num++].quota, name);
+	quota[quota_num].allocname = xstrdup(name);
+	quota[quota_num].quota.root = quota[quota_num].allocname;
+	quota_num++;
 	break;
     case IMAP_QUOTAROOT_NONEXISTENT:
 	if (!frock || !quota_num ||
@@ -267,7 +270,6 @@ static int found_match(char *name, int matchlen, int maycreate, void *frock)
 	break;
     default:
 	return r;
-	break;
     }
 
     if (frock) {
@@ -381,13 +383,13 @@ int fixquota_mailbox(char *name,
     if (r) errmsg("failed opening header for mailbox '%s'", name, r);
     else {
 	if (thisquota == -1) {
-	    if (mailbox->quota.root) {
+	    if (mailbox->quotaroot) {
 		r = fixquota_fixroot(mailbox, (char *)0);
 	    }
 	}
 	else {
-	    if (!mailbox->quota.root ||
-		strcmp(mailbox->quota.root, quota[thisquota].quota.root) != 0) {
+	    if (!mailbox->quotaroot ||
+		strcmp(mailbox->quotaroot, quota[thisquota].quota.root) != 0) {
 		r = fixquota_fixroot(mailbox, quota[thisquota].quota.root);
 	    }
 
@@ -407,20 +409,18 @@ int fixquota_mailbox(char *name,
 }
 	
 int fixquota_fixroot(struct mailbox *mailbox,
-		     char *root)
+		     const char *root)
 {
     int r;
 
     redofix = 1;
 
     printf("%s: quota root %s --> %s\n", mailbox->name,
-	   mailbox->quota.root ? mailbox->quota.root : "(none)",
+	   mailbox->quotaroot ? mailbox->quotaroot : "(none)",
 	   root ? root : "(none)");
 
-    quota_free(&mailbox->quota);
-    if (root) quota_setroot(&mailbox->quota, root);
-
-    r = mailbox_commit(mailbox, 1);
+    mailbox_set_quotaroot(mailbox, root);
+    r = mailbox_commit(mailbox);
     if (r) errmsg("failed writing header for mailbox '%s'", mailbox->name, r);
 
     return r;
@@ -436,14 +436,13 @@ int fixquota_finish(int thisquota, struct txn **tid, unsigned long *count)
     if (!quota[thisquota].refcount) {
 	if (!quota[thisquota].deleted++) {
 	    printf("%s: removed\n", quota[thisquota].quota.root);
-	    r = quota_delete(&quota[thisquota].quota, tid);
+	    r = quota_deleteroot(quota[thisquota].quota.root);
 	    if (r) {
 		errmsg("failed deleting quotaroot '%s'",
 		       quota[thisquota].quota.root, r);
 		return r;
 	    }
 	    (*count)++;
-	    quota_free(&quota[thisquota].quota);
 	}
 	return 0;
     }

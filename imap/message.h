@@ -61,6 +61,8 @@
 extern int message_copy_strict P((struct protstream *from, FILE *to,
 				  unsigned size, int allow_null));
 
+extern int message_parse(const char *fname, struct index_record *record);
+
 /* Flags for parsing message date/time - to be bitwise OR'd */
 #define PARSE_DATE	(1<<0)  /* Default (always parsed) */
 #define PARSE_TIME	(1<<1)

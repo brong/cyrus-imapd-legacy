@@ -336,15 +336,15 @@ int do_examine(char *name,
 	printf("\n");
 
 	if (!mailbox_cacherecord(mailbox, &record)) {
-	    print_rec("Envel", &record.crec.buf[CACHE_ENVELOPE]);
-	    print_rec("BdyStr", &record.crec.buf[CACHE_BODYSTRUCTURE]);
-	    print_rec("Body", &record.crec.buf[CACHE_BODY]);
-	    print_rec("CacHdr", &record.crec.buf[CACHE_HEADERS]);
-	    print_rec("From", &record.crec.buf[CACHE_FROM]);
-	    print_rec("To", &record.crec.buf[CACHE_TO]);
-	    print_rec("Cc", &record.crec.buf[CACHE_CC]);
-	    print_rec("Bcc", &record.crec.buf[CACHE_BCC]);
-	    print_rec("Subjct", &record.crec.buf[CACHE_SUBJECT]);
+	    print_rec("Envel", cacheitem_buf(&record, CACHE_ENVELOPE));
+	    print_rec("BdyStr", cacheitem_buf(&record, CACHE_BODYSTRUCTURE));
+	    print_rec("Body", cacheitem_buf(&record, CACHE_BODY));
+	    print_rec("CacHdr", cacheitem_buf(&record, CACHE_HEADERS));
+	    print_rec("From", cacheitem_buf(&record, CACHE_FROM));
+	    print_rec("To", cacheitem_buf(&record, CACHE_TO));
+	    print_rec("Cc", cacheitem_buf(&record, CACHE_CC));
+	    print_rec("Bcc", cacheitem_buf(&record, CACHE_BCC));
+	    print_rec("Subjct", cacheitem_buf(&record, CACHE_SUBJECT));
 	}
 
 	if (flag) break;

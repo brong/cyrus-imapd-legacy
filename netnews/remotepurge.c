@@ -296,12 +296,12 @@ callback_search(struct imclient *imclient,
 {
     uid_list_t *uids = (uid_list_t *) rock;
     const char *s;
-    unsigned long num;
+    uint32_t num;
 
     s = reply->text;
 
     while (Uisdigit(*s)) {
-	num = parsenum(s, &s);
+	if (parseuint32(s, &s, &num)) break;
 
 	if (uids->size >= uids->allocsize)
 	{

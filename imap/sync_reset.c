@@ -76,6 +76,7 @@
 #include "imparse.h"
 #include "util.h"
 #include "xmalloc.h"
+#include "xstrlcat.h"
 #include "retry.h"
 #include "imapd.h"
 #include "user.h"
@@ -129,52 +130,24 @@ void fatal(const char* s, int code)
 
 /* ====================================================================== */
 
-static int addmbox_name(char *name,
-			int matchlen __attribute__((unused)),
-			int maycreate __attribute__((unused)),
-			void *rock)
-{
-    struct sync_name_list *list = (struct sync_name_list *) rock;
-    sync_name_list_add(list, name);
-    return 0;
-}
-
-/* ====================================================================== */
-
-static int
-reset_single(char *user)
+static int reset_single(const char *userid)
 {
     struct sync_name_list *list = NULL;
     struct sync_name *item;
     char buf[MAX_MAILBOX_BUFFER];
     int r = 0;
-    static int md5_dir_set     = 0;
-    static const char *md5_dir = NULL;
-
-    if (!md5_dir_set) {
-        md5_dir = config_getstring(IMAPOPT_MD5_DIR);
-        md5_dir_set = 1;
-    }
-
-    if (verbose > 1)
-        fprintf(stderr, "   RESET %s\n", user);
-
-    if (sync_userid)    free(sync_userid);
-    if (sync_authstate) auth_freestate(sync_authstate);
-
-    sync_userid    = xstrdup(user);
-    sync_authstate = auth_newstate(sync_userid);
 
     /* Nuke subscriptions */
     list = sync_name_list_create();
-    snprintf(buf, sizeof(buf)-1, "user.%s.*", user);
-    r = (sync_namespacep->mboxlist_findsub)(sync_namespacep, buf, 0,
-                                            user, sync_authstate, addmbox_name,
-                                            (void *)list, 0);
+    r = (sync_namespacep->mboxlist_findsub)(sync_namespacep, "*", 1,
+					    (char *)userid, sync_authstate,
+					    addmbox_sub, (void *)list, 1);
     if (r) goto fail;
 
-    for (item = list->head ; item ; item = item->next) {
-        r = mboxlist_changesub(item->name, sync_userid, sync_authstate, 0, 0);
+    for (item = list->head; item; item = item->next) {
+	r = (sync_namespacep->mboxname_tointernal)(sync_namespacep, item->name,
+						   userid, buf);
+        if (!r) r = mboxlist_changesub(buf, userid, sync_authstate, 0, 0);
         if (r) goto fail;
     }
     sync_name_list_free(&list);
@@ -182,42 +155,33 @@ reset_single(char *user)
     /* Nuke normal folders */
     list = sync_name_list_create();
 
-    snprintf(buf, sizeof(buf)-1, "user.%s.*", user);
-    r = (sync_namespacep->mboxlist_findall)(sync_namespacep, buf, 0,
-                                           user, sync_authstate, addmbox_name,
-                                           (void *)list);
+    (sync_namespacep->mboxname_tointernal)(sync_namespacep, "INBOX",
+					   userid, buf);
+    strlcat(buf, ".*", sizeof(buf));
+    r = (sync_namespacep->mboxlist_findall)(sync_namespacep, buf, 1,
+					    sync_userid, sync_authstate,
+					    addmbox, (void *)list);
     if (r) goto fail;
 
-    for (item = list->head ; item ; item = item->next) {
-        r=mboxlist_deletemailbox(item->name, 1, NULL, sync_authstate, 1, 0, 0);
-
+    for (item = list->head; item; item = item->next) {
+        r = mboxlist_deletemailbox(item->name, 1, sync_userid,
+				   sync_authstate, 0, 0, 1);
         if (r) goto fail;
     }
-    sync_name_list_free(&list);
 
     /* Nuke inbox (recursive nuke possible?) */
-    snprintf(buf, sizeof(buf)-1, "user.%s", user);
-    r = mboxlist_deletemailbox(buf, 1, "cyrus", sync_authstate, 1, 0, 0);
+    (sync_namespacep->mboxname_tointernal)(sync_namespacep, "INBOX",
+					   userid, buf);
+    r = mboxlist_deletemailbox(buf, 1, sync_userid,
+			       sync_authstate, 0, 0, 1);
     if (r && (r != IMAP_MAILBOX_NONEXISTENT)) goto fail;
 
-    if ((r=user_deletedata(user, sync_userid, sync_authstate, 1)))
-        goto fail;
-
-    /* Nuke md5 database entry (not the end of the world if it fails) */
-    if (md5_dir) {
-        snprintf(buf, sizeof(buf)-1, "%s/%c/%s", md5_dir, user[0], user);
-        unlink(buf);
-    }
-
-    return(0);
+    r = user_deletedata((char *)userid, sync_userid, sync_authstate, 1);
 
  fail:
-    if (list)
-        sync_name_list_free(&list);
-    fprintf(stderr, "Failed to reset account %s: %s\n",
-            sync_userid, error_message(r));
+    sync_name_list_free(&list);
 
-    return(r);
+    return r;
 }
 
 /* ====================================================================== */

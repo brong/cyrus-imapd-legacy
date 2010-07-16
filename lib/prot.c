@@ -105,6 +105,8 @@ int write;
     if(write)
 	newstream->cnt = PROT_BUFSIZE;
 
+    newstream->can_unget = 0;
+
     return newstream;
 }
 
@@ -519,6 +521,7 @@ int prot_rewind(struct protstream *s)
     s->cnt = 0;
     s->error = 0;
     s->eof = 0;
+    s->can_unget = 0;
     return 0;
 }
 
@@ -728,6 +731,7 @@ int prot_fill(struct protstream *s)
     }
 
     s->cnt--;		/* we return the first char */
+    s->can_unget = 1;
     return *s->ptr++;
 }
 
@@ -1299,23 +1303,19 @@ int prot_read(struct protstream *s, char *buf, unsigned size)
 
     if (!size) return 0;
 
-    if (s->cnt) {
-	/* Some data in the input buffer, return that */
-	if (size > s->cnt) size = s->cnt;
-	memcpy(buf, s->ptr, size);
-	s->ptr += size;
-	s->cnt -= size;
-	return size;
+    /* If no data in the input buffer, get some */
+    if (!s->cnt) {
+	c = prot_fill(s);
+	if (c == EOF) return 0;
+	prot_ungetc(c, s);
     }
 
-    c = prot_fill(s);
-    if (c == EOF) return 0;
-    buf[0] = c;
-    if (--size > s->cnt) size = s->cnt;
-    memcpy(buf+1, s->ptr, size);
+    if (size > s->cnt) size = s->cnt;
+    memcpy(buf, s->ptr, size);
     s->ptr += size;
     s->cnt -= size;
-    return size+1;
+    s->can_unget += size;
+    return size;
 }
 
 /*
@@ -1604,17 +1604,13 @@ struct protstream *protgroup_getelement(struct protgroup *group,
     return group->group[element];
 }
 
-/* function versions of the macros */
-#undef prot_getc
-#undef prot_ungetc
-#undef prot_putc
-
 int prot_getc(struct protstream *s)
 {
     assert(!s->write);
 
     if (s->cnt > 0) {
 	--s->cnt;
+	s->can_unget++;
 	return *(s->ptr)++;
     }
 
@@ -1625,7 +1621,11 @@ int prot_ungetc(int c, struct protstream *s)
 {
     assert(!s->write);
 
+    if (!s->can_unget)
+	fatal("Can't unwind any more", EC_SOFTWARE);
+
     s->cnt++;
+    s->can_unget--;
     *--(s->ptr) = c;
 
     return c;
