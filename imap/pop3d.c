@@ -89,6 +89,7 @@
 #include "proxy.h"
 #include "seen.h"
 #include "userdeny.h"
+#include "me.h"
 
 #include "sync_log.h"
 #include "statuscache.h"
@@ -1026,6 +1027,7 @@ done:
 	    else {
 		msgno = parse_msgno(&arg);
 		if (msgno) {
+		    me_send_rate(popd_userid, "bw", popd_msg[msgno].size);
 		    blat(msgno, -1);
 		    popd_msg[msgno].seen = 1;
 		    count_retr++;

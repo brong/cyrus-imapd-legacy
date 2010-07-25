@@ -83,6 +83,7 @@
 
 #include "index.h"
 #include "sync_log.h"
+#include "me.h"
 
 /* Forward declarations */
 static void index_refresh(struct index_state *state);
@@ -91,10 +92,11 @@ int index_lock(struct index_state *state);
 void index_unlock(struct index_state *state);
 
 int index_writeseen(struct index_state *state);
-void index_fetchmsg(const char *msg_base, unsigned long msg_size,
+void index_fetchmsg(struct index_state *state,
+		    const char *msg_base, unsigned long msg_size,
 		    unsigned offset, unsigned size,
 		    unsigned start_octet, unsigned octet_count,
-		    struct protstream *pout);
+		    int do_rate, struct protstream *pout);
 static int index_fetchsection(struct index_state *state, const char *resp,
 			      const char *msg_base, unsigned long msg_size,
 			      char *section,
@@ -1574,7 +1576,8 @@ static int index_appendremote(struct index_state *state, unsigned msgno,
     prot_printf(pout, ") \"%s\" ", datebuf);
 
     /* message literal */
-    index_fetchmsg(state, msg_base, msg_size, 0, im->record.size, 0, 0, pout);
+    index_fetchmsg(state, msg_base, msg_size, 0, im->record.size,
+		   0, 0, 0, pout);
 
     /* close the message file */
     if (msg_base) 
@@ -1664,8 +1667,9 @@ static int data_domain(const char *p, size_t n)
  * IMAP command PARTIAL.
  */
 void
-index_fetchmsg(msg_base, msg_size, offset, size,
-	       start_octet, octet_count, pout)
+index_fetchmsg(state, msg_base, msg_size, offset, size,
+	       start_octet, octet_count, do_rate, pout)
+struct index_state *state;
 const char *msg_base;
 unsigned long msg_size;
 unsigned offset;
@@ -1673,8 +1677,10 @@ unsigned size;     /* this is the correct size for a news message after
 		      having LF translated to CRLF */
 unsigned start_octet;
 unsigned octet_count;
+int do_rate;
 struct protstream *pout;
 {
+  unsigned n_write;
   unsigned n, domain;
 
     /* If no data, output NIL */
@@ -1721,7 +1727,12 @@ struct protstream *pout;
     /* Non-text literal -- tell the protstream about it */
     if (domain != DOMAIN_7BIT) prot_data_boundary(pout);
 
-    prot_write(pout, msg_base + offset, n);
+    n_write = prot_write(pout, msg_base + offset, n);
+
+    // Update bandwidth for IMAP fetches
+    if (do_rate && n_write != EOF && size > 500 && state->userid)
+	me_send_rate(state->userid, "bw", size);
+
     while (n++ < size) {
 	/* File too short, resynch client.
 	 *
@@ -1748,6 +1759,8 @@ static int index_fetchsection(struct index_state *state, const char *resp,
     int fetchmime = 0;
     unsigned offset = 0;
     char *decbuf = NULL;
+    int r;
+    int do_rate = 1;
 
     p = section;
 
@@ -1756,9 +1769,11 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 	if (strstr(resp, "BINARY.SIZE")) {
 	    prot_printf(state->out, "%s%u", resp, size);
 	} else {
+	    if (strstr(resp, "BINARY"))
+		do_rate = 0;
 	    prot_printf(state->out, "%s", resp);
-	    index_fetchmsg(msg_base, msg_size, 0, size,
-			   start_octet, octet_count, state->out);
+	    index_fetchmsg(state, msg_base, msg_size, 0, size,
+			   start_octet, octet_count, do_rate, state->out);
 	}
 	return 0;
     }
@@ -1833,6 +1848,7 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 	    syslog(LOG_ERR, "invalid part offset in %s", state->mailbox->name);
 	    return IMAP_IOERROR;
 	}
+	do_rate = 0;
 
 	msg_base = charset_decode_mimebody(msg_base + offset, size, encoding,
 					   &decbuf, 0, &newsize);
@@ -1858,8 +1874,8 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 
     /* Output body part */
     prot_printf(state->out, "%s", resp);
-    index_fetchmsg(msg_base, msg_size, offset, size,
-		   start_octet, octet_count, state->out);
+    index_fetchmsg(state, msg_base, msg_size, offset, size,
+		   start_octet, octet_count, do_rate, state->out);
 
     if (decbuf) free(decbuf);
     return 0;
@@ -2522,7 +2538,7 @@ static int index_fetchreply(struct index_state *state, unsigned msgno,
 		         fetchargs->start_octet : 0,
 		       (fetchitems & FETCH_IS_PARTIAL) ?
 		         fetchargs->octet_count : 0,
-		       state->out);
+		       0, state->out);
     }
     else if (fetchargs->headers || fetchargs->headers_not) {
 	prot_printf(state->out, "%cRFC822.HEADER ", sepchar);
@@ -2545,7 +2561,7 @@ static int index_fetchreply(struct index_state *state, unsigned msgno,
 		         fetchargs->start_octet : 0,
 		       (fetchitems & FETCH_IS_PARTIAL) ?
 		         fetchargs->octet_count : 0,
-		       state->out);
+		       1, state->out);
     }
     if (fetchitems & FETCH_RFC822) {
 	prot_printf(state->out, "%cRFC822 ", sepchar);
@@ -2555,7 +2571,7 @@ static int index_fetchreply(struct index_state *state, unsigned msgno,
 		         fetchargs->start_octet : 0,
 		       (fetchitems & FETCH_IS_PARTIAL) ?
 		         fetchargs->octet_count : 0,
-		       state->out);
+		       1, state->out);
     }
     for (fsection = fetchargs->fsections; fsection; fsection = fsection->next) {
 	prot_printf(state->out, "%cBODY[%s ", sepchar, fsection->section);
