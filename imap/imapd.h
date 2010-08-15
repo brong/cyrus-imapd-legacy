@@ -117,7 +117,10 @@ enum {
     FETCH_SETSEEN =             (1<<10),
 /*     FETCH_UNCACHEDHEADER =      (1<<11) -- obsolete */
     FETCH_IS_PARTIAL =          (1<<12), /* this is the PARTIAL command */
-    FETCH_MODSEQ =		(1<<13)
+    FETCH_MODSEQ =		(1<<13),
+    FETCH_GUID   =    (1<<14),
+    FETCH_SHA1   =    (1<<15),
+    FETCH_FILESIZE =  (1<<16)
 };
 
 enum {
