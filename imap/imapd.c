@@ -315,6 +315,7 @@ struct capa_struct base_capabilities[] = {
     { "XLIST",                 2 },
     { "SPECIAL-USE",           2 },
     { "CREATE-SPECIAL-USE",    2 },
+    { "DIGEST=SHA1",           2 },
 
 #ifdef HAVE_SSL
     { "URLAUTH",               2 },
@@ -4218,6 +4219,13 @@ badannotation:
 	    else goto badatt;
 	    break;
 
+	case 'D':
+	    if (!strcmp(fetchatt.s, "DIGEST.SHA1")) {
+		fa->fetchitems |= FETCH_GUID;
+	    }
+	    else goto badatt;
+	    break;
+
 	case 'E':
 	    if (!strcmp(fetchatt.s, "ENVELOPE")) {
 		fa->fetchitems |= FETCH_ENVELOPE;
@@ -4251,6 +4259,7 @@ badannotation:
 	    }
 	    else goto badatt;
 	    break;
+
 	case 'R':
 	    if (!strcmp(fetchatt.s, "RFC822")) {
 		fa->fetchitems |= FETCH_RFC822|FETCH_SETSEEN;
@@ -4266,6 +4275,12 @@ badannotation:
 	    }
 	    else if (!strcmp(fetchatt.s, "RFC822.TEXT")) {
 		fa->fetchitems |= FETCH_TEXT|FETCH_SETSEEN;
+	    }
+	    else if (!strcmp(fetchatt.s, "RFC822.SHA1")) {
+		fa->fetchitems |= FETCH_SHA1;
+	    }
+	    else if (!strcmp(fetchatt.s, "RFC822.FILESIZE")) {
+		fa->fetchitems |= FETCH_FILESIZE;
 	    }
 	    else if (!strcmp(fetchatt.s, "RFC822.TEXT.PEEK")) {
 		fa->fetchitems |= FETCH_TEXT;
