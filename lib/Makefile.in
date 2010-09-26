@@ -89,7 +89,7 @@ LIBCYR_HDRS = $(srcdir)/acl.h $(srcdir)/assert.h $(srcdir)/auth.h \
 	$(srcdir)/cyrusdb.h $(srcdir)/iptostring.h $(srcdir)/rfc822date.h \
 	$(srcdir)/libcyr_cfg.h $(srcdir)/byteorder64.h \
 	$(srcdir)/md5.h $(srcdir)/crc32.h $(srcdir)/strarray.h \
-	$(srcdir)/iostat.h
+	$(srcdir)/iostat.h $(srcdir)/me.h
 
 LIBCYR_OBJS = acl.o bsearch.o charset.o glob.o util.o tok.o \
 	libcyr_cfg.o mkgmtime.o prot.o parseaddr.o imclient.o imparse.o \
@@ -98,7 +98,7 @@ LIBCYR_OBJS = acl.o bsearch.o charset.o glob.o util.o tok.o \
 	gmtoff_@WITH_GMTOFF@.o $(ACL) $(AUTH) \
 	@LIBOBJS@ @CYRUSDB_OBJS@ \
 	iptostring.o xmalloc.o wildmat.o byteorder64.o \
-	xstrlcat.o xstrlcpy.o crc32.o ptrarray.o iostat.o
+	xstrlcat.o xstrlcpy.o crc32.o ptrarray.o iostat.o me.o
 
 LIBCYRM_HDRS = $(srcdir)/hash.h $(srcdir)/mpool.h $(srcdir)/xmalloc.h \
 	$(srcdir)/xstrlcat.h $(srcdir)/xstrlcpy.h $(srcdir)/util.h \
