@@ -323,7 +323,7 @@ include_HEADERS = lib/acl.h lib/assert.h lib/auth.h lib/auth_pts.h \
 	lib/map.h lib/mappedfile.h lib/mkgmtime.h lib/mpool.h lib/nonblock.h \
 	lib/parseaddr.h lib/retry.h lib/rfc822date.h lib/signals.h \
 	lib/strarray.h lib/strhash.h lib/stristr.h lib/sysexits.h lib/times.h \
-	lib/tok.h lib/wildmat.h lib/xmalloc.h lib/hashu64.h
+	lib/tok.h lib/wildmat.h lib/xmalloc.h lib/hashu64.h lib/me.h
 nobase_include_HEADERS = sieve/sieve_interface.h
 nobase_nodist_include_HEADERS = sieve/sieve_err.h
 
@@ -573,7 +573,7 @@ endif
 endif
 lib_libcyrus_min_la_SOURCES += lib/mpool.c lib/retry.c lib/strarray.c \
 	lib/strhash.c lib/util.c lib/xmalloc.c lib/xstrlcat.c lib/xstrlcpy.c \
-	lib/hashu64.c
+	lib/hashu64.c lib/me.c
 lib_libcyrus_min_la_LIBADD = $(LTLIBOBJS)
 lib_libcyrus_min_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
 
