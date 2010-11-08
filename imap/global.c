@@ -106,6 +106,7 @@ const char *config_tlscache_db;
 const char *config_ptscache_db;
 const char *config_statuscache_db;
 const char *config_userdeny_db;
+const char *config_conversations_db;
 int charset_flags;
 
 char session_id_buf[MAX_SESSIONID_SIZE];
@@ -227,6 +228,7 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 	config_ptscache_db = config_getstring(IMAPOPT_PTSCACHE_DB);
 	config_statuscache_db = config_getstring(IMAPOPT_STATUSCACHE_DB);
 	config_userdeny_db = config_getstring(IMAPOPT_USERDENY_DB);
+	config_conversations_db = config_getstring(IMAPOPT_CONVERSATIONS_DB);
 
 	/* configure libcyrus as needed */
 	libcyrus_config_setstring(CYRUSOPT_CONFIG_DIR, config_dir);
