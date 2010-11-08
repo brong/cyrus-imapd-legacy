@@ -102,7 +102,7 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	imapparse.o telemetry.o user.o notify.o idle.o quota_db.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
-	dlist.o version.o rfc822_header.o
+	dlist.o version.o rfc822_header.o conversations.o
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
@@ -167,7 +167,7 @@ lmtpstats.h: lmtpstats.c
 imap_err.c imap_err.h: imap_err.et
 	$(COMPILE_ET) $(srcdir)/imap_err.et
 
-annotate.o append.o arbitron.o convert_code.o: imap_err.h
+annotate.o append.o arbitron.o conversations.o convert_code.o: imap_err.h
 ctl_mboxlist.o cvt_cyrusdb.o: imap_err.h
 cyr_dbtool.o cyrdump.o cyr_sequence.o deliver.o dlist.o: imap_err.h
 duplicate.o fud.o global.o imapd.o imap_proxy.o index.o: imap_err.h
