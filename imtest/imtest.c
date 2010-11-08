@@ -74,6 +74,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 
+#include <sasl/md5global.h>
+#include <sasl/md5.h>
 #include <sasl/sasl.h>
 #include <sasl/saslutil.h>
 
@@ -87,7 +89,6 @@
 #include "xmalloc.h"
 #include "xstrlcat.h"
 #include "xstrlcpy.h"
-#include "md5.h"
 
 #ifdef HAVE_SSL
 #include <openssl/ssl.h>
@@ -1951,8 +1952,8 @@ static int auth_apop(char *apop_chal)
     unsigned int passlen;
     int i;
     MD5_CTX ctx;
-    unsigned char digest[MD5_DIGEST_LENGTH];
-    char digeststr[2*MD5_DIGEST_LENGTH+1];
+    unsigned char digest[16];
+    char digeststr[2*16+1];
     
     if (!apop_chal) {
 	printf("[Server does not support APOP]\n");
@@ -1963,10 +1964,10 @@ static int auth_apop(char *apop_chal)
     interaction(SASL_CB_PASS,NULL, "Please enter your password",
 		&pass, &passlen);
     
-    MD5Init(&ctx);
-    MD5Update(&ctx,apop_chal,strlen(apop_chal));
-    MD5Update(&ctx,pass,passlen);
-    MD5Final(digest, &ctx);
+    _sasl_MD5Init(&ctx);
+    _sasl_MD5Update(&ctx,apop_chal,strlen(apop_chal));
+    _sasl_MD5Update(&ctx,pass,passlen);
+    _sasl_MD5Final(digest, &ctx);
     
     /* convert digest from binary to ASCII hex */
     for (i = 0; i < 16; i++)

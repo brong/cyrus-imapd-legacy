@@ -49,6 +49,8 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+#include <sasl/md5global.h>
+#include <sasl/md5.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -56,7 +58,6 @@
 #include <fcntl.h>
 #include <string.h>
 
-#include "md5.h"
 #include "sieve_interface.h"
 #include "interp.h"
 #include "message.h"
@@ -226,11 +227,11 @@ static int makehash(unsigned char hash[],
 {
     MD5_CTX ctx;
 
-    MD5Init(&ctx);
-    MD5Update(&ctx, s1, strlen(s1));
-    MD5Update(&ctx, s2, strlen(s2));
-    if (s3) MD5Update(&ctx, s3, strlen(s3));
-    MD5Final(hash, &ctx);
+    _sasl_MD5Init(&ctx);
+    _sasl_MD5Update(&ctx, s1, strlen(s1));
+    _sasl_MD5Update(&ctx, s2, strlen(s2));
+    if (s3) _sasl_MD5Update(&ctx, s3, strlen(s3));
+    _sasl_MD5Final(hash, &ctx);
 
     return SIEVE_OK;
 }
