@@ -102,6 +102,7 @@ TESTSOURCES = \
 	binhex.c \
 	buf.c \
 	charset.c \
+	conversations.c \
 	crc32.c \
 	db.c \
 	getxstring.c \
