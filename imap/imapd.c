@@ -4220,6 +4220,14 @@ badannotation:
 	    else goto badatt;
 	    break;
 
+	case 'C':
+	    if (!strcmp(fetchatt.s, "CID") &&
+	        config_getswitch(IMAPOPT_CONVERSATIONS)) {
+		fa->fetchitems |= FETCH_CID;
+	    }
+	    else goto badatt;
+	    break;
+
 	case 'D':
 	    if (!strcmp(fetchatt.s, "DIGEST.SHA1")) {
 		fa->fetchitems |= FETCH_GUID;
