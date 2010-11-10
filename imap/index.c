@@ -2778,6 +2778,17 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	prot_printf(state->out, "%cRFC822.SHA1 %s", sepchar, message_guid_encode(&tmpguid));
 	sepchar = ' ';
     }
+    if ((fetchitems & FETCH_CID) &&
+	config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	struct buf buf = BUF_INITIALIZER;
+	if (!im->record.cid)
+	    buf_appendcstr(&buf, "NIL");
+	else
+	    buf_printf(&buf, CONV_FMT, im->record.cid);
+	prot_printf(state->out, "%cCID %s", sepchar, buf_cstring(&buf));
+	buf_free(&buf);
+	sepchar = ' ';
+    }
     if (fetchitems & FETCH_ENVELOPE) {
         if (!mailbox_cacherecord(mailbox, &im->record)) {
 	    prot_printf(state->out, "%cENVELOPE ", sepchar);
