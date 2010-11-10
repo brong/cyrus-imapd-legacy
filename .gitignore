@@ -40,6 +40,7 @@ cunit/registers.h
 cunit/unit
 cunit/test-dbdir
 imap/arbitron
+imap/ctl_conversationsdb
 imap/chk_cyrus
 imap/ctl_cyrusdb
 imap/ctl_deliver
