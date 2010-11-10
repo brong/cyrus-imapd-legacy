@@ -75,5 +75,6 @@ extern int conversations_get(struct conversations_state *state,
 			     conversation_id_t *cidp);
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh);
+extern void conversations_dump(struct conversations_state *, FILE *);
 
 #endif /* __CYRUS_CONVERSATIONS_H_ */
