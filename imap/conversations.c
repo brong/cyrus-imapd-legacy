@@ -100,7 +100,59 @@ struct conversations_mrec {
 };
 
 
+/* basename of conversations db for shared namespace */
+#define FNAME_SHARED "shared"
+/* per user conversations db extension */
+#define FNAME_CONVERSATIONS_SUFFIX ".conversations"
+
 #define DB config_conversations_db
+
+
+char *conversations_getpath(const char *mboxname)
+{
+    struct mboxname_parts parts;
+    char c[2], d[2];
+    char *fname;
+
+    if (mboxname_to_parts(mboxname, &parts))
+	return NULL;
+
+    if (parts.userid) {
+	/* have a userid: per-user conversations db */
+	if (parts.domain)
+	    fname = strconcat(config_dir,
+			      FNAME_DOMAINDIR,
+			      dir_hash_b(parts.domain, config_fulldirhash, d),
+			      "/", parts.domain,
+			      FNAME_USERDIR,
+			      dir_hash_b(parts.userid, config_fulldirhash, c),
+			      "/", parts.userid, FNAME_CONVERSATIONS_SUFFIX,
+			      (char *)NULL);
+	else
+	    fname = strconcat(config_dir,
+			      FNAME_USERDIR,
+			      dir_hash_b(parts.userid, config_fulldirhash, c),
+			      "/", parts.userid, FNAME_CONVERSATIONS_SUFFIX,
+			      (char *)NULL);
+    } else {
+	/* no userid: global or per-domain conversations db for shared space */
+	if (parts.domain)
+	    fname = strconcat(config_dir,
+			      FNAME_DOMAINDIR,
+			      dir_hash_b(parts.domain, config_fulldirhash, d),
+			      "/", parts.domain, "/",
+			      FNAME_SHARED, FNAME_CONVERSATIONS_SUFFIX,
+			      (char *)NULL);
+	else
+	    fname = strconcat(config_dir,
+			      FNAME_SHARED, FNAME_CONVERSATIONS_SUFFIX,
+			      (char *)NULL);
+    }
+
+    mboxname_free_parts(&parts);
+    return fname;
+}
+
 
 int conversations_open(struct conversations_state *state, const char *fname)
 {
