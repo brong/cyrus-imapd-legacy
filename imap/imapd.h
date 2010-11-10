@@ -120,7 +120,8 @@ enum {
     FETCH_MODSEQ =		(1<<13),
     FETCH_GUID   =    (1<<14),
     FETCH_SHA1   =    (1<<15),
-    FETCH_FILESIZE =  (1<<16)
+    FETCH_FILESIZE =  (1<<16),
+    FETCH_CID =			(1<<17)
 };
 
 enum {
