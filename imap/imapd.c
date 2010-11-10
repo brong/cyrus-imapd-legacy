@@ -4123,6 +4123,13 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 	    else goto badatt;
 	    break;
 
+	case 'C':
+	    if (!strcmp(fetchatt.s, "CID")) {
+		fetchitems |= FETCH_CID;
+	    }
+	    else goto badatt;
+	    break;
+
 	case 'D':
 	    if (!strcmp(fetchatt.s, "DIGEST.SHA1")) {
 		fetchitems |= FETCH_GUID;
