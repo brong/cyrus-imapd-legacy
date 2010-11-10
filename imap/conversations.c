@@ -306,4 +306,31 @@ int conversations_prune(struct conversations_state *state, time_t thresh)
     return 0;
 }
 
+static int dumpcb(void *rock,
+		  const char *key, int keylen,
+		  const char *data, int datalen)
+{
+    FILE *fp = rock;
+    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
+    time_t stamp;
+    char stampstr[32];
+
+    stamp = ntohl(mrec->stamp);
+    strftime(stampstr, sizeof(stampstr), "%Y-%m-%dT%H:%M:%SZ", gmtime(&stamp));
+    fprintf(fp, "\"%*s\"\t%08x%08x\t%s\n",
+	    keylen, key,
+	    ntohl(mrec->idhi), ntohl(mrec->idlo), stampstr);
+    return 0;
+}
+
+void conversations_dump(struct conversations_state *state, FILE *fp)
+{
+    if (state->db) {
+	fprintf(fp, "MSGID\tCID\tSTAMP\n");
+	fprintf(fp, "=====\t===\t=====\n");
+	DB->foreach(state->db, NULL, 0, NULL, dumpcb, fp, &state->txn);
+	fprintf(fp, "===============\n");
+    }
+}
+
 #undef DB
