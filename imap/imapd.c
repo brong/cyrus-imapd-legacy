@@ -2914,6 +2914,9 @@ void capa_response(int flags)
 
     if (!(flags & CAPA_POSTAUTH)) return;
 
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	prot_printf(imapd_out, " XCONVERSATIONS");
+
 #ifdef HAVE_ZLIB
     if (!imapd_compress_done && !imapd_tls_comp) {
 	prot_printf(imapd_out, " COMPRESS=DEFLATE");
