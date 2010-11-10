@@ -60,6 +60,7 @@ struct conversations_state
     struct txn *txn;
 };
 
+extern char *conversations_getpath(const char *mboxname);
 extern int conversations_open(struct conversations_state *state,
 			      const char *fname);
 extern int conversations_close(struct conversations_state *state);
