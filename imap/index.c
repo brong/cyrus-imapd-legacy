@@ -2516,6 +2516,17 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	prot_printf(state->out, "%cRFC822.SHA1 %s", sepchar, message_guid_encode(&tmpguid));
 	sepchar = ' ';
     }
+    if (fetchitems & FETCH_CID) {
+	char buf[17];
+	if (im->record.cid != NULLCONVERSATION) {
+	    /* sigh, prot_printf() is too dumb */
+	    snprintf(buf, sizeof(buf), "%016llx", im->record.cid);
+	} else {
+	    strncpy(buf, "NIL", sizeof(buf));
+	}
+	prot_printf(state->out, "%cCID %s", sepchar, buf);
+	sepchar = ' ';
+    }
     if (fetchitems & FETCH_ENVELOPE) {
         if (!mailbox_cacherecord(mailbox, &im->record)) {
 	    prot_printf(state->out, "%cENVELOPE ", sepchar);
