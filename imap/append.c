@@ -516,6 +516,30 @@ out:
     return r;
 }
 
+static int append_update_conversations_file(struct appendstate *as,
+					    struct index_record *record,
+					    const char *fname)
+{
+    struct body *body = NULL;
+    FILE *fp;
+    int r;
+
+    fp = fopen(fname, "r");
+    if (fp == NULL)
+	return IMAP_IOERROR;
+
+    r = message_parse_file(fp, NULL, NULL, &body);
+    fclose(fp);
+    if (r)
+	return r;
+
+    r = append_update_conversations(as, record, body);
+
+    message_free_body(body);
+
+    return r;
+}
+
 /*
  * staging, to allow for single-instance store.  the complication here
  * is multiple partitions.
@@ -792,7 +816,7 @@ int append_copy(struct mailbox *mailbox,
 {
     int msg;
     struct index_record record;
-    char *srcfname, *destfname;
+    char *srcfname, *destfname = NULL;
     int r = 0;
     int flag, userflag;
     
@@ -835,11 +859,11 @@ int append_copy(struct mailbox *mailbox,
 	}
 
 	/* Link/copy message file */
+	if (destfname) free(destfname);
 	srcfname = xstrdup(mailbox_message_fname(mailbox, copymsg[msg].uid));
 	destfname = xstrdup(mailbox_message_fname(as->mailbox, record.uid));
 	r = mailbox_copyfile(srcfname, destfname, nolink);
 	free(srcfname);
-	free(destfname);
 	if (r) goto fail;
 
 	/* Write out cache info, copy other info */
@@ -850,7 +874,13 @@ int append_copy(struct mailbox *mailbox,
 	record.content_lines = copymsg[msg].content_lines;
 	record.cache_version = copymsg[msg].cache_version;
 	record.cache_crc = copymsg[msg].cache_crc;
+	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
+
+	if (record.cid == NULLCONVERSATION) {
+	    r = append_update_conversations_file(as, &record, destfname);
+	    if (r) goto fail;
+	}
 
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);
@@ -858,6 +888,7 @@ int append_copy(struct mailbox *mailbox,
     }
 
  fail:
+    if (destfname) free(destfname);
     if (r) append_abort(as);
 
     return r;
