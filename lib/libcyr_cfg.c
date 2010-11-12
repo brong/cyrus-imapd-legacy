@@ -59,6 +59,8 @@
 #define CFGVAL(t,v)	{(void *)(v)}
 #endif
 
+static int protect_stderr = -1;
+
 struct cyrusopt_s cyrus_options[] = {
     { CYRUSOPT_ZERO, { NULL }, CYRUS_OPT_NOTOPT },
 
@@ -221,10 +223,28 @@ void libcyrus_config_setswitch(enum cyrus_opt opt, int val)
 
 void libcyrus_init()
 {
+    protect_stderr = open("/dev/null", O_RDWR, 0666);
+    if (protect_stderr > 2) {
+	/* Ok, we're safe */
+	close(protect_stderr);
+	protect_stderr = -1;
+    }
+    else if (protect_stderr == 2) {
+	syslog(LOG_ERR, "WARNING: Protecting stderr from dangerous re-open. "
+			"Are you running under broken truss on FreeBSD?");
+    }
+    else {
+	abort();
+    }
+
     cyrusdb_init();
 }
 
 void libcyrus_done()
 {
     cyrusdb_done();
+    if (protect_stderr > -1) {
+	close(protect_stderr);
+	protect_stderr = -1;
+    }
 }
