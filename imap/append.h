@@ -67,6 +67,7 @@ struct copymsg {
     struct message_guid guid;
     bit32 system_flags;
     char *flag[MAX_USER_FLAGS+1];
+    conversation_id_t cid;
 };
 
 /* it's ridiculous i have to expose this structure if i want to allow
