@@ -4167,7 +4167,8 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 	    break;
 
 	case 'C':
-	    if (!strcmp(fetchatt.s, "CID")) {
+	    if (!strcmp(fetchatt.s, "CID") &&
+	        config_getswitch(IMAPOPT_CONVERSATIONS)) {
 		fetchitems |= FETCH_CID;
 	    }
 	    else goto badatt;

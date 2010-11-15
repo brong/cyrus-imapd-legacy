@@ -2516,7 +2516,8 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	prot_printf(state->out, "%cRFC822.SHA1 %s", sepchar, message_guid_encode(&tmpguid));
 	sepchar = ' ';
     }
-    if (fetchitems & FETCH_CID) {
+    if ((fetchitems & FETCH_CID) &&
+	config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	char buf[17];
 	if (im->record.cid != NULLCONVERSATION) {
 	    /* sigh, prot_printf() is too dumb */
