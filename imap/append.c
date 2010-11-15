@@ -206,11 +206,13 @@ int append_setup(struct appendstate *as, const char *name,
     as->s = APPEND_READY;
 
     /* open conversations db and start a txn */
-    r = conversations_open(&as->conversations,
-			   conversations_getpath(name));
-    if (r) {
-	mailbox_close(&as->mailbox);
-	return r;
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	r = conversations_open(&as->conversations,
+			       conversations_getpath(name));
+	if (r) {
+	    mailbox_close(&as->mailbox);
+	    return r;
+	}
     }
 
     return 0;
@@ -254,12 +256,14 @@ int append_commit(struct appendstate *as,
 	return r;
     }
 
-    r = conversations_commit(&as->conversations);
-    if (r) {
-	syslog(LOG_ERR, "IOERROR: commiting conversations append: %s",
-	       error_message(r));
-	append_abort(as);
-	return r;
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	r = conversations_commit(&as->conversations);
+	if (r) {
+	    syslog(LOG_ERR, "IOERROR: commiting conversations append: %s",
+		   error_message(r));
+	    append_abort(as);
+	    return r;
+	}
     }
 
     if (mailboxptr) {
@@ -268,7 +272,9 @@ int append_commit(struct appendstate *as,
     else {
 	mailbox_close(&as->mailbox);
     }
-    conversations_close(&as->conversations);
+
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	conversations_close(&as->conversations);
 
     as->s = APPEND_DONE;
 
@@ -287,7 +293,9 @@ int append_abort(struct appendstate *as)
 
     /* close mailbox */
     mailbox_close(&as->mailbox);
-    conversations_close(&as->conversations);
+
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	conversations_close(&as->conversations);
 
     seqset_free(as->seen_seq);
 
@@ -625,7 +633,8 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
-	if (!r) r = append_update_conversations(as, &record, *body);
+	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS))
+	    r = append_update_conversations(as, &record, *body);
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -878,7 +887,8 @@ int append_copy(struct mailbox *mailbox,
 	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
 
-	if (record.cid == NULLCONVERSATION) {
+	if (record.cid == NULLCONVERSATION &&
+	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    r = append_update_conversations_file(as, &record, destfname);
 	    if (r) goto fail;
 	}
