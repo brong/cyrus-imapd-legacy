@@ -333,4 +333,30 @@ void conversations_dump(struct conversations_state *state, FILE *fp)
     }
 }
 
+const char *conversation_id_encode(conversation_id_t cid)
+{
+    static char text[2*sizeof(cid)+1];
+
+    if (cid != NULLCONVERSATION) {
+	cid = htonll(cid);
+	bin_to_hex(&cid, sizeof(cid), text, BH_LOWER);
+    } else {
+	strncpy(text, "NIL", sizeof(text));
+    }
+
+    return text;
+}
+
+int conversation_id_decode(conversation_id_t *cid, const char *text)
+{
+    if (!strcmp(text, "NIL")) {
+	*cid = NULLCONVERSATION;
+	return 1;
+    } else {
+	int r = hex_to_bin(text, 0, cid);
+	*cid = ntohll(*cid);
+	return (r == sizeof(cid));
+    }
+}
+
 #undef DB
