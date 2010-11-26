@@ -296,6 +296,43 @@ static void test_two(void)
     CU_ASSERT_EQUAL(r, 0);
 }
 
+/* test CID encoding */
+static void test_cid_encode(void)
+{
+    static const conversation_id_t CID1 = 0x01089abcdef23456;
+    static const char STR1[] = "01089abcdef23456";
+    static const conversation_id_t CID2 = NULLCONVERSATION;
+    static const char STR2[] = "NIL";
+    const char *r;
+
+    r = conversation_id_encode(CID1);
+    CU_ASSERT_STRING_EQUAL(r, STR1);
+
+    r = conversation_id_encode(CID2);
+    CU_ASSERT_STRING_EQUAL(r, STR2);
+}
+
+/* test CID decoding */
+static void test_cid_decode(void)
+{
+    static const char STR1[] = "01089abcdef23456";
+    static const conversation_id_t CID1 = 0x01089abcdef23456;
+    static const char STR2[] = "NIL";
+    static const conversation_id_t CID2 = NULLCONVERSATION;
+    conversation_id_t cid;
+    int r;
+
+    memset(&cid, 0x45, sizeof(cid));
+    r = conversation_id_decode(&cid, STR1);
+    CU_ASSERT_EQUAL(r, 1);
+    CU_ASSERT_EQUAL(cid, CID1);
+
+    memset(&cid, 0x45, sizeof(cid));
+    r = conversation_id_decode(&cid, STR2);
+    CU_ASSERT_EQUAL(r, 1);
+    CU_ASSERT_EQUAL(cid, CID2);
+}
+
 
 static int init(void)
 {
