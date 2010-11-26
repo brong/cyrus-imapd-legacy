@@ -2514,14 +2514,8 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     }
     if ((fetchitems & FETCH_CID) &&
 	config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	char buf[17];
-	if (im->record.cid != NULLCONVERSATION) {
-	    /* sigh, prot_printf() is too dumb */
-	    snprintf(buf, sizeof(buf), "%016llx", im->record.cid);
-	} else {
-	    strncpy(buf, "NIL", sizeof(buf));
-	}
-	prot_printf(state->out, "%cCID %s", sepchar, buf);
+	prot_printf(state->out, "%cCID %s", sepchar,
+		    conversation_id_encode(im->record.cid));
 	sepchar = ' ';
     }
     if (fetchitems & FETCH_ENVELOPE) {
