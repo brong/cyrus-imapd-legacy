@@ -72,9 +72,6 @@ int verbose = 0;
 static int usage(const char *name)
     __attribute__((noreturn));
 
-/* current namespace */
-static struct namespace dump_namespace;
-
 int main(int argc, char **argv)
 {
     int c;
