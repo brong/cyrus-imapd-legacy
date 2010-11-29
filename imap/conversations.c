@@ -76,6 +76,7 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "times.h"
 
 #include "conversations.h"
 
