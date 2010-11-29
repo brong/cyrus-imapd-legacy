@@ -372,7 +372,7 @@ FILE *append_newstage(const char *mailboxname, time_t internaldate,
 static conversation_id_t generate_conversation_id(const struct body *body)
 {
     conversation_id_t cid = 0;
-    int i;
+    size_t i;
 
     assert(body->guid.status == GUID_NONNULL);
 
@@ -412,8 +412,6 @@ static int append_update_conversations(struct appendstate *as,
     int j;
     int r;
     char *msgid;
-    char *userid;
-    char *fname;
 
     /*
      * Gather all the msgids mentioned in the message, starting with
