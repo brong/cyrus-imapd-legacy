@@ -308,7 +308,7 @@ int conversations_prune(struct conversations_state *state, time_t thresh)
 
 static int dumpcb(void *rock,
 		  const char *key, int keylen,
-		  const char *data, int datalen)
+		  const char *data, int datalen __attribute__((unused)))
 {
     FILE *fp = rock;
     const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
