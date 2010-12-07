@@ -171,4 +171,9 @@ extern int message_create_record P((struct index_record *message_index,
 				    const struct body *body));
 extern void message_free_body P((struct body *body));
 
+extern int message_update_conversations(struct conversations_state *,
+			         struct index_record *, const struct body *);
+extern int message_update_conversations_file(struct conversations_state *,
+				      struct index_record *, const char *);
+
 #endif /* INCLUDED_MESSAGE_H */
