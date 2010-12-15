@@ -2723,6 +2723,8 @@ void replica_connect(const char *channel)
     /* links to sockets */
     sync_in = sync_backend->in;
     sync_out = sync_backend->out;
+
+    sync_crc_setup(NULL, NULL, /*strict*/0);
 }
 
 static void replica_disconnect(void)
