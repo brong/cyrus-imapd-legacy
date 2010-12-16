@@ -207,8 +207,9 @@ int append_setup(struct appendstate *as, const char *name,
 
     /* open conversations db and start a txn */
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	r = conversations_open(&as->conversations,
-			       conversations_getpath(name));
+	char *path = conversations_getpath(name);
+	r = conversations_open(&as->conversations, path);
+	free(path);
 	if (r) {
 	    mailbox_close(&as->mailbox);
 	    return r;
