@@ -89,6 +89,7 @@ static void forget_capabilities(struct backend *s)
 	free(s->cap_params[i].params);
     s->capability = 0;
     free(s->cap_params);
+    s->cap_params = NULL;
     s->num_cap_params = 0;
 }
 
