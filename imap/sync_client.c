@@ -1004,6 +1004,7 @@ static int compare_one_record(struct mailbox *mailbox,
     int diff = 0;
     int i;
     int r;
+    conversation_id_t cid;
 
     /* are there any differences? */
     if (mp->modseq != rp->modseq)
@@ -1026,6 +1027,8 @@ static int compare_one_record(struct mailbox *mailbox,
 		diff = 1;
 	}
     }
+    if (mp->cid != rp->cid)
+	diff = 1;
 
     /* if differences we'll have to rewrite to bump the modseq
      * so that regular replication will cause an update */
@@ -1089,6 +1092,16 @@ static int compare_one_record(struct mailbox *mailbox,
 		    if (r) return r;
 		}
 	    }
+
+	    r = sync_choose_cid(mp, rp, &cid);
+	    if ((r & SYNC_CHOOSE_CLASH)) {
+		struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+		if ((r & SYNC_CHOOSE_REPLICA))
+		    mailbox_rename_cid(cstate, mp->cid, rp->cid);
+		else
+		    mailbox_rename_cid(cstate, rp->cid, mp->cid);
+	    }
+	    mp->cid = cid;
 	}
 
 	/* are we making changes yet? */
