@@ -1400,7 +1400,7 @@ int sync_mailbox(struct mailbox *mailbox,
     char sync_crc[128];
 
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
-    if (r < 0)
+    if (r)
 	return r;
 
     dlist_atom(kl, "UNIQUEID", mailbox->uniqueid);
@@ -1664,7 +1664,8 @@ static void sync_crc32_update(const struct mailbox *mailbox,
 
 static int sync_crc32_end(char *buf, int maxlen)
 {
-    return snprintf(buf, maxlen, "%u", sync_crc32);
+    snprintf(buf, maxlen, "%u", sync_crc32);
+    return 0;
 }
 
 static const struct sync_crc_algorithm sync_crc_algorithms[] = {
@@ -1810,7 +1811,7 @@ const char *sync_crc_get_covers(void)
  * Calculate a sync CRC for the entire mailbox, and store the result
  * formatted as a nul-terminated ASCII string (suitable for use as an
  * IMAP atom) in @buf.
- * Returns: number of characters formatted on success, -ve on error.
+ * Returns: 0 on success, -ve on error.
  */
 int sync_crc_calc(struct mailbox *mailbox, char *buf, int maxlen)
 {

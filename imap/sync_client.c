@@ -249,7 +249,7 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 	/* mailbox is open from here, no exiting without closing it! */
 
 	r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
-	if (r < 0) {
+	if (r) {
 	    syslog(LOG_ERR, "Failed to calculate CRC %s: %s",
 		   mbox->name, error_message(r));
 	    mailbox_close(&mailbox);
@@ -1324,7 +1324,7 @@ static int is_unchanged(struct mailbox *mailbox, struct sync_folder *remote)
     }
 
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
-    if (r > 0 && strcmp(remote->sync_crc, sync_crc)) return 0;
+    if (!r && strcmp(remote->sync_crc, sync_crc)) return 0;
 
     /* otherwise it's unchanged! */
     return 1;
