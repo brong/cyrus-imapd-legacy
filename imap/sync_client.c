@@ -980,6 +980,8 @@ static int compare_one_record(struct mailbox *mailbox,
 		diff = 1;
 	}
     }
+    if (mp->cid != rp->cid)
+	diff = 1;
 
     /* if differences we'll have to rewrite to bump the modseq
      * so that regular replication will cause an update */
@@ -1031,6 +1033,11 @@ static int compare_one_record(struct mailbox *mailbox,
 	    }
 	    else {
 		log_mismatch("more recent on master", mailbox, mp, rp);
+	    }
+
+	    r = sync_choose_cid(mp, rp, &mp->cid);
+	    if ((r & SYNC_CHOOSE_CLASH)) {
+		syslog(LOG_ERR, "Oh noes!! need to handle conversation merging\n");
 	    }
 	}
 
