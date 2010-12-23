@@ -406,6 +406,13 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 int sync_append_copyfile(struct mailbox *mailbox,
 			 struct index_record *record);
 
+#define SYNC_CHOOSE_MASTER	(1<<0)
+#define SYNC_CHOOSE_REPLICA	(1<<1)
+#define SYNC_CHOOSE_CLASH	(1<<2)
+int sync_choose_cid(const struct index_record *mp,
+		    const struct index_record *rp,
+		    conversation_id_t *cidp);
+
 /* ====================================================================== */
 
 const char *sync_crc_get_algorithm(void);

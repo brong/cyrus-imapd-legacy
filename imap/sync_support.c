@@ -273,6 +273,7 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 {
     struct dlist *fl;
     const char *guid;
+    const char *cid;
     int r;
 
     memset(record, 0, sizeof(struct index_record));
@@ -299,6 +300,13 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
     /* check the GUID format */
     if (!message_guid_decode(&record->guid, guid))
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
+
+    record->cid = NULLCONVERSATION;
+    if (config_getswitch(IMAPOPT_CONVERSATIONS) &&
+        dlist_getatom(kr, "CID", &cid)) {
+	if (!conversation_id_decode(&record->cid, cid))
+	    return IMAP_PROTOCOL_BAD_PARAMETERS;
+    }
 
     return 0;
 }
@@ -1485,6 +1493,7 @@ int sync_mailbox(struct mailbox *mailbox,
 	    dlist_date(il, "INTERNALDATE", record.internaldate);
 	    dlist_num(il, "SIZE", record.size);
 	    dlist_atom(il, "GUID", message_guid_encode(&record.guid));
+	    dlist_atom(il, "CID", conversation_id_encode(record.cid));
 	}
     }
 
@@ -1559,6 +1568,9 @@ int sync_append_copyfile(struct mailbox *mailbox,
 {
     const char *fname, *destname;
     struct message_guid tmp_guid;
+    conversation_id_t cid = record->cid;
+    struct body *body = NULL;
+    struct conversations_state conversations;
     int r;
 
     message_guid_copy(&tmp_guid, &record->guid);
@@ -1571,7 +1583,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
-    r = message_parse(fname, record);
+    r = message_parse2(fname, record, &body);
     if (r) {
 	/* deal with unlinked master records */
 	if (record->system_flags & FLAG_EXPUNGED) {
@@ -1581,6 +1593,21 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	syslog(LOG_ERR, "IOERROR: failed to parse %s", fname);
 	return r;
     }
+
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	char *path = conversations_getpath(mailbox->name);
+	r = conversations_open(&conversations, path);
+	free(path);
+	if (!r) {
+	    record->cid = cid;	/* use the CID given us */
+	    r = message_update_conversations(&conversations, record, body);
+	    if (!r)
+		r = conversations_commit(&conversations);
+	    r = conversations_close(&conversations);
+	}
+    }
+    message_free_body(body);
+    body = NULL;
 
     if (!message_guid_equal(&tmp_guid, &record->guid)) {
 	syslog(LOG_ERR, "IOERROR: guid mismatch on parse %s", fname);
@@ -1600,9 +1627,65 @@ int sync_append_copyfile(struct mailbox *mailbox,
     return mailbox_append_index_record(mailbox, record);
 }
 
+/*
+ * Choose a CID from either the master's or the replica's idea of what
+ * the CID is.  In the common and easy case the replica will have a null
+ * CID and the master a non-null CID.  The tricky case is where both
+ * sides have different non-null CIDs; this can happen in a
+ * master-master replication setup where delivery has occurred racily at
+ * both ends.
+ *
+ * If @cidp is not NULL, write the chosen CID there.
+ *
+ * Returns: a bitmask of three possible bits:
+ *
+ * @SYNC_CHOOSE_MASTER - if the master's CID was chosen and the
+ *			 replica's CID was different
+ * @SYNC_CHOOSE_REPLICA - if the replica's CID was chosen and the
+ *			  master's CID was different
+ * @SYNC_CHOOSE_CLASH - the side which lost had a non-NULL CID and
+ *			will now need to deal with the CID changing
+ */
+int sync_choose_cid(const struct index_record *mp,
+		    const struct index_record *rp,
+		    conversation_id_t *cidp)
+{
+    int r = 0;
+    conversation_id_t cid;
+
+    /*
+     * We need to choose the MAX of the replica's and the master's
+     * CIDs, regardless of which one is newer according to modseq.
+     * This ensures that
+     *
+     * a) if either are NULL the other will win, and
+     *
+     * b) if neither are NULL a predictable choice will be made.
+     */
+    if (mp->cid < rp->cid) {
+	r |= SYNC_CHOOSE_REPLICA;
+	cid = rp->cid;
+	if (mp->cid != NULLCONVERSATION)
+	    r |= SYNC_CHOOSE_CLASH;
+    } else if (mp->cid > rp->cid) {
+	r |= SYNC_CHOOSE_MASTER;
+	cid = mp->cid;
+	if (rp->cid != NULLCONVERSATION)
+	    r |= SYNC_CHOOSE_CLASH;
+    } else {
+	cid = mp->cid;
+    }
+
+    if (cidp)
+	*cidp = cid;
+    return r;
+}
+
+
 /* ====================================================================== */
 
 #define SYNC_CRC_BASIC	(1<<0)
+#define SYNC_CRC_CID	(1<<1)
 
 struct sync_crc_algorithm {
     const char *name;
@@ -1618,6 +1701,10 @@ static bit32 sync_crc32;
 
 static int sync_crc32_setup(int cflags __attribute__((unused)))
 {
+    if ((cflags & ~(SYNC_CRC_BASIC|SYNC_CRC_CID)))
+	return IMAP_INVALID_IDENTIFIER;
+    if (!(cflags & SYNC_CRC_BASIC))
+	return IMAP_INVALID_IDENTIFIER;
     return 0;
 }
 
@@ -1628,7 +1715,7 @@ static void sync_crc32_begin(void)
 
 static void sync_crc32_update(const struct mailbox *mailbox,
 			      const struct index_record *record,
-			      int cflags __attribute__((unused)))
+			      int cflags)
 {
     char buf[4096];
     bit32 flagcrc = 0;
@@ -1658,6 +1745,9 @@ static void sync_crc32_update(const struct mailbox *mailbox,
 	lcase(buf);
 	flagcrc ^= crc32_cstring(buf);
     }
+
+    if ((cflags & SYNC_CRC_CID) && record->cid != NULLCONVERSATION)
+	flagcrc ^= crc32_cstring(conversation_id_encode(record->cid));
 
     snprintf(buf, 4096, "%u " MODSEQ_FMT " %lu (%u) %lu %s",
 	    record->uid, record->modseq, record->last_updated,
@@ -1738,6 +1828,8 @@ static int covers_from_string(const char *str, int strict)
     for (p = strtok(b, sep) ; p ; p = strtok(NULL, sep)) {
 	if (!strcasecmp(p, "BASIC"))
 	    flags |= SYNC_CRC_BASIC;
+	else if (!strcasecmp(p, "CID"))
+	    flags |= SYNC_CRC_CID;
 	else if (strict) {
 	    flags = IMAP_INVALID_IDENTIFIER;
 	    goto done;
@@ -1756,12 +1848,16 @@ static const char *covers_to_string(int flags)
     buf[0] = '\0';
     if ((flags & SYNC_CRC_BASIC))
 	strcat(buf, " BASIC");
+    if ((flags & SYNC_CRC_CID))
+	strcat(buf, " CID");
     return (buf[0] ? buf+1 : NULL);
 }
 
 const char *sync_crc_list_covers(void)
 {
     int cflags = SYNC_CRC_BASIC;
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	cflags |= SYNC_CRC_CID;
     return covers_to_string(cflags);
 }
 
