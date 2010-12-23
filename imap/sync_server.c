@@ -1213,6 +1213,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
     struct dlist *ki;
     struct sync_annot_list *mannots = NULL;
     struct sync_annot_list *rannots = NULL;
+    conversation_id_t cid;
     int r;
     int i;
 
@@ -1256,6 +1257,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 
 	    /* everything else only matters if we're not expunged */
 	    if (!(mrecord.system_flags & FLAG_EXPUNGED)) {
+                /* GUID mismatch on a non-expunged record is an error straight away */
 		if (!message_guid_equal(&mrecord.guid, &rrecord.guid)) {
 		    syslog(LOG_ERR, "SYNCERROR: guid mismatch %s %u",
 			   mailbox->name, mrecord.uid);
@@ -1268,6 +1270,28 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		    r = IMAP_SYNC_CHECKSUM;
 		    goto out;
 		}
+
+		r = sync_choose_cid(&mrecord, &rrecord, &cid);
+		/* if we want the master CID, we can do that now */
+		if ((r & SYNC_CHOOSE_MASTER)) {
+		    if ((r & SYNC_CHOOSE_CLASH)) {
+			struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+			/* We chose the master's CID but the replica has
+		         * a non-NULL CID which will need to be rewritten. */
+			mailbox_rename_cid(cstate, rrecord.cid, cid);
+		    }
+		    /* the rename_cid will do this anyway, but if we get in early
+		     * we can avoid the MODSEQ bump which would cause a CRC
+		     * failure and full resync */
+		    rrecord.cid = cid;
+		}
+
+		/* If we needed to choose the replica's CID, the master
+		 * will get confused.  Because this might only happen due
+		 * to earlier updates, we CAN NOT DETECT during the first
+		 * pass.  To avoid conflicted intermediate states, our
+		 * only choice is to ignore the CID, causing a later
+		 * CRC mismatch and a full sync */
 	    }
 
 	    /* skip out on the first pass */

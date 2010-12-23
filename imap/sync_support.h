@@ -432,6 +432,13 @@ int apply_annotations(struct mailbox *mailbox,
 int diff_annotations(const struct sync_annot_list *local_annots,
 		     const struct sync_annot_list *remote_annots);
 
+#define SYNC_CHOOSE_MASTER	(1<<0)
+#define SYNC_CHOOSE_REPLICA	(1<<1)
+#define SYNC_CHOOSE_CLASH	(1<<2)
+int sync_choose_cid(const struct index_record *mp,
+		    const struct index_record *rp,
+		    conversation_id_t *cidp);
+
 /* ====================================================================== */
 
 const char *sync_crc_get_algorithm(void);
