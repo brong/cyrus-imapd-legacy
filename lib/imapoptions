@@ -319,6 +319,11 @@ Blank lines and lines beginning with ``#'' are ignored.
 { "conversations_db", "skiplist", STRINGLIST("berkeley", "berkeley-nosync", "berkeley-hash", "berkeley-hash-nosync", "skiplist", "sql")}
 /* The cyrusdb backend to use for the per-user conversations database. */
 
+{ "conversations_expire_days", 90, INT }
+/* How long the conversations database keeps the message tracking
+   information needed for receiving new messages in existing
+   conversations, in days. */
+
 { "debug_command", NULL, STRING }
 /* Debug command to be used by processes started with -D option.  The string
    is a C format string that gets 3 options: the first is the name of the
