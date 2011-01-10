@@ -57,6 +57,9 @@ cyr_expire \- expire messages and duplicate delivery database entries
 .BI \-X " expunge-days"
 ]
 [
+.BI \-O "cid-expire-days"
+]
+[
 .BI \-p " mailbox-prefix"
 ]
 [
@@ -74,7 +77,9 @@ expire entries from the duplicate delivery database, and
 cleanse mailboxes of partially expunged messages (when
 using the "delayed" expunge mode), and
 .IP \(bu 2m
-remove deleted mailboxes (when using the "delayed" delete mode).
+remove deleted mailboxes (when using the "delayed" delete mode), and
+.IP \(bu 2m
+expire entries from conversations databases.
 .PP
 The expiration of messages is controlled by the
 \fB/vendor/cmu/cyrus-imapd/expire\fR mailbox annotation which
@@ -115,11 +120,19 @@ Prune the duplicate database of entries older than \fIexpire-days\fR.  This
 value is only used for entries which do not have a corresponding
 \fB/vendor/cmu/cyrus-imapd/expire\fR mailbox annotation.
 .TP
+\fB-O \fIcid-expire-days\fR
+Prune the conversations database of entries older than
+\fIcid-expire-days\fR.  If no \fB-O\fR option is specified, the
+value of the \fB-E\fR option is used.
+.TP
 \fB\-X \fIexpunge-days\fR
 Expunge previously deleted messages older than \fIexpunge-days\fR
 (when using the "delayed" expunge mode).
 .TP
-\fB\-x
+\fB-c\fR
+Do not expire conversation database entries.
+.TP
+\fB\-x\fR
 Do not expunge messages even if using delayed expunge mode.  This reduces IO
 traffic considerably, allowing \fBcyr_expire\fR to be run frequently to clean
 up the duplicate database without overloading the machine.
