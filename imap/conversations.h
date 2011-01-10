@@ -74,7 +74,8 @@ extern int conversations_get(struct conversations_state *state,
 			     const char *msgid,
 			     conversation_id_t *cidp);
 extern int conversations_prune(struct conversations_state *state,
-			       time_t thresh);
+			       time_t thresh, unsigned int *,
+			       unsigned int *);
 extern void conversations_dump(struct conversations_state *, FILE *);
 
 extern const char *conversation_id_encode(conversation_id_t cid);
