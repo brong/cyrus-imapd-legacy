@@ -271,6 +271,8 @@ int conversations_get(struct conversations_state *state,
 struct prune_rock {
     struct conversations_state *state;
     time_t thresh;
+    unsigned int nseen;
+    unsigned int ndeleted;
 };
 
 static int prunecb(void *rock,
@@ -282,6 +284,7 @@ static int prunecb(void *rock,
     time_t stamp;
     int r;
 
+    prock->nseen++;
     r = check_msgid(key, keylen, NULL);
     if (r)
 	return r;
@@ -291,6 +294,7 @@ static int prunecb(void *rock,
     stamp = ntohl(mrec->stamp);
     if (stamp >= prock->thresh)
 	return 0;
+    prock->ndeleted++;
 
     return DB->delete(prock->state->db,
 		      key, keylen,
@@ -298,11 +302,18 @@ static int prunecb(void *rock,
 		      /*force*/1);
 }
 
-int conversations_prune(struct conversations_state *state, time_t thresh)
+int conversations_prune(struct conversations_state *state,
+			time_t thresh, unsigned int *nseenp,
+			unsigned int *ndeletedp)
 {
-    struct prune_rock rock = { state, thresh };
+    struct prune_rock rock = { state, thresh, 0, 0 };
 
     DB->foreach(state->db, "<", 1, NULL, prunecb, &rock, &state->txn);
+
+    if (nseenp)
+	*nseenp = rock.nseen;
+    if (ndeletedp)
+	*ndeletedp = rock.ndeleted;
 
     return 0;
 }
