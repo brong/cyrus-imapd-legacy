@@ -142,6 +142,7 @@ static void test_prune(void)
     static const conversation_id_t C_CID3 = 0x10689abcdef2345;
     time_t stamp3;
     conversation_id_t cid;
+    unsigned int nseen = 0, ndeleted = 0;
 
     memset(&state, 0, sizeof(state));
 
@@ -190,8 +191,12 @@ static void test_prune(void)
     /* Prune out the oldest two.  Note we try to make this test
      * stable with respect to timing artifacts, such as clock
      * granularity, by careful choice of sleep times. */
-    r = conversations_prune(&state, stamp2+(stamp3-stamp2)/2);
+    r = conversations_prune(&state, stamp2+(stamp3-stamp2)/2,
+			    &nseen, &ndeleted);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT(nseen >= 3);
+    CU_ASSERT(ndeleted >= 2);
+    CU_ASSERT(nseen - ndeleted >= 1);
 
     /* gets of the oldest two records should succeed
      * but report no record, and a get of the newest
