@@ -356,8 +356,8 @@ int main(int argc, char *argv[])
     int expire_days = 0;
     int expunge_days = -1;
     int delete_days = -1;
-    int cid_expire_days = -1;
-    int do_cid_expire = 1;
+    int cid_expire_days;
+    int do_cid_expire = -1;
     int do_expunge = 1;	/* gnb:TODO bool */
     char *alt_config = NULL;
     const char *find_prefix = "*";
@@ -391,11 +391,6 @@ int main(int argc, char *argv[])
 	case 'E':
 	    if (expire_days) usage();
 	    if (!parse_uint(optarg, &expire_days)) usage();
-	    break;
-
-	case 'O':
-	    if (cid_expire_days >= 0) usage();
-	    if (!parse_uint(optarg, &cid_expire_days)) usage();
 	    break;
 
 	case 'X':
@@ -442,6 +437,9 @@ int main(int argc, char *argv[])
 
     cyrus_init(alt_config, "cyr_expire", 0);
     global_sasl_init(1, 0, NULL);
+
+    if (do_cid_expire < 0)
+	do_cid_expire = config_getswitch(IMAPOPT_CONVERSATIONS);
 
     annotatemore_init(0, NULL, NULL);
     annotatemore_open(NULL);
@@ -500,14 +498,13 @@ int main(int argc, char *argv[])
     }
 
     if (do_cid_expire) {
-	if (cid_expire_days < 0)
-	    cid_expire_days = expire_days;
+	cid_expire_days = config_getint(IMAPOPT_CONVERSATIONS_EXPIRE_DAYS);
 	crock.expire_mark = time(0) - (cid_expire_days * 60 * 60 * 24);
 
         if (verbose)
             fprintf(stderr,
                     "Removing conversation entries older than %d days\n",
-                    expire_days);
+                    cid_expire_days);
 
 	mboxlist_findall(NULL, find_prefix, 1, 0, 0,
 			 expire_conversations, &crock);
