@@ -57,9 +57,6 @@ cyr_expire \- expire messages and duplicate delivery database entries
 .BI \-X " expunge-days"
 ]
 [
-.BI \-O "cid-expire-days"
-]
-[
 .BI \-p " mailbox-prefix"
 ]
 [
@@ -98,11 +95,17 @@ The annotation can be examined using the \fBinfo\fR command of
 \fBcyradm(1p)\fR, and modified using the \fBmboxconfig\fR and
 \fBsetinfo\fR commands of \fBcyradm(1p)\fR.
 .PP
-Expiry of duplicate delivery database entries for a given mailbox
+Expiration of duplicate delivery database entries for a given mailbox
 is also controlled by the \fB/vendor/cmu/cyrus-imapd/expire\fR annotation
 which applies to that mailbox.  Unlike message expiration, if no
 annotation applies to the mailbox then duplicate database entries are
 expired using the value given to the \fB-E\fR option.
+.PP
+Expiration of conversations database entries occurs if the
+\fBconversations\fP option is present in \fIimapd.conf\fP.  Expiration
+can be disabled using the \fB\-c\fP option.  The period used to
+expire entries is controlled by the \fBconversations_expire_days\fP
+option in \fIimapd.conf\fP.
 .PP
 \fBCyr_expire\fR reads its configuration options out of the \fIimapd.conf\fR(5)
 file unless specified otherwise by \fB-C\fR.
@@ -120,17 +123,13 @@ Prune the duplicate database of entries older than \fIexpire-days\fR.  This
 value is only used for entries which do not have a corresponding
 \fB/vendor/cmu/cyrus-imapd/expire\fR mailbox annotation.
 .TP
-\fB-O \fIcid-expire-days\fR
-Prune the conversations database of entries older than
-\fIcid-expire-days\fR.  If no \fB-O\fR option is specified, the
-value of the \fB-E\fR option is used.
-.TP
 \fB\-X \fIexpunge-days\fR
 Expunge previously deleted messages older than \fIexpunge-days\fR
 (when using the "delayed" expunge mode).
 .TP
 \fB-c\fR
-Do not expire conversation database entries.
+Do not expire conversation database entries, even if the conversations
+feature is enabled.
 .TP
 \fB\-x\fR
 Do not expunge messages even if using delayed expunge mode.  This reduces IO
