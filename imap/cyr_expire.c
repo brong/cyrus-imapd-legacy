@@ -72,6 +72,7 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "strarray.h"
 
 /* global state */
 const int config_need_data = 0;
@@ -96,11 +97,6 @@ struct expire_rock {
     int skip_annotate;
 };
 
-struct delete_node {
-    struct delete_node *next;
-    char *name;
-};
-
 struct conversations_rock {
     struct hash_table seen;
     time_t expire_mark;
@@ -111,8 +107,7 @@ struct conversations_rock {
 
 struct delete_rock {
     time_t delete_mark;
-    struct delete_node *head;
-    struct delete_node *tail;
+    strarray_t to_delete;
 };
 
 /*
@@ -292,7 +287,6 @@ static int delete(char *name,
     struct mboxlist_entry *mbentry = NULL;
     struct delete_rock *drock = (struct delete_rock *) rock;
     int r;
-    struct delete_node *node;
     time_t timestamp;
 
     if (sigquit) {
@@ -322,16 +316,8 @@ static int delete(char *name,
         return 0;
 
     /* Add this mailbox to list of mailboxes to delete */
-    node = xmalloc(sizeof(struct delete_node));
-    node->next = NULL;
-    node->name = xstrdup(name);
+    strarray_append(&drock->to_delete, name);
 
-    if (drock->tail) {
-	drock->tail->next = node;
-	drock->tail = node;
-    } else {
-	drock->head = drock->tail = node;
-    }
     return(0);
 }
 
@@ -398,6 +384,7 @@ int main(int argc, char *argv[])
     memset(&erock, 0, sizeof(erock));
     construct_hash_table(&erock.table, 10000, 1);
     memset(&drock, 0, sizeof(drock));
+    strarray_init(&drock.to_delete);
     memset(&crock, 0, sizeof(crock));
     construct_hash_table(&crock.seen, 100, 1);
 
@@ -552,40 +539,40 @@ int main(int argc, char *argv[])
 
     if ((delete_seconds >= 0) && mboxlist_delayed_delete_isenabled() &&
 	config_getstring(IMAPOPT_DELETEDPREFIX)) {
-        struct delete_node *node;
-        int count = 0;
+	int count = 0;
+	int i;
 
-        if (verbose) {
-            fprintf(stderr,
+	if (verbose) {
+	    fprintf(stderr,
 		    "Removing deleted mailboxes older than %0.2f days\n",
 		    (double)(delete_seconds/86400));
-        }
+	}
 
-        drock.delete_mark = time(0) - delete_seconds;
-        drock.head = NULL;
-        drock.tail = NULL;
+	drock.delete_mark = time(0) - delete_seconds;
 
-        mboxlist_findall(NULL, find_prefix, 1, 0, 0, delete, &drock);
+	mboxlist_findall(NULL, find_prefix, 1, 0, 0, delete, &drock);
 
-        for (node = drock.head ; node ; node = node->next) {
+	for (i = 0 ; i < drock.to_delete.count ; i++) {
+	    char *name = drock.to_delete.data[i];
+
 	    if (sigquit) {
 		goto finish;
 	    }
-            if (verbose) {
-                fprintf(stderr, "Removing: %s\n", node->name);
-            }
-            r = mboxlist_deletemailbox(node->name, 1, NULL, NULL, 0, 0, 0);
-            count++;
-        }
+	    if (verbose) {
+		fprintf(stderr, "Removing: %s\n", name);
+	    }
+	    r = mboxlist_deletemailbox(name, 1, NULL, NULL, 0, 0, 0);
+	    count++;
+	}
 
-        if (verbose) {
-            if (count != 1) {
-                fprintf(stderr, "Removed %d deleted mailboxes\n", count);
-            } else {
-                fprintf(stderr, "Removed 1 deleted mailbox\n");
-            }
-        }
-        syslog(LOG_NOTICE, "Removed %d deleted mailboxes", count);
+	if (verbose) {
+	    if (count != 1) {
+		fprintf(stderr, "Removed %d deleted mailboxes\n", count);
+	    } else {
+		fprintf(stderr, "Removed 1 deleted mailbox\n");
+	    }
+	}
+	syslog(LOG_NOTICE, "Removed %d deleted mailboxes", count);
     }
     if (sigquit) {
 	goto finish;
@@ -597,6 +584,7 @@ int main(int argc, char *argv[])
 finish:
     free_hash_table(&erock.table, free);
     free_hash_table(&crock.seen, NULL);
+    strarray_fini(&drock.to_delete);
 
     quotadb_close();
     quotadb_done();
