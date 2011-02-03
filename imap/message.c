@@ -2617,7 +2617,7 @@ continue2:
      * to work out which conversation id that message belongs to.
      */
     for (i = 0 ; i < nfound ; i++) {
-	r = conversations_get(state, found[i].msgid, &found[i].cid);
+	r = conversations_get_cid(state, found[i].msgid, &found[i].cid);
 	if (r)
 	    goto out;
 	if (found[i].cid == NULLCONVERSATION)
@@ -2649,7 +2649,7 @@ continue2:
     for (i = 0 ; i < nfound ; i++) {
 	if (found[i].cid == NULLCONVERSATION) {
 	    found[i].cid = newcid;
-	    r = conversations_set(state, found[i].msgid, found[i].cid);
+	    r = conversations_set_cid(state, found[i].msgid, found[i].cid);
 	    if (r)
 		goto out;
 	}
