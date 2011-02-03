@@ -67,12 +67,12 @@ extern int conversations_close(struct conversations_state *state);
 
 extern int conversations_commit(struct conversations_state *state);
 
-extern int conversations_set(struct conversations_state *state,
-			     const char *msgid,
-			     conversation_id_t cid);
-extern int conversations_get(struct conversations_state *state,
-			     const char *msgid,
-			     conversation_id_t *cidp);
+extern int conversations_set_cid(struct conversations_state *state,
+			         const char *msgid,
+			         conversation_id_t cid);
+extern int conversations_get_cid(struct conversations_state *state,
+			         const char *msgid,
+			         conversation_id_t *cidp);
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,
 			       unsigned int *);
