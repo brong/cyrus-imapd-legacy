@@ -41,17 +41,17 @@ static void test_getset(void)
 
     /* Database is empty, so get should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set(&state, C_MSGID, C_CID);
+    r = conversations_set_cid(&state, C_MSGID, C_CID);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
@@ -60,7 +60,7 @@ static void test_getset(void)
 
     /* get should still succeed after the transaction is over */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
@@ -72,7 +72,7 @@ static void test_getset(void)
 
     /* get should still succeed after the db is closed & reopened */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
@@ -95,17 +95,17 @@ static void test_abort(void)
 
     /* Database is empty, so get should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set(&state, C_MSGID, C_CID);
+    r = conversations_set_cid(&state, C_MSGID, C_CID);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
@@ -120,7 +120,7 @@ static void test_abort(void)
     /* the set vanished with the txn abort, so get should
      * succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID, &cid);
+    r = conversations_get_cid(&state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
@@ -152,19 +152,19 @@ static void test_prune(void)
     /* Add keys, with delays in between */
     /* TODO: CUnit needs a time warping system */
 
-    r = conversations_set(&state, C_MSGID1, C_CID1);
+    r = conversations_set_cid(&state, C_MSGID1, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
     stamp1 = time(NULL);
 
     sleep(4);
 
-    r = conversations_set(&state, C_MSGID2, C_CID2);
+    r = conversations_set_cid(&state, C_MSGID2, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
     stamp2 = time(NULL);
 
     sleep(4);
 
-    r = conversations_set(&state, C_MSGID3, C_CID3);
+    r = conversations_set_cid(&state, C_MSGID3, C_CID3);
     CU_ASSERT_EQUAL(r, 0);
     stamp3 = time(NULL);
 
@@ -174,17 +174,17 @@ static void test_prune(void)
     /* Should be able to get all 3 msgids */
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID1, &cid);
+    r = conversations_get_cid(&state, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID1);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID2, &cid);
+    r = conversations_get_cid(&state, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID3, &cid);
+    r = conversations_get_cid(&state, C_MSGID3, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID3);
 
@@ -203,17 +203,17 @@ static void test_prune(void)
      * record should succeed */
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID1, &cid);
+    r = conversations_get_cid(&state, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID2, &cid);
+    r = conversations_get_cid(&state, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state, C_MSGID3, &cid);
+    r = conversations_get_cid(&state, C_MSGID3, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID3);
 
@@ -246,51 +246,51 @@ static void test_two(void)
     /* Databases are empty, so gets of either msgid from either db
      * should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state1, C_MSGID1, &cid);
+    r = conversations_get_cid(&state1, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state1, C_MSGID2, &cid);
+    r = conversations_get_cid(&state1, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state2, C_MSGID2, &cid);
+    r = conversations_get_cid(&state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state2, C_MSGID2, &cid);
+    r = conversations_get_cid(&state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set(&state1, C_MSGID1, C_CID1);
+    r = conversations_set_cid(&state1, C_MSGID1, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_set(&state2, C_MSGID2, C_CID2);
+    r = conversations_set_cid(&state2, C_MSGID2, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it
      * and not the value in the other db */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state1, C_MSGID1, &cid);
+    r = conversations_get_cid(&state1, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID1);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state1, C_MSGID2, &cid);
+    r = conversations_get_cid(&state1, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state2, C_MSGID1, &cid);
+    r = conversations_get_cid(&state2, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get(&state2, C_MSGID2, &cid);
+    r = conversations_get_cid(&state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
