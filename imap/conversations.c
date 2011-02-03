@@ -211,9 +211,9 @@ static int check_msgid(const char *msgid, int len, int *lenp)
     return 0;
 }
 
-int conversations_set(struct conversations_state *state,
-		      const char *msgid,
-		      conversation_id_t cid)
+int conversations_set_cid(struct conversations_state *state,
+		          const char *msgid,
+		          conversation_id_t cid)
 {
     int keylen;
     struct conversations_mrec mrec;
@@ -238,9 +238,9 @@ int conversations_set(struct conversations_state *state,
     return 0;
 }
 
-int conversations_get(struct conversations_state *state,
-		      const char *msgid,
-		      conversation_id_t *cidp)
+int conversations_get_cid(struct conversations_state *state,
+		          const char *msgid,
+		          conversation_id_t *cidp)
 {
     int keylen;
     struct conversations_mrec *mrec = NULL;
