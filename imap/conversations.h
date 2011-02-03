@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "util.h"
+#include "strarray.h"
 
 typedef bit64	conversation_id_t;
 #define NULLCONVERSATION	(0ULL)
@@ -73,6 +74,13 @@ extern int conversations_set_cid(struct conversations_state *state,
 extern int conversations_get_cid(struct conversations_state *state,
 			         const char *msgid,
 			         conversation_id_t *cidp);
+extern int conversations_add_folder(struct conversations_state *state,
+				    conversation_id_t cid,
+				    const char *mboxname);
+extern int conversations_get_folders(struct conversations_state *state,
+				     conversation_id_t cid,
+				     strarray_t *sa);
+
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,
 			       unsigned int *);
