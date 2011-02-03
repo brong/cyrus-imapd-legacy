@@ -339,6 +339,79 @@ static void test_cid_decode(void)
 }
 
 
+static void test_folders(void)
+{
+    int r;
+    struct conversations_state state;
+    static const char FOLDER1[] = "foobar.com!user.smurf";
+    static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
+    static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
+    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    strarray_t mboxes = STRARRAY_INITIALIZER;
+
+    memset(&state, 0, sizeof(state));
+
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* Database is empty, so get should succeed and report no results */
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 0);
+    strarray_fini(&mboxes);
+
+    /* add should succeed */
+    r = conversations_add_folder(&state, C_CID, FOLDER1);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* get should now succeed and report the value we gave it */
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 1);
+    CU_ASSERT_STRING_EQUAL(mboxes.data[0], FOLDER1);
+    strarray_fini(&mboxes);
+
+    /* some more adds should succeed */
+    r = conversations_add_folder(&state, C_CID, FOLDER2);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_add_folder(&state, C_CID, FOLDER3);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* get should now succeed and report all values we gave it */
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 3);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER3, 0) >= 0);
+    strarray_fini(&mboxes);
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* get should still succeed and report all values we gave it */
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 3);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER3, 0) >= 0);
+    strarray_fini(&mboxes);
+
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+}
+
 static int init(void)
 {
     int r;
