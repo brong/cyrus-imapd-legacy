@@ -495,4 +495,135 @@ int conversation_id_decode(conversation_id_t *cid, const char *text)
     }
 }
 
+struct rename_rock {
+    struct conversations_state *state;
+    conversation_id_t from_cid;
+    conversation_id_t to_cid;
+    unsigned long entries_seen;
+    unsigned long entries_renamed;
+};
+
+static int do_one_rename(void *rock,
+		         const char *key, int keylen,
+		         const char *data, int datalen __attribute__((unused)))
+{
+    struct rename_rock *rrock = (struct rename_rock *)rock;
+    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
+    struct conversations_mrec mrecw;
+    int r;
+
+    rrock->entries_seen++;
+    r = check_msgid(key, keylen, NULL);
+    if (r)
+	return r;
+    if (datalen != sizeof(*mrec))
+	return IMAP_IOERROR;
+
+    if (align_ntohll(&mrec->idhi) != rrock->from_cid)
+	return 0;	/* nothing to see, move along */
+
+    rrock->entries_renamed++;
+    mrecw = *mrec;
+    align_htonll(&mrecw.idhi, rrock->to_cid);
+
+    r = DB->store(rrock->state->db,
+		  key, keylen,
+		  (const char *)&mrecw, sizeof(mrecw),
+		  &rrock->state->txn);
+    if (r)
+	return IMAP_IOERROR;
+
+    return 0;
+}
+
+int conversations_rename_cid(struct conversations_state *state,
+			     conversation_id_t from_cid,
+			     conversation_id_t to_cid,
+			     conversations_rename_cb_t renamecb,
+			     void *rock)
+{
+    struct rename_rock rrock;
+    const char *bdata;
+    int bdatalen;
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    strarray_t mboxes = STRARRAY_INITIALIZER;
+    struct buf buf = BUF_INITIALIZER;
+    int i;
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    memset(&rrock, 0, sizeof(rrock));
+    rrock.state = state;
+    rrock.from_cid = from_cid;
+    rrock.to_cid = to_cid;
+
+    DB->foreach(state->db, "<", 1, NULL, do_one_rename, &rrock, &state->txn);
+
+    syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu",
+			rrock.entries_seen, rrock.entries_renamed);
+
+    /* Use the B record to notify mailboxes of a CID rename
+     * and rename the B record too */
+    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(from_cid));
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &bdata, &bdatalen,
+		  &state->txn);
+    if (r == CYRUSDB_NOTFOUND)
+	return 0;
+
+    brec_to_strarray(bdata, bdatalen, &mboxes);
+
+    r = DB->delete(state->db,
+		   bkey, strlen(bkey),
+		   &state->txn, /*force*/0);
+    if (r)
+	goto out;
+
+    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(to_cid));
+    strarray_to_brec(&mboxes, &buf);
+
+    r = DB->store(state->db,
+		  bkey, strlen(bkey),
+		  buf.s, buf.len,
+		  &state->txn);
+    if (r)
+	goto out;
+
+    if (renamecb) {
+	for (i = 0 ; i < mboxes.count ; i++)
+	    renamecb(mboxes.data[i], from_cid, to_cid, rock);
+    }
+
+out:
+    strarray_fini(&mboxes);
+    buf_free(&buf);
+    return r;
+}
+
+int conversations_rename_cid_mb(const char *name,
+			        conversation_id_t from_cid,
+			        conversation_id_t to_cid,
+				conversations_rename_cb_t renamecb,
+				void *rock)
+{
+    struct conversations_state state;
+    char *path;
+    int r;
+
+    path = conversations_getpath(name);
+    r = conversations_open(&state, path);
+    if (r)
+	goto out;
+
+    r = conversations_rename_cid(&state, from_cid, to_cid, renamecb, rock);
+    conversations_close(&state);
+
+out:
+    free(path);
+    return r;
+}
+
 #undef DB
