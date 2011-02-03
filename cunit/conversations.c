@@ -338,6 +338,127 @@ static void test_cid_decode(void)
     CU_ASSERT_EQUAL(cid, CID2);
 }
 
+static void rename_cb(const char *mboxname,
+		      conversation_id_t from_cid,
+		      conversation_id_t to_cid,
+		      void *rock)
+{
+    strarray_t *notifies = (strarray_t *)rock;
+
+    strarray_append(notifies, mboxname);
+    strarray_append(notifies, conversation_id_encode(from_cid));
+    strarray_append(notifies, conversation_id_encode(to_cid));
+}
+
+static void test_cid_rename(void)
+{
+    int r;
+    struct conversations_state state;
+    static const char FOLDER1[] = "fnarp.com!user.smurf";
+    static const char FOLDER2[] = "fnarp.com!user.smurf.foo bar";
+    static const char FOLDER3[] = "fnarp.com!user.smurf.quux.foonly";
+    static const char C_MSGID1[] = "<0008.1288854309@example.com>";
+    static const char C_MSGID2[] = "<0009.1288854309@example.com>";
+    static const char C_MSGID3[] = "<0010.1288854309@example.com>";
+    static const conversation_id_t C_CID1 = 0x10bcdef23456789a;
+    static const conversation_id_t C_CID2 = 0x10cdef23456789ab;
+    strarray_t notifies = STRARRAY_INITIALIZER;
+    strarray_t mboxes = STRARRAY_INITIALIZER;
+    conversation_id_t cid;
+
+    memset(&state, 0, sizeof(state));
+
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* setup the records we expect */
+    r = conversations_set_cid(&state, C_MSGID1, C_CID1);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_set_cid(&state, C_MSGID2, C_CID1);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_set_cid(&state, C_MSGID3, C_CID1);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_add_folder(&state, C_CID1, FOLDER1);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_add_folder(&state, C_CID1, FOLDER2);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_add_folder(&state, C_CID1, FOLDER3);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* commit & close */
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* do a rename */
+    r = conversations_rename_cid(&state, C_CID1, C_CID2,
+				 rename_cb, (void *)&notifies);
+    CU_ASSERT_EQUAL(r, 0);
+    /* check that the rename callback was called with the right data */
+    CU_ASSERT_EQUAL(notifies.count, 9);
+    CU_ASSERT_STRING_EQUAL(notifies.data[1], conversation_id_encode(C_CID1));
+    CU_ASSERT_STRING_EQUAL(notifies.data[2], conversation_id_encode(C_CID2));
+    CU_ASSERT_STRING_EQUAL(notifies.data[4], conversation_id_encode(C_CID1));
+    CU_ASSERT_STRING_EQUAL(notifies.data[5], conversation_id_encode(C_CID2));
+    CU_ASSERT_STRING_EQUAL(notifies.data[7], conversation_id_encode(C_CID1));
+    CU_ASSERT_STRING_EQUAL(notifies.data[8], conversation_id_encode(C_CID2));
+    r = strarray_find(&notifies, FOLDER1, 0);
+    CU_ASSERT(r >= 0 && (r % 3) == 0);
+    r = strarray_find(&notifies, FOLDER2, 0);
+    CU_ASSERT(r >= 0 && (r % 3) == 0);
+    r = strarray_find(&notifies, FOLDER3, 0);
+    CU_ASSERT(r >= 0 && (r % 3) == 0);
+    strarray_fini(&notifies);
+
+    /* commit & close */
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* check the data got renamed */
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID1, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 0);
+    strarray_fini(&mboxes);
+
+    strarray_init(&mboxes);
+    r = conversations_get_folders(&state, C_CID2, &mboxes);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(mboxes.count, 3);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
+    CU_ASSERT(strarray_find(&mboxes, FOLDER3, 0) >= 0);
+    strarray_fini(&mboxes);
+
+    memset(&cid, 0x45, sizeof(cid));
+    r = conversations_get_cid(&state, C_MSGID1, &cid);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(cid, C_CID2);
+
+    memset(&cid, 0x45, sizeof(cid));
+    r = conversations_get_cid(&state, C_MSGID2, &cid);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(cid, C_CID2);
+
+    memset(&cid, 0x45, sizeof(cid));
+    r = conversations_get_cid(&state, C_MSGID3, &cid);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(cid, C_CID2);
+
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+}
 
 static void test_folders(void)
 {
