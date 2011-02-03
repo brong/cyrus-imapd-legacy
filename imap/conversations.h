@@ -89,4 +89,20 @@ extern void conversations_dump(struct conversations_state *, FILE *);
 extern const char *conversation_id_encode(conversation_id_t cid);
 extern int conversation_id_decode(conversation_id_t *cid, const char *text);
 
+typedef void (*conversations_rename_cb_t)(const char *mboxname,
+					  conversation_id_t from_cid,
+					  conversation_id_t to_cid,
+					  void *rock);
+
+extern int conversations_rename_cid(struct conversations_state *state,
+				    conversation_id_t from_cid,
+				    conversation_id_t to_cid,
+				    conversations_rename_cb_t renamecb,
+				    void *rock);
+extern int conversations_rename_cid_mb(const char *name,
+				       conversation_id_t from_cid,
+				       conversation_id_t to_cid,
+				       conversations_rename_cb_t renamecb,
+				       void *rock);
+
 #endif /* __CYRUS_CONVERSATIONS_H_ */
