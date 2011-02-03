@@ -100,6 +100,7 @@ struct conversations_mrec {
     bit32   stamp;	/* time_t insertion timestamp */
 };
 
+#define CONVERSATION_ID_STRMAX	    (1+sizeof(conversation_id_t)*2)
 
 /* basename of conversations db for shared namespace */
 #define FNAME_SHARED "shared"
@@ -268,6 +269,104 @@ int conversations_get_cid(struct conversations_state *state,
     return 0;
 }
 
+static void brec_to_strarray(const char *bdata, int bdatalen, strarray_t *sa)
+{
+    const char *end = bdata + bdatalen;
+    const char *p;
+
+    if (!bdata || !bdatalen)
+	return;
+
+    /* make sure strlen() isn't going to run off the end */
+    if (bdata[bdatalen-1] != '\0')
+	return;	    /* TODO: return an error */
+
+    for (p = bdata ; p < end ; p += strlen(p)+1)
+	strarray_append(sa, p);
+}
+
+static void strarray_to_brec(const strarray_t *sa, struct buf *b)
+{
+    int i;
+
+    for (i = 0 ; i < sa->count ; i++) {
+	buf_appendcstr(b, sa->data[i]);
+	buf_putc(b, '\0');
+    }
+}
+
+int conversations_add_folder(struct conversations_state *state,
+			     conversation_id_t cid, const char *mboxname)
+{
+    const char *bdata;
+    int bdatalen;
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    strarray_t mboxes = STRARRAY_INITIALIZER;
+    struct buf buf = BUF_INITIALIZER;
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &bdata, &bdatalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_OK)
+    {
+	/* found an existing record */
+	brec_to_strarray(bdata, bdatalen, &mboxes);
+	r = strarray_find(&mboxes, mboxname, 0);
+	if (r >= 0) {
+	    /* folder already in the record => nop */
+	    r = 0;
+	    goto out;
+	}
+    } else if (r != CYRUSDB_NOTFOUND) {
+	return r;	/* some db error */
+    }
+
+    strarray_append(&mboxes, mboxname);
+    strarray_to_brec(&mboxes, &buf);
+
+    r = DB->store(state->db,
+		  bkey, strlen(bkey),
+		  buf.s, buf.len,
+		  &state->txn);
+
+out:
+    strarray_fini(&mboxes);
+    buf_free(&buf);
+    return r;
+}
+
+int conversations_get_folders(struct conversations_state *state,
+			      conversation_id_t cid, strarray_t *sa)
+{
+    const char *bdata;
+    int bdatalen;
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &bdata, &bdatalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_OK)
+	brec_to_strarray(bdata, bdatalen, sa);
+    else if (r == CYRUSDB_NOTFOUND)
+	r = 0;
+
+    return r;
+}
+
 struct prune_rock {
     struct conversations_state *state;
     time_t thresh;
@@ -318,9 +417,9 @@ int conversations_prune(struct conversations_state *state,
     return 0;
 }
 
-static int dumpcb(void *rock,
-		  const char *key, int keylen,
-		  const char *data, int datalen __attribute__((unused)))
+static int dump_cid_cb(void *rock,
+		       const char *key, int keylen,
+		       const char *data, int datalen __attribute__((unused)))
 {
     FILE *fp = rock;
     const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
@@ -335,12 +434,37 @@ static int dumpcb(void *rock,
     return 0;
 }
 
+static int dump_folder_cb(void *rock,
+		          const char *key, int keylen,
+		          const char *bdata, int bdatalen)
+{
+    FILE *fp = rock;
+    strarray_t mboxes = STRARRAY_INITIALIZER;
+    int i;
+
+    brec_to_strarray(bdata, bdatalen, &mboxes);
+
+    fprintf(fp, "%*s\t", keylen-1, key+1);
+    for (i = 0 ; i < mboxes.count ; i++)
+	fprintf(fp, "%s%s", (i ? " " : ""), mboxes.data[i]);
+    fprintf(fp, "\n");
+
+    strarray_fini(&mboxes);
+
+    return 0;
+}
+
 void conversations_dump(struct conversations_state *state, FILE *fp)
 {
     if (state->db) {
 	fprintf(fp, "MSGID\tCID\tSTAMP\n");
 	fprintf(fp, "=====\t===\t=====\n");
-	DB->foreach(state->db, NULL, 0, NULL, dumpcb, fp, &state->txn);
+	DB->foreach(state->db, "<", 1, NULL, dump_cid_cb, fp, &state->txn);
+	fprintf(fp, "===============\n");
+
+	fprintf(fp, "CID\tFOLDERS\n");
+	fprintf(fp, "===\t=======\n");
+	DB->foreach(state->db, "B", 1, NULL, dump_folder_cb, fp, &state->txn);
 	fprintf(fp, "===============\n");
     }
 }
