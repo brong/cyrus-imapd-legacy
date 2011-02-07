@@ -110,6 +110,7 @@ TESTSOURCES = \
 	guid.c \
 	hash.c \
 	imapurl.c \
+	mailbox.c \
 	mboxname.c \
 	md5.c \
 	message.c \
