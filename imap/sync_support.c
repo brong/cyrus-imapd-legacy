@@ -1587,7 +1587,8 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	free(path);
 	if (!r) {
 	    record->cid = cid;	/* use the CID given us */
-	    r = message_update_conversations(&conversations, record, body);
+	    r = message_update_conversations(&conversations, record,
+					     body, mailbox->name);
 	    if (!r)
 		r = conversations_commit(&conversations);
 	    r = conversations_close(&conversations);
