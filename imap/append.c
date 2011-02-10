@@ -448,7 +448,8 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
 	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS))
-	    r = message_update_conversations(&as->conversations, &record, *body);
+	    r = message_update_conversations(&as->conversations, &record,
+					     *body, mailbox->name);
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -705,7 +706,8 @@ int append_copy(struct mailbox *mailbox,
 	if (record.cid == NULLCONVERSATION &&
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    r = message_update_conversations_file(&as->conversations,
-						  &record, destfname);
+						  &record, destfname,
+						  mailbox->name);
 	    if (r) goto fail;
 	}
 

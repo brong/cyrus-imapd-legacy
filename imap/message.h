@@ -170,8 +170,10 @@ extern int message_create_record P((struct index_record *message_index,
 extern void message_free_body P((struct body *body));
 
 extern int message_update_conversations(struct conversations_state *,
-			         struct index_record *, const struct body *);
+			         struct index_record *, const struct body *,
+				 const char *mboxbame);
 extern int message_update_conversations_file(struct conversations_state *,
-				      struct index_record *, const char *);
+				      struct index_record *, const char *,
+				      const char *mboxname);
 
 #endif /* INCLUDED_MESSAGE_H */
