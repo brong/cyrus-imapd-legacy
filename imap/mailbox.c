@@ -4254,6 +4254,27 @@ out:
     return 0;
 }
 
+void mailbox_cid_rename_cb(const char *name,
+		          conversation_id_t from_cid,
+		          conversation_id_t to_cid,
+			  void *rock __attribute__((unused)))
+{
+    struct buf action = BUF_INITIALIZER;
+    int r;
+
+    buf_appendcstr(&action, "CIDRENAME ");
+    buf_appendcstr(&action, conversation_id_encode(from_cid));
+    buf_putc(&action, ' ');
+    buf_appendcstr(&action, conversation_id_encode(to_cid));
+    buf_putc(&action, '\n');
+
+    r = mailbox_post_action(name, &action);
+    if (r)
+	syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
+	       name, error_message(r));
+    buf_free(&action);
+}
+
 int mailbox_post_nop_action(const char *name, unsigned int tag)
 {
     struct buf action = BUF_INITIALIZER;
@@ -4263,6 +4284,64 @@ int mailbox_post_nop_action(const char *name, unsigned int tag)
     r = mailbox_post_action(name, &action);
     buf_free(&action);
     return r;
+}
+
+static void mailbox_action_cid_rename(struct mailbox *mailbox,
+				      const strarray_t *action,
+				      const char *fname,
+				      unsigned int lineno)
+{
+    /* we can do ntohll() here because we know that the data parts
+     * of a struct mailbox_action are 8-byte aligned */
+    conversation_id_t from_cid, to_cid;
+    uint32_t recno;
+    struct index_record record;
+    int r;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return;
+
+    if (action->count != 3)
+	goto bad_syntax;
+
+    r = conversation_id_decode(&from_cid, action->data[1]);
+    if (!r)
+	goto bad_syntax;
+    r = conversation_id_decode(&to_cid, action->data[2]);
+    if (!r)
+	goto bad_syntax;
+
+    syslog(LOG_NOTICE, "Performing delayed CID rename: %s -> %s",
+			action->data[1], action->data[2]);
+
+    for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+
+	r = mailbox_read_index_record(mailbox, recno, &record);
+	if (r) {
+	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+			    "reading record %u, mailbox %s: %s",
+			    recno, mailbox->name, error_message(r));
+	    return;
+	}
+
+	if (record.cid != from_cid)
+	    continue;
+	record.cid = to_cid;
+
+	r = mailbox_rewrite_index_record(mailbox, &record);
+	if (r) {
+	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+			    "rewriting record %u, mailbox %s: %s",
+			    recno, mailbox->name, error_message(r));
+	    return;
+	}
+    }
+
+    return;
+
+bad_syntax:
+    syslog(LOG_ERR, "Bad syntax for CIDRENAME, line %u file %s",
+		    lineno, fname);
 }
 
 /* This is for testing only */
@@ -4299,6 +4378,8 @@ static void mailbox_execute_actions_file(struct mailbox *mailbox,
 
 	if (!strcmp(action->data[0], "NOP")) {
 	    mailbox_action_nop(mailbox, action, fname, lineno);
+	} else if (!strcmp(action->data[0], "CIDRENAME")) {
+	    mailbox_action_cid_rename(mailbox, action, fname, lineno);
 	} else {
 	    syslog(LOG_ERR, "Unknown record type \"%s\", line %u file %s",
 			    action->data[0], lineno, fname);
