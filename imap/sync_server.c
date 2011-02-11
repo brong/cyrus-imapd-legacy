@@ -1187,6 +1187,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
     struct index_record rrecord;
     uint32_t recno = 1;
     struct dlist *ki;
+    conversation_id_t cid;
     int r;
     int i;
 
@@ -1237,7 +1238,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		return IMAP_SYNC_CHECKSUM;
 	    }
 
-	    r = sync_choose_cid(&mrecord, &rrecord, &rrecord.cid);
+	    r = sync_choose_cid(&mrecord, &rrecord, &cid);
 	    if ((r & SYNC_CHOOSE_REPLICA)) {
 		/* We needed to choose the replica's CID, and the
 		 * master's CID is different.  To avoid the master
@@ -1245,10 +1246,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		 * pretending to have a CRC failure.  The master will
 		 * eventually get all this information and make the same
 		 * decision, then tell us a CID we both agree on. */
-		r = IMAP_MAILBOX_CRC;
-		goto done;
+		return IMAP_MAILBOX_CRC;
 	    } else if ((r & SYNC_CHOOSE_CLASH)) {
-		syslog(LOG_ERR, "Oh noes!! need to handle conversation merging\n");
+		/* We chose the master's CID but the replica has
+		 * a non-NULL CID which will need to be rewritten. */
+		conversations_rename_cid_mb(mailbox->name, rrecord.cid, cid,
+					    mailbox_cid_rename_cb, NULL);
+		rrecord.cid = cid;
 	    }
 
 	    /* skip out on the first pass */
@@ -1321,7 +1325,6 @@ static int do_mailbox(struct dlist *kin)
     const char *specialuse = NULL;
 
     struct mailbox *mailbox = NULL;
-    uint32_t newcrc;
     struct dlist *kr;
     int r;
 
