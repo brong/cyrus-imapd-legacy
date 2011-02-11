@@ -130,7 +130,7 @@ static void test_nextmodseq(void)
 static enum enum_value old_config_virtdomains;
 static char *old_config_dir;
 
-static int init(void)
+static int set_up(void)
 {
     char cwd[PATH_MAX];
     char *s;
@@ -152,7 +152,7 @@ static int init(void)
     return 0;
 }
 
-static int cleanup(void)
+static int tear_down(void)
 {
     char *cmd;
     int r;

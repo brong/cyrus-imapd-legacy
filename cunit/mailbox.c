@@ -114,7 +114,7 @@ static void config_read_string(const char *s)
     close(fd);
 }
 
-static int init(void)
+static int set_up(void)
 {
     int r;
     struct mboxlist_entry mbentry;
@@ -172,7 +172,7 @@ static int init(void)
     return 0;
 }
 
-static int cleanup(void)
+static int tear_down(void)
 {
     int r;
 
