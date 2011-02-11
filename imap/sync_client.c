@@ -953,6 +953,7 @@ static int compare_one_record(struct mailbox *mailbox,
     int diff = 0;
     int i;
     int r;
+    conversation_id_t cid;
 
     /* are there any differences? */
     if (mp->modseq != rp->modseq)
@@ -1026,10 +1027,16 @@ static int compare_one_record(struct mailbox *mailbox,
 		log_mismatch("more recent on master", mailbox, mp, rp);
 	    }
 
-	    r = sync_choose_cid(mp, rp, &mp->cid);
+	    r = sync_choose_cid(mp, rp, &cid);
 	    if ((r & SYNC_CHOOSE_CLASH)) {
-		syslog(LOG_ERR, "Oh noes!! need to handle conversation merging\n");
+		if ((r & SYNC_CHOOSE_REPLICA))
+		    conversations_rename_cid_mb(mailbox->name, mp->cid, rp->cid,
+						mailbox_cid_rename_cb, NULL);
+		else
+		    conversations_rename_cid_mb(mailbox->name, rp->cid, mp->cid,
+					        mailbox_cid_rename_cb, NULL);
 	    }
+	    mp->cid = cid;
 	}
 
 	/* are we making changes yet? */
