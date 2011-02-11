@@ -89,7 +89,7 @@ static void test_same_userid_domain(void)
 
 static enum enum_value old_config_virtdomains;
 
-static int init(void)
+static int set_up(void)
 {
     /*
      * TODO: this is pretty hacky.  There should be some
@@ -102,7 +102,7 @@ static int init(void)
     return 0;
 }
 
-static int cleanup(void)
+static int tear_down(void)
 {
     config_virtdomains = old_config_virtdomains;
     return 0;
