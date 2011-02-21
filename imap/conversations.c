@@ -212,9 +212,10 @@ static int check_msgid(const char *msgid, int len, int *lenp)
     return 0;
 }
 
-int conversations_set_cid(struct conversations_state *state,
-		          const char *msgid,
-		          conversation_id_t cid)
+static int _conversations_set_cid2(struct conversations_state *state,
+				   const char *msgid,
+				   conversation_id_t cid,
+				   time_t stamp)
 {
     int keylen;
     struct conversations_mrec mrec;
@@ -228,7 +229,7 @@ int conversations_set_cid(struct conversations_state *state,
 
     memset(&mrec, 0, sizeof(mrec));
     align_htonll(&mrec.idhi, cid);
-    mrec.stamp = htonl(time(NULL));
+    mrec.stamp = htonl(stamp);
 
     r = DB->store(state->db,
 		  msgid, keylen,
@@ -237,6 +238,13 @@ int conversations_set_cid(struct conversations_state *state,
     if (r)
 	return IMAP_IOERROR;
     return 0;
+}
+
+int conversations_set_cid(struct conversations_state *state,
+		          const char *msgid,
+		          conversation_id_t cid)
+{
+    return _conversations_set_cid2(state, msgid, cid, time(NULL));
 }
 
 int conversations_get_cid(struct conversations_state *state,
@@ -342,6 +350,29 @@ out:
     return r;
 }
 
+static int _conversations_set_folders(struct conversations_state *state,
+				      conversation_id_t cid,
+				      const strarray_t *mboxes)
+{
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    struct buf buf = BUF_INITIALIZER;
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    strarray_to_brec(mboxes, &buf);
+
+    r = DB->store(state->db,
+		  bkey, strlen(bkey),
+		  buf.s, buf.len,
+		  &state->txn);
+
+    buf_free(&buf);
+    return r;
+}
+
 int conversations_get_folders(struct conversations_state *state,
 			      conversation_id_t cid, strarray_t *sa)
 {
@@ -417,56 +448,204 @@ int conversations_prune(struct conversations_state *state,
     return 0;
 }
 
-static int dump_cid_cb(void *rock,
-		       const char *key, int keylen,
-		       const char *data, int datalen __attribute__((unused)))
+static int dump_record_cb(void *rock,
+		          const char *bkey, int bkeylen,
+		          const char *data, int datalen)
 {
     FILE *fp = rock;
-    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
-    time_t stamp;
-    char stampstr[32];
+    char *key = xstrndup(bkey, bkeylen);
 
-    stamp = ntohl(mrec->stamp);
-    strftime(stampstr, sizeof(stampstr), "%Y-%m-%dT%H:%M:%SZ", gmtime(&stamp));
-    fprintf(fp, "\"%*s\"\t%08x%08x\t%s\n",
-	    keylen, key,
-	    ntohl(mrec->idhi), ntohl(mrec->idlo), stampstr);
-    return 0;
-}
+    switch (key[0])
+    {
+    case '<':	    /* msgid to cid mapping */
+	{
+	    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
+	    char stampstr[32];
 
-static int dump_folder_cb(void *rock,
-		          const char *key, int keylen,
-		          const char *bdata, int bdatalen)
-{
-    FILE *fp = rock;
-    strarray_t mboxes = STRARRAY_INITIALIZER;
-    int i;
+	    time_to_iso8601(ntohl(mrec->stamp), stampstr, sizeof(stampstr));
+	    fprintf(fp, "msgid_to_cid \"%s\" %08x%08x %s\n",
+		    key, ntohl(mrec->idhi), ntohl(mrec->idlo), stampstr);
+	}
+	break;
+    case 'B':	    /* cid to folders mapping */
+	{
+	    strarray_t mboxes = STRARRAY_INITIALIZER;
+	    int i;
 
-    brec_to_strarray(bdata, bdatalen, &mboxes);
+	    brec_to_strarray(data, datalen, &mboxes);
 
-    fprintf(fp, "%*s\t", keylen-1, key+1);
-    for (i = 0 ; i < mboxes.count ; i++)
-	fprintf(fp, "%s%s", (i ? " " : ""), mboxes.data[i]);
-    fprintf(fp, "\n");
+	    fprintf(fp, "cid_to_folders %s", key+1);
+	    for (i = 0 ; i < mboxes.count ; i++)
+		fprintf(fp, " \"%s\"", mboxes.data[i]);
+	    fprintf(fp, "\n");
 
-    strarray_fini(&mboxes);
+	    strarray_fini(&mboxes);
+	}
+	break;
+    default:
+	fprintf(stderr, "Unknown record type: key=\"%s\"\n", key);
+	break;
+    }
 
+    free(key);
     return 0;
 }
 
 void conversations_dump(struct conversations_state *state, FILE *fp)
 {
-    if (state->db) {
-	fprintf(fp, "MSGID\tCID\tSTAMP\n");
-	fprintf(fp, "=====\t===\t=====\n");
-	DB->foreach(state->db, "<", 1, NULL, dump_cid_cb, fp, &state->txn);
-	fprintf(fp, "===============\n");
+    if (state->db)
+	DB->foreach(state->db, "", 0, NULL, dump_record_cb, fp, &state->txn);
+}
 
-	fprintf(fp, "CID\tFOLDERS\n");
-	fprintf(fp, "===\t=======\n");
-	DB->foreach(state->db, "B", 1, NULL, dump_folder_cb, fp, &state->txn);
-	fprintf(fp, "===============\n");
+static int buf_getline(struct buf *buf,  FILE *fp)
+{
+    int c;
+
+    buf_reset(buf);
+    while ((c = fgetc(fp)) != EOF) {
+	buf_putc(buf, c);
+	if (c == '\n')
+	    break;
     }
+    buf_cstring(buf);
+    return buf->len;
+}
+
+int conversations_undump(struct conversations_state *state, FILE *fp)
+{
+    struct buf line = BUF_INITIALIZER;
+    struct buf w1 = BUF_INITIALIZER;
+    struct buf w2 = BUF_INITIALIZER;
+    struct protstream *prot = NULL;
+    int c;
+    int r;
+    unsigned int lineno = 0;
+
+    while (buf_getline(&line, fp)) {
+	lineno++;
+	/* set up to tokenize */
+	prot = prot_readmap(buf_cstring(&line), line.len);
+	if (!prot) {
+	    r = IMAP_IOERROR;
+	    goto out;
+	}
+
+	/* get the leading keyword */
+	c = getastring(prot, NULL, &w1);
+	if (c == EOF)
+	    goto syntax_error;
+
+	if (!strcmp(buf_cstring(&w1), "msgid_to_cid")) {
+	    conversation_id_t cid;
+	    time_t stamp;
+
+	    /* parse the msgid */
+	    c = getastring(prot, NULL, &w1);
+	    if (c == EOF)
+		goto syntax_error;
+
+	    /* parse the CID */
+	    c = getastring(prot, NULL, &w2);
+	    if (c == EOF)
+		goto syntax_error;
+	    if (!conversation_id_decode(&cid, buf_cstring(&w2)))
+		goto syntax_error;
+
+	    /* parse the timestamp */
+	    c = getastring(prot, NULL, &w2);
+	    if (c == EOF)
+		goto syntax_error;
+	    if (time_from_iso8601(buf_cstring(&w2), &stamp) < 0)
+		goto syntax_error;
+
+	    /* save into the database */
+	    r = _conversations_set_cid2(state, buf_cstring(&w1), cid, stamp);
+	    if (r) {
+		fprintf(stderr, "Error at line %u: %s\n", lineno, error_message(r));
+		goto out;
+	    }
+	} else if (!strcmp(buf_cstring(&w1), "cid_to_folders")) {
+	    conversation_id_t cid;
+	    strarray_t mboxes = STRARRAY_INITIALIZER;
+
+	    /* parse the CID */
+	    c = getastring(prot, NULL, &w1);
+	    if (c == EOF)
+		goto syntax_error;
+	    if (!conversation_id_decode(&cid, buf_cstring(&w1)))
+		goto syntax_error;
+
+	    /* parse the list of mboxnames */
+	    r = 0;
+	    while ((c = getastring(prot, NULL, &w1)) != EOF) {
+		strarray_append(&mboxes, buf_cstring(&w1));
+	    }
+	    r = _conversations_set_folders(state, cid, &mboxes);
+	    strarray_fini(&mboxes);
+	    if (r)
+		goto out;
+	} else {
+	    fprintf(stderr, "Unknown keyword \"%s\" at line %u\n",
+		    buf_cstring(&w1), lineno);
+	    r = IMAP_MAILBOX_BADFORMAT;
+	    goto out;
+	}
+
+	prot_free(prot);
+	prot = NULL;
+    }
+
+out:
+    if (prot)
+	prot_free(prot);
+    buf_free(&line);
+    buf_free(&w1);
+    buf_free(&w2);
+    return r;
+
+syntax_error:
+    fprintf(stderr, "Syntax error at line %u\n", lineno);
+    r = IMAP_MAILBOX_BADFORMAT;
+    goto out;
+}
+
+struct truncate_rock {
+    struct conversations_state *state;
+    int r;
+};
+
+static int delete_record_cb(void *rock,
+		            const char *key, int keylen,
+		            const char *data __attribute__((unused)),
+			    int datalen __attribute__((unused)))
+{
+    struct truncate_rock *trock = rock;
+    int r;
+
+    r = DB->delete(trock->state->db,
+		  key, keylen,
+		  &trock->state->txn,
+		  /*force*/1);
+    if (r) {
+	trock->r = r;
+	return 1;   /* break the foreach() early */
+    }
+
+    return 0;
+}
+
+int conversations_truncate(struct conversations_state *state)
+{
+    struct truncate_rock trock = { state, 0 };
+    int r = 0;
+
+    /* Unfortunately, the libcyrusdb interface does not provide a
+     * "delete every record" primitive like Berkerley's DB->truncate().
+     * So we have to do it the hard way */
+
+    if (state->db)
+	DB->foreach(state->db, "", 0, NULL, delete_record_cb, &trock, &state->txn);
+    return r;
 }
 
 const char *conversation_id_encode(conversation_id_t cid)
