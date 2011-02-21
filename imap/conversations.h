@@ -85,6 +85,9 @@ extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,
 			       unsigned int *);
 extern void conversations_dump(struct conversations_state *, FILE *);
+extern int conversations_undump(struct conversations_state *, FILE *);
+
+extern int conversations_truncate(struct conversations_state *);
 
 extern const char *conversation_id_encode(conversation_id_t cid);
 extern int conversation_id_decode(conversation_id_t *cid, const char *text);
