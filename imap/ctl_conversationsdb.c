@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994-2010 Carnegie Mellon University.  All rights reserved.
+ * Copyright (c) 1994-2011 Carnegie Mellon University.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -107,7 +107,7 @@ int main(int argc, char **argv)
     else
 	usage(argv[0]);
 
-    cyrus_init(alt_config, "conversationsdump", 0);
+    cyrus_init(alt_config, "ctl_conversationsdb", 0);
 
     fname = conversations_getpath(mboxname);
     if (fname == NULL) {
@@ -156,7 +156,7 @@ static int usage(const char *name)
 
 void fatal(const char* s, int code)
 {
-    fprintf(stderr, "conversationsdump: %s\n", s);
+    fprintf(stderr, "ctl_conversationsdb: %s\n", s);
     cyrus_done();
     exit(code);
 }
