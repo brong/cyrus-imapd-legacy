@@ -69,6 +69,75 @@ const int config_need_data = CONFIG_NEED_PARTITION_DATA;
 
 int verbose = 0;
 
+static int do_dump(const char *fname)
+{
+    struct conversations_state state;
+    struct stat sb;
+    int r;
+
+    /* What we really want here is read-only database access without
+     * the create-if-nonexistant semantics.  However, the cyrusdb
+     * interface makes it difficult to do that properly.  In the
+     * meantime, we can just check if the file exists here. */
+    r = stat(fname, &sb);
+    if (r < 0) {
+	perror(fname);
+	return -1;
+    }
+
+    r = conversations_open(&state, fname);
+    if (r) {
+	/* TODO: wouldn't it be nice if we could translate this
+	 * error code into somethine useful for humans? */
+	fprintf(stderr, "Failed to open conversations database %s: %d\n",
+		fname, r);
+	return -1;
+    }
+
+    conversations_dump(&state, stdout);
+
+    conversations_close(&state);
+    return 0;
+}
+
+static int do_undump(const char *fname)
+{
+    struct conversations_state state;
+    int r;
+
+    r = conversations_open(&state, fname);
+    if (r) {
+	/* TODO: wouldn't it be nice if we could translate this
+	 * error code into somethine useful for humans? */
+	fprintf(stderr, "Failed to open conversations database %s: %s\n",
+		fname, error_message(r));
+	return -1;
+    }
+
+    r = conversations_truncate(&state);
+    if (r) {
+	fprintf(stderr, "Failed to truncate conversations database %s: %s\n",
+		fname, error_message(r));
+	goto out;
+    }
+
+    r = conversations_undump(&state, stdin);
+    if (r) {
+	fprintf(stderr, "Failed to undump to conversations database %s: %s\n",
+		fname, error_message(r));
+	goto out;
+    }
+
+    r = conversations_commit(&state);
+    if (r)
+	fprintf(stderr, "Failed to commit conversations database %s: %s\n",
+		fname, error_message(r));
+
+out:
+    conversations_close(&state);
+    return r;
+}
+
 static int usage(const char *name)
     __attribute__((noreturn));
 
@@ -78,16 +147,24 @@ int main(int argc, char **argv)
     const char *alt_config = NULL;
     const char *mboxname = NULL;
     char *fname;
-    struct conversations_state state;
-    struct stat sb;
-    int r;
+    enum { UNKNOWN, DUMP, UNDUMP } mode = UNKNOWN;
 
     if ((geteuid()) == 0 && (become_cyrus() != 0)) {
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "vC:")) != EOF) {
+    while ((c = getopt(argc, argv, "duvC:")) != EOF) {
 	switch (c) {
+	case 'd':
+	    if (mode != UNKNOWN)
+		usage(argv[0]);
+	    mode = DUMP;
+	    break;
+	case 'u':
+	    if (mode != UNKNOWN)
+		usage(argv[0]);
+	    mode = UNDUMP;
+	    break;
 	case 'v':
 	    verbose++;
 	    break;
@@ -101,6 +178,9 @@ int main(int argc, char **argv)
 	    break;
 	}
     }
+
+    if (mode == UNKNOWN)
+	usage(argv[0]);
 
     if (optind == argc-1)
 	mboxname = argv[optind];
@@ -117,28 +197,19 @@ int main(int argc, char **argv)
 	exit(EC_NOINPUT);
     }
 
-    /* What we really want here is read-only database access without
-     * the create-if-nonexistant semantics.  However, the cyrusdb
-     * interface makes it difficult to do that properly.  In the
-     * meantime, we can just check if the file exists here. */
-    r = stat(fname, &sb);
-    if (r < 0) {
-	perror(fname);
-	exit(EC_NOINPUT);
+    switch (mode)
+    {
+    case DUMP:
+	if (do_dump(fname))
+	    exit(EC_NOINPUT);
+	break;
+    case UNDUMP:
+	if (do_undump(fname))
+	    exit(EC_NOINPUT);
+	break;
+    case UNKNOWN:   /* oh shut up, gcc */
+	break;
     }
-
-    r = conversations_open(&state, fname);
-    if (r) {
-	/* TODO: wouldn't it be nice if we could translate this
-	 * error code into somethine useful for humans? */
-	fprintf(stderr, "Failed to open conversations database %s: %d\n",
-		fname, r);
-	exit(EC_NOINPUT);
-    }
-
-    conversations_dump(&state, stdout);
-
-    conversations_close(&state);
 
     cyrus_done();
     free(fname);
@@ -149,7 +220,14 @@ int main(int argc, char **argv)
 
 static int usage(const char *name)
 {
-    fprintf(stderr, "usage: %s [-v] [-C altconfig] mboxname\n", name);
+    fprintf(stderr, "usage: %s [options] -d mboxname > dump.dat\n", name);
+    fprintf(stderr, "       %s [options] -u mboxname < dump.dat\n", name);
+    fprintf(stderr, "options are:\n");
+    fprintf(stderr, "    -v             be more verbose\n");
+    fprintf(stderr, "    -C altconfig   use altconfig instead of imapd.conf\n");
+    fprintf(stderr, "    -u             undump the conversations database from stdin\n");
+    fprintf(stderr, "    -d             dump the conversations database to stdout\n");
+
 
     exit(EC_USAGE);
 }
