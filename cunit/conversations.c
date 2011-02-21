@@ -6,6 +6,7 @@
 #include "global.h"
 #include "cyrusdb.h"
 #include "libcyr_cfg.h"
+#include "message.h"	    /* for VECTOR_SIZE */
 #include "xmalloc.h"
 
 #define DBDIR	"test-dbdir"
@@ -532,6 +533,185 @@ static void test_folders(void)
     r = conversations_close(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
+
+static void gen_msgid_cid(int i, char *msgid, int msgidlen,
+			  conversation_id_t *cidp)
+{
+    static const char * const domains[] = {
+	"fastmail.fm",
+	"example.com",
+	"gmail.com",
+	"yahoo.com",
+	"hotmail.com"
+    };
+    snprintf(msgid, msgidlen, "<%04d.1298269537@%s>",
+	    i, domains[i % VECTOR_SIZE(domains)]);
+
+    *cidp = 0xfeeddeadbeef0000ULL | (unsigned int)i;
+}
+
+static void gen_cid_folder(int i, conversation_id_t *cidp,
+			   strarray_t *mboxnames)
+{
+    int n;
+    int j;
+    static const char * const folders[] = {
+	"user.foo.INBOX",
+	"user.foo.Manilla",
+	"user.foo.VanillaGorilla",
+	"user.foo.SarsparillaGorilla"
+    };
+
+    *cidp = 0xfeeddeadbeef0000ULL | (unsigned int)i;
+
+    strarray_truncate(mboxnames, 0);
+    n = 1 + (17 - i) % (VECTOR_SIZE(folders)-1);
+    CU_ASSERT(n > 0);
+    for (j = 0 ; j < n ; j++)
+	strarray_append(mboxnames,
+			folders[(j + i/2) % VECTOR_SIZE(folders)]);
+}
+
+static void test_dump(void)
+{
+    int r;
+    struct conversations_state state;
+    int fd;
+    FILE *fp;
+    char filename[64];
+    char msgid[40];
+    strarray_t mboxnames = STRARRAY_INITIALIZER;
+    strarray_t mboxnames2 = STRARRAY_INITIALIZER;
+    conversation_id_t cid, cid2;
+    int i;
+    int j;
+#define N_MSGID_TO_CID	500
+#define N_CID_TO_FOLDER	333
+    struct stat sb;
+
+    strcpy(filename, "/tmp/cyrus-conv.datXXXXXX");
+    fd = mkstemp(filename);
+    CU_ASSERT_FATAL(fd >= 0);
+    fp = fdopen(fd, "r+");
+    CU_ASSERT_PTR_NOT_NULL_FATAL(fp);
+
+    /* generate some data in the database */
+    memset(&state, 0, sizeof(state));
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
+	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
+	r = conversations_set_cid(&state, msgid, cid);
+	CU_ASSERT_EQUAL(r, 0);
+    }
+    for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
+	gen_cid_folder(i, &cid, &mboxnames);
+	for (j = 0 ; j < mboxnames.count ; j++) {
+	    r = conversations_add_folder(&state, cid,
+					 mboxnames.data[j]);
+	    CU_ASSERT_EQUAL(r, 0);
+	}
+    }
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open and dump the database */
+    memset(&state, 0, sizeof(state));
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    conversations_dump(&state, fp);
+
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* do some basic checks on the output file */
+    fflush(fp);
+
+    r = fstat(fd, &sb);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT(sb.st_size > 40*N_MSGID_TO_CID + 40*N_CID_TO_FOLDER);
+
+    r = (int)fseek(fp, 0L, SEEK_SET);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open and truncate the database */
+    memset(&state, 0, sizeof(state));
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    r = conversations_truncate(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* check we can no longer find any of the data */
+    memset(&state, 0, sizeof(state));
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
+	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
+	r = conversations_get_cid(&state, msgid, &cid2);
+	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(cid2, NULLCONVERSATION);
+    }
+    for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
+	gen_cid_folder(i, &cid, &mboxnames);
+	strarray_truncate(&mboxnames2, 0);
+	r = conversations_get_folders(&state, cid, &mboxnames2);
+	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(mboxnames2.count, 0);
+    }
+
+    /* now undump */
+    r = conversations_undump(&state, fp);
+    CU_ASSERT_EQUAL(r, 0);
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* finally check that we got all the data back */
+    memset(&state, 0, sizeof(state));
+    r = conversations_open(&state, DBNAME);
+    CU_ASSERT_EQUAL(r, 0);
+
+    for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
+	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
+	r = conversations_get_cid(&state, msgid, &cid2);
+	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(cid, cid2);
+    }
+    for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
+	gen_cid_folder(i, &cid, &mboxnames);
+	strarray_truncate(&mboxnames2, 0);
+	r = conversations_get_folders(&state, cid, &mboxnames2);
+	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(mboxnames2.count, mboxnames2.count);
+	for (j = 0 ; j < mboxnames.count ; j++)
+	    CU_ASSERT_STRING_EQUAL(mboxnames.data[j], mboxnames2.data[j]);
+    }
+
+    r = conversations_close(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    fclose(fp);
+    unlink(filename);
+    strarray_fini(&mboxnames);
+    strarray_fini(&mboxnames2);
+#undef N_MSGID_TO_CID
+#undef N_CID_TO_FOLDER
+}
+
 
 static int set_up(void)
 {
