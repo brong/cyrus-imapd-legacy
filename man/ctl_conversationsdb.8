@@ -50,6 +50,18 @@ ctl_conversationsdb \- perform operations on the conversations databases
 [
 .B \-v
 ]
+\fB-d\fR
+\fImboxname\fR
+.br
+.B ctl_conversationsdb
+[
+.B \-C
+.I config-file
+]
+[
+.B \-v
+]
+\fB-u\fR
 \fImboxname\fR
 .SH DESCRIPTION
 .I Ctl_conversationsdb
@@ -65,14 +77,26 @@ The
 .I configdirectory
 option is used to determine the default location of the conversations database.
 .PP
-Currently, \fIctl_conversationsdb\fR merely dumps the contents of the
-conversations database which corresponds to the mailbox \fImboxname\fR,
-using a human readable format suitable for manual debugging only.  This
-will soon change.
+The first synopsis, dumps the contents of the conversations database to
+standard output in an ASCII format.  The resulting file can be fed back
+in to the second synposis, which "undumps" from standard input.  This
+pair of commands is useful for disaster recovery, or for changing the
+backend used to store the conversations database.
 .SH OPTIONS
 .TP
 .BI \-C\  "config-file"
 Read configuration options from \fIconfig-file\fR.
+.TP
+.B \-d
+Dump the conversations database which corresponds to the mailbox \fImboxname\fR
+to standard output in an ASCII format.  The resulting file can be used
+to recreate a database using the \fB-u\fR option.
+.TP
+.B \-u
+"Undumps" the conversations database corresponding to the mailbox \fImboxname\fR,
+i.e. replaces all the entries with data from ASCII records parsed from
+standard input.  The output from the \fB-d\fR option can be used as
+input.
 .TP
 .B \-v
 Be more verbose when running.
