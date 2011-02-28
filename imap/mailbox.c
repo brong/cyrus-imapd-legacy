@@ -4268,11 +4268,8 @@ void mailbox_cid_rename_cb(const char *name,
     struct buf action = BUF_INITIALIZER;
     int r;
 
-    buf_appendcstr(&action, "CIDRENAME ");
-    buf_appendcstr(&action, conversation_id_encode(from_cid));
-    buf_putc(&action, ' ');
-    buf_appendcstr(&action, conversation_id_encode(to_cid));
-    buf_putc(&action, '\n');
+    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
+	       from_cid, to_cid);
 
     r = mailbox_post_action(name, &action);
     if (r)
@@ -4297,8 +4294,6 @@ static void mailbox_action_cid_rename(struct mailbox *mailbox,
 				      const char *fname,
 				      unsigned int lineno)
 {
-    /* we can do ntohll() here because we know that the data parts
-     * of a struct mailbox_action are 8-byte aligned */
     conversation_id_t from_cid, to_cid;
     uint32_t recno;
     struct index_record record;
