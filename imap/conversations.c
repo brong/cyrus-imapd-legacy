@@ -94,10 +94,9 @@
  * Also note that we don't use bit64, as this would actually
  * increase sizeof(mrec) with an invisible 32b pad.
  */
-struct conversations_mrec {
-    bit32   idhi;	/* low 32 bits of conversation id */
-    bit32   idlo;	/* high 32 bits of conversation id */
-    bit32   stamp;	/* time_t insertion timestamp */
+struct conversations_rec {
+    conversation_id_t cid; /* conversation ID */
+    time_t stamp;	/* time_t insertion timestamp */
 };
 
 #define CONVERSATION_ID_STRMAX	    (1+sizeof(conversation_id_t)*2)
@@ -212,48 +211,96 @@ static int check_msgid(const char *msgid, int len, int *lenp)
     return 0;
 }
 
-static int _conversations_set_cid2(struct conversations_state *state,
-				   const char *msgid,
-				   conversation_id_t cid,
-				   time_t stamp)
+static int _conversations_set_key(struct conversations_state *state,
+				  const char *key, int keylen,
+				  struct conversations_rec *rec)
 {
-    int keylen;
-    struct conversations_mrec mrec;
     int r;
+    struct buf buf;
+
+    buf_init(&buf);
 
     if (state->db == NULL)
 	return IMAP_IOERROR;
+
+    buf_printf(&buf, CONV_FMT " %lu", rec->cid, rec->stamp);
+
+    r = DB->store(state->db,
+		  key, keylen,
+		  buf.s, buf.len,
+		  &state->txn);
+
+    buf_free(&buf);
+    if (r)
+	return IMAP_IOERROR;
+
+    return 0;
+}
+
+static int _conversations_set(struct conversations_state *state,
+			      const char *msgid,
+			      struct conversations_rec *rec)
+{
+    int keylen;
+    int r;
+    struct buf buf;
+
+    buf_init(&buf);
+
     r = check_msgid(msgid, 0, &keylen);
     if (r)
 	return r;
 
-    memset(&mrec, 0, sizeof(mrec));
-    align_htonll(&mrec.idhi, cid);
-    mrec.stamp = htonl(stamp);
-
-    r = DB->store(state->db,
-		  msgid, keylen,
-		  (const char *)&mrec, sizeof(mrec),
-		  &state->txn);
-    if (r)
-	return IMAP_IOERROR;
-    return 0;
+    return _conversations_set_key(state, msgid, keylen, rec);
 }
 
 int conversations_set_cid(struct conversations_state *state,
-		          const char *msgid,
-		          conversation_id_t cid)
+			  const char *msgid,
+			  conversation_id_t cid)
 {
-    return _conversations_set_cid2(state, msgid, cid, time(NULL));
+    struct conversations_rec rec;
+    rec.cid = cid;
+    rec.stamp = time(NULL);
+    return _conversations_set(state, msgid, &rec);
 }
 
-int conversations_get_cid(struct conversations_state *state,
-		          const char *msgid,
-		          conversation_id_t *cidp)
+static int _conversations_parse(const char *data, int datalen,
+				struct conversations_rec *rec)
+{ 
+    const char *rest;
+    int r;
+    bit64 tval;
+
+    r = parsehex(data, &rest, 16, &rec->cid);
+    if (r) return IMAP_MAILBOX_BADFORMAT;
+
+    /* should have parsed exactly 16 characters */
+    if (rest != data + 16)
+	return IMAP_MAILBOX_BADFORMAT;
+
+    /* next character is a space */
+    if (rest[0] != ' ')
+	return IMAP_MAILBOX_BADFORMAT;
+
+    r = parsenum(rest+1, &rest, datalen-17, &tval);
+    if (r) return IMAP_MAILBOX_BADFORMAT;
+
+    /* should have parsed to the end of the string */
+    if (rest - data != datalen)
+	return IMAP_MAILBOX_BADFORMAT;
+
+    rec->stamp = tval;
+
+    return 0;
+}
+
+static int _conversations_get(struct conversations_state *state,
+			      const char *msgid,
+			      struct conversations_rec *rec)
 {
     int keylen;
-    struct conversations_mrec *mrec = NULL;
     int datalen = 0;
+    const char *data;
     int r;
 
     if (state->db == NULL)
@@ -264,16 +311,31 @@ int conversations_get_cid(struct conversations_state *state,
 
     r = DB->fetch(state->db,
 		  msgid, keylen,
-		  (const char **)&mrec, &datalen,
+		  &data, &datalen,
 		  &state->txn);
-    if (r == CYRUSDB_NOTFOUND) {
-	*cidp = NULLCONVERSATION;
-	return 0;
-    }
-    if (r || mrec == NULL || datalen != sizeof(*mrec))
-	return IMAP_IOERROR;
 
-    *cidp = align_ntohll(&mrec->idhi);
+    if (!r) r = _conversations_parse(data, datalen, rec);
+
+    if (r) {
+	rec->cid = 0;
+	rec->stamp = 0;
+    }
+
+    return 0;
+}
+
+int conversations_get_cid(struct conversations_state *state,
+		          const char *msgid,
+		          conversation_id_t *cidp)
+{
+    struct conversations_rec rec;
+    int r;
+
+    r = _conversations_get(state, msgid, &rec);
+    if (r) return r;
+
+    *cidp = rec.cid;
+
     return 0;
 }
 
@@ -316,7 +378,7 @@ int conversations_add_folder(struct conversations_state *state,
     if (!state->db)
 	return IMAP_IOERROR;
 
-    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
     r = DB->fetch(state->db,
 		  bkey, strlen(bkey),
 		  &bdata, &bdatalen,
@@ -361,7 +423,7 @@ static int _conversations_set_folders(struct conversations_state *state,
     if (!state->db)
 	return IMAP_IOERROR;
 
-    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
     strarray_to_brec(mboxes, &buf);
 
     r = DB->store(state->db,
@@ -384,7 +446,7 @@ int conversations_get_folders(struct conversations_state *state,
     if (!state->db)
 	return IMAP_IOERROR;
 
-    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(cid));
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
     r = DB->fetch(state->db,
 		  bkey, strlen(bkey),
 		  &bdata, &bdatalen,
@@ -410,20 +472,20 @@ static int prunecb(void *rock,
 		   const char *data, int datalen)
 {
     struct prune_rock *prock = (struct prune_rock *)rock;
-    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
-    time_t stamp;
+    struct conversations_rec rec;
     int r;
 
     prock->nseen++;
     r = check_msgid(key, keylen, NULL);
-    if (r)
-	return r;
-    if (datalen != sizeof(*mrec))
-	return IMAP_IOERROR;
+    if (r) return r;
 
-    stamp = ntohl(mrec->stamp);
-    if (stamp >= prock->thresh)
+    r = _conversations_parse(data, datalen, &rec);
+    if (r) return r;
+
+    /* keep records newer than the threshold */
+    if (rec.stamp >= prock->thresh)
 	return 0;
+
     prock->ndeleted++;
 
     return DB->delete(prock->state->db,
@@ -454,17 +516,20 @@ static int dump_record_cb(void *rock,
 {
     FILE *fp = rock;
     char *key = xstrndup(bkey, bkeylen);
+    int r;
 
     switch (key[0])
     {
     case '<':	    /* msgid to cid mapping */
 	{
-	    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
+	    struct conversations_rec rec;
 	    char stampstr[32];
 
-	    time_to_iso8601(ntohl(mrec->stamp), stampstr, sizeof(stampstr));
-	    fprintf(fp, "msgid_to_cid \"%s\" %08x%08x %s\n",
-		    key, ntohl(mrec->idhi), ntohl(mrec->idlo), stampstr);
+	    r = _conversations_parse(data, datalen, &rec);
+
+	    time_to_iso8601(rec.stamp, stampstr, sizeof(stampstr));
+	    fprintf(fp, "msgid_to_cid \"%s\" " CONV_FMT " %s\n",
+		    key, rec.cid, stampstr);
 	}
 	break;
     case 'B':	    /* cid to folders mapping */
@@ -536,8 +601,7 @@ int conversations_undump(struct conversations_state *state, FILE *fp)
 	    goto syntax_error;
 
 	if (!strcmp(buf_cstring(&w1), "msgid_to_cid")) {
-	    conversation_id_t cid;
-	    time_t stamp;
+	    struct conversations_rec rec;
 
 	    /* parse the msgid */
 	    c = getastring(prot, NULL, &w1);
@@ -548,18 +612,18 @@ int conversations_undump(struct conversations_state *state, FILE *fp)
 	    c = getastring(prot, NULL, &w2);
 	    if (c == EOF)
 		goto syntax_error;
-	    if (!conversation_id_decode(&cid, buf_cstring(&w2)))
+	    if (!conversation_id_decode(&rec.cid, buf_cstring(&w2)))
 		goto syntax_error;
 
 	    /* parse the timestamp */
 	    c = getastring(prot, NULL, &w2);
 	    if (c == EOF)
 		goto syntax_error;
-	    if (time_from_iso8601(buf_cstring(&w2), &stamp) < 0)
+	    if (time_from_iso8601(buf_cstring(&w2), &rec.stamp) < 0)
 		goto syntax_error;
 
 	    /* save into the database */
-	    r = _conversations_set_cid2(state, buf_cstring(&w1), cid, stamp);
+	    r = _conversations_set(state, buf_cstring(&w1), &rec);
 	    if (r) {
 		fprintf(stderr, "Error at line %u: %s\n", lineno, error_message(r));
 		goto out;
@@ -648,13 +712,13 @@ int conversations_truncate(struct conversations_state *state)
     return r;
 }
 
+/* NOTE: this makes an "ATOM" return */
 const char *conversation_id_encode(conversation_id_t cid)
 {
     static char text[2*sizeof(cid)+1];
 
     if (cid != NULLCONVERSATION) {
-	cid = htonll(cid);
-	bin_to_hex(&cid, sizeof(cid), text, BH_LOWER);
+	snprintf(text, sizeof(text), CONV_FMT, cid);
     } else {
 	strncpy(text, "NIL", sizeof(text));
     }
@@ -666,12 +730,11 @@ int conversation_id_decode(conversation_id_t *cid, const char *text)
 {
     if (!strcmp(text, "NIL")) {
 	*cid = NULLCONVERSATION;
-	return 1;
     } else {
-	int r = hex_to_bin(text, 0, cid);
-	*cid = ntohll(*cid);
-	return (r == sizeof(cid));
+	if (strlen(text) != 16) return 0;
+	*cid = strtoull(text, 0, 16);
     }
+    return 1;
 }
 
 struct rename_rock {
@@ -684,35 +747,27 @@ struct rename_rock {
 
 static int do_one_rename(void *rock,
 		         const char *key, int keylen,
-		         const char *data, int datalen __attribute__((unused)))
+		         const char *data, int datalen)
 {
     struct rename_rock *rrock = (struct rename_rock *)rock;
-    const struct conversations_mrec *mrec = (struct conversations_mrec *)data;
-    struct conversations_mrec mrecw;
+    struct conversations_rec rec;
     int r;
 
-    rrock->entries_seen++;
     r = check_msgid(key, keylen, NULL);
-    if (r)
-	return r;
-    if (datalen != sizeof(*mrec))
-	return IMAP_IOERROR;
+    if (r) return r;
 
-    if (align_ntohll(&mrec->idhi) != rrock->from_cid)
+    r = _conversations_parse(data, datalen, &rec);
+    if (r) return r;
+
+    rrock->entries_seen++;
+
+    if (rec.cid != rrock->from_cid)
 	return 0;	/* nothing to see, move along */
 
     rrock->entries_renamed++;
-    mrecw = *mrec;
-    align_htonll(&mrecw.idhi, rrock->to_cid);
 
-    r = DB->store(rrock->state->db,
-		  key, keylen,
-		  (const char *)&mrecw, sizeof(mrecw),
-		  &rrock->state->txn);
-    if (r)
-	return IMAP_IOERROR;
-
-    return 0;
+    rec.cid = rrock->to_cid;
+    return _conversations_set_key(rrock->state, key, keylen, &rec);
 }
 
 int conversations_rename_cid(struct conversations_state *state,
@@ -745,7 +800,7 @@ int conversations_rename_cid(struct conversations_state *state,
 
     /* Use the B record to notify mailboxes of a CID rename
      * and rename the B record too */
-    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(from_cid));
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, from_cid);
     r = DB->fetch(state->db,
 		  bkey, strlen(bkey),
 		  &bdata, &bdatalen,
@@ -761,7 +816,7 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r)
 	goto out;
 
-    snprintf(bkey, sizeof(bkey), "B%s", conversation_id_encode(to_cid));
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, to_cid);
     strarray_to_brec(&mboxes, &buf);
 
     r = DB->store(state->db,
