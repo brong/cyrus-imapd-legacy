@@ -186,7 +186,7 @@ struct nntp_overview {
 extern int index_fetch(struct index_state *state,
 		       const char* sequence,
 		       int usinguid,
-		       struct fetchargs* fetchargs,
+		       const struct fetchargs* fetchargs,
 		       int* fetchedsomething);
 extern int index_store(struct index_state *state,
 		       char *sequence,
