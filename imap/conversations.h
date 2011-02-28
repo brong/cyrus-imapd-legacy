@@ -53,6 +53,7 @@
 #include "strarray.h"
 
 typedef bit64	conversation_id_t;
+#define CONV_FMT "%016llx"
 #define NULLCONVERSATION	(0ULL)
 
 struct conversations_state
