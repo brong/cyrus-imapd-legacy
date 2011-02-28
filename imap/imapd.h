@@ -51,6 +51,7 @@
 #include "mailbox.h"
 #include "prot.h"
 #include "strarray.h"
+#include "conversations.h"
 
 /* Userid client has logged in as */
 extern char *imapd_userid;
@@ -100,6 +101,7 @@ struct fetchargs {
 
     bit32 cache_atleast;          /* to do headers we need atleast this
 				   * cache version */
+    conversation_id_t cid;	  /* for XCONVFETCH */
 };
 
 /* Bitmasks for fetchitems */
@@ -121,7 +123,9 @@ enum {
     FETCH_GUID   =    (1<<14),
     FETCH_SHA1   =    (1<<15),
     FETCH_FILESIZE =  (1<<16),
-    FETCH_CID =			(1<<17)
+    FETCH_CID =			(1<<17),
+    FETCH_FOLDER =		(1<<18),
+    FETCH_UIDVALIDITY =		(1<<19)
 };
 
 enum {
