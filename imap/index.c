@@ -2512,8 +2512,11 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     }
     if ((fetchitems & FETCH_CID) &&
 	config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	prot_printf(state->out, "%cCID %s", sepchar,
-		    conversation_id_encode(im->record.cid));
+	struct buf buf;
+	buf_init(&buf);
+	buf_printf(&buf, "%cCID " CONV_FMT, sepchar, im->record.cid);
+	prot_putbuf(state->out, &buf);
+	buf_free(&buf);
 	sepchar = ' ';
     }
     if (fetchitems & FETCH_ENVELOPE) {

@@ -273,7 +273,6 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 {
     struct dlist *fl;
     const char *guid;
-    const char *cid;
     int r;
 
     memset(record, 0, sizeof(struct index_record));
@@ -301,12 +300,9 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
     if (!message_guid_decode(&record->guid, guid))
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
 
+    /* OK if it doesn't have one */
     record->cid = NULLCONVERSATION;
-    if (config_getswitch(IMAPOPT_CONVERSATIONS) &&
-        dlist_getatom(kr, "CID", &cid)) {
-	if (!conversation_id_decode(&record->cid, cid))
-	    return IMAP_PROTOCOL_BAD_PARAMETERS;
-    }
+    dlist_gethex64(kr, "CID", &record->cid);
 
     return 0;
 }
@@ -1479,7 +1475,7 @@ int sync_mailbox(struct mailbox *mailbox,
 	    dlist_date(il, "INTERNALDATE", record.internaldate);
 	    dlist_num(il, "SIZE", record.size);
 	    dlist_atom(il, "GUID", message_guid_encode(&record.guid));
-	    dlist_atom(il, "CID", conversation_id_encode(record.cid));
+	    dlist_num(il, "CID", record.cid);
 	}
     }
 
@@ -1739,8 +1735,10 @@ static void sync_crc32_update(const struct mailbox *mailbox,
 	flagcrc ^= crc32_cstring(buf);
     }
 
-    if ((cflags & SYNC_CRC_CID) && record->cid != NULLCONVERSATION)
-	flagcrc ^= crc32_cstring(conversation_id_encode(record->cid));
+    if ((cflags & SYNC_CRC_CID) && record->cid != NULLCONVERSATION) {
+	snprintf(buf, 4096, CONV_FMT, record->cid);
+	flagcrc ^= crc32_cstring(buf);
+    }
 
     snprintf(buf, 4096, "%u " MODSEQ_FMT " %lu (%u) %lu %s",
 	    record->uid, record->modseq, record->last_updated,
