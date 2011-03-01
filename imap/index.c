@@ -172,8 +172,6 @@ static void index_thread_ref(struct index_state *state,
 			     unsigned *msgno_list, int nmsg, int usinguid);
 
 static void index_select(struct index_state *state);
-static struct seqset *_index_vanished(struct index_state *state,
-				      struct vanished_params *params);
 static struct seqset *_parse_sequence(struct index_state *state,
 				      const char *sequence, int usinguid);
 
@@ -250,7 +248,7 @@ int index_open(const char *name, struct index_init *init,
 
     /* have to get the vanished list while we're still locked */
     if (init && init->vanished.uidvalidity == state->mailbox->i.uidvalidity) {
-	vanishedlist = _index_vanished(state, &init->vanished);
+	vanishedlist = index_vanished(state, &init->vanished);
     }
 
     index_unlock(state);
@@ -692,8 +690,8 @@ int index_check(struct index_state *state, int usinguid, int printuid)
 /*
  * Perform UID FETCH (VANISHED) on a sequence.
  */
-static struct seqset *_index_vanished(struct index_state *state,
-				      struct vanished_params *params)
+struct seqset *index_vanished(struct index_state *state,
+			      struct vanished_params *params)
 {
     struct mailbox *mailbox = state->mailbox;
     struct index_record record;
@@ -869,7 +867,7 @@ int index_fetch(struct index_state *state,
 	v.match_seq = fetchargs->match_seq;
 	v.match_uid = fetchargs->match_uid;
 	/* XXX - return error unless usinguid? */
-	vanishedlist = _index_vanished(state, &v);
+	vanishedlist = index_vanished(state, &v);
     }
 
     index_unlock(state);
@@ -2527,7 +2525,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	sepchar = ' ';
     }
     if ((fetchitems & FETCH_FOLDER)) {
-	char mboxname[MAX_MAILBOX_PATH+1];
+// 	char mboxname[MAX_MAILBOX_PATH+1];
 // 	(*imapd_namespace.mboxname_toexternal)(&imapd_namespace,
 // 					       state->mailbox->name,
 // 					       imapd_userid, mboxname);
