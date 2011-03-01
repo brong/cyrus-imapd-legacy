@@ -4568,6 +4568,8 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     r = parse_fetch_args(tag, "Xconvfetch", 0, &fetchargs);
     if (r)
 	goto freeargs;
+    fetchargs.cid = cid;
+    fetchargs.fetchitems |= (FETCH_UIDVALIDITY|FETCH_FOLDER);
 
     r = do_xconvfetch(cid, &validities, &fetchargs);
 
@@ -4678,7 +4680,6 @@ static int do_xconvfetch(conversation_id_t cid,
 	free(vanished);
 
 	fetchargs->changedsince = (client_sd ? client_sd->highestmodseq : 0);
-	fetchargs->cid = cid;
 
 	r = index_fetch(states[i], "1:*", /*usinguid*/1,
 			fetchargs, &dummy);
