@@ -1299,6 +1299,7 @@ int index_sort(struct index_state *state,
     modseq_t highestmodseq = 0;
     int i, modseq = 0;
     hash_table seen_cids;
+    unsigned int n = 0;
 
     /* update the index */
     if (index_check(state, 0, 0))
@@ -1350,6 +1351,10 @@ int index_sort(struct index_state *state,
 		    goto next;
 		hash_insert(key, (void *)1, &seen_cids);
 	    }
+	    if (windowargs &&
+		windowargs->limit &&
+		++n > windowargs->limit)
+		goto next;
 
 	    prot_printf(state->out, " %u", no);
 
