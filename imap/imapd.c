@@ -3969,6 +3969,7 @@ static int parse_fetch_args(const char *tag, const char *cmd,
     strarray_t *newfields = strarray_new();
 
     /* local mailbox */
+    memset(fa, 0, sizeof(struct fetchargs));
     memset(&fetchargs, 0, sizeof(struct fetchargs));
 
     c = getword(imapd_in, &fetchatt);
