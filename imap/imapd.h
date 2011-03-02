@@ -249,6 +249,7 @@ enum {
 struct windowargs {
     int conversations;		/* whether to limit the results by
 				   conversation id */
+    uint32_t limit;		/* limit on how many messages to return */
 };
 
 /* Bitmask for status queries */
