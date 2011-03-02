@@ -1291,10 +1291,13 @@ int index_search(struct index_state *state, struct searchargs *searchargs,
 }
 
 /*
- * Performs a SORT command
+ * Performs a SORT or XCONVSORT command
  */
-int index_sort(struct index_state *state, struct sortcrit *sortcrit,
-	       struct searchargs *searchargs, int usinguid)
+int index_sort(struct index_state *state,
+	       struct sortcrit *sortcrit,
+	       struct searchargs *searchargs,
+	       struct windowargs *windowargs,
+	       int usinguid)
 {
     unsigned *msgno_list;
     MsgData *msgdata = NULL, *freeme = NULL;
@@ -1302,6 +1305,7 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
     clock_t start;
     modseq_t highestmodseq = 0;
     int i, modseq = 0;
+    hash_table seen_cids;
 
     /* update the index */
     if (index_check(state, 0, 0))
@@ -1338,12 +1342,25 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 			(int (*)(void*,void*,void*)) index_sort_compare,
 			sortcrit);
 
+	if (windowargs && windowargs->conversations)
+	    construct_hash_table(&seen_cids, 1024, 0);
+
 	/* Output the sorted messages */ 
 	while (msgdata) {
 	    unsigned no = usinguid ? state->map[msgdata->msgno-1].record.uid
 				   : msgdata->msgno;
+
+	    if (windowargs && windowargs->conversations) {
+		const char *key = conversation_id_encode(
+				    state->map[msgdata->msgno-1].record.cid);
+		if (hash_lookup(key, &seen_cids))
+		    goto next;
+		hash_insert(key, (void *)1, &seen_cids);
+	    }
+
 	    prot_printf(state->out, " %u", no);
 
+next:
 	    /* free contents of the current node */
 	    index_msgdata_free(msgdata);
 
@@ -1352,6 +1369,8 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 
 	/* free the msgdata array */
 	free(freeme);
+	if (windowargs && windowargs->conversations)
+	    free_hash_table(&seen_cids, NULL);
     }
 
     if (highestmodseq)
