@@ -247,6 +247,12 @@ enum {
 /* Sort key modifier flag bits */
 #define SORT_REVERSE		(1<<0)
 
+/* Windowing arguments for the XCONVSORT command */
+struct windowargs {
+    int conversations;		/* whether to limit the results by
+				   conversation id */
+};
+
 /* Bitmask for status queries */
 enum {
     STATUS_MESSAGES =	        (1<<0),

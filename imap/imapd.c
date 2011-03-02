@@ -357,6 +357,7 @@ static int do_xconvfetch(conversation_id_t cid,
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
 void cmd_sort(char *tag, int usinguid);
+void cmd_xconvsort(char *tag);
 void cmd_thread(char *tag, int usinguid);
 void cmd_copy(char *tag, char *sequence, char *name, int usinguid);
 void cmd_expunge(char *tag, char *sequence);
@@ -433,6 +434,8 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 			 int *charsetp, int *searchstatep);
 int getsearchdate(time_t *start, time_t *end);
 int getsortcriteria(char *tag, struct sortcrit **sortcrit);
+static int parse_windowargs(const char *tag, struct windowargs **);
+static void free_windowargs(struct windowargs *wa);
 int getdatetime(time_t *date);
 
 void appendfieldlist(struct fieldlist **l, char *section,
@@ -2081,6 +2084,13 @@ void cmdloop(void)
 		cmd_xconvfetch(tag.s, arg1.s);
 
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
+	    }
+	    else if (!strcmp(cmd.s, "Xconvsort")) {
+		if (!imapd_index && !backend_current) goto nomailbox;
+		if (c != ' ') goto missingargs;
+		cmd_xconvsort(tag.s);
+
+// 		snmp_increment(XCONVSORT_COUNT, 1);
 	    }
 	    else if (!strcmp(cmd.s, "Xfer")) {
 		int havepartition = 0;
@@ -5017,7 +5027,7 @@ void cmd_sort(char *tag, int usinguid)
 	goto error;
     }
 
-    n = index_sort(imapd_index, sortcrit, searchargs, usinguid);
+    n = index_sort(imapd_index, sortcrit, searchargs, NULL, usinguid);
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
     prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
@@ -5031,6 +5041,101 @@ error:
     eatline(imapd_in, (c == EOF ? ' ' : c));
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
+}
+
+/*
+ * Perform a XCONVSORT command
+ */    
+void cmd_xconvsort(char *tag)
+{
+    int c;
+    struct sortcrit *sortcrit = NULL;
+    static struct buf arg;
+    int charset = 0;
+    struct searchargs *searchargs = NULL;
+    struct windowargs *windowargs = NULL;
+    clock_t start = clock();
+    char mytime[100];
+    int n;
+
+    if (backend_current) {
+	/* remote mailbox */
+	const char *cmd = "Xconvsort";
+
+	prot_printf(backend_current->out, "%s %s ", tag, cmd);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
+	return;
+    }
+
+    /* local mailbox */
+    c = getsortcriteria(tag, &sortcrit);
+    if (c == EOF) goto error;
+
+    /* get charset */
+    if (c != ' ') {
+	prot_printf(imapd_out, "%s BAD Missing charset in Sort\r\n",
+		    tag);
+	goto error;
+    }
+
+    c = getword(imapd_in, &arg);
+    if (c == '(' && !arg.len) {
+	c = parse_windowargs(tag, &windowargs);
+	if (c != ')')
+	    goto error;
+	c = prot_getc(imapd_in);
+	if (c != ' ') {
+	    prot_printf(imapd_out, "%s BAD Missing search criteria in Sort\r\n",
+			tag);
+	    goto error;
+	}
+	c = getword(imapd_in, &arg);
+    }
+    if (c != ' ') {
+	prot_printf(imapd_out, "%s BAD Missing search criteria in Sort\r\n",
+		    tag);
+	goto error;
+    }
+    lcase(arg.s);
+    charset = charset_lookupname(arg.s);
+
+    if (charset == -1) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag,
+	       error_message(IMAP_UNRECOGNIZED_CHARSET));
+	goto error;
+    }
+
+    searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
+
+    c = getsearchprogram(tag, searchargs, &charset, 0);
+    if (c == EOF) goto error;
+
+    if (c == '\r') c = prot_getc(imapd_in);
+    if (c != '\n') {
+	prot_printf(imapd_out, 
+		    "%s BAD Unexpected extra arguments to Xconvsort\r\n", tag);
+	goto error;
+    }
+
+    n = index_sort(imapd_index, sortcrit, searchargs, windowargs,
+		   /*usinguid*/0);
+    snprintf(mytime, sizeof(mytime), "%2.3f",
+	     (clock() - start) / (double) CLOCKS_PER_SEC);
+    prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
+		error_message(IMAP_OK_COMPLETED), n, mytime);
+
+    freesortcrit(sortcrit);
+    freesearchargs(searchargs);
+    free_windowargs(windowargs);
+    return;
+
+error:
+    eatline(imapd_in, (c == EOF ? ' ' : c));
+    freesortcrit(sortcrit);
+    freesearchargs(searchargs);
+    free_windowargs(windowargs);
 }
 
 /*
@@ -10052,6 +10157,51 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
 #endif
+}
+
+static int parse_windowargs(const char *tag, struct windowargs **wa)
+{
+    struct windowargs windowargs;
+    struct buf arg = BUF_INITIALIZER;
+    int c;
+
+    memset(&windowargs, 0, sizeof(windowargs));
+
+    for (;;)
+    {
+	c = getword(imapd_in, &arg);
+	if (!arg.len) {
+	    if (c == ')')
+		break;
+	    goto syntax_error;
+	}
+
+	if (!strcasecmp(arg.s, "CONVERSATIONS"))
+	    windowargs.conversations = 1;
+	else
+	    goto syntax_error;
+
+	if (c == ')')
+	    break;
+	if (c != ' ')
+	    goto syntax_error;
+    }
+
+    *wa = xmemdup(&windowargs, sizeof(windowargs));
+    buf_free(&arg);
+    return c;
+
+syntax_error:
+    prot_printf(imapd_out, "%s BAD Syntax error in window arguments\r\n", tag);
+    buf_free(&arg);
+    return EOF;
+}
+
+static void free_windowargs(struct windowargs *wa)
+{
+    if (!wa)
+	return;
+    free(wa);
 }
 
 /*
