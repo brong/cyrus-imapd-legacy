@@ -4684,17 +4684,15 @@ static int do_xconvfetch(conversation_id_t cid,
 	}
 
 	prot_printf(imapd_out,
-		    "* FOLDERSTATE (FOLDER \"%s\""
-		    " UIDVALIDITY %u"
-		    " SINCE " MODSEQ_FMT
-		    " UNTIL " MODSEQ_FMT
-		    "%s%s"
-		    ")\r\n",
+		    "* FOLDERSTATE \"%s\" %u " MODSEQ_FMT
+		    "%s%s%s"
+		    "\r\n",
 		    mboxnames.data[i],
 		    server_sd.uidvalidity,
-		    (client_sd ? client_sd->highestmodseq : 0),
 		    server_sd.highestmodseq,
-		    vanished ? " VANISHED " : "", vanished ? vanished : "");
+		    vanished ? " (VANISHED " : "",
+		    vanished ? vanished : "",
+		    vanished ? ")" : "");
 	free(vanished);
 
 	fetchargs->changedsince = (client_sd ? client_sd->highestmodseq : 0);
