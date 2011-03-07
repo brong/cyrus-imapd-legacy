@@ -5001,7 +5001,7 @@ void cmd_sort(char *tag, int usinguid)
 	goto error;
     }
 
-    n = index_sort(imapd_index, sortcrit, searchargs, NULL, usinguid);
+    n = index_sort(imapd_index, sortcrit, searchargs, usinguid);
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
     prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
@@ -5019,7 +5019,7 @@ error:
 
 /*
  * Perform a XCONVSORT command
- */    
+ */
 void cmd_xconvsort(char *tag)
 {
     int c;
@@ -5093,7 +5093,7 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    n = index_sort(imapd_index, sortcrit, searchargs, windowargs,
+    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs,
 		   /*usinguid*/0);
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
@@ -10119,9 +10119,15 @@ static int parse_windowargs(const char *tag, struct windowargs **wa)
 
 	if (!strcasecmp(arg.s, "CONVERSATIONS"))
 	    windowargs.conversations = 1;
-	else if (!strcasecmp(arg.s, "LIMIT")) {
+	else if (!strcasecmp(arg.s, "LIMIT"))
 	    c = getuint32(imapd_in, &windowargs.limit);
-	} else
+	else if (!strcasecmp(arg.s, "POSITION"))
+	    c = getuint32(imapd_in, &windowargs.position);
+	else if (!strcasecmp(arg.s, "ANCHOR"))
+	    c = getuint32(imapd_in, &windowargs.anchor);
+	else if (!strcasecmp(arg.s, "OFFSET"))
+	    c = getsint32(imapd_in, &windowargs.offset);
+	else
 	    goto syntax_error;
 
 	if (c == ')')

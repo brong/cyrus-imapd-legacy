@@ -150,7 +150,8 @@ static char *_index_extract_subject(char *s, int *is_refwd);
 static void index_get_ids(MsgData *msgdata,
 			  char *envtokens[], const char *headers, unsigned size);
 static MsgData *index_msgdata_load(struct index_state *state, unsigned *msgno_list, int n,
-				   struct sortcrit *sortcrit);
+				   struct sortcrit *sortcrit,
+				   unsigned int anchor, int *found_anchor);
 
 static void *index_sort_getnext(MsgData *node);
 static void index_sort_setnext(MsgData *node, MsgData *next);
@@ -1283,13 +1284,10 @@ int index_search(struct index_state *state, struct searchargs *searchargs,
 }
 
 /*
- * Performs a SORT or XCONVSORT command
+ * Performs a SORT command
  */
-int index_sort(struct index_state *state,
-	       struct sortcrit *sortcrit,
-	       struct searchargs *searchargs,
-	       struct windowargs *windowargs,
-	       int usinguid)
+int index_sort(struct index_state *state, struct sortcrit *sortcrit,
+	       struct searchargs *searchargs, int usinguid)
 {
     unsigned *msgno_list;
     MsgData *msgdata = NULL, *freeme = NULL;
@@ -1297,8 +1295,6 @@ int index_sort(struct index_state *state,
     clock_t start;
     modseq_t highestmodseq = 0;
     int i, modseq = 0;
-    hash_table seen_cids;
-    unsigned int n = 0;
 
     /* update the index */
     if (index_check(state, 0, 0))
@@ -1325,7 +1321,8 @@ int index_sort(struct index_state *state,
 
     if (nmsg) {
 	/* Create/load the msgdata array */
-	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit);
+	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
+					      0, NULL);
 	free(msgno_list);
 
 	/* Sort the messages based on the given criteria */
@@ -1335,24 +1332,182 @@ int index_sort(struct index_state *state,
 			(int (*)(void*,void*,void*)) index_sort_compare,
 			sortcrit);
 
-	if (windowargs && windowargs->conversations)
-	    construct_hash_table(&seen_cids, 1024, 0);
-
 	/* Output the sorted messages */ 
 	while (msgdata) {
 	    unsigned no = usinguid ? state->map[msgdata->msgno-1].record.uid
 				   : msgdata->msgno;
+	    prot_printf(state->out, " %u", no);
 
-	    if (windowargs && windowargs->conversations) {
+	    /* free contents of the current node */
+	    index_msgdata_free(msgdata);
+
+	    msgdata = msgdata->next;
+	}
+
+	/* free the msgdata array */
+	free(freeme);
+    }
+
+    if (highestmodseq)
+	prot_printf(state->out, " (MODSEQ " MODSEQ_FMT ")", highestmodseq);
+
+    prot_printf(state->out, "\r\n");
+
+    /* debug */
+    if (CONFIG_TIMING_VERBOSE) {
+	int len;
+	static const char * const key_names[] = {
+	    "SEQUENCE", "ARRIVAL", "CC", "DATE", "FROM",
+	    "SIZE", "SUBJECT", "TO", "ANNOTATION", "MODSEQ"
+	};
+	char buf[1024] = "";
+
+	while (sortcrit->key && sortcrit->key < VECTOR_SIZE(key_names)) {
+	    if (sortcrit->flags & SORT_REVERSE)
+		strlcat(buf, "REVERSE ", sizeof(buf));
+
+	    strlcat(buf, key_names[sortcrit->key], sizeof(buf));
+
+	    switch (sortcrit->key) {
+	    case SORT_ANNOTATION:
+		len = strlen(buf);
+		snprintf(buf + len, sizeof(buf) - len,
+			 " \"%s\" \"%s\"",
+			 sortcrit->args.annot.entry, sortcrit->args.annot.attrib);
+		break;
+	    }
+	    if ((++sortcrit)->key) strlcat(buf, " ", sizeof(buf));
+	}
+
+	syslog(LOG_DEBUG, "SORT (%s) processing time: %d msg in %f sec",
+	       buf, nmsg, (clock() - start) / (double) CLOCKS_PER_SEC);
+    }
+
+    return nmsg;
+}
+
+/*
+ * Performs a XCONVSORT command
+ */
+int index_convsort(struct index_state *state,
+		   struct sortcrit *sortcrit,
+		   struct searchargs *searchargs,
+		   const struct windowargs *windowargs,
+		   int usinguid)
+{
+    unsigned *msgno_list;
+    MsgData *msgdata = NULL, *freeme = NULL;
+    int nmsg;
+    clock_t start;
+    modseq_t highestmodseq = 0;
+    unsigned int i;
+    int modseq = 0;
+    hash_table seen_cids;
+    uint32_t pos = 0;
+    uint32_t nres = 0;
+    unsigned int *window = NULL;
+    unsigned int win_size = 0;
+    static const struct windowargs default_windowargs;    /* all zeroes */
+    int found_anchor = 0;
+    uint32_t anchor_pos = 0;
+
+    if (!windowargs)
+	windowargs = &default_windowargs;
+
+    /* update the index */
+    if (index_check(state, 0, 0))
+	return 0;
+
+    if(CONFIG_TIMING_VERBOSE)
+	start = clock();
+
+    if (searchargs->modseq) modseq = 1;
+    else {
+	for (i = 0; sortcrit[i].key != SORT_SEQUENCE; i++) {
+	    if (sortcrit[i].key == SORT_MODSEQ) {
+		modseq = 1;
+		break;
+	    }
+	}
+    }
+
+    /* Search for messages based on the given criteria */
+    nmsg = _index_search(&msgno_list, state, searchargs,
+			 modseq ? &highestmodseq : NULL);
+
+    prot_printf(state->out, "* SORT");
+
+    if (nmsg) {
+	/* Create/load the msgdata array */
+	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
+					      windowargs->anchor, &found_anchor);
+	free(msgno_list);
+
+	/* Sort the messages based on the given criteria */
+	msgdata = lsort(msgdata,
+			(void * (*)(void*)) index_sort_getnext,
+			(void (*)(void*,void*)) index_sort_setnext,
+			(int (*)(void*,void*,void*)) index_sort_compare,
+			sortcrit);
+
+	if (windowargs->conversations)
+	    construct_hash_table(&seen_cids, 1024, 0);
+	if (found_anchor &&
+	    windowargs->limit &&
+	    windowargs->offset < 0) {
+	    win_size = MAX(windowargs->limit,
+			   (unsigned)(-windowargs->offset));
+	    window = xcalloc(win_size, sizeof(unsigned int));
+	}
+	/* Note the window is initialised to 0 which is not a valid msg
+	 * sequence number or UID */
+
+	/* Output the sorted messages */
+	while (msgdata) {
+	    unsigned uid = state->map[msgdata->msgno-1].record.uid;
+	    unsigned no = usinguid ? uid : msgdata->msgno;
+
+	    if (found_anchor &&
+		!anchor_pos &&
+		windowargs->anchor == uid) {
+		anchor_pos = pos+1;
+		if (window) {
+		    for (i = anchor_pos + windowargs->offset ; i <= pos ; i++) {
+			if (!window[i % win_size])
+			    continue;
+			++nres;
+			if (windowargs->limit && nres > windowargs->limit)
+			    goto next;
+			prot_printf(state->out, " %u",
+			    window[i % win_size]);
+		    }
+		}
+	    }
+
+	    if (windowargs->conversations) {
 		const char *key = conversation_id_encode(
 				    state->map[msgdata->msgno-1].record.cid);
 		if (hash_lookup(key, &seen_cids))
 		    goto next;
 		hash_insert(key, (void *)1, &seen_cids);
 	    }
-	    if (windowargs &&
-		windowargs->limit &&
-		++n > windowargs->limit)
+
+	    ++pos;
+	    if (found_anchor) {
+		if (!anchor_pos) {
+		    if (window) {
+			/* add to the rotating window */
+			window[pos % win_size] = no;
+		    }
+		    goto next;
+		}
+		if (pos < anchor_pos + windowargs->offset)
+		    goto next;
+	    } else if (windowargs->position && pos < windowargs->position)
+		goto next;
+
+	    ++nres;
+	    if (windowargs->limit && nres > windowargs->limit)
 		goto next;
 
 	    prot_printf(state->out, " %u", no);
@@ -1366,8 +1521,10 @@ next:
 
 	/* free the msgdata array */
 	free(freeme);
-	if (windowargs && windowargs->conversations)
+	if (windowargs->conversations)
 	    free_hash_table(&seen_cids, NULL);
+	free(window);
+	window = NULL;
     }
 
     if (highestmodseq)
@@ -3557,7 +3714,8 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
  */
 static MsgData *index_msgdata_load(struct index_state *state,
 				   unsigned *msgno_list, int n,
-				   struct sortcrit *sortcrit)
+				   struct sortcrit *sortcrit,
+				   unsigned int anchor, int *found_anchor)
 {
     MsgData *md, *cur;
     int i, j;
@@ -3573,11 +3731,16 @@ static MsgData *index_msgdata_load(struct index_state *state,
     /* create an array of MsgData to use as nodes of linked list */
     md = (MsgData *) xzmalloc(n * sizeof(MsgData));
 
+    if (found_anchor)
+	*found_anchor = 0;
+
     for (i = 0, cur = md; i < n; i++, cur = cur->next) {
 	/* set msgno */
 	cur->msgno = msgno_list[i];
 	im = &state->map[cur->msgno-1];
 	cur->uid = im->record.uid;
+	if (found_anchor && im->record.uid == anchor)
+	    *found_anchor = 1;
 
 	/* set pointer to next node */
 	cur->next = (i+1 < n ? cur+1 : NULL);
@@ -4059,7 +4222,8 @@ static void index_thread_orderedsubj(struct index_state *state,
     Thread *head, *newnode, *cur, *parent, *last;
 
     /* Create/load the msgdata array */
-    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit);
+    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg,
+					  sortcrit, 0, NULL);
 
     /* Sort messages by subject and date */
     msgdata = lsort(msgdata,
@@ -4735,7 +4899,8 @@ static void _index_thread_ref(struct index_state *state, unsigned *msgno_list, i
     struct rootset rootset;
 
     /* Create/load the msgdata array */
-    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, loadcrit);
+    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg,
+					  loadcrit, 0, NULL);
 
     /* calculate the sum of the number of references for all messages */
     for (md = msgdata, tref = 0; md; md = md->next)
