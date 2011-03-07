@@ -249,7 +249,19 @@ enum {
 struct windowargs {
     int conversations;		/* whether to limit the results by
 				   conversation id */
-    uint32_t limit;		/* limit on how many messages to return */
+    uint32_t limit;		/* limit on how many messages to return,
+				 * 0 means unlimited. */
+    uint32_t position;		/* 1-based index into results of first
+				 * message to return.  0 means not
+				 * specified which is the same as 1. */
+    uint32_t anchor;		/* UID of a message used to locate the
+				 * start of the window; 0 means not
+				 * specified.  If the anchor is found,
+				 * the first message reported will be
+				 * the largest of 1 and the anchor minus
+				 * @offset.  If not specified or not
+				 * found, @position will be used instead. */
+    int32_t offset;
 };
 
 /* Bitmask for status queries */
