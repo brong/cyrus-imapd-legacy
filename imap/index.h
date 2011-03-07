@@ -201,8 +201,10 @@ extern int index_store(struct index_state *state,
 		       struct storeargs *storeargs,
 		       const strarray_t *flags);
 extern int index_sort(struct index_state *state, struct sortcrit *sortcrit,
+		      struct searchargs *searchargs, int usinguid);
+extern int index_convsort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
-		      struct windowargs * windowargs, int usinguid);
+		      const struct windowargs * windowargs, int usinguid);
 extern int index_thread(struct index_state *state, int algorithm,
 			struct searchargs *searchargs, int usinguid);
 extern int index_search(struct index_state *state,
