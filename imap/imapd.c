@@ -4608,6 +4608,14 @@ static int compare_mboxnames(const void *v1, const void *v2)
     return strcmp(*(const char **)v1, *(const char **)v2);
 }
 
+static void do_xconvstate_notfound(char *key, void *data,
+				   void *rock __attribute__((unused)))
+{
+    struct statusdata *sd = data;
+
+    if (sd->messages != ~0U)
+	prot_printf(imapd_out, "* FOLDERSTATE \"%s\" NIL NIL\r\n", key);
+}
 
 static int do_xconvfetch(conversation_id_t cid,
 			 hash_table *validities,
@@ -4653,6 +4661,8 @@ static int do_xconvfetch(conversation_id_t cid,
 	if (r)
 	    goto out;
 	client_sd = hash_lookup(mboxnames.data[i], validities);
+	if (client_sd)
+	    client_sd->messages = ~0U;
 	if (client_sd &&
 	    client_sd->uidvalidity == server_sd.uidvalidity &&
 	    client_sd->highestmodseq == server_sd.highestmodseq) {
@@ -4695,6 +4705,11 @@ static int do_xconvfetch(conversation_id_t cid,
 	if (r)
 	    goto out;
     }
+
+    /* Emit FOLDERSTATE notifications for any folders named
+     * by the client-sent validity tuples but no longer
+     * recorded as being touched by this conversation */
+    hash_enumerate(validities, do_xconvstate_notfound, NULL);
 
     r = 0;
 
