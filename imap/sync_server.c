@@ -1246,7 +1246,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		 * pretending to have a CRC failure.  The master will
 		 * eventually get all this information and make the same
 		 * decision, then tell us a CID we both agree on. */
-		return IMAP_MAILBOX_CRC;
+		return IMAP_SYNC_CHECKSUM;
 	    } else if ((r & SYNC_CHOOSE_CLASH)) {
 		/* We chose the master's CID but the replica has
 		 * a non-NULL CID which will need to be rewritten. */
