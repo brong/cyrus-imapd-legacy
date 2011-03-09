@@ -709,7 +709,7 @@ int dlist_gethex64(struct dlist *dl, const char *name, bit64 *val)
     size_t strlen;
     const char *end;
 
-    if (dlist_getbuf(dl, name, &str, &strlen))
+    if (!dlist_getbuf(dl, name, &str, &strlen))
 	return 0;
 
     if (parsehex(str, &end, strlen, val))
