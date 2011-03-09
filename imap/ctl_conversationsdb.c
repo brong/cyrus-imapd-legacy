@@ -145,7 +145,8 @@ int main(int argc, char **argv)
 {
     int c;
     const char *alt_config = NULL;
-    const char *mboxname = NULL;
+    const char *userid = NULL;
+    const char *inboxname = NULL;
     char *fname;
     enum { UNKNOWN, DUMP, UNDUMP } mode = UNKNOWN;
 
@@ -183,17 +184,23 @@ int main(int argc, char **argv)
 	usage(argv[0]);
 
     if (optind == argc-1)
-	mboxname = argv[optind];
+	userid = argv[optind];
     else
 	usage(argv[0]);
 
     cyrus_init(alt_config, "ctl_conversationsdb", 0);
 
-    fname = conversations_getpath(mboxname);
+    inboxname = mboxname_user_inbox(userid);
+    if (inboxname == NULL) {
+	fprintf(stderr, "Invalid userid %s", userid);
+	exit(EC_NOINPUT);
+    }
+
+    fname = conversations_getpath(inboxname);
     if (fname == NULL) {
 	fprintf(stderr, "Unable to get conversations database "
-			"filename for mboxname \"%s\"\n",
-			mboxname);
+			"filename for userid \"%s\"\n",
+			userid);
 	exit(EC_NOINPUT);
     }
 
