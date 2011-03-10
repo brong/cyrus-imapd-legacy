@@ -686,6 +686,10 @@ static void server_emit_caps(struct server_state *state)
      * Note that we suppress them all if STARTTLS is enabled.
      */
     if (!state->config.starttls || state->is_tls) {
+	int got_login = 0;
+	int got_plain = 0;
+	int got_digestmd5 = 0;
+
 	/* First see what mechanisms SASL has; no point reporting
 	 * mechanisms which aren't actually available. */
 	sasl_listmech(state->saslconn, /*user*/NULL, /*prefix*/"",
@@ -697,15 +701,31 @@ static void server_emit_caps(struct server_state *state)
 	 * allows us. */
 	words[n++] = "ccSASL";
 	for (p = strtok(b, " ") ; p ; p = strtok(NULL, " ")) {
-	    if (!strcasecmp(p, "LOGIN") && state->config.sasl_login)
+	    if (!strcasecmp(p, "LOGIN") && state->config.sasl_login) {
 		words[n++] = "LOGIN";
-	    if (!strcasecmp(p, "LOGIN") && state->config.sasl_plain)
+		got_login = 1;
+	    }
+	    if (!strcasecmp(p, "LOGIN") && state->config.sasl_plain) {
 		words[n++] = "PLAIN";
-	    if (!strcasecmp(p, "DIGEST-MD5") && state->config.sasl_digestmd5)
+		got_plain = 1;
+	    }
+	    if (!strcasecmp(p, "DIGEST-MD5") && state->config.sasl_digestmd5) {
 		words[n++] = "DIGEST-MD5";
+		got_digestmd5 = 1;
+	    }
 	}
 	words[n++] = NULL;
 	free(b);
+
+	if (state->config.sasl_login && !got_login)
+	    fprintf(stderr, "Server failed to find requested "
+			    "SASL mechanism \"LOGIN\"\n");
+	if (state->config.sasl_plain && !got_plain)
+	    fprintf(stderr, "Server failed to find requested "
+			    "SASL mechanism \"PLAIN\"\n");
+	if (state->config.sasl_digestmd5 && !got_digestmd5)
+	    fprintf(stderr, "Server failed to find requested "
+			    "SASL mechanism \"DIGEST-MD5\"\n");
     }
 
     /*
