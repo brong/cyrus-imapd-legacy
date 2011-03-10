@@ -56,6 +56,7 @@
 #include "prot.h"
 #include "quota.h"
 #include "sequence.h"
+#include "conversations.h"
 
 #define MAX_MAILBOX_NAME 490
 /* enough space for all possible rewrites and DELETED.* and stuff */
@@ -133,7 +134,7 @@ struct index_record {
     uint32_t cache_version;
     struct message_guid guid;
     modseq_t modseq;
-    bit64 cid;
+    conversation_id_t cid;
     bit32 cache_crc;
     bit32 record_crc;
 
