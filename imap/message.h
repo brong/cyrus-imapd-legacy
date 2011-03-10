@@ -174,4 +174,9 @@ extern void message_free_body P((struct body *body));
 /* NOTE - scribbles on its input */
 extern void message_parse_env_address(char *str, struct address *addr);
 
+extern int message_update_conversations(struct conversations_state *,
+			         struct index_record *, const struct body *);
+extern int message_update_conversations_file(struct conversations_state *,
+				      struct index_record *, const char *);
+
 #endif /* INCLUDED_MESSAGE_H */

@@ -78,6 +78,7 @@
 #include "annotate.h"
 #include "message_guid.h"
 #include "strarray.h"
+#include "conversations.h"
 
 struct stagemsg {
     char fname[1024];
@@ -154,7 +155,8 @@ int append_setup(struct appendstate *as, const char *name,
 {
     int r;
 
-    as->mailbox = NULL;
+    memset(as, 0, sizeof(*as));
+
     r = mailbox_open_iwl(name, &as->mailbox);
     if (r) return r;
 
@@ -746,6 +748,7 @@ static int callout_run(const char *fname,
 out:
     buf_free(&args);
     dlist_free(&results);
+
     return r;
 }
 
@@ -838,6 +841,13 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
+	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    if (cstate)
+		r = message_update_conversations(cstate, &record, *body);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
+	}
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -1066,7 +1076,7 @@ int append_copy(struct mailbox *mailbox,
 {
     int msg;
     struct index_record record;
-    char *srcfname, *destfname;
+    char *srcfname, *destfname = NULL;
     int r = 0;
     int flag, userflag;
     
@@ -1109,11 +1119,11 @@ int append_copy(struct mailbox *mailbox,
 	}
 
 	/* Link/copy message file */
+	free(destfname);
 	srcfname = xstrdup(mailbox_message_fname(mailbox, copymsg[msg].uid));
 	destfname = xstrdup(mailbox_message_fname(as->mailbox, record.uid));
 	r = mailbox_copyfile(srcfname, destfname, nolink);
 	free(srcfname);
-	free(destfname);
 	if (r) goto out;
 
 	/* Write out cache info, copy other info */
@@ -1124,7 +1134,18 @@ int append_copy(struct mailbox *mailbox,
 	record.content_lines = copymsg[msg].content_lines;
 	record.cache_version = copymsg[msg].cache_version;
 	record.cache_crc = copymsg[msg].cache_crc;
+	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
+
+	if (record.cid == NULLCONVERSATION &&
+	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    if (cstate)
+		r = message_update_conversations_file(cstate, &record, destfname);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
+	    if (r) goto out;
+	}
 
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);
@@ -1137,6 +1158,7 @@ int append_copy(struct mailbox *mailbox,
     }
 
 out:
+    free(destfname);
     if (r) append_abort(as);
 
     return r;
