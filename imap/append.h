@@ -50,6 +50,7 @@
 #include "prot.h"
 #include "sequence.h"
 #include "strarray.h"
+#include "conversations.h"
 
 struct copymsg {
     unsigned long uid;
@@ -86,6 +87,8 @@ struct appendstate {
     /* set seen on these message on commit */
     int internalseen;
     struct seqset *seen_seq;
+
+    struct conversations_state conversations;
 };
 
 /* add helper function to determine uid range appended? */
