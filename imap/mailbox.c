@@ -1424,6 +1424,7 @@ int mailbox_buf_to_index_record(const char *buf,
     record->cache_version = ntohl(*((bit32 *)(buf+OFFSET_CACHE_VERSION)));
     message_guid_import(&record->guid, (unsigned char *)buf+OFFSET_MESSAGE_GUID);
     record->modseq = ntohll(*((bit64 *)(buf+OFFSET_MODSEQ)));
+    record->cid = ntohll(*(bit64 *)(buf+OFFSET_CID));
     record->cache_crc = ntohl(*((bit32 *)(buf+OFFSET_CACHE_CRC)));
     record->record_crc = ntohl(*((bit32 *)(buf+OFFSET_RECORD_CRC)));
 
@@ -1934,6 +1935,7 @@ bit32 mailbox_index_record_to_buf(struct index_record *record,
     *((bit32 *)(buf+OFFSET_CACHE_VERSION)) = htonl(record->cache_version);
     message_guid_export(&record->guid, buf+OFFSET_MESSAGE_GUID);
     *((bit64 *)(buf+OFFSET_MODSEQ)) = htonll(record->modseq);
+    *((bit64 *)(buf+OFFSET_CID)) = htonll(record->cid);
     *((bit32 *)(buf+OFFSET_CACHE_CRC)) = htonl(record->cache_crc);   
 
     /* calculate the checksum */
