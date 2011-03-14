@@ -1424,7 +1424,8 @@ static int do_mailbox(struct dlist *kin)
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	r = mboxlist_createsync(mboxname, mbtype, partition,
 				sync_userid, sync_authstate,
-				options, uidvalidity, acl,
+				options, uidvalidity,
+				highestmodseq, acl,
 				uniqueid, &mailbox);
 	/* set a highestmodseq of 0 so ALL changes are future
 	 * changes and get applied */
@@ -1524,6 +1525,7 @@ static int do_mailbox(struct dlist *kin)
 
     /* this happens all the time! */
     if (mailbox->i.highestmodseq < highestmodseq) {
+	mboxname_setmodseq(mailbox->name, highestmodseq);
 	mailbox->i.highestmodseq = highestmodseq;
     }
 
@@ -1531,6 +1533,8 @@ static int do_mailbox(struct dlist *kin)
     if (mailbox->i.uidvalidity < uidvalidity) {
 	syslog(LOG_ERR, "%s uidvalidity higher on master, updating %u => %u",
 	       mailbox->name, mailbox->i.uidvalidity, uidvalidity);
+	/* make sure nothing new gets created with a lower value */
+	mboxname_setuidvalidity(mailbox->name, uidvalidity);
 	mailbox->i.uidvalidity = uidvalidity;
     }
 
