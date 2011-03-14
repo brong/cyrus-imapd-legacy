@@ -236,7 +236,7 @@ int upgrade_index(struct mailbox *mailbox)
 
     /* HIGHESTMODSEQ[_64] added with minor version 8 */
     if (oldminor_version < 8)
-	mailbox->i.highestmodseq = 1;
+	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
 
     /* new version fields */
     mailbox->i.minor_version = MAILBOX_MINOR_VERSION;
@@ -250,7 +250,8 @@ int upgrade_index(struct mailbox *mailbox)
     if (oldstart_offset < OFFSET_POP3_LAST_LOGIN)
 	mailbox->i.pop3_last_login = 0;
     if (oldstart_offset < OFFSET_UIDVALIDITY)
-	mailbox->i.uidvalidity = 1;
+	mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
+							  time(NULL));
     if (oldstart_offset < OFFSET_MAILBOX_OPTIONS)
 	mailbox->i.options = config_getint(IMAPOPT_MAILBOX_DEFAULT_OPTIONS);
 

@@ -876,7 +876,7 @@ int undump_mailbox(const char *mbname,
 	struct mboxlist_entry *mbentry = NULL;
 	r = mboxlist_lookup(mbname, &mbentry, NULL);
 	if (!r) r = mailbox_create(mbname, mbentry->partition, mbentry->acl,
-				   NULL, NULL, 0, 0, &mailbox);
+				   NULL, NULL, 0, 0, 0, &mailbox);
 	mboxlist_entry_free(&mbentry);
     }
     if(r) goto done;

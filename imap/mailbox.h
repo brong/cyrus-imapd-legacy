@@ -500,6 +500,7 @@ extern void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sd)
 extern int mailbox_create(const char *name, const char *part, const char *acl,
 			  const char *uniqueid, const char *specialuse,
 			  int options, unsigned uidvalidity,
+			  modseq_t highestmodseq,
 			  struct mailbox **mailboxptr);
 
 extern int mailbox_copy_files(struct mailbox *mailbox, const char *newpart,
