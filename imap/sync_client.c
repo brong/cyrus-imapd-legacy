@@ -1292,7 +1292,8 @@ static int mailbox_full_update(const char *mboxname)
 	       ", updating %u => %u",
 	       mailbox->name, mailbox->i.uidvalidity, uidvalidity);
 	mailbox_index_dirty(mailbox);
-	mailbox->i.uidvalidity = uidvalidity;
+	mailbox->i.uidvalidity = mboxname_setuidvalidity(mailbox->name,
+							 uidvalidity);
     }
 
     if (mailbox->i.highestmodseq < highestmodseq) {
@@ -1301,8 +1302,8 @@ static int mailbox_full_update(const char *mboxname)
 	syslog(LOG_NOTICE, "SYNCNOTICE: highestmodseq higher on replica %s"
 	       ", updating " MODSEQ_FMT " => " MODSEQ_FMT,
 	       mailbox->name, mailbox->i.highestmodseq, highestmodseq+1);
-	mailbox_modseq_dirty(mailbox);
-	mailbox->i.highestmodseq = highestmodseq+1;
+	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name,
+						       highestmodseq);
     }
 
     r = mailbox_update_loop(mailbox, kr->head, last_uid,
