@@ -1,9 +1,11 @@
 #if HAVE_CONFIG_H
 #include <config.h>
 #endif
+#include <assert.h>
 #include "cunit/cunit.h"
 #include "libconfig.h"
 #include "mboxname.h"
+#include "global.h"
 
 static void test_to_parts(void)
 {
@@ -49,7 +51,7 @@ static void test_to_userid(void)
     static const char BETTYAT_SENT[] = "boop.com!user.betty.Sent";
     static const char SHARED[] = "shared.Gossip";
     static const char SHAREDAT[] = "foonly.com!shared.Tattle";
-    char *r;
+    const char *r;
 
     r = mboxname_to_userid(SAM_DRAFTS);
     CU_ASSERT_STRING_EQUAL(r, "sam");
@@ -66,7 +68,7 @@ static void test_to_userid(void)
 
 static void test_to_inbox(void)
 {
-    char *r;
+    const char *r;
 
     r = mboxname_user_inbox("sam");
     CU_ASSERT_STRING_EQUAL(r, "user.sam");
@@ -102,10 +104,37 @@ static void test_same_userid_domain(void)
     CU_ASSERT_EQUAL(mboxname_same_userid(JANE_SENT, JANEAT_SENT), 0);
 }
 
+static void test_nextmodseq(void)
+{
+    static const char FREDNAME[] = "bloggs.com!user.fred";
+    struct mboxname_parts parts;
+    char *fname;
+
+    /* ensure there is no file */
+    mboxname_to_parts(FREDNAME, &parts);
+    fname = mboxname_conf_getpath(&parts, "modseq");
+    unlink(fname);
+    free(fname);
+    mboxname_free_parts(&parts);
+
+    /* initial value should be 1 without file */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 0), 1);
+    /* next value should always increment */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 0), 2);
+    /* higher value should force a jump */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 100), 101);
+    /* lower value should not decrease */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 5), 102);
+}
+
 static enum enum_value old_config_virtdomains;
+static char *old_config_dir;
 
 static int init(void)
 {
+    char cwd[PATH_MAX];
+    char *s;
+
     /*
      * TODO: this is pretty hacky.  There should be some
      * cleaner way of pushing aside the config for a moment
@@ -114,12 +143,29 @@ static int init(void)
      */
     old_config_virtdomains = config_virtdomains;
     config_virtdomains = IMAP_ENUM_VIRTDOMAINS_ON;
+
+    old_config_dir = (char *)config_dir;
+    s = getcwd(cwd, sizeof(cwd));
+    assert(s);
+    config_dir = strconcat(cwd, "/conf.d", (char *)NULL);
+
     return 0;
 }
 
 static int cleanup(void)
 {
+    char *cmd;
+    int r;
+
+    cmd = strconcat("rm -rf \"", config_dir, "\"", (char *)NULL);
+    r = system(cmd);
+    assert(!r);
+    free(cmd);
+    free((char *)config_dir);
+    config_dir = old_config_dir;
+
     config_virtdomains = old_config_virtdomains;
+
     return 0;
 }
 
