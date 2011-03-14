@@ -1023,7 +1023,8 @@ EXPORTED void mailbox_modseq_dirty(struct mailbox *mailbox)
     if (mailbox->modseq_dirty)
 	return;
 
-    mailbox->i.highestmodseq++;
+    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name,
+			       mailbox->i.highestmodseq);
     mailbox->last_updated = time(0);
     mailbox->modseq_dirty = 1;
     mailbox_index_dirty(mailbox);
@@ -1755,16 +1756,17 @@ restart:
     }
 
     /* fix up 2.4.0 bug breakage */
-    if (mailbox->i.uidvalidity == 0) {
-	mailbox->i.uidvalidity = time(0);
+    if (!mailbox->i.uidvalidity) {
+	mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
+							  time(0));
 	if (locktype == LOCK_EXCLUSIVE) {
 	    mailbox_index_dirty(mailbox);
 	    mailbox_commit(mailbox);
 	    syslog(LOG_ERR, "%s: fixing zero uidvalidity", mailbox->name);
 	}
     }
-    if (mailbox->i.highestmodseq == 0) {
-	mailbox->i.highestmodseq = 1;
+    if (!mailbox->i.highestmodseq) {
+	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
 	if (locktype == LOCK_EXCLUSIVE) {
 	    mailbox_index_dirty(mailbox);
 	    mailbox_commit(mailbox);
@@ -2846,6 +2848,7 @@ EXPORTED int mailbox_create(const char *name,
 		   const char *specialuse,
 		   int options,
 		   unsigned uidvalidity,
+		   modseq_t highestmodseq,
 		   struct mailbox **mailboxptr)
 {
     int r = 0;
@@ -2943,15 +2946,22 @@ EXPORTED int mailbox_create(const char *name,
 
     /* ensure a UIDVALIDITY is set */
     if (!uidvalidity)
-	uidvalidity = time(0);
+	uidvalidity = mboxname_nextuidvalidity(name, time(0));
+    else
+	mboxname_setuidvalidity(mailbox->name, uidvalidity);
+    /* and highest modseq */
+    if (!highestmodseq) 
+	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
+    else
+	mboxname_setmodseq(mailbox->name, highestmodseq);
     /* init non-zero fields */
     mailbox_index_dirty(mailbox);
     mailbox->i.minor_version = MAILBOX_MINOR_VERSION;
     mailbox->i.start_offset = INDEX_HEADER_SIZE;
     mailbox->i.record_size = INDEX_RECORD_SIZE;
-    mailbox->i.uidvalidity = uidvalidity;
     mailbox->i.options = options;
-    mailbox->i.highestmodseq = 1;
+    mailbox->i.uidvalidity = uidvalidity;
+    mailbox->i.highestmodseq = highestmodseq;
 
     /* initialise header size field so appends calculate the
      * correct map size */
@@ -3286,13 +3296,13 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
 
     /* create uidvalidity if not explicitly requested */
     if (!uidvalidity)
-	uidvalidity = time(0);
+	uidvalidity = mboxname_nextuidvalidity(newname, time(0));
 
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
 		       oldmailbox->acl, (userid ? NULL : oldmailbox->uniqueid),
 		       oldmailbox->specialuse, oldmailbox->i.options,
-		       uidvalidity, &newmailbox);
+		       uidvalidity, oldmailbox->i.highestmodseq, &newmailbox);
 
     if (r) return r;
 
@@ -3640,7 +3650,7 @@ static int mailbox_reconstruct_create(const char *name, struct mailbox **mbptr)
          * no point trying to rescue anything else... */
 	mailbox_close(&mailbox);
 	r = mailbox_create(name, mbentry->partition, mbentry->acl,
-			   mbentry->specialuse, NULL, options, 0, mbptr);
+			   mbentry->specialuse, NULL, options, 0, 0, mbptr);
 	mboxlist_entry_free(&mbentry);
 	return r;
     }
@@ -3921,7 +3931,8 @@ static int mailbox_reconstruct_compare_update(struct mailbox *mailbox,
 	syslog(LOG_ERR, "%s uid %u future modseq " MODSEQ_FMT " found",
 		   mailbox->name, record->uid, record->modseq);
 	mailbox_index_dirty(mailbox);
-	mailbox->i.highestmodseq = record->modseq;
+	mailbox->i.highestmodseq = mboxname_setmodseq(mailbox->name,
+						      record->modseq);
     }
 
     if (record->uid > mailbox->i.last_uid) {
@@ -4274,17 +4285,18 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
     reconstruct_compare_headers(mailbox, &old_header, &mailbox->i);
 
     /* fix up 2.4.0 bug breakage */
-    if (mailbox->i.uidvalidity == 0) {
+    if (!mailbox->i.uidvalidity) {
 	if (make_changes) {
-	    mailbox->i.uidvalidity = time(0);
+	    mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
+							      time(0));
 	    mailbox_index_dirty(mailbox);
 	}
 	syslog(LOG_ERR, "%s: zero uidvalidity", mailbox->name);
     }
-    if (mailbox->i.highestmodseq == 0) {
+    if (!mailbox->i.highestmodseq) {
 	if (make_changes) {
 	    mailbox_index_dirty(mailbox);
-	    mailbox->i.highestmodseq = 1;
+	    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
 	}
 	syslog(LOG_ERR, "%s:  zero highestmodseq", mailbox->name);
     }
