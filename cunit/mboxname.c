@@ -4,6 +4,7 @@
 #include "cunit/cunit.h"
 #include "libconfig.h"
 #include "mboxname.h"
+#include "global.h"
 
 static void test_to_parts(void)
 {
@@ -49,7 +50,7 @@ static void test_to_userid(void)
     static const char BETTYAT_SENT[] = "boop.com!user.betty.Sent";
     static const char SHARED[] = "shared.Gossip";
     static const char SHAREDAT[] = "foonly.com!shared.Tattle";
-    char *r;
+    const char *r;
 
     r = mboxname_to_userid(SAM_DRAFTS);
     CU_ASSERT_STRING_EQUAL(r, "sam");
@@ -66,7 +67,7 @@ static void test_to_userid(void)
 
 static void test_to_inbox(void)
 {
-    char *r;
+    const char *r;
 
     r = mboxname_user_inbox("sam");
     CU_ASSERT_STRING_EQUAL(r, "user.sam");
@@ -100,6 +101,29 @@ static void test_same_userid_domain(void)
     CU_ASSERT_EQUAL(mboxname_same_userid(JANEAT_SENT, FREDAT_SENT), 0);
     CU_ASSERT_EQUAL(mboxname_same_userid(JANE_SENT, FREDAT_SENT), 0);
     CU_ASSERT_EQUAL(mboxname_same_userid(JANE_SENT, JANEAT_SENT), 0);
+}
+
+static void test_nextmodseq(void)
+{
+    static const char FREDNAME[] = "bloggs.com!user.fred";
+    struct mboxname_parts parts;
+    char *fname;
+
+    /* ensure there is no file */
+    mboxname_to_parts(FREDNAME, &parts);
+    fname = mboxname_conf_getpath(&parts, "modseq");
+    unlink(fname);
+    free(fname);
+    mboxname_free_parts(&parts);
+
+    /* initial value should be 1 without file */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 0), 1);
+    /* next value should always increment */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 0), 2);
+    /* higher value should force a jump */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 100), 101);
+    /* lower value should not decrease */
+    CU_ASSERT_EQUAL(mboxname_nextmodseq(FREDNAME, 5), 102);
 }
 
 static enum enum_value old_config_virtdomains;
