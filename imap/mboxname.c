@@ -59,6 +59,9 @@
 #include "global.h"
 #include "imap_err.h"
 #include "mailbox.h"
+#include "map.h"
+#include "retry.h"
+#include "user.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -1449,3 +1452,102 @@ char *mboxname_conf_getpath(struct mboxname_parts *parts, const char *suffix)
 
     return fname;
 }
+
+
+/* XXX - inform about errors?  Any error causes the value of at least
+   last+1 to be returned.  An error only on writing causes
+   max(last, fileval) + 1 to still be returned */
+static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 last)
+{
+    int fd = -1;
+    int newfd = -1;
+    char *fname = NULL;
+    char newfname[MAX_MAILBOX_PATH];
+    struct stat sbuf, fbuf;
+    const char *base = NULL;
+    unsigned long len = 0;
+    bit64 fileval = 0;
+    char numbuf[30];
+    struct mboxname_parts parts;
+
+    mboxname_to_parts(mboxname, &parts);
+
+    fname = mboxname_conf_getpath(&parts, metaname);
+    if (!fname) goto done;
+
+    /* get a blocking lock on fd */
+    for (;;) {
+	fd = open(fname, O_RDWR | O_CREAT, 0644);
+	if (fd == -1) {
+	    /* OK to not exist - try creating the directory first */
+	    if (cyrus_mkdir(fname, 0755)) goto done;
+	    fd = open(fname, O_RDWR | O_CREAT, 0644);
+	}
+	if (fd == -1) {
+	    syslog(LOG_ERR, "IOERROR: %s failed to create", fname);
+	    goto done;
+	}
+	if (lock_blocking(fd)) {
+	    syslog(LOG_ERR, "IOERROR: %s failed to lock", fname);
+	    goto done;
+	}
+	if (fstat(fd, &sbuf)) {
+	    syslog(LOG_ERR, "IOERROR: %s failed to stat fd", fname);
+	    goto done;
+	}
+	if (stat(fname, &fbuf)) {
+	    syslog(LOG_ERR, "IOERROR: %s failed to stat file", fname);
+	    goto done;
+	}
+	if (sbuf.st_ino == fbuf.st_ino) break;
+	close(fd);
+	fd = -1;
+    }
+
+    /* read the old value */
+    if (fd != -1) {
+	map_refresh(fd, 1, &base, &len, sbuf.st_size, metaname, mboxname);
+	if (len > 0)
+	    parsenum(base, NULL, len, &fileval);
+	if (fileval > last) last = fileval;
+    }
+
+    snprintf(newfname, MAX_MAILBOX_PATH, "%s.NEW", fname);
+    newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    if (!newfd) {
+	if (cyrus_mkdir(newfname, 0755)) goto done;
+	newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    }
+
+    if (newfd == -1) goto done;
+
+    snprintf(numbuf, 30, "%llu", last + 1);
+    retry_write(newfd, numbuf, strlen(numbuf));
+
+    if (fdatasync(newfd)) goto done;
+
+    close(newfd);
+    newfd = -1;
+
+    rename(newfname, fname);
+
+ done:
+    if (newfd != -1) close(newfd);
+    if (fd != -1) close(fd);
+    mboxname_free_parts(&parts);
+    free(fname);
+    return last + 1;
+}
+
+modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last)
+{
+    return (modseq_t)mboxname_nextval(mboxname, "modseq", (bit64)last);
+}
+
+
+uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last)
+{
+    return (uint32_t)mboxname_nextval(mboxname, "uidvalidity", (bit64)last);
+}
+
+
