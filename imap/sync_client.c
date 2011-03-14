@@ -1244,7 +1244,8 @@ static int mailbox_full_update(const char *mboxname)
 	syslog(LOG_NOTICE, "SYNCNOTICE: highestmodseq higher on replica %s"
 	       ", updating " MODSEQ_FMT " => " MODSEQ_FMT,
 	       mailbox->name, mailbox->i.highestmodseq, highestmodseq+1);
-	mailbox->i.highestmodseq = highestmodseq+1;
+	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name,
+						       highestmodseq);
     }
 
     r = mailbox_update_loop(mailbox, kr->head, last_uid,
