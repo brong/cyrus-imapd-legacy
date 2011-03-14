@@ -235,9 +235,10 @@ HIDDEN int upgrade_index(struct mailbox *mailbox)
 
     /* upgrade other fields as necessary */
     if (!mailbox->i.highestmodseq)
-	mailbox->i.highestmodseq = 1;
+	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
     if (!mailbox->i.uidvalidity)
-	mailbox->i.uidvalidity = time(0);
+	mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
+							  time(NULL));
 
     /* minor version wasn't updated religiously in the early days,
      * so we need to use the old offset instead */
