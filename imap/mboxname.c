@@ -1469,6 +1469,7 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
     bit64 fileval = 0;
     char numbuf[30];
     struct mboxname_parts parts;
+    int n;
 
     mboxname_to_parts(mboxname, &parts);
 
@@ -1484,19 +1485,19 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
 	    fd = open(fname, O_RDWR | O_CREAT, 0644);
 	}
 	if (fd == -1) {
-	    syslog(LOG_ERR, "IOERROR: %s failed to create", fname);
+	    syslog(LOG_ERR, "IOERROR: failed to create %s: %m", fname);
 	    goto done;
 	}
 	if (lock_blocking(fd)) {
-	    syslog(LOG_ERR, "IOERROR: %s failed to lock", fname);
+	    syslog(LOG_ERR, "IOERROR: failed to lock %s: %m", fname);
 	    goto done;
 	}
 	if (fstat(fd, &sbuf)) {
-	    syslog(LOG_ERR, "IOERROR: %s failed to stat fd", fname);
+	    syslog(LOG_ERR, "IOERROR: failed to stat fd %s: %m", fname);
 	    goto done;
 	}
 	if (stat(fname, &fbuf)) {
-	    syslog(LOG_ERR, "IOERROR: %s failed to stat file", fname);
+	    syslog(LOG_ERR, "IOERROR: failed to stat file %s: %m", fname);
 	    goto done;
 	}
 	if (sbuf.st_ino == fbuf.st_ino) break;
@@ -1514,22 +1515,30 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
 
     snprintf(newfname, MAX_MAILBOX_PATH, "%s.NEW", fname);
     newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-    if (!newfd) {
-	if (cyrus_mkdir(newfname, 0755)) goto done;
-	newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    if (newfd == -1) {
+	syslog(LOG_ERR, "IOERROR: failed to open for write %s: %m", newfname);
+	goto done;
     }
 
-    if (newfd == -1) goto done;
-
     snprintf(numbuf, 30, "%llu", last + 1);
-    retry_write(newfd, numbuf, strlen(numbuf));
+    n = retry_write(newfd, numbuf, strlen(numbuf));
+    if (n < 0) {
+	syslog(LOG_ERR, "IOERROR: failed to write %s: %m", newfname);
+	goto done;
+    }
 
-    if (fdatasync(newfd)) goto done;
+    if (fdatasync(newfd)) {
+	syslog(LOG_ERR, "IOERROR: failed to fdatasync %s: %m", newfname);
+	goto done;
+    }
 
     close(newfd);
     newfd = -1;
 
-    rename(newfname, fname);
+    if (rename(newfname, fname)) {
+	syslog(LOG_ERR, "IOERROR: failed to rename %s: %m", newfname);
+	goto done;
+    }
 
  done:
     if (newfd != -1) close(newfd);
