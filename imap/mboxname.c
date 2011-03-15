@@ -1472,6 +1472,7 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
 	map_refresh(fd, 1, &base, &len, sbuf.st_size, metaname, mboxname);
 	if (len > 0)
 	    parsenum(base, NULL, len, &fileval);
+	map_free(&base, &len);
 	if (fileval > last) last = fileval;
     }
 
