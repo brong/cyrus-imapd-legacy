@@ -203,7 +203,9 @@ int mboxname_make_parent(char *namebuf);
 char *mboxname_conf_getpath(struct mboxname_parts *parts,
 			    const char *suffix);
 
+modseq_t mboxname_readmodseq(const char *mboxname);
 modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last);
+uint32_t mboxname_readuidvalidity(const char *mboxname);
 uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last);
 
 #endif
