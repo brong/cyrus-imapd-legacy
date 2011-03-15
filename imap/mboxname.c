@@ -1415,6 +1415,43 @@ char *mboxname_conf_getpath(struct mboxname_parts *parts, const char *suffix)
     return fname;
 }
 
+static bit64 mboxname_readval(const char *mboxname, const char *metaname)
+{
+    bit64 fileval = 0;
+    struct mboxname_parts parts;
+    char *fname = NULL;
+    const char *base = NULL;
+    unsigned long len = 0;
+    int fd;
+
+    mboxname_to_parts(mboxname, &parts);
+
+    fname = mboxname_conf_getpath(&parts, metaname);
+    if (!fname) goto done;
+
+    fd = open(fname, O_RDONLY);
+
+    /* read the value - note: we don't care if it's being rewritten,
+     * we'll still get a consistent read on either the old or new
+     * value */
+    if (fd != -1) {
+	struct stat sbuf;
+	if (fstat(fd, &sbuf)) {
+	    syslog(LOG_ERR, "IOERROR: failed to stat fd %s: %m", fname);
+	    goto done;
+	}
+	map_refresh(fd, 1, &base, &len, sbuf.st_size, metaname, mboxname);
+	if (len > 0)
+	    parsenum(base, NULL, len, &fileval);
+	map_free(&base, &len);
+    }
+
+ done:
+    if (fd != -1) close(fd);
+    mboxname_free_parts(&parts);
+    free(fname);
+    return fileval;
+}
 
 /* XXX - inform about errors?  Any error causes the value of at least
    last+1 to be returned.  An error only on writing causes
@@ -1511,11 +1548,20 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
     return last + 1;
 }
 
+modseq_t mboxname_readmodseq(const char *mboxname)
+{
+    return (modseq_t)mboxname_readval(mboxname, "modseq");
+}
+
 modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last)
 {
     return (modseq_t)mboxname_nextval(mboxname, "modseq", (bit64)last);
 }
 
+uint32_t mboxname_readuidvalidity(const char *mboxname)
+{
+    return (uint32_t)mboxname_readval(mboxname, "uidvalidity");
+}
 
 uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last)
 {
