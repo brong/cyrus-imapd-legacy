@@ -307,41 +307,54 @@ int conversations_get_cid(struct conversations_state *state,
     return 0;
 }
 
-static void brec_to_strarray(const char *bdata, int bdatalen, strarray_t *sa)
+static void parse_conversation_folders(const char *base, int len,
+				       modseq_t *highestmodseq,
+				       strarray_t *mboxes)
 {
-    const char *end = bdata + bdatalen;
+    const char *end = base + len;
     const char *p;
 
-    if (!bdata || !bdatalen)
+    if (!base || !len)
 	return;
 
     /* make sure strlen() isn't going to run off the end */
-    if (bdata[bdatalen-1] != '\0')
+    if (base[len-1] != '\0')
 	return;	    /* TODO: return an error */
 
-    for (p = bdata ; p < end ; p += strlen(p)+1)
-	strarray_append(sa, p);
+    *highestmodseq = strtoull(base, NULL, 10);
+
+    for (p = base + strlen(base) + 1; p < end; p += strlen(p) + 1)
+	strarray_append(mboxes, p);
 }
 
-static void strarray_to_brec(const strarray_t *sa, struct buf *b)
+static void build_conversation_folders(modseq_t highestmodseq,
+				       const strarray_t *mboxes,
+				       struct buf *b)
 {
     int i;
 
-    for (i = 0 ; i < sa->count ; i++) {
-	buf_appendcstr(b, sa->data[i]);
+    buf_printf(b, "%llu", highestmodseq);
+    buf_putc(b, '\0');
+
+    for (i = 0 ; i < mboxes->count ; i++) {
+	buf_appendcstr(b, mboxes->data[i]);
 	buf_putc(b, '\0');
     }
 }
 
-int conversations_add_folder(struct conversations_state *state,
-			     conversation_id_t cid, const char *mboxname)
+int conversations_set_folder(struct conversations_state *state,
+			     conversation_id_t cid,
+			     modseq_t highestmodseq,
+			     const char *mboxname)
 {
     const char *bdata;
     int bdatalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
     strarray_t mboxes = STRARRAY_INITIALIZER;
+    modseq_t oldmodseq = 0;
     struct buf buf = BUF_INITIALIZER;
-    int r;
+    int r = 0;
+    int found = -1;
 
     if (!state->db)
 	return IMAP_IOERROR;
@@ -355,19 +368,26 @@ int conversations_add_folder(struct conversations_state *state,
     if (r == CYRUSDB_OK)
     {
 	/* found an existing record */
-	brec_to_strarray(bdata, bdatalen, &mboxes);
-	r = strarray_find(&mboxes, mboxname, 0);
-	if (r >= 0) {
-	    /* folder already in the record => nop */
-	    r = 0;
-	    goto out;
-	}
+	parse_conversation_folders(bdata, bdatalen, &oldmodseq, &mboxes);
+	found = strarray_find(&mboxes, mboxname, 0);
     } else if (r != CYRUSDB_NOTFOUND) {
 	return r;	/* some db error */
     }
 
-    strarray_append(&mboxes, mboxname);
-    strarray_to_brec(&mboxes, &buf);
+    if (found >= 0) {
+	if (oldmodseq == highestmodseq)
+	    goto out;
+    }
+    else {
+	/* folder not found */
+	strarray_append(&mboxes, mboxname);
+    }
+
+    /* can't step back in time */
+    if (highestmodseq < oldmodseq)
+	highestmodseq = oldmodseq;
+
+    build_conversation_folders(highestmodseq, &mboxes, &buf);
 
     r = DB->store(state->db,
 		  bkey, strlen(bkey),
@@ -380,9 +400,10 @@ out:
     return r;
 }
 
-static int _conversations_set_folders(struct conversations_state *state,
-				      conversation_id_t cid,
-				      const strarray_t *mboxes)
+static int conversations_set_folders(struct conversations_state *state,
+				     conversation_id_t cid,
+				     modseq_t highestmodseq,
+				     const strarray_t *mboxes)
 {
     char bkey[CONVERSATION_ID_STRMAX+2];
     struct buf buf = BUF_INITIALIZER;
@@ -392,7 +413,7 @@ static int _conversations_set_folders(struct conversations_state *state,
 	return IMAP_IOERROR;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
-    strarray_to_brec(mboxes, &buf);
+    build_conversation_folders(highestmodseq, mboxes, &buf);
 
     r = DB->store(state->db,
 		  bkey, strlen(bkey),
@@ -404,7 +425,9 @@ static int _conversations_set_folders(struct conversations_state *state,
 }
 
 int conversations_get_folders(struct conversations_state *state,
-			      conversation_id_t cid, strarray_t *sa)
+			      conversation_id_t cid,
+			      modseq_t *highestmodseqp,
+			      strarray_t *sap)
 {
     const char *bdata;
     int bdatalen;
@@ -421,7 +444,7 @@ int conversations_get_folders(struct conversations_state *state,
 		  &state->txn);
 
     if (r == CYRUSDB_OK)
-	brec_to_strarray(bdata, bdatalen, sa);
+	parse_conversation_folders(bdata, bdatalen, highestmodseqp, sap);
     else if (r == CYRUSDB_NOTFOUND)
 	r = 0;
 
@@ -502,12 +525,14 @@ static int dump_record_cb(void *rock,
 	break;
     case 'B':	    /* cid to folders mapping */
 	{
+	    modseq_t highestmodseq = 0;
 	    strarray_t mboxes = STRARRAY_INITIALIZER;
 	    int i;
 
-	    brec_to_strarray(data, datalen, &mboxes);
+	    parse_conversation_folders(data, datalen,
+				       &highestmodseq, &mboxes);
 
-	    fprintf(fp, "cid_to_folders %s", key+1);
+	    fprintf(fp, "cid_to_folders %s %llu", key+1, highestmodseq);
 	    for (i = 0 ; i < mboxes.count ; i++)
 		fprintf(fp, " \"%s\"", mboxes.data[i]);
 	    fprintf(fp, "\n");
@@ -598,6 +623,7 @@ int conversations_undump(struct conversations_state *state, FILE *fp)
 	    }
 	} else if (!strcmp(buf_cstring(&w1), "cid_to_folders")) {
 	    conversation_id_t cid;
+	    modseq_t highestmodseq;
 	    strarray_t mboxes = STRARRAY_INITIALIZER;
 
 	    /* parse the CID */
@@ -608,11 +634,13 @@ int conversations_undump(struct conversations_state *state, FILE *fp)
 		goto syntax_error;
 
 	    /* parse the list of mboxnames */
+	    c = getastring(prot, NULL, &w1);
+	    highestmodseq = strtoull(buf_cstring(&w1), NULL, 10);
 	    r = 0;
 	    while ((c = getastring(prot, NULL, &w1)) != EOF) {
 		strarray_append(&mboxes, buf_cstring(&w1));
 	    }
-	    r = _conversations_set_folders(state, cid, &mboxes);
+	    r = conversations_set_folders(state, cid, highestmodseq, &mboxes);
 	    strarray_fini(&mboxes);
 	    if (r)
 		goto out;
@@ -748,6 +776,7 @@ int conversations_rename_cid(struct conversations_state *state,
     const char *bdata;
     int bdatalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
+    modseq_t highestmodseq = 0;
     strarray_t mboxes = STRARRAY_INITIALIZER;
     struct buf buf = BUF_INITIALIZER;
     int i;
@@ -776,7 +805,8 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r == CYRUSDB_NOTFOUND)
 	return 0;
 
-    brec_to_strarray(bdata, bdatalen, &mboxes);
+    parse_conversation_folders(bdata, bdatalen,
+			       &highestmodseq, &mboxes);
 
     r = DB->delete(state->db,
 		   bkey, strlen(bkey),
@@ -785,7 +815,7 @@ int conversations_rename_cid(struct conversations_state *state,
 	goto out;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, to_cid);
-    strarray_to_brec(&mboxes, &buf);
+    build_conversation_folders(highestmodseq, &mboxes, &buf);
 
     r = DB->store(state->db,
 		  bkey, strlen(bkey),
