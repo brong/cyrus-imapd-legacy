@@ -1874,6 +1874,19 @@ int mailbox_commit_quota(struct mailbox *mailbox)
     return 0;
 }
 
+static int mailbox_commit_conversations(struct mailbox *mailbox)
+{
+    int r = 0;
+
+    if (mailbox->conversations_open) {
+	r = conversations_commit(&mailbox->cstate);
+	if (!r) r = conversations_close(&mailbox->cstate);
+	mailbox->conversations_open = 0;
+    }
+
+    return r;
+}
+
 /*
  * Write the index header for 'mailbox'
  */
@@ -1891,6 +1904,9 @@ int mailbox_commit(struct mailbox *mailbox)
     if (r) return r;
 
     r = mailbox_commit_header(mailbox);
+    if (r) return r;
+
+    r = mailbox_commit_conversations(mailbox);
     if (r) return r;
 
     if (!mailbox->i.dirty)
@@ -2038,6 +2054,42 @@ int mailbox_index_recalc(struct mailbox *mailbox)
     return 0;
 }
 
+int mailbox_open_conversations(struct mailbox *mailbox)
+{
+    int r;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    if (mailbox->conversations_open) {
+	char *fname = conversations_getpath(mailbox->name);
+	r = conversations_open(&mailbox->cstate, fname);
+	free(fname);
+	if (r) return r;
+	mailbox->conversations_open = 1;
+    }
+
+    return 0;
+
+}
+
+static int mailbox_update_conversations(struct mailbox *mailbox,
+					struct index_record *record)
+{
+    int r = 0;
+
+    r = mailbox_open_conversations(mailbox);
+    if (r) return r;
+
+    if (!mailbox->conversations_open)
+	return 0;
+
+    r = conversations_set_folder(&mailbox->cstate, record->cid,
+				 record->modseq, mailbox->name);
+
+    return r;
+}
+
 /*
  * Rewrite an index record in a mailbox - updates all
  * necessary tracking fields automatically.
@@ -2143,8 +2195,10 @@ int mailbox_rewrite_index_record(struct mailbox *mailbox,
 		session_id(), mailbox->name, mailbox->uniqueid,
 		record->uid, message_guid_encode(&record->guid));
     }
-    
-    return 0;
+
+    r = mailbox_update_conversations(mailbox, record);
+
+    return r;
 }
 
 /* append a single message to a mailbox - also updates everything
@@ -2278,8 +2332,10 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 		   session_id(), mailbox->name, mailbox->uniqueid,
 		   record->uid);
     }
+
+    r = mailbox_update_conversations(mailbox, record);
     
-    return 0;
+    return r;
 }
 
 static void mailbox_message_unlink(struct mailbox *mailbox, uint32_t uid)

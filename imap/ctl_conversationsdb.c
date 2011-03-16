@@ -193,19 +193,19 @@ static int do_zero(const char *inboxname, const char *fname)
 static int build_cid_cb(const char *mboxname,
 		        int matchlen __attribute__((unused)),
 		        int maycreate __attribute__((unused)),
-		        void *rock)
+		        void *rock __attribute__((unused)))
 {
-    struct conversations_state *state = (struct conversations_state *)rock;
     struct mailbox *mailbox = NULL;
-    struct body *body = NULL;
     const char *fname = NULL;
     struct index_record record;
     uint32_t recno;
     int r;
-    FILE *f;
 
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r) return r;
+
+    r = mailbox_open_conversations(mailbox);
+    if (r) goto done;
 
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
@@ -221,63 +221,30 @@ static int build_cid_cb(const char *mboxname,
     
 	/* parse the file - XXX: should abstract this bit */
 	fname = mailbox_message_fname(mailbox, record.uid);
-	f = fopen(fname, "r");
-	if (!f) {
-	    r = IMAP_IOERROR;
-	    goto done;
-	}
-	r = message_parse_file(f, NULL, NULL, &body);
-	fclose(f);
-	if (r) goto done;
 
-	r = message_update_conversations(state, &record,
-					 body, mailbox->name);
+	r = message_update_conversations_file(&mailbox->cstate, &record, fname);
 	if (r) goto done;
-
-	message_free_body(body);
-	body = NULL;
 
 	r = mailbox_rewrite_index_record(mailbox, &record);
 	if (r) goto done;
     }
 
  done:
-    if (body) message_free_body(body);
     mailbox_close(&mailbox);
     return r;
 }
 
-static int do_build(const char *inboxname, const char *fname)
+static int do_build(const char *inboxname)
 {
-    struct conversations_state state;
     char buf[MAX_MAILBOX_NAME];
     int r;
 
-    r = conversations_open(&state, fname);
-    if (r) {
-	/* TODO: wouldn't it be nice if we could translate this
-	 * error code into somethine useful for humans? */
-	fprintf(stderr, "Failed to open conversations database %s: %s\n",
-		fname, error_message(r));
-	return -1;
-    }
-
-    r = build_cid_cb(inboxname, 0, 0, &state);
-    if (r) goto out;
+    r = build_cid_cb(inboxname, 0, 0, NULL);
+    if (r) return r;
 
     snprintf(buf, sizeof(buf), "%s.*", inboxname);
     r = mboxlist_findall(NULL, buf, 1, NULL,
-			 NULL, build_cid_cb, &state);
-    if (r) goto out; 
-
-    r = conversations_commit(&state);
-    if (r) {
-	fprintf(stderr, "Failed to commit conversations database %s: %s\n",
-		fname, error_message(r));
-    }
-
-out:
-    conversations_close(&state);
+			 NULL, build_cid_cb, NULL);
     return r;
 }
 
@@ -384,7 +351,7 @@ int main(int argc, char **argv)
 	break;
 
     case BUILD:
-	if (do_build(inboxname, fname))
+	if (do_build(inboxname))
 	    r = EC_NOINPUT;
 	break;
 
