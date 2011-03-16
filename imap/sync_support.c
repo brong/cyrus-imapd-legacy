@@ -1565,7 +1565,6 @@ int sync_append_copyfile(struct mailbox *mailbox,
     struct message_guid tmp_guid;
     conversation_id_t cid = record->cid;
     struct body *body = NULL;
-    struct conversations_state conversations;
     int r;
 
     message_guid_copy(&tmp_guid, &record->guid);
@@ -1590,16 +1589,10 @@ int sync_append_copyfile(struct mailbox *mailbox,
     }
 
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	char *path = conversations_getpath(mailbox->name);
-	r = conversations_open(&conversations, path);
-	free(path);
+	r = mailbox_open_conversations(mailbox);
 	if (!r) {
 	    record->cid = cid;	/* use the CID given us */
-	    r = message_update_conversations(&conversations, record,
-					     body, mailbox->name);
-	    if (!r)
-		r = conversations_commit(&conversations);
-	    r = conversations_close(&conversations);
+	    r = message_update_conversations(&mailbox->cstate, record, body);
 	}
     }
     message_free_body(body);

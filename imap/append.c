@@ -205,15 +205,11 @@ int append_setup(struct appendstate *as, const char *name,
     as->baseuid = as->mailbox->i.last_uid + 1;
     as->s = APPEND_READY;
 
-    /* open conversations db and start a txn */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	char *path = conversations_getpath(name);
-	r = conversations_open(&as->conversations, path);
-	free(path);
-	if (r) {
-	    mailbox_close(&as->mailbox);
-	    return r;
-	}
+    /* open conversations db */
+    r = mailbox_open_conversations(as->mailbox);
+    if (r) {
+	mailbox_close(&as->mailbox);
+	return r;
     }
 
     return 0;
@@ -257,25 +253,12 @@ int append_commit(struct appendstate *as,
 	return r;
     }
 
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	r = conversations_commit(&as->conversations);
-	if (r) {
-	    syslog(LOG_ERR, "IOERROR: commiting conversations append: %s",
-		   error_message(r));
-	    append_abort(as);
-	    return r;
-	}
-    }
-
     if (mailboxptr) {
 	*mailboxptr = as->mailbox;
     }
     else {
 	mailbox_close(&as->mailbox);
     }
-
-    if (config_getswitch(IMAPOPT_CONVERSATIONS))
-	conversations_close(&as->conversations);
 
     as->s = APPEND_DONE;
 
@@ -294,9 +277,6 @@ int append_abort(struct appendstate *as)
 
     /* close mailbox */
     mailbox_close(&as->mailbox);
-
-    if (config_getswitch(IMAPOPT_CONVERSATIONS))
-	conversations_close(&as->conversations);
 
     seqset_free(as->seen_seq);
 
@@ -450,8 +430,7 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
 	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS))
-	    r = message_update_conversations(&as->conversations, &record,
-					     *body, mailbox->name);
+	    r = message_update_conversations(&mailbox->cstate, &record, *body);
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -706,9 +685,8 @@ int append_copy(struct mailbox *mailbox,
 
 	if (record.cid == NULLCONVERSATION &&
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	    r = message_update_conversations_file(&as->conversations,
-						  &record, destfname,
-						  mailbox->name);
+	    r = message_update_conversations_file(&mailbox->cstate,
+						  &record, destfname);
 	    if (r) goto fail;
 	}
 

@@ -52,11 +52,11 @@
 
 #include "auth.h"
 #include "byteorder64.h"
+#include "conversations.h"
 #include "message_guid.h"
 #include "prot.h"
 #include "quota.h"
 #include "sequence.h"
-#include "conversations.h"
 
 #define MAX_MAILBOX_NAME 490
 /* enough space for all possible rewrites and DELETED.* and stuff */
@@ -221,6 +221,9 @@ struct mailbox {
     char *specialuse;
     char *quotaroot;
     char *flagname[MAX_USER_FLAGS];
+
+    int conversations_open;
+    struct conversations_state cstate;
 
     /* change management */
     int modseq_dirty;
@@ -539,5 +542,7 @@ extern int mailbox_post_nop_action(const char *name, unsigned int tag);
 extern unsigned int mailbox_nop_action_count, mailbox_nop_action_tag;
 extern unsigned int mailbox_nop_action_count;
 extern unsigned int mailbox_nop_action_tag;
+
+extern int mailbox_open_conversations(struct mailbox *mailbox);
 
 #endif /* INCLUDED_MAILBOX_H */
