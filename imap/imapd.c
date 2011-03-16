@@ -4634,6 +4634,7 @@ static int do_xconvfetch(conversation_id_t cid,
     struct conversations_state state;
     int r = 0;
     char *fname;
+    modseq_t highestmodseq = 0;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     struct index_state **states;
     int i;
@@ -4650,7 +4651,7 @@ static int do_xconvfetch(conversation_id_t cid,
     if (r)
 	goto out;
 
-    r = conversations_get_folders(&state, cid, &mboxnames);
+    r = conversations_get_folders(&state, cid, &highestmodseq, &mboxnames);
     conversations_close(&state);
     if (r)
 	goto out;

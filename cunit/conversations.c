@@ -363,6 +363,7 @@ static void test_cid_rename(void)
     static const char C_MSGID3[] = "<0010.1288854309@example.com>";
     static const conversation_id_t C_CID1 = 0x10bcdef23456789a;
     static const conversation_id_t C_CID2 = 0x10cdef23456789ab;
+    modseq_t highestmodseq = 0;
     strarray_t notifies = STRARRAY_INITIALIZER;
     strarray_t mboxes = STRARRAY_INITIALIZER;
     conversation_id_t cid;
@@ -379,11 +380,11 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
     r = conversations_set_cid(&state, C_MSGID3, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_add_folder(&state, C_CID1, FOLDER1);
+    r = conversations_set_folder(&state, C_CID1, 1, FOLDER1);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_add_folder(&state, C_CID1, FOLDER2);
+    r = conversations_set_folder(&state, C_CID1, 8, FOLDER2);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_add_folder(&state, C_CID1, FOLDER3);
+    r = conversations_set_folder(&state, C_CID1, 5, FOLDER3);
     CU_ASSERT_EQUAL(r, 0);
 
     /* commit & close */
@@ -428,14 +429,18 @@ static void test_cid_rename(void)
 
     /* check the data got renamed */
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID1, &mboxes);
+    highestmodseq = 0;
+    r = conversations_get_folders(&state, C_CID1, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(highestmodseq, 0);
     CU_ASSERT_EQUAL(mboxes.count, 0);
     strarray_fini(&mboxes);
 
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID2, &mboxes);
+    highestmodseq = 0;
+    r = conversations_get_folders(&state, C_CID2, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(highestmodseq, 8);
     CU_ASSERT_EQUAL(mboxes.count, 3);
     CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
     CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
@@ -469,6 +474,7 @@ static void test_folders(void)
     static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
     static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
     static const conversation_id_t C_CID = 0x10abcdef23456789;
+    modseq_t highestmodseq = 0;
     strarray_t mboxes = STRARRAY_INITIALIZER;
 
     memset(&state, 0, sizeof(state));
@@ -478,33 +484,37 @@ static void test_folders(void)
 
     /* Database is empty, so get should succeed and report no results */
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID, &mboxes);
+    r = conversations_get_folders(&state, C_CID, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(mboxes.count, 0);
     strarray_fini(&mboxes);
 
     /* add should succeed */
-    r = conversations_add_folder(&state, C_CID, FOLDER1);
+    r = conversations_set_folder(&state, C_CID, 4, FOLDER1);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it */
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID, &mboxes);
+    highestmodseq = 0;
+    r = conversations_get_folders(&state, C_CID, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(highestmodseq, 4);
     CU_ASSERT_EQUAL(mboxes.count, 1);
     CU_ASSERT_STRING_EQUAL(mboxes.data[0], FOLDER1);
     strarray_fini(&mboxes);
 
     /* some more adds should succeed */
-    r = conversations_add_folder(&state, C_CID, FOLDER2);
+    r = conversations_set_folder(&state, C_CID, 7, FOLDER2);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_add_folder(&state, C_CID, FOLDER3);
+    r = conversations_set_folder(&state, C_CID, 55, FOLDER3);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report all values we gave it */
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID, &mboxes);
+    highestmodseq = 0;
+    r = conversations_get_folders(&state, C_CID, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(highestmodseq, 55);
     CU_ASSERT_EQUAL(mboxes.count, 3);
     CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
     CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
@@ -522,8 +532,10 @@ static void test_folders(void)
 
     /* get should still succeed and report all values we gave it */
     strarray_init(&mboxes);
-    r = conversations_get_folders(&state, C_CID, &mboxes);
+    highestmodseq = 0;
+    r = conversations_get_folders(&state, C_CID, &highestmodseq, &mboxes);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(highestmodseq, 55);
     CU_ASSERT_EQUAL(mboxes.count, 3);
     CU_ASSERT(strarray_find(&mboxes, FOLDER1, 0) >= 0);
     CU_ASSERT(strarray_find(&mboxes, FOLDER2, 0) >= 0);
@@ -580,6 +592,7 @@ static void test_dump(void)
     FILE *fp;
     char filename[64];
     char msgid[40];
+    modseq_t highestmodseq = 0;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     strarray_t mboxnames2 = STRARRAY_INITIALIZER;
     conversation_id_t cid, cid2;
@@ -608,7 +621,7 @@ static void test_dump(void)
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
 	for (j = 0 ; j < mboxnames.count ; j++) {
-	    r = conversations_add_folder(&state, cid,
+	    r = conversations_set_folder(&state, cid, 100,
 					 mboxnames.data[j]);
 	    CU_ASSERT_EQUAL(r, 0);
 	}
@@ -666,8 +679,9 @@ static void test_dump(void)
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
 	strarray_truncate(&mboxnames2, 0);
-	r = conversations_get_folders(&state, cid, &mboxnames2);
+	r = conversations_get_folders(&state, cid, &highestmodseq, &mboxnames2);
 	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(highestmodseq, 0);
 	CU_ASSERT_EQUAL(mboxnames2.count, 0);
     }
 
@@ -694,8 +708,9 @@ static void test_dump(void)
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
 	strarray_truncate(&mboxnames2, 0);
-	r = conversations_get_folders(&state, cid, &mboxnames2);
+	r = conversations_get_folders(&state, cid, &highestmodseq, &mboxnames2);
 	CU_ASSERT_EQUAL(r, 0);
+	CU_ASSERT_EQUAL(highestmodseq, 100);
 	CU_ASSERT_EQUAL(mboxnames2.count, mboxnames2.count);
 	for (j = 0 ; j < mboxnames.count ; j++)
 	    CU_ASSERT_STRING_EQUAL(mboxnames.data[j], mboxnames2.data[j]);

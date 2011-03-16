@@ -75,11 +75,13 @@ extern int conversations_set_cid(struct conversations_state *state,
 extern int conversations_get_cid(struct conversations_state *state,
 			         const char *msgid,
 			         conversation_id_t *cidp);
-extern int conversations_add_folder(struct conversations_state *state,
+extern int conversations_set_folder(struct conversations_state *state,
 				    conversation_id_t cid,
+				    modseq_t modseq,
 				    const char *mboxname);
 extern int conversations_get_folders(struct conversations_state *state,
 				     conversation_id_t cid,
+				     modseq_t *highestmodseqp,
 				     strarray_t *sa);
 
 extern int conversations_prune(struct conversations_state *state,

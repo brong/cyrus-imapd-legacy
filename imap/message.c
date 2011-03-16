@@ -2541,8 +2541,7 @@ static conversation_id_t generate_conversation_id(const struct body *body)
  */
 int message_update_conversations(struct conversations_state *state,
 			         struct index_record *record,
-			         const struct body *body,
-				 const char *mboxname)
+			         const struct body *body)
 {
     char *hdrs[3];
     /* TODO: need an expanding array class here */
@@ -2652,9 +2651,6 @@ continue2:
 	r = conversations_set_cid(state, found[i].msgid, newcid);
 	if (r)
 	    goto out;
-	r = conversations_add_folder(state, newcid, mboxname);
-	if (r)
-	    goto out;
     }
 
     record->cid = newcid;
@@ -2668,8 +2664,7 @@ out:
 
 int message_update_conversations_file(struct conversations_state *state,
 				      struct index_record *record,
-				      const char *fname,
-				      const char *mboxname)
+				      const char *fname)
 {
     struct body *body = NULL;
     FILE *fp;
@@ -2684,7 +2679,7 @@ int message_update_conversations_file(struct conversations_state *state,
     if (r)
 	return r;
 
-    r = message_update_conversations(state, record, body, mboxname);
+    r = message_update_conversations(state, record, body);
 
     message_free_body(body);
 
