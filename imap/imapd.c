@@ -429,6 +429,7 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 			 int *charset, int parsecharset);
 int getsearchdate(time_t *start, time_t *end);
 int getsortcriteria(char *tag, struct sortcrit **sortcrit);
+static char *sortcrit_as_string(const struct sortcrit *sortcrit);
 static int parse_windowargs(const char *tag, struct windowargs **);
 static void free_windowargs(struct windowargs *wa);
 int getdatetime(time_t *date);
@@ -5017,6 +5018,12 @@ void cmd_sort(char *tag, int usinguid)
     n = index_sort(imapd_index, sortcrit, searchargs, usinguid);
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
+    if (CONFIG_TIMING_VERBOSE) {
+	char *s = sortcrit_as_string(sortcrit);
+	syslog(LOG_DEBUG, "SORT (%s) processing time: %d msg in %s sec",
+	       s, n, mytime);
+	free(s);
+    }
     prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
 		error_message(IMAP_OK_COMPLETED), n, mytime);
 
@@ -5110,6 +5117,12 @@ void cmd_xconvsort(char *tag)
 		   /*usinguid*/0);
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
+    if (CONFIG_TIMING_VERBOSE) {
+	char *s = sortcrit_as_string(sortcrit);
+	syslog(LOG_DEBUG, "XCONVSORT (%s) processing time: %d msg in %s sec",
+	       s, n, mytime);
+	free(s);
+    }
     prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
 		error_message(IMAP_OK_COMPLETED), n, mytime);
 
@@ -10108,6 +10121,36 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
 #endif
+}
+
+static char *sortcrit_as_string(const struct sortcrit *sortcrit)
+{
+    struct buf b = BUF_INITIALIZER;
+    static const char * const key_names[] = {
+	"SEQUENCE", "ARRIVAL", "CC", "DATE", "FROM",
+	"SIZE", "SUBJECT", "TO", "ANNOTATION", "MODSEQ"
+    };
+
+    for ( ; sortcrit->key ; sortcrit++) {
+	if (b.len)
+	    buf_putc(&b, ' ');
+	if (sortcrit->flags & SORT_REVERSE)
+	    buf_appendcstr(&b, "REVERSE ");
+
+	if (sortcrit->key < VECTOR_SIZE(key_names))
+	    buf_appendcstr(&b, key_names[sortcrit->key]);
+	else
+	    buf_printf(&b, "UNKNOWN%u", sortcrit->key);
+
+	switch (sortcrit->key) {
+	case SORT_ANNOTATION:
+	    buf_printf(&b, " \"%s\" \"%s\"",
+		       sortcrit->args.annot.entry,
+		       sortcrit->args.annot.attrib);
+	    break;
+	}
+    }
+    return buf_release(&b);
 }
 
 static int parse_windowargs(const char *tag, struct windowargs **wa)
