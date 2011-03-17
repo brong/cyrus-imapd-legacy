@@ -3566,9 +3566,8 @@ void cmd_select(char *tag, char *cmd, char *name)
 		v->uidvalidity = strtoul(arg.s, &p, 10);
 		if (*p || !v->uidvalidity || v->uidvalidity == ULONG_MAX) goto badqresync;
 		if (c != ' ') goto badqresync;
-		c = getastring(imapd_in, imapd_out, &arg);
-		v->modseq = strtoul(arg.s, &p, 10);
-		if (*p || !v->modseq || v->modseq == ULONG_MAX) goto badqresync;
+		c = getmodseq(imapd_in, &v->modseq);
+		if (c == EOF) goto badqresync;
 		if (c == ' ') {
 		    c = prot_getc(imapd_in);
 		    if (c != '(') {
@@ -4321,9 +4320,8 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 		    eatline(imapd_in, c);
 		    goto freeargs;
 		}
-		c = getastring(imapd_in, imapd_out, &fieldname);
-		fetchargs.changedsince = strtoul(fieldname.s, &p, 10);
-		if (*p || fetchargs.changedsince == ULONG_MAX) {
+		c = getmodseq(imapd_in, &fetchargs.changedsince);
+		if (c == EOF) {
 		    prot_printf(imapd_out,
 				"%s BAD Invalid argument to %s %s\r\n",
 				tag, cmd, fetchatt.s);
@@ -4454,7 +4452,8 @@ static int parse_xconv_validities(const char *tag,
 {
     int c;
     struct buf name = BUF_INITIALIZER;
-    uint32_t uidv, hms;
+    uint32_t uidv;
+    modseq_t hms;
     struct statusdata *sd;
 
     /* parse the opening parenthesis of the tuple list */
@@ -4479,7 +4478,7 @@ static int parse_xconv_validities(const char *tag,
 	if (c != ' ')
 	    goto syntax_error;
 
-	c = getuint32(imapd_in, &hms);
+	c = getmodseq(imapd_in, &hms);
 	if (c != ')')
 	    goto syntax_error;
 
@@ -4733,8 +4732,7 @@ void cmd_store(char *tag, char *sequence, int usinguid)
     c = prot_getc(imapd_in);
     if (c == '(') {
 	/* Grab/parse the modifier(s) */
-	static struct buf storemod, modvalue;
-	char *p;
+	static struct buf storemod;
 
 	do {
 	    c = getword(imapd_in, &storemod);
@@ -4747,12 +4745,11 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 		    eatline(imapd_in, c);
 		    return;
 		}
-		c = getastring(imapd_in, imapd_out, &modvalue);
-		storeargs.unchangedsince = strtoul(modvalue.s, &p, 10);
-		if (*p || storeargs.unchangedsince == ULONG_MAX) {
+		c = getmodseq(imapd_in, &storeargs.unchangedsince);
+		if (c == EOF) {
 		    prot_printf(imapd_out,
-				"%s BAD Invalid argument to %s %s\r\n",
-				tag, cmd, storemod.s);
+				"%s BAD Invalid argument to %s UNCHANGEDSINCE\r\n",
+				tag, cmd);
 		    eatline(imapd_in, c);
 		    return;
 		}
@@ -8685,11 +8682,8 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 		c = getword(imapd_in, &arg);
 		if (c != ' ') goto missingarg;
 	    }
-	    c = getword(imapd_in, &arg);
-	    for (p = arg.s; *p && Uisdigit(*p); p++) {
-		searchargs->modseq = searchargs->modseq * 10 + *p - '0';
-	    }
-	    if (!arg.s || *p) goto badnumber;
+	    c = getmodseq(imapd_in, &searchargs->modseq);
+	    if (c == EOF) goto badnumber;
 	}
 	else goto badcri;
 	break;
