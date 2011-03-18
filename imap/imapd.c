@@ -4641,13 +4641,15 @@ static int do_xconvfetch(conversation_id_t cid,
     struct conversations_state state;
     int r = 0;
     char *fname;
-    modseq_t highestmodseq = 0;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     struct index_state **states;
     int i;
     char *vanished;
     struct statusdata *client_sd;
     struct statusdata server_sd;
+    struct dlist *dl = NULL;
+    struct dlist *ditem = NULL;
+    const char *mboxname;
     int dummy;
 
     fname = conversations_getpath(imapd_index->mailbox->name);
@@ -4658,10 +4660,17 @@ static int do_xconvfetch(conversation_id_t cid,
     if (r)
 	goto out;
 
-    r = conversations_get_folders(&state, cid, &highestmodseq, &mboxnames);
+    r = conversations_get_data(&state, cid, &dl);
     conversations_close(&state);
     if (r)
 	goto out;
+
+    for (ditem = dlist_getchild(dl, "FOLDERS"); ditem; ditem = ditem->next) {
+	if (dlist_getatom(ditem, "MBOXNAME", &mboxname))
+	    strarray_append(&mboxnames, mboxname);
+    }
+    
+    dlist_free(&dl);
 
     /* Force a fixed order on the folders, so that the locking order is stable */
     qsort(mboxnames.data, mboxnames.count, sizeof(char *),
