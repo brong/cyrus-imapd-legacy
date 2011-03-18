@@ -50,7 +50,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "util.h"
-#include "strarray.h"
 
 typedef bit64	conversation_id_t;
 #define CONV_FMT "%016llx"
@@ -61,6 +60,9 @@ struct conversations_state
     struct db *db;
     struct txn *txn;
 };
+
+struct index_record;
+struct dlist;
 
 extern char *conversations_getpath(const char *mboxname);
 extern int conversations_open(struct conversations_state *state,
@@ -75,14 +77,13 @@ extern int conversations_set_msgid(struct conversations_state *state,
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
-extern int conversations_set_folder(struct conversations_state *state,
-				    conversation_id_t cid,
-				    modseq_t modseq,
-				    const char *mboxname);
-extern int conversations_get_folders(struct conversations_state *state,
-				     conversation_id_t cid,
-				     modseq_t *highestmodseqp,
-				     strarray_t *sa);
+extern int conversations_update(struct conversations_state *state,
+				const char *mboxname,
+				struct index_record *old,
+				struct index_record *new);
+extern int conversations_get_data(struct conversations_state *state,
+				  conversation_id_t cid,
+				  struct dlist **dptr);
 
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,

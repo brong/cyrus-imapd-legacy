@@ -57,6 +57,7 @@
 #include "append.h"
 #include "assert.h"
 #include "charset.h"
+#include "dlist.h"
 #include "exitcodes.h"
 #include "hash.h"
 #include "imap_err.h"
@@ -81,24 +82,6 @@
 
 #include "conversations.h"
 
-
-/*
- * In-database format of conversations db record message-id
- * record, which is keyed on a message-id (including the <>
- * brackets), e.g. "<123.abc@example.com>".
- *
- * Note that the structure is stored in network order for
- * portability between architecture.  Note also, the structure
- * is carefully defined to avoid implicit padding which might
- * make it's binary format non-portable.
- *
- * Also note that we don't use bit64, as this would actually
- * increase sizeof(mrec) with an invisible 32b pad.
- */
-struct conversations_rec {
-    conversation_id_t cid; /* conversation ID */
-    time_t stamp;	/* time_t insertion timestamp */
-};
 
 #define CONVERSATION_ID_STRMAX	    (1+sizeof(conversation_id_t)*2)
 
@@ -181,7 +164,7 @@ static int check_msgid(const char *msgid, int len, int *lenp)
 
 static int _conversations_set_key(struct conversations_state *state,
 				  const char *key, int keylen,
-				  struct conversations_rec *rec)
+				  conversation_id_t cid, time_t stamp)
 {
     int r;
     struct buf buf;
@@ -191,7 +174,7 @@ static int _conversations_set_key(struct conversations_state *state,
     if (state->db == NULL)
 	return IMAP_IOERROR;
 
-    buf_printf(&buf, CONV_FMT " %lu", rec->cid, rec->stamp);
+    buf_printf(&buf, CONV_FMT " %lu", cid, stamp);
 
     r = DB->store(state->db,
 		  key, keylen,
@@ -205,9 +188,9 @@ static int _conversations_set_key(struct conversations_state *state,
     return 0;
 }
 
-static int _conversations_set(struct conversations_state *state,
-			      const char *msgid,
-			      struct conversations_rec *rec)
+int conversations_set_msgid(struct conversations_state *state,
+			  const char *msgid,
+			  conversation_id_t cid)
 {
     int keylen;
     int r;
@@ -216,27 +199,17 @@ static int _conversations_set(struct conversations_state *state,
     if (r)
 	return r;
 
-    return _conversations_set_key(state, msgid, keylen, rec);
-}
-
-int conversations_set_msgid(struct conversations_state *state,
-			  const char *msgid,
-			  conversation_id_t cid)
-{
-    struct conversations_rec rec;
-    rec.cid = cid;
-    rec.stamp = time(NULL);
-    return _conversations_set(state, msgid, &rec);
+    return _conversations_set_key(state, msgid, keylen, cid, time(NULL));
 }
 
 static int _conversations_parse(const char *data, int datalen,
-				struct conversations_rec *rec)
+				conversation_id_t *cidp, time_t *stampp)
 { 
     const char *rest;
     int r;
     bit64 tval;
 
-    r = parsehex(data, &rest, 16, &rec->cid);
+    r = parsehex(data, &rest, 16, cidp);
     if (r) return IMAP_MAILBOX_BADFORMAT;
 
     /* should have parsed exactly 16 characters */
@@ -254,14 +227,14 @@ static int _conversations_parse(const char *data, int datalen,
     if (rest - data != datalen)
 	return IMAP_MAILBOX_BADFORMAT;
 
-    rec->stamp = tval;
+    if (stampp) *stampp = tval;
 
     return 0;
 }
 
-static int _conversations_get(struct conversations_state *state,
-			      const char *msgid,
-			      struct conversations_rec *rec)
+int conversations_get_msgid(struct conversations_state *state,
+		          const char *msgid,
+		          conversation_id_t *cidp)
 {
     int keylen;
     int datalen = 0;
@@ -279,84 +252,48 @@ static int _conversations_get(struct conversations_state *state,
 		  &data, &datalen,
 		  &state->txn);
 
-    if (!r) r = _conversations_parse(data, datalen, rec);
+    if (!r) r = _conversations_parse(data, datalen, cidp, NULL);
 
-    if (r) {
-	rec->cid = 0;
-	rec->stamp = 0;
-    }
+    if (r) *cidp = NULLCONVERSATION;
 
     return 0;
 }
 
-int conversations_get_msgid(struct conversations_state *state,
-		          const char *msgid,
-		          conversation_id_t *cidp)
-{
-    struct conversations_rec rec;
-    int r;
-
-    r = _conversations_get(state, msgid, &rec);
-    if (r) return r;
-
-    *cidp = rec.cid;
-
-    return 0;
-}
-
-static void parse_conversation_folders(const char *base, int len,
-				       modseq_t *highestmodseq,
-				       strarray_t *mboxes)
-{
-    const char *end = base + len;
-    const char *p;
-
-    if (!base || !len)
-	return;
-
-    /* make sure strlen() isn't going to run off the end */
-    if (base[len-1] != '\0')
-	return;	    /* TODO: return an error */
-
-    *highestmodseq = strtoull(base, NULL, 10);
-
-    for (p = base + strlen(base) + 1; p < end; p += strlen(p) + 1)
-	strarray_append(mboxes, p);
-}
-
-static void build_conversation_folders(modseq_t highestmodseq,
-				       const strarray_t *mboxes,
-				       struct buf *b)
-{
-    int i;
-
-    buf_printf(b, "%llu", highestmodseq);
-    buf_putc(b, '\0');
-
-    for (i = 0 ; i < mboxes->count ; i++) {
-	buf_appendcstr(b, mboxes->data[i]);
-	buf_putc(b, '\0');
-    }
-}
-
-int conversations_set_folder(struct conversations_state *state,
-			     conversation_id_t cid,
-			     modseq_t highestmodseq,
-			     const char *mboxname)
+int conversations_update(struct conversations_state *state,
+			 const char *mboxname,
+			 struct index_record *old,
+			 struct index_record *new)
 {
     const char *bdata;
     int bdatalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
-    strarray_t mboxes = STRARRAY_INITIALIZER;
-    modseq_t oldmodseq = 0;
+    struct dlist *data = NULL;
+    struct dlist *hl = NULL;
+    struct dlist *el = NULL;
+    struct dlist *ul = NULL;
+    struct dlist *dl = NULL;
+    struct dlist *fl = NULL;
+    struct dlist *ml = NULL;
+    struct dlist *mhl = NULL;
+    struct dlist *mel = NULL;
+    struct dlist *mul = NULL;
     struct buf buf = BUF_INITIALIZER;
     int r = 0;
-    int found = -1;
+
+    if (old) assert(old->cid == new->cid);
+
+    modseq_t oldh, newh;
+    uint32_t olde, newe;
+    uint32_t oldu, newu;
+    uint32_t oldd, newd;
+    modseq_t oldmh, newmh;
+    uint32_t oldme, newme;
+    uint32_t oldmu, newmu;
 
     if (!state->db)
 	return IMAP_IOERROR;
 
-    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, new->cid);
     r = DB->fetch(state->db,
 		  bkey, strlen(bkey),
 		  &bdata, &bdatalen,
@@ -365,66 +302,109 @@ int conversations_set_folder(struct conversations_state *state,
     if (r == CYRUSDB_OK)
     {
 	/* found an existing record */
-	parse_conversation_folders(bdata, bdatalen, &oldmodseq, &mboxes);
-	found = strarray_find(&mboxes, mboxname, 0);
+	dlist_parsemap(&data, 0, bdata, bdatalen);
+	if (data) {
+	    hl = dlist_getchild(data, "MODSEQ");
+	    el = dlist_getchild(data, "EXISTS");
+	    ul = dlist_getchild(data, "UNSEEN");
+	    dl = dlist_getchild(data, "DRAFTS");
+	    fl = dlist_getchild(data, "FOLDER");
+	    for (ml = fl; ml; ml = ml->next) {
+		struct dlist *tmpl = dlist_getchild(ml, "MBOXNAME");
+		if (tmpl && !strcmp(tmpl->sval, mboxname))
+		    break;
+	    }
+	}
     } else if (r != CYRUSDB_NOTFOUND) {
 	return r;	/* some db error */
     }
 
-    if (found >= 0) {
-	if (oldmodseq == highestmodseq)
-	    goto out;
+    /* create if not exists */
+    if (!data) data = dlist_kvlist(NULL, NULL);
+    if (!hl) hl = dlist_modseq(data, "MODSEQ", 0);
+    if (!el) el = dlist_num(data, "EXISTS", 0);
+    if (!ul) ul = dlist_num(data, "UNSEEN", 0);
+    if (!dl) dl = dlist_num(data, "DRAFTS", 0);
+    if (!fl) fl = dlist_list(data, "FOLDER");
+    if (!ml) {
+	ml = dlist_kvlist(fl, "FOLDER");
+	dlist_atom(ml, "MBOXNAME", mboxname);
     }
-    else {
-	/* folder not found */
-	strarray_append(&mboxes, mboxname);
+    mhl = dlist_getchild(ml, "MODSEQ");
+    mel = dlist_getchild(ml, "EXISTS");
+    mul = dlist_getchild(ml, "UNSEEN");
+    if (!mhl) mhl = dlist_modseq(ml, "MODSEQ", 0);
+    if (!mel) mel = dlist_num(ml, "EXISTS", 0);
+    if (!mul) mul = dlist_num(ml, "UNSEEN", 0);
+
+    newh  = oldh  = dlist_modseqval(hl);
+    newe  = olde  = dlist_nval(el);
+    newu  = oldu  = dlist_nval(ul);
+    newd  = oldd  = dlist_nval(dl);
+    newmh = oldmh = dlist_modseqval(mhl);
+    newme = oldme = dlist_nval(mel);
+    newmu = oldmu = dlist_nval(mul);
+
+    /* apply the changes */
+    if (old) {
+	/* decrease any relevent counts */
+	if (!(old->system_flags & FLAG_EXPUNGED)) {
+	    newe--;
+	    newme--;
+	    if (!(old->system_flags & FLAG_SEEN)) {
+		newu--;
+		newmu--;
+	    }
+	    if (old->system_flags & FLAG_DRAFT)
+		newd--;
+	}
+    }
+    /* add any counts */
+    if (!(new->system_flags & FLAG_EXPUNGED)) {
+	newe++;
+	newme++;
+	if (!(new->system_flags & FLAG_SEEN)) {
+	    newu++;
+	    newmu++;
+	}
+	if (new->system_flags & FLAG_DRAFT)
+	    newd++;
+    }
+    if (new->modseq > newh)  newh  = new->modseq;
+    if (new->modseq > newmh) newmh = new->modseq;
+
+    if (newh != oldh || newe != olde || newu != oldu || newd != oldd ||
+		newmh != oldmh || newme != oldme || newmu != oldmu) {
+	/* skanky in-house modifications */
+	hl->nval = newh;
+	hl->type = DL_MODSEQ;
+	el->nval = newe;
+	el->type = DL_NUM;
+	ul->nval = newu;
+	el->type = DL_NUM;
+	dl->nval = newd;
+	el->type = DL_NUM;
+	mhl->nval = newmh;
+	mhl->type = DL_NUM;
+	mel->nval = newme;
+	mel->type = DL_NUM;
+	mul->nval = newmu;
+	mul->type = DL_NUM;
+	dlist_printbuf(data, 0, &buf);
+	r = DB->store(state->db,
+		      bkey, strlen(bkey),
+		      buf.s, buf.len,
+		      &state->txn);
     }
 
-    /* can't step back in time */
-    if (highestmodseq < oldmodseq)
-	highestmodseq = oldmodseq;
-
-    build_conversation_folders(highestmodseq, &mboxes, &buf);
-
-    r = DB->store(state->db,
-		  bkey, strlen(bkey),
-		  buf.s, buf.len,
-		  &state->txn);
-
-out:
-    strarray_fini(&mboxes);
+    dlist_free(&data);
     buf_free(&buf);
     return r;
 }
 
-static int conversations_set_folders(struct conversations_state *state,
-				     conversation_id_t cid,
-				     modseq_t highestmodseq,
-				     const strarray_t *mboxes)
-{
-    char bkey[CONVERSATION_ID_STRMAX+2];
-    struct buf buf = BUF_INITIALIZER;
-    int r;
-
-    if (!state->db)
-	return IMAP_IOERROR;
-
-    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
-    build_conversation_folders(highestmodseq, mboxes, &buf);
-
-    r = DB->store(state->db,
-		  bkey, strlen(bkey),
-		  buf.s, buf.len,
-		  &state->txn);
-
-    buf_free(&buf);
-    return r;
-}
-
-int conversations_get_folders(struct conversations_state *state,
-			      conversation_id_t cid,
-			      modseq_t *highestmodseqp,
-			      strarray_t *sap)
+int conversations_get_data(struct conversations_state *state,
+			   conversation_id_t cid,
+			   struct dlist **dptr)
 {
     const char *bdata;
     int bdatalen;
@@ -440,8 +420,9 @@ int conversations_get_folders(struct conversations_state *state,
 		  &bdata, &bdatalen,
 		  &state->txn);
 
-    if (r == CYRUSDB_OK)
-	parse_conversation_folders(bdata, bdatalen, highestmodseqp, sap);
+    if (r == CYRUSDB_OK) {
+	dlist_parsemap(dptr, 0, bdata, bdatalen);
+    }
     else if (r == CYRUSDB_NOTFOUND)
 	r = 0;
 
@@ -460,18 +441,19 @@ static int prunecb(void *rock,
 		   const char *data, int datalen)
 {
     struct prune_rock *prock = (struct prune_rock *)rock;
-    struct conversations_rec rec;
+    conversation_id_t cid;
+    time_t stamp;
     int r;
 
     prock->nseen++;
     r = check_msgid(key, keylen, NULL);
     if (r) return r;
 
-    r = _conversations_parse(data, datalen, &rec);
+    r = _conversations_parse(data, datalen, &cid, &stamp);
     if (r) return r;
 
     /* keep records newer than the threshold */
-    if (rec.stamp >= prock->thresh)
+    if (stamp >= prock->thresh)
 	return 0;
 
     prock->ndeleted++;
@@ -496,213 +478,6 @@ int conversations_prune(struct conversations_state *state,
 	*ndeletedp = rock.ndeleted;
 
     return 0;
-}
-
-static int dump_record_cb(void *rock,
-		          const char *bkey, int bkeylen,
-		          const char *data, int datalen)
-{
-    FILE *fp = rock;
-    char *key = xstrndup(bkey, bkeylen);
-    int r;
-
-    switch (key[0])
-    {
-    case '<':	    /* msgid to cid mapping */
-	{
-	    struct conversations_rec rec;
-	    char stampstr[32];
-
-	    r = _conversations_parse(data, datalen, &rec);
-
-	    time_to_iso8601(rec.stamp, stampstr, sizeof(stampstr));
-	    fprintf(fp, "msgid_to_cid \"%s\" " CONV_FMT " %s\n",
-		    key, rec.cid, stampstr);
-	}
-	break;
-    case 'B':	    /* cid to folders mapping */
-	{
-	    modseq_t highestmodseq = 0;
-	    strarray_t mboxes = STRARRAY_INITIALIZER;
-	    int i;
-
-	    parse_conversation_folders(data, datalen,
-				       &highestmodseq, &mboxes);
-
-	    fprintf(fp, "cid_to_folders %s %llu", key+1, highestmodseq);
-	    for (i = 0 ; i < mboxes.count ; i++)
-		fprintf(fp, " \"%s\"", mboxes.data[i]);
-	    fprintf(fp, "\n");
-
-	    strarray_fini(&mboxes);
-	}
-	break;
-    default:
-	fprintf(stderr, "Unknown record type: key=\"%s\"\n", key);
-	break;
-    }
-
-    free(key);
-    return 0;
-}
-
-void conversations_dump(struct conversations_state *state, FILE *fp)
-{
-    if (state->db)
-	DB->foreach(state->db, "", 0, NULL, dump_record_cb, fp, &state->txn);
-}
-
-static int buf_getline(struct buf *buf,  FILE *fp)
-{
-    int c;
-
-    buf_reset(buf);
-    while ((c = fgetc(fp)) != EOF) {
-	buf_putc(buf, c);
-	if (c == '\n')
-	    break;
-    }
-    buf_cstring(buf);
-    return buf->len;
-}
-
-int conversations_undump(struct conversations_state *state, FILE *fp)
-{
-    struct buf line = BUF_INITIALIZER;
-    struct buf w1 = BUF_INITIALIZER;
-    struct buf w2 = BUF_INITIALIZER;
-    struct protstream *prot = NULL;
-    int c;
-    int r;
-    unsigned int lineno = 0;
-
-    while (buf_getline(&line, fp)) {
-	lineno++;
-	/* set up to tokenize */
-	prot = prot_readmap(buf_cstring(&line), line.len);
-	if (!prot) {
-	    r = IMAP_IOERROR;
-	    goto out;
-	}
-
-	/* get the leading keyword */
-	c = getastring(prot, NULL, &w1);
-	if (c == EOF)
-	    goto syntax_error;
-
-	if (!strcmp(buf_cstring(&w1), "msgid_to_cid")) {
-	    struct conversations_rec rec;
-
-	    /* parse the msgid */
-	    c = getastring(prot, NULL, &w1);
-	    if (c == EOF)
-		goto syntax_error;
-
-	    /* parse the CID */
-	    c = getastring(prot, NULL, &w2);
-	    if (c == EOF)
-		goto syntax_error;
-	    if (!conversation_id_decode(&rec.cid, buf_cstring(&w2)))
-		goto syntax_error;
-
-	    /* parse the timestamp */
-	    c = getastring(prot, NULL, &w2);
-	    if (c == EOF)
-		goto syntax_error;
-	    if (time_from_iso8601(buf_cstring(&w2), &rec.stamp) < 0)
-		goto syntax_error;
-
-	    /* save into the database */
-	    r = _conversations_set(state, buf_cstring(&w1), &rec);
-	    if (r) {
-		fprintf(stderr, "Error at line %u: %s\n", lineno, error_message(r));
-		goto out;
-	    }
-	} else if (!strcmp(buf_cstring(&w1), "cid_to_folders")) {
-	    conversation_id_t cid;
-	    modseq_t highestmodseq;
-	    strarray_t mboxes = STRARRAY_INITIALIZER;
-
-	    /* parse the CID */
-	    c = getastring(prot, NULL, &w1);
-	    if (c == EOF)
-		goto syntax_error;
-	    if (!conversation_id_decode(&cid, buf_cstring(&w1)))
-		goto syntax_error;
-
-	    /* parse the list of mboxnames */
-	    c = getastring(prot, NULL, &w1);
-	    highestmodseq = strtoull(buf_cstring(&w1), NULL, 10);
-	    r = 0;
-	    while ((c = getastring(prot, NULL, &w1)) != EOF) {
-		strarray_append(&mboxes, buf_cstring(&w1));
-	    }
-	    r = conversations_set_folders(state, cid, highestmodseq, &mboxes);
-	    strarray_fini(&mboxes);
-	    if (r)
-		goto out;
-	} else {
-	    fprintf(stderr, "Unknown keyword \"%s\" at line %u\n",
-		    buf_cstring(&w1), lineno);
-	    r = IMAP_MAILBOX_BADFORMAT;
-	    goto out;
-	}
-
-	prot_free(prot);
-	prot = NULL;
-    }
-
-out:
-    if (prot)
-	prot_free(prot);
-    buf_free(&line);
-    buf_free(&w1);
-    buf_free(&w2);
-    return r;
-
-syntax_error:
-    fprintf(stderr, "Syntax error at line %u\n", lineno);
-    r = IMAP_MAILBOX_BADFORMAT;
-    goto out;
-}
-
-struct truncate_rock {
-    struct conversations_state *state;
-    int r;
-};
-
-static int delete_record_cb(void *rock,
-		            const char *key, int keylen,
-		            const char *data __attribute__((unused)),
-			    int datalen __attribute__((unused)))
-{
-    struct truncate_rock *trock = rock;
-    int r;
-
-    r = DB->delete(trock->state->db,
-		  key, keylen,
-		  &trock->state->txn,
-		  /*force*/1);
-    if (r) {
-	trock->r = r;
-	return 1;   /* break the foreach() early */
-    }
-
-    return 0;
-}
-
-int conversations_truncate(struct conversations_state *state)
-{
-    struct truncate_rock trock = { state, 0 };
-    int r = 0;
-
-    /* Unfortunately, the libcyrusdb interface does not provide a
-     * "delete every record" primitive like Berkerley's DB->truncate().
-     * So we have to do it the hard way */
-
-    if (state->db)
-	DB->foreach(state->db, "", 0, NULL, delete_record_cb, &trock, &state->txn);
-    return r;
 }
 
 /* NOTE: this makes an "ATOM" return */
@@ -743,24 +518,25 @@ static int do_one_rename(void *rock,
 		         const char *data, int datalen)
 {
     struct rename_rock *rrock = (struct rename_rock *)rock;
-    struct conversations_rec rec;
+    conversation_id_t cid;
+    time_t stamp;
     int r;
 
     r = check_msgid(key, keylen, NULL);
     if (r) return r;
 
-    r = _conversations_parse(data, datalen, &rec);
+    r = _conversations_parse(data, datalen, &cid, &stamp);
     if (r) return r;
 
     rrock->entries_seen++;
 
-    if (rec.cid != rrock->from_cid)
+    if (cid != rrock->from_cid)
 	return 0;	/* nothing to see, move along */
 
     rrock->entries_renamed++;
 
-    rec.cid = rrock->to_cid;
-    return _conversations_set_key(rrock->state, key, keylen, &rec);
+    return _conversations_set_key(rrock->state, key, keylen,
+				  rrock->to_cid, stamp);
 }
 
 int conversations_rename_cid(struct conversations_state *state,
@@ -773,10 +549,8 @@ int conversations_rename_cid(struct conversations_state *state,
     const char *bdata;
     int bdatalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
-    modseq_t highestmodseq = 0;
-    strarray_t mboxes = STRARRAY_INITIALIZER;
     struct buf buf = BUF_INITIALIZER;
-    int i;
+    struct dlist *dl = NULL;
     int r;
 
     if (!state->db)
@@ -802,8 +576,8 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r == CYRUSDB_NOTFOUND)
 	return 0;
 
-    parse_conversation_folders(bdata, bdatalen,
-			       &highestmodseq, &mboxes);
+    if (renamecb)
+	dlist_parsemap(&dl, 0, bdata, bdatalen);
 
     r = DB->delete(state->db,
 		   bkey, strlen(bkey),
@@ -811,8 +585,9 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r)
 	goto out;
 
+    dlist_printbuf(dl, 0, &buf);
+
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, to_cid);
-    build_conversation_folders(highestmodseq, &mboxes, &buf);
 
     r = DB->store(state->db,
 		  bkey, strlen(bkey),
@@ -821,13 +596,21 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r)
 	goto out;
 
-    if (renamecb) {
-	for (i = 0 ; i < mboxes.count ; i++)
-	    renamecb(mboxes.data[i], from_cid, to_cid, rock);
+    if (dl) {
+	struct dlist *fl;
+	struct dlist *ditem;
+	if (dlist_getlist(dl, "FOLDER", &fl)) {
+	    for (ditem = fl->head; ditem; ditem = ditem->next) {
+		const char *mboxname;
+		if (dlist_getatom(ditem, "MBOXNAME", &mboxname)) {
+		    renamecb(mboxname, from_cid, to_cid, rock);
+		}
+	    }
+	}
     }
 
 out:
-    strarray_fini(&mboxes);
+    dlist_free(&dl);
     buf_free(&buf);
     return r;
 }
@@ -853,6 +636,21 @@ int conversations_rename_cid_mb(const char *name,
 out:
     free(path);
     return r;
+}
+
+void conversations_dump(struct conversations_state *state, FILE *fp)
+{
+    cyrusdb_dump(DB, state->db, "", 0, fp, &state->txn);
+}
+
+int conversations_truncate(struct conversations_state *state)
+{
+    return cyrusdb_truncate(DB, state->db, &state->txn);
+}
+
+int conversations_undump(struct conversations_state *state, FILE *fp)
+{
+    return cyrusdb_undump(DB, state->db, fp, &state->txn);
 }
 
 #undef DB
