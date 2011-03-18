@@ -89,6 +89,7 @@
 #include "util.h"
 #include "sequence.h"
 #include "statuscache.h"
+#include "strarray.h"
 #include "sync_log.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
@@ -2074,7 +2075,8 @@ int mailbox_open_conversations(struct mailbox *mailbox)
 }
 
 static int mailbox_update_conversations(struct mailbox *mailbox,
-					struct index_record *record)
+					struct index_record *old,
+					struct index_record *new)
 {
     int r = 0;
 
@@ -2084,8 +2086,7 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (!mailbox->conversations_open)
 	return 0;
 
-    r = conversations_set_folder(&mailbox->cstate, record->cid,
-				 record->modseq, mailbox->name);
+    r = conversations_update(&mailbox->cstate, mailbox->name, old, new);
 
     return r;
 }
@@ -2196,7 +2197,7 @@ int mailbox_rewrite_index_record(struct mailbox *mailbox,
 		record->uid, message_guid_encode(&record->guid));
     }
 
-    r = mailbox_update_conversations(mailbox, record);
+    r = mailbox_update_conversations(mailbox, &oldrecord, record);
 
     return r;
 }
@@ -2333,7 +2334,7 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 		   record->uid);
     }
 
-    r = mailbox_update_conversations(mailbox, record);
+    r = mailbox_update_conversations(mailbox, NULL, record);
     
     return r;
 }
