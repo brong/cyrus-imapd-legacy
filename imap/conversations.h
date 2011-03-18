@@ -69,12 +69,12 @@ extern int conversations_close(struct conversations_state *state);
 
 extern int conversations_commit(struct conversations_state *state);
 
-extern int conversations_set_cid(struct conversations_state *state,
-			         const char *msgid,
-			         conversation_id_t cid);
-extern int conversations_get_cid(struct conversations_state *state,
-			         const char *msgid,
-			         conversation_id_t *cidp);
+extern int conversations_set_msgid(struct conversations_state *state,
+				   const char *msgid,
+				   conversation_id_t cid);
+extern int conversations_get_msgid(struct conversations_state *state,
+				   const char *msgid,
+				   conversation_id_t *cidp);
 extern int conversations_set_folder(struct conversations_state *state,
 				    conversation_id_t cid,
 				    modseq_t modseq,
