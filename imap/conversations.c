@@ -211,9 +211,6 @@ static int _conversations_set(struct conversations_state *state,
 {
     int keylen;
     int r;
-    struct buf buf;
-
-    buf_init(&buf);
 
     r = check_msgid(msgid, 0, &keylen);
     if (r)
