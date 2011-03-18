@@ -222,7 +222,7 @@ static int _conversations_set(struct conversations_state *state,
     return _conversations_set_key(state, msgid, keylen, rec);
 }
 
-int conversations_set_cid(struct conversations_state *state,
+int conversations_set_msgid(struct conversations_state *state,
 			  const char *msgid,
 			  conversation_id_t cid)
 {
@@ -292,7 +292,7 @@ static int _conversations_get(struct conversations_state *state,
     return 0;
 }
 
-int conversations_get_cid(struct conversations_state *state,
+int conversations_get_msgid(struct conversations_state *state,
 		          const char *msgid,
 		          conversation_id_t *cidp)
 {
