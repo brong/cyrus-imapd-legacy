@@ -264,6 +264,11 @@ struct windowargs {
 				 * @offset.  If not specified or not
 				 * found, @position will be used instead. */
     int32_t offset;
+    int changedsince;		/* if 1, show messages a) added since @uidnext,
+				 * b) removed since @modseq, or c) modified
+				 * since @modseq */
+    modseq_t modseq;
+    uint32_t uidnext;
 };
 
 /* Bitmask for status queries */

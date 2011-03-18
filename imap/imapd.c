@@ -5139,8 +5139,11 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs,
-		   /*usinguid*/0);
+    if (windowargs->changedsince)
+	searchargs->modseq = windowargs->modseq + 1;
+
+    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
+
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
     if (CONFIG_TIMING_VERBOSE) {
@@ -10240,7 +10243,21 @@ static int parse_windowargs(const char *tag, struct windowargs **wa)
 	    c = getuint32(imapd_in, &windowargs.anchor);
 	else if (!strcasecmp(arg.s, "OFFSET"))
 	    c = getsint32(imapd_in, &windowargs.offset);
-	else
+	else if (!strcasecmp(arg.s, "CHANGEDSINCE")) {
+	    windowargs.changedsince = 1;
+	    if (c != ' ')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	    if (c != '(')
+		goto syntax_error;
+	    c = getmodseq(imapd_in, &windowargs.modseq);
+	    if (c != ' ')
+		goto syntax_error;
+	    c = getuint32(imapd_in, &windowargs.uidnext);
+	    if (c != ')')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	} else
 	    goto syntax_error;
 
 	if (c == ')')

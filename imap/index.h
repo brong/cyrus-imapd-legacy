@@ -197,7 +197,7 @@ extern int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs, int usinguid);
 extern int index_convsort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
-		      const struct windowargs * windowargs, int usinguid);
+		      const struct windowargs * windowargs);
 extern int index_thread(struct index_state *state, int algorithm,
 			struct searchargs *searchargs, int usinguid);
 extern int index_search(struct index_state *state,
