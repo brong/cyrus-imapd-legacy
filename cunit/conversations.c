@@ -131,7 +131,7 @@ static void test_abort(void)
     CU_ASSERT_EQUAL(r, 0);
 }
 
-static void notest_prune(void)
+static void test_prune(void)
 {
     int r;
     struct conversations_state state;
