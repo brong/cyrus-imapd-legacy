@@ -1596,7 +1596,12 @@ int index_convsort(struct index_state *state,
 		    added[nadded].pos = wi.pos;
 		    nadded++;
 		}
-		if (wi.is_new_exemplar && wi.is_changed) {
+		if (wi.was_old_exemplar &&
+		    wi.is_new_exemplar &&
+		    wi.is_changed) {
+		    /* TODO: instead of wi.is_changed, lookup conversation
+		     * and compare the conversation's highestmodseq to
+		     * windowargs->modseq */
 		    assert(nchanged < maxresults);
 		    changed[nchanged++] = wi.cid;
 		}
