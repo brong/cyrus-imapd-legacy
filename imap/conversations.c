@@ -276,7 +276,6 @@ int conversations_update(struct conversations_state *state,
     struct dlist *ml = NULL;
     struct dlist *mhl = NULL;
     struct dlist *mel = NULL;
-    struct dlist *mul = NULL;
     struct dlist *sl = NULL;
     struct dlist *sel = NULL;
     struct dlist *enl = NULL;
@@ -299,7 +298,6 @@ int conversations_update(struct conversations_state *state,
     uint32_t oldd, newd;
     modseq_t oldmh, newmh;
     uint32_t oldme, newme;
-    uint32_t oldmu, newmu;
     uint32_t oldee, newee;
 
     if (!state->db)
@@ -367,10 +365,8 @@ int conversations_update(struct conversations_state *state,
     }
     mhl = dlist_getchild(ml, "MODSEQ");
     mel = dlist_getchild(ml, "EXISTS");
-    mul = dlist_getchild(ml, "UNSEEN");
     if (!mhl) mhl = dlist_modseq(ml, "MODSEQ", 0);
     if (!mel) mel = dlist_num(ml, "EXISTS", 0);
-    if (!mul) mul = dlist_num(ml, "UNSEEN", 0);
 
     /* sender stuff */
     if (email) {
@@ -396,7 +392,6 @@ int conversations_update(struct conversations_state *state,
     newd  = oldd  = dlist_nval(dl);
     newmh = oldmh = dlist_modseqval(mhl);
     newme = oldme = dlist_nval(mel);
-    newmu = oldmu = dlist_nval(mul);
     if (email) newee = oldee = dlist_nval(eel);
 
     /* apply the changes */
@@ -406,10 +401,8 @@ int conversations_update(struct conversations_state *state,
 	    newe--;
 	    newme--;
 	    if (email) newee--;
-	    if (!(old->system_flags & FLAG_SEEN)) {
+	    if (!(old->system_flags & FLAG_SEEN))
 		newu--;
-		newmu--;
-	    }
 	    if (old->system_flags & FLAG_DRAFT)
 		newd--;
 	}
@@ -422,10 +415,8 @@ int conversations_update(struct conversations_state *state,
 	    newe++;
 	    newme++;
 	    if (email) newee++;
-	    if (!(new->system_flags & FLAG_SEEN)) {
+	    if (!(new->system_flags & FLAG_SEEN))
 		newu++;
-		newmu++;
-	    }
 	    if (new->system_flags & FLAG_DRAFT)
 		newd++;
 	}
@@ -441,8 +432,7 @@ int conversations_update(struct conversations_state *state,
 		      &state->txn, /*force*/1);
     }
     else if (newh != oldh || newe != olde || newu != oldu || newd != oldd ||
-		newmh != oldmh || newme != oldme || newmu != oldmu ||
-		(email && newee != oldee)) {
+	     newmh != oldmh || newme != oldme || (email && newee != oldee)) {
 	/* skanky in-house modifications */
 	hl->nval = newh;
 	hl->type = DL_MODSEQ;
@@ -453,11 +443,9 @@ int conversations_update(struct conversations_state *state,
 	dl->nval = newd;
 	el->type = DL_NUM;
 	mhl->nval = newmh;
-	mhl->type = DL_NUM;
+	mhl->type = DL_MODSEQ;
 	mel->nval = newme;
 	mel->type = DL_NUM;
-	mul->nval = newmu;
-	mul->type = DL_NUM;
 	if (email) {
 	    eel->type = DL_NUM;
 	    eel->nval = newee;
