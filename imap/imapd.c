@@ -5148,9 +5148,6 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    if (windowargs->changedsince)
-	searchargs->modseq = windowargs->modseq + 1;
-
     n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
@@ -10266,7 +10263,9 @@ static int parse_windowargs(const char *tag, struct windowargs **wa)
 	    if (c != ')')
 		goto syntax_error;
 	    c = prot_getc(imapd_in);
-	} else
+	} else if (!strcasecmp(arg.s, "UNTIL"))
+	    windowargs.until = 1;
+	else
 	    goto syntax_error;
 
 	if (c == ')')
