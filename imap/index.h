@@ -151,6 +151,10 @@ typedef struct msgdata {
     strarray_t annot;		/* array of annotation attribute values
 				   (stored in order of sortcrit) */
     struct msgdata *next;
+
+    unsigned int was_old_exemplar:1;
+    unsigned int is_new_exemplar:1;
+    unsigned int is_changed:1;
 } MsgData;
 
 typedef struct thread {
