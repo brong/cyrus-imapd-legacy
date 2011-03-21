@@ -1,6 +1,7 @@
 #if HAVE_CONFIG_H
 #include <config.h>
 #endif
+#include <assert.h>
 #include "cunit/cunit.h"
 #include "libconfig.h"
 #include "mboxname.h"
@@ -127,9 +128,13 @@ static void test_nextmodseq(void)
 }
 
 static enum enum_value old_config_virtdomains;
+static char *old_config_dir;
 
 static int set_up(void)
 {
+    char cwd[PATH_MAX];
+    char *s;
+
     /*
      * TODO: this is pretty hacky.  There should be some
      * cleaner way of pushing aside the config for a moment
@@ -138,12 +143,29 @@ static int set_up(void)
      */
     old_config_virtdomains = config_virtdomains;
     config_virtdomains = IMAP_ENUM_VIRTDOMAINS_ON;
+
+    old_config_dir = (char *)config_dir;
+    s = getcwd(cwd, sizeof(cwd));
+    assert(s);
+    config_dir = strconcat(cwd, "/conf.d", (char *)NULL);
+
     return 0;
 }
 
 static int tear_down(void)
 {
+    char *cmd;
+    int r;
+
+    cmd = strconcat("rm -rf \"", config_dir, "\"", (char *)NULL);
+    r = system(cmd);
+    assert(!r);
+    free(cmd);
+    free((char *)config_dir);
+    config_dir = old_config_dir;
+
     config_virtdomains = old_config_virtdomains;
+
     return 0;
 }
 
