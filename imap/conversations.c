@@ -260,7 +260,7 @@ int conversations_get_msgid(struct conversations_state *state,
 }
 
 int conversations_update(struct conversations_state *state,
-			 const char *mboxname,
+			 struct mailbox *mailbox,
 			 struct index_record *old,
 			 struct index_record *new)
 {
@@ -277,8 +277,16 @@ int conversations_update(struct conversations_state *state,
     struct dlist *mhl = NULL;
     struct dlist *mel = NULL;
     struct dlist *mul = NULL;
+    struct dlist *sl = NULL;
+    struct dlist *sel = NULL;
+    struct dlist *enl = NULL;
+    struct dlist *eel = NULL;
     struct buf buf = BUF_INITIALIZER;
     int r = 0;
+    char *envtokens[NUMENVTOKENS];
+    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
+    char *env = NULL;
+    char *email = NULL;
 
     if (old) assert(old->cid == new->cid);
 
@@ -289,9 +297,24 @@ int conversations_update(struct conversations_state *state,
     modseq_t oldmh, newmh;
     uint32_t oldme, newme;
     uint32_t oldmu, newmu;
+    uint32_t oldee, newee;
 
     if (!state->db)
 	return IMAP_IOERROR;
+
+    if (!mailbox_cacherecord(mailbox, new)) {
+	/* +1 -> skip the leading paren */
+	env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
+		       cacheitem_size(new, CACHE_ENVELOPE) - 1);
+
+	parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
+
+	if (envtokens[ENV_FROM]) /* paranoia */
+	    message_parse_env_address(envtokens[ENV_FROM], &addr);
+
+	if (addr.mailbox && addr.domain)
+	    email = strconcat(addr.mailbox, "@", addr.domain);
+    }
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, new->cid);
     r = DB->fetch(state->db,
@@ -311,9 +334,18 @@ int conversations_update(struct conversations_state *state,
 	    fl = dlist_getchild(data, "FOLDER");
 	    for (ml = fl; ml; ml = ml->next) {
 		struct dlist *tmpl = dlist_getchild(ml, "MBOXNAME");
-		if (tmpl && !strcmp(tmpl->sval, mboxname))
+		if (tmpl && !strcmp(tmpl->sval, mailbox->name))
 		    break;
 	    }
+	    sl = dlist_getchild(data, "SENDER");
+	    if (email) {
+		for (sel = sl; sel; sel = sel->next) {
+		    struct dlist *tmpl = dlist_getchild(sel, "EMAIL");
+		    if (tmpl && !strcmp(tmpl->sval, email))
+			break;
+		}
+	    }
+	    
 	}
     } else if (r != CYRUSDB_NOTFOUND) {
 	return r;	/* some db error */
@@ -328,7 +360,7 @@ int conversations_update(struct conversations_state *state,
     if (!fl) fl = dlist_list(data, "FOLDER");
     if (!ml) {
 	ml = dlist_kvlist(fl, "FOLDER");
-	dlist_atom(ml, "MBOXNAME", mboxname);
+	dlist_atom(ml, "MBOXNAME", mailbox->name);
     }
     mhl = dlist_getchild(ml, "MODSEQ");
     mel = dlist_getchild(ml, "EXISTS");
@@ -337,6 +369,24 @@ int conversations_update(struct conversations_state *state,
     if (!mel) mel = dlist_num(ml, "EXISTS", 0);
     if (!mul) mul = dlist_num(ml, "UNSEEN", 0);
 
+    /* sender stuff */
+    if (email) {
+	if (!sl) sl = dlist_list(data, "SENDER");
+	if (!sel) {
+	    sel = dlist_kvlist(sl, "SENDER");
+	    dlist_atom(sel, "EMAIL", email);
+	}
+	enl = dlist_getchild(sel, "NAME");
+	eel = dlist_getchild(sel, "EXISTS");
+	if (!enl) enl = dlist_atom(sel, "NAME", addr.name || "");
+	/* case: cached value no name and we have a name now */
+	if (addr.name && !strcmp(enl->sval, "")) {
+	    free(enl->sval);
+	    enl->sval = xstrdup(addr.name);
+	}
+	if (!eel) eel = dlist_num(sel, "EXISTS", 0);
+    }
+
     newh  = oldh  = dlist_modseqval(hl);
     newe  = olde  = dlist_nval(el);
     newu  = oldu  = dlist_nval(ul);
@@ -344,6 +394,7 @@ int conversations_update(struct conversations_state *state,
     newmh = oldmh = dlist_modseqval(mhl);
     newme = oldme = dlist_nval(mel);
     newmu = oldmu = dlist_nval(mul);
+    if (email) newee = oldee = dlist_nval(eel);
 
     /* apply the changes */
     if (old) {
@@ -351,6 +402,7 @@ int conversations_update(struct conversations_state *state,
 	if (!(old->system_flags & FLAG_EXPUNGED)) {
 	    newe--;
 	    newme--;
+	    if (email) newee--;
 	    if (!(old->system_flags & FLAG_SEEN)) {
 		newu--;
 		newmu--;
@@ -363,6 +415,7 @@ int conversations_update(struct conversations_state *state,
     if (!(new->system_flags & FLAG_EXPUNGED)) {
 	newe++;
 	newme++;
+	if (email) newee++;
 	if (!(new->system_flags & FLAG_SEEN)) {
 	    newu++;
 	    newmu++;
@@ -373,8 +426,16 @@ int conversations_update(struct conversations_state *state,
     if (new->modseq > newh)  newh  = new->modseq;
     if (new->modseq > newmh) newmh = new->modseq;
 
-    if (newh != oldh || newe != olde || newu != oldu || newd != oldd ||
-		newmh != oldmh || newme != oldme || newmu != oldmu) {
+    /* XXX - handle removing zero-count senders, zero count mailboxes,
+     * rather than just everything */
+    if (newe == 0) {
+	r = DB->delete(state->db,
+		      bkey, strlen(bkey),
+		      &state->txn, /*force*/1);
+    }
+    else if (newh != oldh || newe != olde || newu != oldu || newd != oldd ||
+		newmh != oldmh || newme != oldme || newmu != oldmu ||
+		(email && newee != oldee)) {
 	/* skanky in-house modifications */
 	hl->nval = newh;
 	hl->type = DL_MODSEQ;
@@ -390,6 +451,10 @@ int conversations_update(struct conversations_state *state,
 	mel->type = DL_NUM;
 	mul->nval = newmu;
 	mul->type = DL_NUM;
+	if (email) {
+	    eel->type = DL_NUM;
+	    eel->nval = newee;
+	}
 	dlist_printbuf(data, 0, &buf);
 	r = DB->store(state->db,
 		      bkey, strlen(bkey),
@@ -397,6 +462,8 @@ int conversations_update(struct conversations_state *state,
 		      &state->txn);
     }
 
+    free(env);
+    free(email);
     dlist_free(&data);
     buf_free(&buf);
     return r;
