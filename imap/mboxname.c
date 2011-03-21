@@ -1457,7 +1457,7 @@ static bit64 mboxname_readval(const char *mboxname, const char *metaname)
     char *fname = NULL;
     const char *base = NULL;
     unsigned long len = 0;
-    int fd;
+    int fd = -1;
 
     mboxname_to_parts(mboxname, &parts);
 
