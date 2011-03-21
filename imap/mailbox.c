@@ -2065,7 +2065,7 @@ int mailbox_open_conversations(struct mailbox *mailbox)
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
 
-    if (mailbox->conversations_open) {
+    if (!mailbox->conversations_open) {
 	char *fname = conversations_getpath(mailbox->name);
 	r = conversations_open(&mailbox->cstate, fname);
 	free(fname);
