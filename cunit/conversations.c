@@ -462,7 +462,6 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
     /* check that the rename callback was called with the right data */
     CU_ASSERT_EQUAL(notifies.count, 9);
-    printf("HIHI %d\n", notifies.count);
     CU_ASSERT_STRING_EQUAL(notifies.data[1], conversation_id_encode(C_CID1));
     CU_ASSERT_STRING_EQUAL(notifies.data[2], conversation_id_encode(C_CID2));
     CU_ASSERT_STRING_EQUAL(notifies.data[4], conversation_id_encode(C_CID1));
