@@ -62,6 +62,7 @@ struct conversations_state
 };
 
 struct index_record;
+struct mailbox;
 struct dlist;
 
 extern char *conversations_getpath(const char *mboxname);
@@ -78,7 +79,7 @@ extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
 extern int conversations_update(struct conversations_state *state,
-				const char *mboxname,
+				struct mailbox *mailbox,
 				struct index_record *old,
 				struct index_record *new);
 extern int conversations_get_data(struct conversations_state *state,

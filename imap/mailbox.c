@@ -2092,7 +2092,7 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (!mailbox->conversations_open)
 	return 0;
 
-    r = conversations_update(&mailbox->cstate, mailbox->name, old, new);
+    r = conversations_update(&mailbox->cstate, mailbox, old, new);
 
     return r;
 }
