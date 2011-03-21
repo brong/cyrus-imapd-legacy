@@ -2086,7 +2086,13 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (!mailbox->conversations_open)
 	return 0;
 
-    r = conversations_update(&mailbox->cstate, mailbox, old, new);
+    if (old && old->cid != new->cid) {
+	r = conversations_update(&mailbox->cstate, mailbox, old, NULL);
+	r = conversations_update(&mailbox->cstate, mailbox, NULL, new);
+    }
+    else {
+	r = conversations_update(&mailbox->cstate, mailbox, old, new);
+    }
 
     return r;
 }
