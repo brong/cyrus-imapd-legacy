@@ -583,6 +583,36 @@ struct dlist *dlist_getchild(struct dlist *dl, const char *name)
     return NULL;
 }
 
+
+struct dlist *dlist_getchildn(struct dlist *dl, int num)
+{
+    struct dlist *i;
+
+    if (!dl) return NULL;
+
+    for (i = dl->head; i && num; i = i->next)
+	num--;
+
+    return i;
+}
+
+struct dlist *dlist_getkvchild_bykey(struct dlist *dl,
+				     const char *key, const char *val)
+{
+    struct dlist *i;
+    struct dlist *tmp;
+
+    if (!dl) return NULL;
+
+    for (i = dl->head; i; i = i->next) {
+	tmp = dlist_getchild(i, key);
+	if (tmp && !strcmp(tmp->sval, val))
+	    return i;
+    }
+
+    return NULL;
+}
+
 /* XXX - type coercion logic here */
 
 int dlist_getatom(struct dlist *dl, const char *name, const char **val)

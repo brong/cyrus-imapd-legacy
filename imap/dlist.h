@@ -112,6 +112,9 @@ int dlist_parsemap(struct dlist **dlp, int parsekeys,
 
 void dlist_stitch(struct dlist *dl, struct dlist *child);
 struct dlist *dlist_getchild(struct dlist *dl, const char *name);
+struct dlist *dlist_getchildn(struct dlist *dl, int num);
+struct dlist *dlist_getkvchild_bykey(struct dlist *dl,
+				     const char *key, const char *val);
 int dlist_getatom(struct dlist *dl, const char *name, const char **val);
 int dlist_getbuf(struct dlist *dl,
 		 const char *name, const char **val, size_t *len);
