@@ -59,8 +59,7 @@ enum dlist_t {
     DL_FLAG,
     DL_NUM,
     DL_DATE,
-    DL_MODSEQ,
-    DL_HEX64,
+    DL_HEX,
     DL_BUF,
     DL_GUID,
     DL_FILE,
@@ -82,50 +81,133 @@ struct dlist {
 
 const char *dlist_reserve_path(const char *part, struct message_guid *guid);
 
-uint32_t dlist_nval(struct dlist *dl);
-modseq_t dlist_modseqval(struct dlist *dl);
+/* set fields */
+void dlist_makeatom(struct dlist *dl, const char *val);
+void dlist_makeflag(struct dlist *dl, const char *val);
+void dlist_makenum32(struct dlist *dl, uint32_t val);
+void dlist_makenum64(struct dlist *dl, bit64 val);
+void dlist_makedate(struct dlist *dl, time_t val);
+void dlist_makehex64(struct dlist *dl, bit64 val);
+void dlist_makemap(struct dlist *dl, const char *val, size_t len);
+void dlist_makelist(struct dlist *val);
+void dlist_makekvlist(struct dlist *dl);
+void dlist_makeguid(struct dlist *dl, struct message_guid *guid);
+void dlist_makefile(struct dlist *dl,
+		    const char *part, struct message_guid *guid,
+		    unsigned long size, const char *fname);
 
-struct dlist *dlist_atom(struct dlist *dl, const char *name, const char *val);
-struct dlist *dlist_flag(struct dlist *dl, const char *name, const char *val);
-struct dlist *dlist_num(struct dlist *dl, const char *name, unsigned long val);
-struct dlist *dlist_date(struct dlist *dl, const char *name, time_t val);
-struct dlist *dlist_modseq(struct dlist *dl, const char *name, modseq_t val);
-struct dlist *dlist_hex64(struct dlist *dl, const char *name, bit64 val);
-struct dlist *dlist_buf(struct dlist *dl,
-			const char *name, const char *val, size_t len);
-struct dlist *dlist_list(struct dlist *dl, const char *name);
-struct dlist *dlist_kvlist(struct dlist *dl, const char *name);
-struct dlist *dlist_guid(struct dlist *dl,
-			 const char *name, struct message_guid *guid);
-struct dlist *dlist_file(struct dlist *dl,
-			 const char *name, const char *part,
-			 struct message_guid *guid,
-			 unsigned long size, const char *fname);
-struct dlist *dlist_new(const char *name);
+/* parse fields */
+int dlist_asatom(struct dlist *dl, const char **valp);
+int dlist_asflag(struct dlist *dl, const char **valp);
+int dlist_asnum32(struct dlist *dl, uint32_t *valp);
+int dlist_asnum(struct dlist *dl, bit64 *valp);
+int dlist_asdate(struct dlist *dl, time_t *valp);
+int dlist_ashex32(struct dlist *dl, uint32_t *valp);
+int dlist_ashex(struct dlist *dl, bit64 *valp);
+int dlist_asmap(struct dlist *dl, const char **valp, size_t *lenp);
+/* these two don't actually do anything except check type */
+int dlist_aslist(struct dlist *dl, struct dlist **valp);
+int dlist_askvlist(struct dlist *dl, struct dlist **valp);
+int dlist_asguid(struct dlist *dl, struct message_guid *guid);
+int dlist_asfile(struct dlist *dl,
+		 const char **partp, struct message_guid *guid,
+		 unsigned long *sizep, const char **fnamep);
+
+/* special number and string readers - return 0 and "" if nothing */
+bit64 dlist_num(struct dlist *dl);
+const char *dlist_cstring(struct dlist *dl);
+
+/* wrappers for use in a kvlist */
+struct dlist *dlist_newlist(struct dlist *parent, const char *name);
+struct dlist *dlist_newkvlist(struct dlist *parent, const char *name);
+
+struct dlist *dlist_setatom(struct dlist *parent, const char *name,
+			    const char *val);
+struct dlist *dlist_setflag(struct dlist *parent, const char *name,
+			    const char *val);
+struct dlist *dlist_setnum32(struct dlist *parent, const char *name,
+			     uint32_t val);
+struct dlist *dlist_setnum64(struct dlist *parent, const char *name,
+			     bit64 val);
+struct dlist *dlist_setdate(struct dlist *parent, const char *name,
+			    time_t val);
+struct dlist *dlist_sethex64(struct dlist *parent, const char *name,
+			     bit64 val);
+struct dlist *dlist_setmap(struct dlist *parent, const char *name,
+			   const char *val, size_t len);
+struct dlist *dlist_setguid(struct dlist *parent, const char *name,
+			    struct message_guid *guid);
+struct dlist *dlist_setfile(struct dlist *parent, const char *name,
+			    const char *part, struct message_guid *guid,
+			    unsigned long size, const char *fname);
+
+/* special number and string readers - return 0 and "" if nothing */
+bit64 dlist_childvaln(struct dlist *parent, const char *name);
+const char *dlist_childvalcstring(struct dlist *parent, const char *name);
+
+struct dlist *dlist_updateatom(struct dlist *parent, const char *name,
+			       const char *val);
+struct dlist *dlist_updateflag(struct dlist *parent, const char *name,
+			       const char *val);
+struct dlist *dlist_updatenum32(struct dlist *parent, const char *name,
+			        uint32_t val);
+struct dlist *dlist_updatenum64(struct dlist *parent, const char *name,
+			        bit64 val);
+struct dlist *dlist_updatedate(struct dlist *parent, const char *name,
+			       time_t val);
+struct dlist *dlist_updatehex64(struct dlist *parent, const char *name,
+				bit64 val);
+struct dlist *dlist_updatemap(struct dlist *parent, const char *name,
+			      const char *val, size_t len);
+struct dlist *dlist_updateguid(struct dlist *parent, const char *name,
+			       struct message_guid *guid);
+struct dlist *dlist_updatefile(struct dlist *parent, const char *name,
+			       const char *part, struct message_guid *guid,
+			       unsigned long size, const char *fname);
+
+int dlist_getatom(struct dlist *parent, const char *name,
+		  const char **valp);
+int dlist_getflag(struct dlist *parent, const char *name,
+		  const char **valp);
+int dlist_getnum32(struct dlist *parent, const char *name,
+		   uint32_t *valp);
+int dlist_getnum64(struct dlist *parent, const char *name,
+		 bit64 *valp);
+int dlist_getdate(struct dlist *parent, const char *name,
+		  time_t *valp);
+int dlist_gethex64(struct dlist *parent, const char *name,
+		   bit64 *valp);
+int dlist_getmap(struct dlist *parent, const char *name,
+		 const char **valp, size_t *lenp);
+int dlist_getlist(struct dlist *parent, const char *name,
+		  struct dlist **valp);
+int dlist_getkvlist(struct dlist *parent, const char *name,
+		    struct dlist **valp);
+int dlist_getguid(struct dlist *parent, const char *name,
+		  struct message_guid *guid);
+int dlist_getfile(struct dlist *parent, const char *name,
+		  const char **partp, struct message_guid *guid,
+		  unsigned long *sizep, const char **fnamep);
+
 void dlist_free(struct dlist **dlp);
 
-void dlist_print(const struct dlist *dl, int printkeys, struct protstream *out);
-void dlist_printbuf(const struct dlist *dl, int printkeys, struct buf *outbuf);
-char dlist_parse(struct dlist **dlp, int parsekeys, struct protstream *in);
+void dlist_print(const struct dlist *dl, int printkeys,
+		 struct protstream *out);
+void dlist_printbuf(const struct dlist *dl, int printkeys,
+		    struct buf *outbuf);
+char dlist_parse(struct dlist **dlp, int parsekeys,
+		 struct protstream *in);
 int dlist_parsemap(struct dlist **dlp, int parsekeys,
 		   const char *base, unsigned len);
 
-void dlist_stitch(struct dlist *dl, struct dlist *child);
+void dlist_stitch(struct dlist *parent, struct dlist *old, struct dlist *new);
+void dlist_unstitch(struct dlist *parent, struct dlist *child);
+void dlist_remove(struct dlist *parent, struct dlist *child);
+
 struct dlist *dlist_getchild(struct dlist *dl, const char *name);
-int dlist_getatom(struct dlist *dl, const char *name, const char **val);
-int dlist_getbuf(struct dlist *dl,
-		 const char *name, const char **val, size_t *len);
-int dlist_getnum(struct dlist *dl, const char *name, uint32_t *val);
-int dlist_getdate(struct dlist *dl, const char *name, time_t *val);
-int dlist_getmodseq(struct dlist *dl, const char *name, modseq_t *val);
-int dlist_gethex64(struct dlist *dl, const char *name, bit64 *val);
-int dlist_getlist(struct dlist *dl, const char *name, struct dlist **val);
-int dlist_getguid(struct dlist *dl,
-		  const char *name, struct message_guid **guid);
-int dlist_getfile(struct dlist *dl,
-		  const char *name, const char **part,
-		  struct message_guid **guid,
-		  unsigned long *size, const char **fname);
+struct dlist *dlist_getchildn(struct dlist *dl, int num);
+struct dlist *dlist_getkvchild_bykey(struct dlist *dl,
+				     const char *key, const char *val);
 
 const char *dlist_lastkey(void);
 

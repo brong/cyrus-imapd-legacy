@@ -276,18 +276,18 @@ int conversations_set_data(struct conversations_state *state,
     if (!cid)
 	return IMAP_INTERNAL;
 
-    dl = dlist_kvlist(NULL, NULL);
-    dlist_modseq(dl, "MODSEQ", conv->modseq);
-    dlist_num(dl, "EXISTS", conv->exists);
-    dlist_num(dl, "UNSEEN", conv->unseen);
-    dlist_num(dl, "DRAFTS", conv->drafts);
+    dl = dlist_newkvlist(NULL, NULL);
+    dlist_setnum64(dl, "MODSEQ", conv->modseq);
+    dlist_setnum32(dl, "EXISTS", conv->exists);
+    dlist_setnum32(dl, "UNSEEN", conv->unseen);
+    dlist_setnum32(dl, "DRAFTS", conv->drafts);
 
-    n = dlist_list(dl, "FOLDER");
+    n = dlist_newlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
-	nn = dlist_kvlist(n, "FOLDER");
-	dlist_atom(nn, "MBOXNAME", folder->mboxname);
-	dlist_modseq(nn, "MODSEQ", folder->modseq);
-	dlist_num(nn, "EXISTS", folder->exists);
+	nn = dlist_newkvlist(n, "FOLDER");
+	dlist_setatom(nn, "MBOXNAME", folder->mboxname);
+	dlist_setnum64(nn, "MODSEQ", folder->modseq);
+	dlist_setnum32(nn, "EXISTS", folder->exists);
     }
 
     dlist_printbuf(dl, 0, &buf);
@@ -339,16 +339,16 @@ int conversations_get_data(struct conversations_state *state,
 
     n = dlist_getchild(dl, "MODSEQ");
     if (n)
-	conv->modseq = dlist_modseqval(n);
+	conv->modseq = dlist_num(n);
     n = dlist_getchild(dl, "EXISTS");
     if (n)
-	conv->exists = dlist_nval(n);
+	conv->exists = dlist_num(n);
     n = dlist_getchild(dl, "UNSEEN");
     if (n)
-	conv->unseen = dlist_nval(n);
+	conv->unseen = dlist_num(n);
     n = dlist_getchild(dl, "DRAFTS");
     if (n)
-	conv->drafts = dlist_nval(n);
+	conv->drafts = dlist_num(n);
 
     n = dlist_getchild(dl, "FOLDER");
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
@@ -359,10 +359,10 @@ int conversations_get_data(struct conversations_state *state,
 
 	nn = dlist_getchild(n, "MODSEQ");
 	if (nn)
-	    folder->modseq = dlist_modseqval(nn);
+	    folder->modseq = dlist_num(nn);
 	nn = dlist_getchild(n, "EXISTS");
 	if (nn)
-	    folder->exists = dlist_nval(nn);
+	    folder->exists = dlist_num(nn);
     }
 
     dlist_free(&dl);
