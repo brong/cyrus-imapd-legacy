@@ -1887,7 +1887,10 @@ static int mailbox_commit_conversations(struct mailbox *mailbox)
 
     if (mailbox->conversations_open) {
 	r = conversations_commit(&mailbox->cstate);
-	if (!r) r = conversations_close(&mailbox->cstate);
+	if (r)
+	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
+		   mailbox->name, error_message(r));
+	conversations_close(&mailbox->cstate);
 	mailbox->conversations_open = 0;
     }
 
@@ -2065,19 +2068,19 @@ int mailbox_open_conversations(struct mailbox *mailbox)
 {
     int r;
 
-    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
-	return 0;
-
     if (!mailbox->conversations_open) {
 	char *fname = conversations_getpath(mailbox->name);
 	r = conversations_open(&mailbox->cstate, fname);
+	if (r)
+	    syslog(LOG_ERR, "Error opening conversations database %s: %s",
+		   fname, error_message(r));
 	free(fname);
-	if (r) return r;
+	if (r)
+	    return r;
 	mailbox->conversations_open = 1;
     }
 
     return 0;
-
 }
 
 static int mailbox_update_conversations(struct mailbox *mailbox,
@@ -2086,11 +2089,16 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 {
     int r = 0;
 
-    r = mailbox_open_conversations(mailbox);
-    if (r) return r;
-
-    if (!mailbox->conversations_open)
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
+
+    if (!old && !new)
+	return IMAP_INTERNAL;
+
+    r = mailbox_open_conversations(mailbox);
+    if (r)
+	return r;
+
 
     if (old && old->cid != new->cid) {
 	r = conversations_update(&mailbox->cstate, mailbox, old, NULL);
