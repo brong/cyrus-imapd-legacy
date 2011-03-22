@@ -61,9 +61,23 @@ struct conversations_state
     struct txn *txn;
 };
 
-struct index_record;
-struct mailbox;
-struct dlist;
+typedef struct conversation conversation_t;
+typedef struct conv_folder  conv_folder_t;
+
+struct conv_folder {
+    conv_folder_t   *next;
+    char	    *mboxname;
+    modseq_t	    modseq;
+    uint32_t	    exists;
+};
+
+struct conversation {
+    modseq_t	    modseq;
+    uint32_t	    exists;
+    uint32_t	    unseen;
+    uint32_t	    drafts;
+    conv_folder_t   *folders;
+};
 
 extern char *conversations_getpath(const char *mboxname);
 extern int conversations_open(struct conversations_state *state,
@@ -78,13 +92,19 @@ extern int conversations_set_msgid(struct conversations_state *state,
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
-extern int conversations_update(struct conversations_state *state,
-				struct mailbox *mailbox,
-				struct index_record *old,
-				struct index_record *new);
+extern int conversations_set_data(struct conversations_state *state,
+				  conversation_id_t cid,
+				  const conversation_t *conv);
 extern int conversations_get_data(struct conversations_state *state,
 				  conversation_id_t cid,
-				  struct dlist **dptr);
+				  conversation_t **convp);
+/* Finds or adds a folder with the given name.
+ * Returns 1 if it's a new folder */
+extern int conversation_add_folder(conversation_t *,
+				   const char *name,
+				   conv_folder_t **folderp);
+extern conversation_t *conversation_new(void);
+extern void conversation_free(conversation_t *);
 
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,

@@ -4647,8 +4647,8 @@ static int do_xconvfetch(conversation_id_t cid,
     char *vanished;
     struct statusdata *client_sd;
     struct statusdata server_sd;
-    struct dlist *dl = NULL;
-    struct dlist *ditem = NULL;
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
     const char *mboxname;
     int dummy;
 
@@ -4660,17 +4660,13 @@ static int do_xconvfetch(conversation_id_t cid,
     if (r)
 	goto out;
 
-    r = conversations_get_data(&state, cid, &dl);
+    r = conversations_get_data(&state, cid, &conv);
     conversations_close(&state);
     if (r)
 	goto out;
-
-    for (ditem = dlist_getchild(dl, "FOLDERS"); ditem; ditem = ditem->next) {
-	if (dlist_getatom(ditem, "MBOXNAME", &mboxname))
-	    strarray_append(&mboxnames, mboxname);
-    }
-    
-    dlist_free(&dl);
+    for (folder = conv->folders ; folder ; folder = folder->next)
+	strarray_append(&mboxnames, folder->mboxname);
+    conversation_free(conv);
 
     /* Force a fixed order on the folders, so that the locking order is stable */
     qsort(mboxnames.data, mboxnames.count, sizeof(char *),
