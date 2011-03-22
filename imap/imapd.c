@@ -4649,7 +4649,6 @@ static int do_xconvfetch(conversation_id_t cid,
     struct statusdata server_sd;
     conversation_t *conv = NULL;
     conv_folder_t *folder;
-    const char *mboxname;
     int dummy;
 
     fname = conversations_getpath(imapd_index->mailbox->name);
