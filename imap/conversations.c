@@ -526,6 +526,66 @@ static int do_one_rename(void *rock,
 				  rrock->to_cid, stamp);
 }
 
+static void _conv_merge_data(struct dlist *from, struct dlist *to)
+{
+    bit64 fromnval, tonval;
+    struct dlist *fromfolders;
+
+    /* yes, you probably could implement this as a parse to the
+     * conversation_t datastructure, add there, and format back */
+
+    fromnval = tonval = 0;
+    dlist_getnum64(from, "MODSEQ", &fromnval);
+    dlist_getnum64(to, "MODSEQ", &tonval);
+    dlist_updatenum64(to, "MODSEQ", fromnval + tonval);
+
+    fromnval = tonval = 0;
+    dlist_getnum64(from, "EXISTS", &fromnval);
+    dlist_getnum64(to, "EXISTS", &tonval);
+    dlist_updatenum64(to, "EXISTS", fromnval + tonval);
+
+    fromnval = tonval = 0;
+    dlist_getnum64(from, "UNSEEN", &fromnval);
+    dlist_getnum64(to, "UNSEEN", &tonval);
+    dlist_updatenum64(to, "UNSEEN", fromnval + tonval);
+
+    fromnval = tonval = 0;
+    dlist_getnum64(from, "DRAFTS", &fromnval);
+    dlist_getnum64(to, "DRAFTS", &tonval);
+    dlist_updatenum64(to, "DRAFTS", fromnval + tonval);
+
+    if (dlist_getlist(from, "FOLDER", &fromfolders)) {
+	struct dlist *tofolders;
+	struct dlist *fromkl;
+	struct dlist *tokl;
+
+	if (!dlist_getlist(to, "FOLDER", &tofolders))
+	    tofolders = dlist_newlist(to, "FOLDER");
+
+	for (fromkl = fromfolders->head; fromkl; fromkl = fromkl->next) {
+	    const char *mboxname;
+	    if (!dlist_getatom(fromkl, "MBOXNAME", &mboxname))
+		continue;
+	    /* add fields to the 'to' folder if it exists */
+	    tokl = dlist_getkvchild_bykey(tofolders, "MBOXNAME", mboxname);
+	    if (!tokl) {
+		tokl = dlist_newkvlist(tofolders, NULL);
+		dlist_setatom(tokl, "MBOXNAME", mboxname);
+	    }
+
+	    fromnval = tonval = 0;
+	    dlist_getnum64(fromkl, "MODSEQ", &fromnval);
+	    dlist_getnum64(tokl, "MODSEQ", &tonval);
+	    dlist_updatenum64(tokl, "MODSEQ", fromnval + tonval);
+
+	    fromnval = tonval = 0;
+	    dlist_getnum64(fromkl, "EXISTS", &fromnval);
+	    dlist_getnum64(tokl, "EXISTS", &tonval);
+	    dlist_updatenum64(tokl, "EXISTS", fromnval + tonval);
+	}
+    }
+}
+
 int conversations_rename_cid(struct conversations_state *state,
 			     conversation_id_t from_cid,
 			     conversation_id_t to_cid,
@@ -537,7 +597,8 @@ int conversations_rename_cid(struct conversations_state *state,
     int bdatalen = 0;
     char bkey[CONVERSATION_ID_STRMAX+2];
     struct buf buf = BUF_INITIALIZER;
-    struct dlist *dl = NULL;
+    struct dlist *fromdata = NULL;
+    struct dlist *todata = NULL;
     int r;
 
     if (!state->db)
@@ -563,8 +624,8 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r == CYRUSDB_NOTFOUND)
 	return 0;
 
-    if (r == CYRUSDB_OK && renamecb)
-	dlist_parsemap(&dl, 0, bdata, bdatalen);
+    if (r == CYRUSDB_OK)
+	dlist_parsemap(&fromdata, 0, bdata, bdatalen);
 
     r = DB->delete(state->db,
 		   bkey, strlen(bkey),
@@ -572,9 +633,20 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r)
 	goto out;
 
-    dlist_printbuf(dl, 0, &buf);
-
+    /* And we need to read the TO record so we don't blat
+     * all the data already there */
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, to_cid);
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &bdata, &bdatalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_OK)
+	dlist_parsemap(&todata, 0, bdata, bdatalen);
+
+    _conv_merge_data(fromdata, todata);
+
+    dlist_printbuf(todata, 0, &buf);
 
     r = DB->store(state->db,
 		  bkey, strlen(bkey),
@@ -583,10 +655,10 @@ int conversations_rename_cid(struct conversations_state *state,
     if (r)
 	goto out;
 
-    if (dl) {
+    if (fromdata && renamecb) {
 	struct dlist *fl;
 	struct dlist *ditem;
-	if (dlist_getlist(dl, "FOLDER", &fl)) {
+	if (dlist_getlist(fromdata, "FOLDER", &fl)) {
 	    for (ditem = fl->head; ditem; ditem = ditem->next) {
 		const char *mboxname;
 		if (dlist_getatom(ditem, "MBOXNAME", &mboxname)) {
@@ -597,7 +669,8 @@ int conversations_rename_cid(struct conversations_state *state,
     }
 
 out:
-    dlist_free(&dl);
+    dlist_free(&fromdata);
+    dlist_free(&todata);
     buf_free(&buf);
     return r;
 }
