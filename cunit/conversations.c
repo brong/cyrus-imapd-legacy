@@ -5,7 +5,6 @@
 #include "conversations.h"
 #include "global.h"
 #include "strarray.h"
-#include "dlist.h"
 #include "cyrusdb.h"
 #include "libcyr_cfg.h"
 #include "message.h"	    /* for VECTOR_SIZE */
@@ -353,49 +352,28 @@ static void rename_cb(const char *mboxname,
     strarray_append(notifies, conversation_id_encode(to_cid));
 }
 
-static modseq_t find_modseq(struct dlist *data)
-{
-    modseq_t rval;
-
-    if (!data) return 0;
-    if (!dlist_getmodseq(data, "MODSEQ", &rval))
-	return 0;
-
-    return rval;
-}
-
-static int num_folders(struct dlist *data)
+static int num_folders(conversation_t *conv)
 {
     int n = 0;
-    struct dlist *tmp;
-    struct dlist *fl;
+    conv_folder_t *folder;
 
-    if (!data) return 0;
+    if (!conv) return 0;
 
-    if (!dlist_getlist(data, "FOLDER", &fl))
-	return 0;
-
-    for (tmp = fl->head; tmp; tmp = tmp->next) {
+    for (folder = conv->folders ; folder ; folder = folder->next)
 	n++;
-    }
 
     return n;
 }
 
-static int find_folder(struct dlist *data, const char *name)
+static int find_folder(conversation_t *conv, const char *name)
 {
-    const char *mboxname;
-    struct dlist *tmp;
-    struct dlist *fl;
+    conv_folder_t *folder;
 
-    if (!data) return 0;
+    if (!conv) return 0;
 
-    if (!dlist_getlist(data, "FOLDER", &fl))
-	return 0;
-
-    for (tmp = fl->head; tmp; tmp = tmp->next) {
-	if (dlist_getatom(tmp, "MBOXNAME", &mboxname))
-	    if (!strcmp(name, mboxname)) return 1;
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	if (!strcmp(name, folder->mboxname))
+	    return 1;
     }
 
     return 0;
@@ -415,13 +393,10 @@ static void test_cid_rename(void)
     static const conversation_id_t C_CID2 = 0x10cdef23456789ab;
     strarray_t notifies = STRARRAY_INITIALIZER;
     conversation_id_t cid;
-    struct index_record record;
-    struct dlist *data = NULL;
+    conversation_t *conv;
+    conv_folder_t *folder;
 
     memset(&state, 0, sizeof(state));
-
-    memset(&record, 0, sizeof(record));
-    record.cid = C_CID1;
 
     r = conversations_open(&state, DBNAME);
     CU_ASSERT_EQUAL(r, 0);
@@ -434,16 +409,26 @@ static void test_cid_rename(void)
     r = conversations_set_msgid(&state, C_MSGID3, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
 
-    record.modseq = 1;
-    r = conversations_update(&state, FOLDER1, NULL, &record);
-    CU_ASSERT_EQUAL(r, 0);
+    conv = conversation_new();
+    CU_ASSERT_PTR_NOT_NULL(conv);
 
-    record.modseq = 8;
-    r = conversations_update(&state, FOLDER2, NULL, &record);
-    CU_ASSERT_EQUAL(r, 0);
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER1, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 1;
 
-    record.modseq = 5;
-    r = conversations_update(&state, FOLDER3, NULL, &record);
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER2, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 8;
+
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER3, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 5;
+
+    conv->modseq = 8;
+    r = conversations_set_data(&state, C_CID1, conv);
     CU_ASSERT_EQUAL(r, 0);
 
     /* commit & close */
@@ -451,6 +436,8 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
     r = conversations_close(&state);
     CU_ASSERT_EQUAL(r, 0);
+    conversation_free(conv);
+    conv = NULL;
 
     /* open the db again */
     r = conversations_open(&state, DBNAME);
@@ -488,19 +475,21 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
 
     /* check the data got renamed */
-    r = conversations_get_data(&state, C_CID1, &data);
+    r = conversations_get_data(&state, C_CID1, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_PTR_NULL(data);
+    CU_ASSERT_PTR_NULL(conv);
 
-    r = conversations_get_data(&state, C_CID2, &data);
+    conv = NULL;
+    r = conversations_get_data(&state, C_CID2, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_PTR_NOT_NULL(data);
-    CU_ASSERT_EQUAL(find_modseq(data), 8);
-    CU_ASSERT_EQUAL(num_folders(data), 3);
-    CU_ASSERT(find_folder(data, FOLDER1));
-    CU_ASSERT(find_folder(data, FOLDER2));
-    CU_ASSERT(find_folder(data, FOLDER3));
-    dlist_free(&data);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 8);
+    CU_ASSERT_EQUAL(num_folders(conv), 3);
+    CU_ASSERT(find_folder(conv, FOLDER1));
+    CU_ASSERT(find_folder(conv, FOLDER2));
+    CU_ASSERT(find_folder(conv, FOLDER3));
+    conversation_free(conv);
+    conv = NULL;
 
     memset(&cid, 0x45, sizeof(cid));
     r = conversations_get_msgid(&state, C_MSGID1, &cid);
@@ -529,53 +518,74 @@ static void test_folders(void)
     static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
     static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
     static const conversation_id_t C_CID = 0x10abcdef23456789;
-    struct dlist *data = NULL;
-    struct index_record record;
+    conversation_t *conv;
+    conv_folder_t *folder;
 
     memset(&state, 0, sizeof(state));
-
-    memset(&record, 0, sizeof(record));
-    record.cid = C_CID;
 
     r = conversations_open(&state, DBNAME);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Database is empty, so get should succeed and report no results */
-    r = conversations_get_data(&state, C_CID, &data);
+    conv = NULL;
+    r = conversations_get_data(&state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_PTR_NULL(data);
+    CU_ASSERT_PTR_NULL(conv);
 
     /* add should succeed */
-    record.modseq = 4;
-    r = conversations_update(&state, FOLDER1, NULL, &record);
+    conv = conversation_new();
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    conv->modseq = 4;
+
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER1, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 4;
+
+    r = conversations_set_data(&state, C_CID, conv);
     CU_ASSERT_EQUAL(r, 0);
+    conversation_free(conv);
+    conv = NULL;
 
     /* get should now succeed and report the value we gave it */
-    r = conversations_get_data(&state, C_CID, &data);
+    conv = NULL;
+    r = conversations_get_data(&state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_PTR_NOT_NULL(data);
-    CU_ASSERT_EQUAL(find_modseq(data), 4);
-    CU_ASSERT_EQUAL(num_folders(data), 1);
-    CU_ASSERT(find_folder(data, FOLDER1));
-    dlist_free(&data);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 4);
+    CU_ASSERT_EQUAL(num_folders(conv), 1);
+    CU_ASSERT(find_folder(conv, FOLDER1));
 
     /* some more adds should succeed */
-    record.modseq = 7;
-    r = conversations_update(&state, FOLDER2, NULL, &record);
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER2, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 7;
+
+    folder = NULL;
+    conversation_add_folder(conv, FOLDER3, &folder);
+    CU_ASSERT_PTR_NOT_NULL(folder);
+    folder->modseq = 55;
+
+    conv->modseq = 55;
+
+    r = conversations_set_data(&state, C_CID, conv);
     CU_ASSERT_EQUAL(r, 0);
-    record.modseq = 55;
-    r = conversations_update(&state, FOLDER3, NULL, &record);
-    CU_ASSERT_EQUAL(r, 0);
+    conversation_free(conv);
+    conv = NULL;
 
     /* get should now succeed and report all values we gave it */
-    r = conversations_get_data(&state, C_CID, &data);
+    conv = NULL;
+    r = conversations_get_data(&state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_EQUAL(find_modseq(data), 55);
-    CU_ASSERT_EQUAL(num_folders(data), 3);
-    CU_ASSERT(find_folder(data, FOLDER1));
-    CU_ASSERT(find_folder(data, FOLDER2));
-    CU_ASSERT(find_folder(data, FOLDER3));
-    dlist_free(&data);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 55);
+    CU_ASSERT_EQUAL(num_folders(conv), 3);
+    CU_ASSERT(find_folder(conv, FOLDER1));
+    CU_ASSERT(find_folder(conv, FOLDER2));
+    CU_ASSERT(find_folder(conv, FOLDER3));
+    conversation_free(conv);
+    conv = NULL;
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
@@ -587,14 +597,17 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should still succeed and report all values we gave it */
-    r = conversations_get_data(&state, C_CID, &data);
+    conv = NULL;
+    r = conversations_get_data(&state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_EQUAL(find_modseq(data), 55);
-    CU_ASSERT_EQUAL(num_folders(data), 3);
-    CU_ASSERT(find_folder(data, FOLDER1));
-    CU_ASSERT(find_folder(data, FOLDER2));
-    CU_ASSERT(find_folder(data, FOLDER3));
-    dlist_free(&data);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 55);
+    CU_ASSERT_EQUAL(num_folders(conv), 3);
+    CU_ASSERT(find_folder(conv, FOLDER1));
+    CU_ASSERT(find_folder(conv, FOLDER2));
+    CU_ASSERT(find_folder(conv, FOLDER3));
+    conversation_free(conv);
+    conv = NULL;
 
     r = conversations_close(&state);
     CU_ASSERT_EQUAL(r, 0);
@@ -648,8 +661,8 @@ static void test_dump(void)
     char msgid[40];
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     conversation_id_t cid, cid2;
-    struct index_record record;
-    struct dlist *data = NULL;
+    conversation_t *conv;
+    conv_folder_t *folder;
     int i;
     int j;
 #define N_MSGID_TO_CID	500
@@ -664,9 +677,6 @@ static void test_dump(void)
 
     memset(&state, 0, sizeof(state));
 
-    memset(&record, 0, sizeof(record));
-    record.modseq = 100;
-
     /* generate some data in the database */
     r = conversations_open(&state, DBNAME);
     CU_ASSERT_EQUAL(r, 0);
@@ -678,11 +688,21 @@ static void test_dump(void)
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
+	conv = conversation_new();
+	CU_ASSERT_PTR_NOT_NULL(conv);
+	conv->modseq = 100;
 	for (j = 0 ; j < mboxnames.count ; j++) {
-	    record.cid = cid;
-	    r = conversations_update(&state, mboxnames.data[j], NULL, &record);
-	    CU_ASSERT_EQUAL(r, 0);
+	    folder = NULL;
+	    conversation_add_folder(conv, mboxnames.data[j], &folder);
+	    CU_ASSERT_PTR_NOT_NULL(folder);
+	    folder->modseq = 100;
+
+
 	}
+	r = conversations_set_data(&state, cid, conv);
+	CU_ASSERT_EQUAL(r, 0);
+	conversation_free(conv);
+	conv = NULL;
     }
 
     r = conversations_commit(&state);
@@ -736,9 +756,10 @@ static void test_dump(void)
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
-	r = conversations_get_data(&state, cid, &data);
+	conv = NULL;
+	r = conversations_get_data(&state, cid, &conv);
 	CU_ASSERT_EQUAL(r, 0);
-	CU_ASSERT_PTR_NULL(data);
+	CU_ASSERT_PTR_NULL(conv);
     }
 
     /* now undump */
@@ -763,13 +784,16 @@ static void test_dump(void)
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
-	r = conversations_get_data(&state, cid, &data);
+	conv = NULL;
+	r = conversations_get_data(&state, cid, &conv);
 	CU_ASSERT_EQUAL(r, 0);
-	CU_ASSERT_PTR_NOT_NULL(data);
-	CU_ASSERT_EQUAL(find_modseq(data), 100);
-	CU_ASSERT_EQUAL(mboxnames.count, num_folders(data));
+	CU_ASSERT_PTR_NOT_NULL(conv);
+	CU_ASSERT_EQUAL(conv->modseq, 100);
+	CU_ASSERT_EQUAL(mboxnames.count, num_folders(conv));
 	for (j = 0 ; j < mboxnames.count ; j++)
-	    CU_ASSERT(find_folder(data, mboxnames.data[j]));
+	    CU_ASSERT(find_folder(conv, mboxnames.data[j]));
+	conversation_free(conv);
+	conv = NULL;
     }
 
     r = conversations_close(&state);
