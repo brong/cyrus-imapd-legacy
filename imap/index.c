@@ -1439,7 +1439,7 @@ int index_convsort(struct index_state *state,
 
 
 	/* Discover exemplars */
-	while (msg = msgdata) {
+	while ((msg = msgdata)) {
 	    struct index_record *record = &state->map[msg->msgno-1].record;
 	    int was_old_exemplar = 0;
 	    int is_new_exemplar = 0;
