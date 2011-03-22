@@ -2049,6 +2049,14 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 					struct index_record *new)
 {
     int r = 0;
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    int delta_exists = 0;
+    int delta_unseen = 0;
+    int delta_drafts = 0;
+    modseq_t modseq = 0;
+    int dirty = 0;
+    conversation_id_t cid = NULLCONVERSATION;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
@@ -2056,19 +2064,84 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (!old && !new)
 	return IMAP_INTERNAL;
 
+    if (old && new) {
+	assert(old->uid == new->uid);
+	assert(old->modseq <= new->modseq);
+	/* this flag cannot go away */
+	if ((old->system_flags & FLAG_EXPUNGED))
+	    assert((new->system_flags & FLAG_EXPUNGED));
+
+	if (old->cid != new->cid) {
+	    /* handle CID being renamed, by calling ourselves */
+	    r = mailbox_update_conversations(mailbox, old, NULL);
+	    if (!r)
+		r = mailbox_update_conversations(mailbox, NULL, new);
+	    return r;
+	}
+    }
+    cid = (new ? new->cid : old->cid);
+
     r = mailbox_open_conversations(mailbox);
     if (r)
 	return r;
 
+    r = conversations_get_data(&mailbox->cstate, cid, &conv);
+    if (r)
+	return r;
 
-    if (old && old->cid != new->cid) {
-	r = conversations_update(&mailbox->cstate, mailbox, old, NULL);
-	r = conversations_update(&mailbox->cstate, mailbox, NULL, new);
+    dirty = conversation_add_folder(conv, mailbox->name, &folder);
+
+    /* calculate the changes */
+    if (old) {
+	/* decrease any relevent counts */
+	if (!(old->system_flags & FLAG_EXPUNGED)) {
+	    delta_exists--;
+	    if (!(old->system_flags & FLAG_SEEN))
+		delta_unseen--;
+	    if (old->system_flags & FLAG_DRAFT)
+		delta_drafts--;
+	}
+	modseq = MAX(modseq, old->modseq);
     }
-    else {
-	r = conversations_update(&mailbox->cstate, mailbox, old, new);
+    if (new) {
+	/* add any counts */
+	if (!(new->system_flags & FLAG_EXPUNGED)) {
+	    delta_exists++;
+	    if (!(new->system_flags & FLAG_SEEN))
+		delta_unseen++;
+	    if (new->system_flags & FLAG_DRAFT)
+		delta_drafts++;
+	}
+	modseq = MAX(modseq, new->modseq);
     }
 
+    if (delta_exists) {
+	conv->exists += delta_exists;
+	folder->exists += delta_exists;
+	dirty = 1;
+    }
+    if (delta_unseen) {
+	conv->unseen += delta_unseen;
+	dirty = 1;
+    }
+    if (delta_drafts) {
+	conv->drafts += delta_drafts;
+	dirty = 1;
+    }
+    if (modseq > conv->modseq) {
+	conv->modseq = modseq;
+	dirty = 1;
+    }
+    if (modseq > folder->modseq) {
+	folder->modseq = modseq;
+	dirty = 1;
+    }
+
+    r = 0;
+    if (dirty)
+	r = conversations_set_data(&mailbox->cstate, cid, conv);
+
+    conversation_free(conv);
     return r;
 }
 
