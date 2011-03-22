@@ -325,7 +325,7 @@ int conversations_get_data(struct conversations_state *state,
 		  &state->txn);
 
     if (r == CYRUSDB_NOTFOUND) {
-	*convp = NULL;
+	*convp = conversation_new();
 	return 0;
     } else if (r != CYRUSDB_OK) {
 	return r;
