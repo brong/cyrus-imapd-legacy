@@ -1588,21 +1588,29 @@ static bit64 mboxname_nextval(const char *mboxname, const char *metaname, bit64 
 
 modseq_t mboxname_readmodseq(const char *mboxname)
 {
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
     return (modseq_t)mboxname_readval(mboxname, "modseq");
 }
 
 modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last)
 {
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return last + 1;
     return (modseq_t)mboxname_nextval(mboxname, "modseq", (bit64)last);
 }
 
 uint32_t mboxname_readuidvalidity(const char *mboxname)
 {
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
     return (uint32_t)mboxname_readval(mboxname, "uidvalidity");
 }
 
 uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last)
 {
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return last + 1;
     return (uint32_t)mboxname_nextval(mboxname, "uidvalidity", (bit64)last);
 }
 
