@@ -1413,7 +1413,7 @@ int sync_mailbox(struct mailbox *mailbox,
     dlist_setatom(kl, "UNIQUEID", mailbox->uniqueid);
     dlist_setatom(kl, "MBOXNAME", mailbox->name);
     dlist_setnum32(kl, "LAST_UID", mailbox->i.last_uid);
-    dlist_setnum32(kl, "HIGHESTMODSEQ", mailbox->i.highestmodseq);
+    dlist_setnum64(kl, "HIGHESTMODSEQ", mailbox->i.highestmodseq);
     dlist_setnum32(kl, "RECENTUID", mailbox->i.recentuid);
     dlist_setdate(kl, "RECENTTIME", mailbox->i.recenttime);
     dlist_setdate(kl, "LAST_APPENDDATE", mailbox->i.last_appenddate);
@@ -1477,7 +1477,7 @@ int sync_mailbox(struct mailbox *mailbox,
 
 	    il = dlist_newkvlist(rl, "RECORD");
 	    dlist_setnum32(il, "UID", record.uid);
-	    dlist_setnum32(il, "MODSEQ", record.modseq);
+	    dlist_setnum64(il, "MODSEQ", record.modseq);
 	    dlist_setdate(il, "LAST_UPDATED", record.last_updated);
 	    sync_print_flags(il, mailbox, &record);
 	    dlist_setdate(il, "INTERNALDATE", record.internaldate);
