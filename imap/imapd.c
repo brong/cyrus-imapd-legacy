@@ -4617,9 +4617,9 @@ static int do_xconvfetch(conversation_id_t cid,
     if (r)
 	goto out;
 
-    r = conversations_get_data(&state, cid, &conv);
+    r = conversation_load(&state, cid, &conv);
     conversations_close(&state);
-    if (r)
+    if (r || !conv)
 	goto out;
     for (folder = conv->folders ; folder ; folder = folder->next)
 	strarray_append(&mboxnames, folder->mboxname);
