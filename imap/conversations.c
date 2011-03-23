@@ -267,6 +267,7 @@ int conversation_save(struct conversations_state *state,
     struct dlist *dl, *n, *nn;
     struct buf buf = BUF_INITIALIZER;
     const conv_folder_t *folder;
+    const conv_sender_t *sender;
     int r = 0;
 
     if (!state->db)
@@ -300,6 +301,13 @@ int conversation_save(struct conversations_state *state,
 	dlist_setatom(nn, "MBOXNAME", folder->mboxname);
 	dlist_setnum64(nn, "MODSEQ", folder->modseq);
 	dlist_setnum32(nn, "EXISTS", folder->exists);
+    }
+
+    n = dlist_newlist(dl, "SENDER");
+    for (sender = conv->senders ; sender ; sender = sender->next) {
+	nn = dlist_newkvlist(n, "SENDER");
+	dlist_setatom(nn, "EMAIL", sender->email);
+	dlist_setatom(nn, "NAME", sender->name);
     }
 
     dlist_printbuf(dl, 0, &buf);
@@ -381,6 +389,14 @@ int conversation_load(struct conversations_state *state,
 	    folder->exists = dlist_num(nn);
     }
 
+    n = dlist_getchild(dl, "SENDER");
+    for (n = (n ? n->head : NULL) ; n ; n = n->next) {
+	struct dlist *nn2;
+	nn = dlist_getchild(n, "EMAIL");
+	nn2 = dlist_getchild(n, "NAME");
+	conversation_add_sender(conv, nn->sval, nn2->sval);
+    }
+
     dlist_free(&dl);
     conv->dirty = 0;
     *convp = conv;
@@ -421,6 +437,32 @@ conv_folder_t *conversation_add_folder(conversation_t *conv,
 				       const char *mboxname)
 {
     return conversation_get_folder(conv, mboxname, /*create*/1);
+}
+
+void conversation_add_sender(conversation_t *conv,
+			     const char *email,
+			     const char *name)
+{
+    conv_sender_t *sender, **tailp = &conv->senders;
+
+    for (sender = conv->senders; sender; sender = sender->next) {
+	if (!strcmp(sender->email, email)) {
+	    /* found it.  Just check if we should update the name */
+	    if (name[0] && !sender->name[0]) {
+		free(sender->name);
+		sender->name = xstrdup(name);
+	    }
+	    return;
+	}
+	tailp = &sender->next;
+    }
+
+    sender = xzmalloc(sizeof(*sender));
+    sender->email = xstrdup(email);
+    sender->name = xstrdup(name);
+    *tailp = sender;
+
+    conv->dirty = 1;
 }
 
 void conversation_update(conversation_t *conv, const char *mboxname,
