@@ -83,6 +83,7 @@
 #include "message.h"
 #include "map.h"
 #include "mboxlist.h"
+#include "parseaddr.h"
 #include "retry.h"
 #include "seen.h"
 #include "upgrade_index.h"
@@ -2155,6 +2156,34 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     conversation_update(conv, mailbox->name,
 			delta_exists, delta_unseen,
 			delta_drafts, modseq);
+
+    if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
+	/* Need to find the sender */
+	if (!mailbox_cacherecord(mailbox, new)) {
+	    char *env = NULL;
+	    char *email = NULL;
+	    char *envtokens[NUMENVTOKENS];
+	    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
+
+	    /* +1 -> skip the leading paren */
+	    env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
+			   cacheitem_size(new, CACHE_ENVELOPE) - 1);
+
+	    parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
+
+	    if (envtokens[ENV_FROM]) /* paranoia */
+		message_parse_env_address(envtokens[ENV_FROM], &addr);
+
+	    if (addr.mailbox && addr.domain)
+		email = strconcat(addr.mailbox, "@", addr.domain, (char *)NULL);
+
+	    conversation_add_sender(conv, email, addr.name);
+
+	    free(env);
+	    free(email);
+	}
+    }
+
     r = conversation_save(&mailbox->cstate, cid, conv);
 
     conversation_free(conv);
