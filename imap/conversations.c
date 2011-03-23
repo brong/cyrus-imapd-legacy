@@ -273,8 +273,10 @@ int conversations_set_data(struct conversations_state *state,
 	return IMAP_IOERROR;
     if (!conv)
 	return IMAP_INTERNAL;
+
+    /* old pre-conversations message, nothing to do */
     if (!cid)
-	return IMAP_INTERNAL;
+	return 0;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
 
