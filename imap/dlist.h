@@ -97,19 +97,19 @@ void dlist_makefile(struct dlist *dl,
 		    unsigned long size, const char *fname);
 
 /* parse fields */
-int dlist_asatom(struct dlist *dl, const char **valp);
-int dlist_asflag(struct dlist *dl, const char **valp);
-int dlist_asnum32(struct dlist *dl, uint32_t *valp);
-int dlist_asnum(struct dlist *dl, bit64 *valp);
-int dlist_asdate(struct dlist *dl, time_t *valp);
-int dlist_ashex32(struct dlist *dl, uint32_t *valp);
-int dlist_ashex(struct dlist *dl, bit64 *valp);
-int dlist_asmap(struct dlist *dl, const char **valp, size_t *lenp);
+int dlist_toatom(struct dlist *dl, const char **valp);
+int dlist_toflag(struct dlist *dl, const char **valp);
+int dlist_tonum32(struct dlist *dl, uint32_t *valp);
+int dlist_tonum(struct dlist *dl, bit64 *valp);
+int dlist_todate(struct dlist *dl, time_t *valp);
+int dlist_tohex32(struct dlist *dl, uint32_t *valp);
+int dlist_tohex(struct dlist *dl, bit64 *valp);
+int dlist_tomap(struct dlist *dl, const char **valp, size_t *lenp);
 /* these two don't actually do anything except check type */
-int dlist_aslist(struct dlist *dl, struct dlist **valp);
-int dlist_askvlist(struct dlist *dl, struct dlist **valp);
-int dlist_asguid(struct dlist *dl, struct message_guid *guid);
-int dlist_asfile(struct dlist *dl,
+int dlist_tolist(struct dlist *dl, struct dlist **valp);
+int dlist_tokvlist(struct dlist *dl, struct dlist **valp);
+int dlist_toguid(struct dlist *dl, struct message_guid *guid);
+int dlist_tofile(struct dlist *dl,
 		 const char **partp, struct message_guid *guid,
 		 unsigned long *sizep, const char **fnamep);
 
