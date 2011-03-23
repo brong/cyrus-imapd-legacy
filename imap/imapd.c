@@ -7396,6 +7396,12 @@ static int parse_statusitems(unsigned *statusitemsp, const char **errstr)
 	else if (!strcmp(arg.s, "highestmodseq")) {
 	    statusitems |= STATUS_HIGHESTMODSEQ;
 	}
+	else if (!strcmp(arg.s, "xconvexists")) {
+	    statusitems |= STATUS_XCONVEXISTS;
+	}
+	else if (!strcmp(arg.s, "xconvunseen")) {
+	    statusitems |= STATUS_XCONVUNSEEN;
+	}
 	else {
 	    static char buf[200];
 	    snprintf(buf, 200, "Invalid Status attributes %s", arg.s);
@@ -7457,6 +7463,14 @@ static int print_statusline(const char *extname, unsigned statusitems,
 		    sepchar, sd->highestmodseq);
 	sepchar = ' ';
     }
+    if (statusitems & STATUS_XCONVEXISTS) {
+	prot_printf(imapd_out, "%cXCONVEXISTS %u", sepchar, sd->xconvexists);
+	sepchar = ' ';
+    }
+    if (statusitems & STATUS_XCONVUNSEEN) {
+	prot_printf(imapd_out, "%cXCONVUNSEEN %u", sepchar, sd->xconvunseen);
+	sepchar = ' ';
+    }
     prot_printf(imapd_out, ")\r\n");
 
     return 0;
@@ -7465,12 +7479,39 @@ static int print_statusline(const char *extname, unsigned statusitems,
 static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
 			    struct statusdata *sd)
 {
+    char *fname = NULL;
+    int r;
+
     /* use the index status if we can so we get the 'alive' Recent count */
     if (imapd_index && !strcmp(imapd_index->mailbox->name, mailboxname))
-	return index_status(imapd_index, sd);
-
+	r = index_status(imapd_index, sd);
     /* fall back to generic lookup */
-    return status_lookup(mailboxname, imapd_userid, statusitems, sd);
+    else 
+	r = status_lookup(mailboxname, imapd_userid, statusitems, sd);
+
+    if (r) goto out;
+
+    if (statusitems & (STATUS_XCONVEXISTS | STATUS_XCONVUNSEEN)) {
+	/* can only get for ourselves for now */
+	struct conversations_state state;
+	fname = conversations_getpath(mailboxname);
+
+	if (!fname) {
+	    r = IMAP_MAILBOX_BADNAME;
+	    goto out;
+	}
+
+	r = conversations_open(&state, fname);
+	if (r) goto out;
+	    
+	r = conversation_getstatus(&state, mailboxname,
+				   &sd->xconvexists, &sd->xconvunseen);
+	conversations_close(&state);
+    }
+
+out:
+    free(fname);
+    return r;
 }
 
 /*
