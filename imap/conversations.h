@@ -77,6 +77,7 @@ struct conversation {
     uint32_t	    unseen;
     uint32_t	    drafts;
     conv_folder_t   *folders;
+    int		    dirty;
 };
 
 extern char *conversations_getpath(const char *mboxname);
@@ -92,17 +93,26 @@ extern int conversations_set_msgid(struct conversations_state *state,
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
-extern int conversations_set_data(struct conversations_state *state,
-				  conversation_id_t cid,
-				  const conversation_t *conv);
-extern int conversations_get_data(struct conversations_state *state,
-				  conversation_id_t cid,
-				  conversation_t **convp);
-/* Finds or adds a folder with the given name.
- * Returns 1 if it's a new folder */
-extern int conversation_add_folder(conversation_t *,
-				   const char *name,
-				   conv_folder_t **folderp);
+extern int conversation_save(struct conversations_state *state,
+			     conversation_id_t cid,
+			     conversation_t *conv);
+extern int conversation_load(struct conversations_state *state,
+			     conversation_id_t cid,
+			     conversation_t **convp);
+/* Update the internal data about a conversation, enforcing
+ * consistency rules (e.g. the conversation's modseq is the
+ * maximum of all the per-folder modseqs).  Sets conv->dirty
+ * if any data actually changed.  */
+extern void conversation_update(conversation_t *conv,
+			        const char *mboxname,
+			        int delta_exists,
+			        int delta_unseen,
+			        int delta_drafts,
+			        modseq_t modseq);
+extern conv_folder_t *conversation_find_folder(conversation_t *,
+					       const char *mboxname);
+extern conv_folder_t *conversation_add_folder(conversation_t *,
+					      const char *mboxname);
 extern conversation_t *conversation_new(void);
 extern void conversation_free(conversation_t *);
 
