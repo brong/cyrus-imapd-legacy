@@ -70,6 +70,7 @@ struct conv_folder {
     char	    *mboxname;
     modseq_t	    modseq;
     uint32_t	    exists;
+    uint32_t	    prev_exists;
 };
 
 struct conv_sender {
@@ -82,6 +83,7 @@ struct conversation {
     modseq_t	    modseq;
     uint32_t	    exists;
     uint32_t	    unseen;
+    uint32_t	    prev_unseen;
     uint32_t	    drafts;
     conv_folder_t   *folders;
     conv_sender_t   *senders;
@@ -101,6 +103,14 @@ extern int conversations_set_msgid(struct conversations_state *state,
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
+extern int conversation_getstatus(struct conversations_state *state,
+				  const char *mboxname,
+				  uint32_t *existsp,
+				  uint32_t *unseenp);
+extern int conversation_setstatus(struct conversations_state *state,
+				  const char *mboxname,
+				  uint32_t exists,
+				  uint32_t unseen);
 extern int conversation_save(struct conversations_state *state,
 			     conversation_id_t cid,
 			     conversation_t *conv);
