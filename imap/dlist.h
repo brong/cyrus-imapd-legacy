@@ -200,7 +200,7 @@ char dlist_parse(struct dlist **dlp, int parsekeys,
 int dlist_parsemap(struct dlist **dlp, int parsekeys,
 		   const char *base, unsigned len);
 
-void dlist_stitch(struct dlist *parent, struct dlist *old, struct dlist *new);
+void dlist_stitch(struct dlist *parent, struct dlist *child);
 void dlist_unstitch(struct dlist *parent, struct dlist *child);
 void dlist_remove(struct dlist *parent, struct dlist *child);
 
