@@ -63,6 +63,7 @@ struct conversations_state
 
 typedef struct conversation conversation_t;
 typedef struct conv_folder  conv_folder_t;
+typedef struct conv_sender  conv_sender_t;
 
 struct conv_folder {
     conv_folder_t   *next;
@@ -71,12 +72,19 @@ struct conv_folder {
     uint32_t	    exists;
 };
 
+struct conv_sender {
+    conv_sender_t   *next;
+    char	    *email;
+    char	    *name;
+};
+
 struct conversation {
     modseq_t	    modseq;
     uint32_t	    exists;
     uint32_t	    unseen;
     uint32_t	    drafts;
     conv_folder_t   *folders;
+    conv_sender_t   *senders;
     int		    dirty;
 };
 
@@ -115,6 +123,10 @@ extern conv_folder_t *conversation_add_folder(conversation_t *,
 					      const char *mboxname);
 extern conversation_t *conversation_new(void);
 extern void conversation_free(conversation_t *);
+
+extern void conversation_add_sender(conversation_t *conv,
+				    const char *email,
+				    const char *name);
 
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,
