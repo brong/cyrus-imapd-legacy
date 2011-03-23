@@ -309,12 +309,15 @@ struct windowargs {
 
 /* Bitmask for status queries */
 enum {
-    STATUS_MESSAGES =	        (1<<0),
+    STATUS_MESSAGES =		(1<<0),
     STATUS_RECENT =		(1<<1),
     STATUS_UIDNEXT =		(1<<2),
     STATUS_UIDVALIDITY =	(1<<3),
     STATUS_UNSEEN =		(1<<4),
-    STATUS_HIGHESTMODSEQ =	(1<<5)
+    STATUS_HIGHESTMODSEQ =	(1<<5),
+    STATUS_XCONVEXISTS =	(1<<6),
+    STATUS_XCONVUNSEEN =	(1<<7),
+    STATUS_XCONVMODSEQ =	(1<<8)
 };
 
 /* Arguments to List functions */
@@ -326,7 +329,7 @@ struct listargs {
     strarray_t pat;		/* Mailbox pattern(s) */
     const char *scan;		/* SCAN content */
     hash_table server_table;	/* for proxying SCAN */
-    unsigned statusitems;       /* for RETURN STATUS */
+    unsigned statusitems;	/* for RETURN STATUS */
 };
 
 /* Value for List command variant */
