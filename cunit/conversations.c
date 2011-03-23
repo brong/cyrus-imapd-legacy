@@ -454,16 +454,15 @@ static void test_cid_rename(void)
     r = conversations_open(&state, DBNAME);
     CU_ASSERT_EQUAL(r, 0);
 
-#if 1	/* this behaviour recently broken */
-    /* check the data got renamed */
+    /*
+     * The B records in the database are not renamed immediately, it's
+     * caller's responsibility to do that.  In the real running system
+     * that happens via the callback to conversations_rename_cid() but
+     * we're not doing that here in the test code.  So the old B records
+     * will still be in the database at this point.
+     */
     conv = NULL;
     r = conversation_load(&state, C_CID1, &conv);
-    CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_PTR_NULL(conv);
-
-    conv = NULL;
-    r = conversation_load(&state, C_CID2, &conv);
-    CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
     CU_ASSERT_EQUAL(conv->modseq, 8);
     CU_ASSERT_EQUAL(num_folders(conv), 3);
@@ -475,7 +474,11 @@ static void test_cid_rename(void)
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     conversation_free(conv);
     conv = NULL;
-#endif
+
+    conv = NULL;
+    r = conversation_load(&state, C_CID2, &conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NULL(conv);
 
     memset(&cid, 0x45, sizeof(cid));
     r = conversations_get_msgid(&state, C_MSGID1, &cid);
