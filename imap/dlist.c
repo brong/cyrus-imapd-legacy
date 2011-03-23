@@ -207,38 +207,17 @@ error:
 
 /* DLIST STUFF */
 
-void dlist_stitch(struct dlist *parent, struct dlist *old, struct dlist *new)
+void dlist_stitch(struct dlist *parent, struct dlist *child)
 {
-    struct dlist *prev = NULL;
-    struct dlist *replace = NULL;
+    assert(!child->next);
 
-    assert(!new->next);
-
-    /* case: old is something else */
-    if (old) {
-	/* find old record */
-	for (replace = parent->head; replace; replace = replace->next) {
-	    if (replace == old) break;
-	    prev = replace;
-	}
-    }
-
-    if (replace) {
-	/* linkage */
-	if (prev) prev->next = new;
-	else (parent->head) = new;
-	if (replace->next) new->next = replace->next;
-	else (parent->tail) = new;
-    }
-    else if (parent->tail) {
-	parent->tail->next = new;
-	parent->tail = new;
+    if (parent->tail) {
+	parent->tail->next = child;
+	parent->tail = child;
     }
     else {
-	parent->head = parent->tail = new;
+	parent->head = parent->tail = child;
     }
-
-    dlist_free(&old);
 }
 
 void dlist_unstitch(struct dlist *parent, struct dlist *child)
@@ -252,14 +231,14 @@ void dlist_unstitch(struct dlist *parent, struct dlist *child)
 	prev = replace;
     }
 
-    if (!replace) return; /* no match, nothing to unstitch */
+    assert(replace);
 
     if (prev) prev->next = child->next;
     else (parent->head) = child->next;
-    if (child->next) {
-	if (prev) prev->next = child->next;
-    }
-    else (parent->tail) = prev;
+
+    if (parent->tail == child) parent->tail = prev;
+
+    child->next = NULL;
 }
 
 static struct dlist *dlist_child(struct dlist *dl, const char *name)
@@ -268,7 +247,7 @@ static struct dlist *dlist_child(struct dlist *dl, const char *name)
     if (name) i->name = xstrdup(name);
     i->type = DL_NIL;
     if (dl)
-	dlist_stitch(dl, NULL, i);
+	dlist_stitch(dl, i);
     return i;
 }
 
@@ -674,7 +653,7 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 	    struct dlist *di = NULL;
 	    prot_ungetc(c, in);
 	    c = dlist_parse(&di, 0, in);
-	    if (di) dlist_stitch(dl, NULL, di);
+	    if (di) dlist_stitch(dl, di);
 	    c = next_nonspace(in, c);
 	    if (c == EOF) goto fail;
 	}
@@ -690,7 +669,7 @@ char dlist_parse(struct dlist **dlp, int parsekey, struct protstream *in)
 		struct dlist *di = NULL;
 		prot_ungetc(c, in);
 		c = dlist_parse(&di, 1, in);
-		if (di) dlist_stitch(dl, NULL, di);
+		if (di) dlist_stitch(dl, di);
 		c = next_nonspace(in, c);
 		if (c == EOF) goto fail;
 	    }
