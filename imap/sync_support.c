@@ -1494,7 +1494,7 @@ int sync_parse_response(const char *cmd, struct protstream *in,
     while (!strcmp(response.s, "*")) {
 	struct dlist *item = sync_parseline(in);
 	if (!item) goto parse_err;
-	dlist_stitch(kl, NULL, item);
+	dlist_stitch(kl, item);
 	if ((c = getword(in, &response)) == EOF)
 	    goto parse_err;
     }
