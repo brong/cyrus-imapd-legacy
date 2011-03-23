@@ -259,9 +259,9 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
-int conversations_set_data(struct conversations_state *state,
-			   conversation_id_t cid,
-			   const conversation_t *conv)
+int conversation_save(struct conversations_state *state,
+		      conversation_id_t cid,
+		      conversation_t *conv)
 {
     char bkey[CONVERSATION_ID_STRMAX+2];
     struct dlist *dl, *n, *nn;
@@ -273,6 +273,8 @@ int conversations_set_data(struct conversations_state *state,
 	return IMAP_IOERROR;
     if (!conv)
 	return IMAP_INTERNAL;
+    if (!conv->dirty)
+	return 0;
 
     /* old pre-conversations message, nothing to do */
     if (!cid)
@@ -311,12 +313,14 @@ int conversations_set_data(struct conversations_state *state,
 done:
 
     buf_free(&buf);
+    if (!r)
+	conv->dirty = 0;
     return r;
 }
 
-int conversations_get_data(struct conversations_state *state,
-			   conversation_id_t cid,
-			   conversation_t **convp)
+int conversation_load(struct conversations_state *state,
+		      conversation_id_t cid,
+		      conversation_t **convp)
 {
     const char *bdata;
     int bdatalen;
@@ -337,7 +341,7 @@ int conversations_get_data(struct conversations_state *state,
 		  &state->txn);
 
     if (r == CYRUSDB_NOTFOUND) {
-	*convp = conversation_new();
+	*convp = NULL;
 	return 0;
     } else if (r != CYRUSDB_OK) {
 	return r;
@@ -367,7 +371,7 @@ int conversations_get_data(struct conversations_state *state,
 	nn = dlist_getchild(n, "MBOXNAME");
 	if (!nn)
 	    continue;
-	conversation_add_folder(conv, nn->sval, &folder);
+	folder = conversation_add_folder(conv, nn->sval);
 
 	nn = dlist_getchild(n, "MODSEQ");
 	if (nn)
@@ -378,32 +382,76 @@ int conversations_get_data(struct conversations_state *state,
     }
 
     dlist_free(&dl);
+    conv->dirty = 0;
     *convp = conv;
     return 0;
 }
 
-int conversation_add_folder(conversation_t *conv,
-			    const char *name,
-			    conv_folder_t **folderp)
+static conv_folder_t *conversation_get_folder(conversation_t *conv,
+					      const char *mboxname,
+					      int create_flag)
 {
     conv_folder_t *folder, **tailp = &conv->folders;
 
-    /* first check if it already exists */
+    /* first check if it already exists and find the tail */
     for (folder = conv->folders ; folder ; folder = folder->next) {
-	if (!strcmp(folder->mboxname, name)) {
-	    *folderp = folder;
-	    return 0;
-	}
+	if (!strcmp(folder->mboxname, mboxname))
+	    return folder;
 	tailp = &folder->next;
     }
 
-    /* not found, create a new one at the end of the list */
-    folder = xzmalloc(sizeof(*folder));
-    folder->mboxname = xstrdup(name);
-    *tailp = folder;
+    if (create_flag) {
+	/* not found, create a new one at the end of the list */
+	folder = xzmalloc(sizeof(*folder));
+	folder->mboxname = xstrdup(mboxname);
+	*tailp = folder;
+	conv->dirty = 1;
+    }
 
-    *folderp = folder;
-    return 1;
+    return folder;
+}
+
+conv_folder_t *conversation_find_folder(conversation_t *conv,
+				        const char *mboxname)
+{
+    return conversation_get_folder(conv, mboxname, /*create*/0);
+}
+
+conv_folder_t *conversation_add_folder(conversation_t *conv,
+				       const char *mboxname)
+{
+    return conversation_get_folder(conv, mboxname, /*create*/1);
+}
+
+void conversation_update(conversation_t *conv, const char *mboxname,
+		         int delta_exists, int delta_unseen,
+		         int delta_drafts, modseq_t modseq)
+{
+    conv_folder_t *folder;
+
+    folder = conversation_add_folder(conv, mboxname);
+
+    if (delta_exists) {
+	conv->exists += delta_exists;
+	folder->exists += delta_exists;
+	conv->dirty = 1;
+    }
+    if (delta_unseen) {
+	conv->unseen += delta_unseen;
+	conv->dirty = 1;
+    }
+    if (delta_drafts) {
+	conv->drafts += delta_drafts;
+	conv->dirty = 1;
+    }
+    if (modseq > conv->modseq) {
+	conv->modseq = modseq;
+	conv->dirty = 1;
+    }
+    if (modseq > folder->modseq) {
+	folder->modseq = modseq;
+	conv->dirty = 1;
+    }
 }
 
 conversation_t *conversation_new(void)
@@ -411,6 +459,7 @@ conversation_t *conversation_new(void)
     conversation_t *conv;
 
     conv = xzmalloc(sizeof(conversation_t));
+    conv->dirty = 1;
 
     return conv;
 }

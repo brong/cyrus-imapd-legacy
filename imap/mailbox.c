@@ -2089,12 +2089,10 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 {
     int r = 0;
     conversation_t *conv = NULL;
-    conv_folder_t *folder;
     int delta_exists = 0;
     int delta_unseen = 0;
     int delta_drafts = 0;
     modseq_t modseq = 0;
-    int dirty = 0;
     conversation_id_t cid = NULLCONVERSATION;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
@@ -2124,11 +2122,11 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (r)
 	return r;
 
-    r = conversations_get_data(&mailbox->cstate, cid, &conv);
+    r = conversation_load(&mailbox->cstate, cid, &conv);
     if (r)
 	return r;
-
-    dirty = conversation_add_folder(conv, mailbox->name, &folder);
+    if (!conv)
+	conv = conversation_new();
 
     /* calculate the changes */
     if (old) {
@@ -2154,31 +2152,10 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	modseq = MAX(modseq, new->modseq);
     }
 
-    if (delta_exists) {
-	conv->exists += delta_exists;
-	folder->exists += delta_exists;
-	dirty = 1;
-    }
-    if (delta_unseen) {
-	conv->unseen += delta_unseen;
-	dirty = 1;
-    }
-    if (delta_drafts) {
-	conv->drafts += delta_drafts;
-	dirty = 1;
-    }
-    if (modseq > conv->modseq) {
-	conv->modseq = modseq;
-	dirty = 1;
-    }
-    if (modseq > folder->modseq) {
-	folder->modseq = modseq;
-	dirty = 1;
-    }
-
-    r = 0;
-    if (dirty)
-	r = conversations_set_data(&mailbox->cstate, cid, conv);
+    conversation_update(conv, mailbox->name,
+			delta_exists, delta_unseen,
+			delta_drafts, modseq);
+    r = conversation_save(&mailbox->cstate, cid, conv);
 
     conversation_free(conv);
     return r;
