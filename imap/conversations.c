@@ -259,6 +259,15 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
+static int bool_diff(uint32_t new, uint32_t old)
+{
+    if (old && !new)
+	return -1;
+    if (new && !old)
+	return 1;
+    return 0;
+}
+
 int conversation_save(struct conversations_state *state,
 		      conversation_id_t cid,
 		      conversation_t *conv)
@@ -269,6 +278,7 @@ int conversation_save(struct conversations_state *state,
     const conv_folder_t *folder;
     const conv_sender_t *sender;
     int r = 0;
+    int unseen_diff;
 
     if (!state->db)
 	return IMAP_IOERROR;
@@ -283,6 +293,25 @@ int conversation_save(struct conversations_state *state,
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
 
+    unseen_diff = bool_diff(conv->unseen, conv->prev_unseen);
+    
+    /* see if any 'F' keys need to be changed */
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	int exists_diff = bool_diff(folder->exists, folder->prev_exists);
+	if (unseen_diff || exists_diff) {
+	    uint32_t exists;
+	    uint32_t unseen;
+	    r = conversation_getstatus(state, folder->mboxname,
+				       &exists, &unseen);
+	    if (r) goto done;
+	    exists += exists_diff;
+	    unseen += unseen_diff;
+	    r = conversation_setstatus(state, folder->mboxname,
+				       exists, unseen);
+	    if (r) goto done;
+	}
+    }
+
     /* this conversation is over, delete it */
     if (!conv->exists) {
 	r = DB->delete(state->db, bkey, strlen(bkey), &state->txn, 1);
@@ -295,7 +324,7 @@ int conversation_save(struct conversations_state *state,
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
     dlist_setnum32(dl, "DRAFTS", conv->drafts);
 
-    n = dlist_newlist(dl, "FOLDER");
+    n = dlist_newkvlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	nn = dlist_newkvlist(n, "FOLDER");
 	dlist_setatom(nn, "MBOXNAME", folder->mboxname);
@@ -303,7 +332,7 @@ int conversation_save(struct conversations_state *state,
 	dlist_setnum32(nn, "EXISTS", folder->exists);
     }
 
-    n = dlist_newlist(dl, "SENDER");
+    n = dlist_newkvlist(dl, "SENDER");
     for (sender = conv->senders ; sender ; sender = sender->next) {
 	nn = dlist_newkvlist(n, "SENDER");
 	dlist_setatom(nn, "EMAIL", sender->email);
@@ -325,6 +354,83 @@ done:
 	conv->dirty = 0;
     return r;
 }
+
+int conversation_getstatus(struct conversations_state *state,
+			   const char *mboxname,
+			    uint32_t *existsp,
+			    uint32_t *unseenp)
+{
+    char *key = strconcat("F", mboxname, (char *)NULL);
+    struct dlist *dl = NULL;
+    struct dlist *n;
+    const char *fdata;
+    int fdatalen;
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    r = DB->fetch(state->db,
+		  key, strlen(key),
+		  &fdata, &fdatalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND) {
+	*existsp = 0;
+	*unseenp = 0;
+	return 0;
+    } else if (r != CYRUSDB_OK) {
+	return r;
+    }
+
+    r = dlist_parsemap(&dl, 0, fdata, fdatalen);
+    if (r)
+	return r;
+
+    n = dlist_getchild(dl, "EXISTS");
+    if (n)
+	*existsp = dlist_num(n);
+    n = dlist_getchild(dl, "UNSEEN");
+    if (n)
+	*unseenp = dlist_num(n);
+
+    dlist_free(&dl);
+    free(key);
+
+    return 0;
+}
+
+int conversation_setstatus(struct conversations_state *state,
+			   const char *mboxname,
+			   uint32_t exists,
+			   uint32_t unseen)
+{
+    char *key = strconcat("F", mboxname, (char *)NULL);
+    struct dlist *dl = NULL;
+    struct buf buf = BUF_INITIALIZER;
+    int r;
+
+    if (!state->db)
+	return IMAP_IOERROR;
+
+    dl = dlist_newkvlist(NULL, NULL);
+    dlist_setnum32(dl, "EXISTS", exists);
+    dlist_setnum32(dl, "UNSEEN", unseen);
+
+    dlist_printbuf(dl, 0, &buf);
+    dlist_free(&dl);
+
+    r = DB->store(state->db,
+		  key, strlen(key),
+		  buf.s, buf.len,
+		  &state->txn);
+
+    buf_free(&buf);
+    free(key);
+
+    return r;
+}
+
 
 int conversation_load(struct conversations_state *state,
 		      conversation_id_t cid,
@@ -387,6 +493,8 @@ int conversation_load(struct conversations_state *state,
 	nn = dlist_getchild(n, "EXISTS");
 	if (nn)
 	    folder->exists = dlist_num(nn);
+
+	folder->prev_exists = folder->exists;
     }
 
     n = dlist_getchild(dl, "SENDER");
@@ -396,6 +504,8 @@ int conversation_load(struct conversations_state *state,
 	nn2 = dlist_getchild(n, "NAME");
 	conversation_add_sender(conv, nn->sval, nn2->sval);
     }
+
+    conv->prev_unseen = conv->unseen;
 
     dlist_free(&dl);
     conv->dirty = 0;
