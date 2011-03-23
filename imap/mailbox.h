@@ -117,12 +117,15 @@ struct statusdata {
     const char *userid;
     unsigned statusitems;
 
-    unsigned messages;
-    unsigned recent;
-    unsigned uidnext;
-    unsigned uidvalidity;
-    unsigned unseen;
+    uint32_t messages;
+    uint32_t recent;
+    uint32_t uidnext;
+    uint32_t uidvalidity;
+    uint32_t unseen;
     modseq_t highestmodseq;
+    uint32_t xconvexists;
+    uint32_t xconvunseen;
+    modseq_t xconvmodseq;
 };
 
 struct index_record {

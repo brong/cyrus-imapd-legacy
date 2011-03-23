@@ -7716,6 +7716,15 @@ static int parse_statusitems(unsigned *statusitemsp, const char **errstr)
 	else if (!strcmp(arg.s, "highestmodseq")) {
 	    statusitems |= STATUS_HIGHESTMODSEQ;
 	}
+	else if (!strcmp(arg.s, "xconvexists")) {
+	    statusitems |= STATUS_XCONVEXISTS;
+	}
+	else if (!strcmp(arg.s, "xconvunseen")) {
+	    statusitems |= STATUS_XCONVUNSEEN;
+	}
+	else if (!strcmp(arg.s, "xconvmodseq")) {
+	    statusitems |= STATUS_XCONVMODSEQ;
+	}
 	else {
 	    static char buf[200];
 	    snprintf(buf, 200, "Invalid Status attributes %s", arg.s);
@@ -7773,6 +7782,18 @@ static int print_statusline(const char *extname, unsigned statusitems,
 		    sepchar, sd->highestmodseq);
 	sepchar = ' ';
     }
+    if (statusitems & STATUS_XCONVEXISTS) {
+	prot_printf(imapd_out, "%cXCONVEXISTS %u", sepchar, sd->xconvexists);
+	sepchar = ' ';
+    }
+    if (statusitems & STATUS_XCONVUNSEEN) {
+	prot_printf(imapd_out, "%cXCONVUNSEEN %u", sepchar, sd->xconvunseen);
+	sepchar = ' ';
+    }
+    if (statusitems & STATUS_XCONVMODSEQ) {
+	prot_printf(imapd_out, "%cXCONVMODSEQ " MODSEQ_FMT, sepchar, sd->xconvmodseq);
+	sepchar = ' ';
+    }
     prot_printf(imapd_out, ")\r\n");
 
     return 0;
@@ -7781,12 +7802,32 @@ static int print_statusline(const char *extname, unsigned statusitems,
 static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
 			    struct statusdata *sd)
 {
+    int r;
+
     /* use the index status if we can so we get the 'alive' Recent count */
     if (imapd_index && !strcmp(imapd_index->mailbox->name, mailboxname))
-	return index_status(imapd_index, sd);
-
+	r = index_status(imapd_index, sd);
     /* fall back to generic lookup */
-    return status_lookup(mailboxname, imapd_userid, statusitems, sd);
+    else
+	r = status_lookup(mailboxname, imapd_userid, statusitems, sd);
+
+    if (r) goto out;
+
+    if (statusitems & (STATUS_XCONVEXISTS | STATUS_XCONVUNSEEN
+		    | STATUS_XCONVMODSEQ)) {
+	/* can only get for ourselves for now */
+	struct conversations_state *state = NULL;
+
+	r = conversations_open_mbox(mailboxname, &state);
+	if (r) goto out;
+
+	r = conversation_getstatus(state, mailboxname, &sd->xconvmodseq,
+				   &sd->xconvexists, &sd->xconvunseen);
+	conversations_abort(&state);
+    }
+
+out:
+    return r;
 }
 
 /*
