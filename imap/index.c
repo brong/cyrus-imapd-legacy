@@ -90,7 +90,6 @@ static void index_refresh(struct index_state *state);
 static void index_tellexists(struct index_state *state);
 static int index_lock(struct index_state *state);
 static void index_unlock(struct index_state *state);
-// extern struct namespace imapd_namespace;
 
 int index_writeseen(struct index_state *state);
 void index_fetchmsg(struct index_state *state,
@@ -2807,14 +2806,16 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	sepchar = ' ';
     }
     if ((fetchitems & FETCH_FOLDER)) {
-// 	char mboxname[MAX_MAILBOX_PATH+1];
-// 	(*imapd_namespace.mboxname_toexternal)(&imapd_namespace,
-// 					       state->mailbox->name,
-// 					       imapd_userid, mboxname);
-// 	/* TODO: quoting!?!?! */
-// 	prot_printf(state->out, "%cFOLDER %s", sepchar, mboxname);
-	prot_printf(state->out, "%cFOLDER \"%s\"", sepchar, state->mailbox->name);
-	sepchar = ' ';
+	struct namespace *ns = fetchargs->namespace;
+	char mboxname[MAX_MAILBOX_PATH+1];
+	r = ns->mboxname_toexternal(ns, state->mailbox->name,
+				    fetchargs->userid, mboxname);
+	if (!r) {
+	    prot_printf(state->out, "%cFOLDER ", sepchar);
+	    prot_printastring(state->out, mboxname);
+	    sepchar = ' ';
+	}
+	r = 0;
     }
     if ((fetchitems & FETCH_UIDVALIDITY)) {
 	prot_printf(state->out, "%cUIDVALIDITY %u", sepchar,

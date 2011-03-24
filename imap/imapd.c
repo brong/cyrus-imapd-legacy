@@ -4416,6 +4416,11 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 	}
     }
 
+    if (fetchitems & FETCH_FOLDER) {
+	fetchargs.namespace = &imapd_namespace;
+	fetchargs.userid = imapd_userid;
+    }
+
     *fa = fetchargs;
     fa->fetchitems = fetchitems;
     strarray_free(newfields);
