@@ -4524,8 +4524,9 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     }
 
     /* parse CID */
-    if (!conversation_id_decode(&cid, cidstr)) {
+    if (!conversation_id_decode(&cid, cidstr) || !cid) {
 	prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
+	eatline(imapd_in, c);
 	return;
     }
 
@@ -4599,9 +4600,9 @@ static int do_xconvfetch(conversation_id_t cid,
     struct conversations_state state;
     int r = 0;
     const char *inboxname;
-    char *fname;
+    char *fname = NULL;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
-    struct index_state **states;
+    struct index_state **states = NULL;
     int i;
     char *vanished = NULL;
     struct statusdata server_sd;
