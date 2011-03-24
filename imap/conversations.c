@@ -357,8 +357,8 @@ done:
 
 int conversation_getstatus(struct conversations_state *state,
 			   const char *mboxname,
-			    uint32_t *existsp,
-			    uint32_t *unseenp)
+			   uint32_t *existsp,
+			   uint32_t *unseenp)
 {
     char *key = strconcat("F", mboxname, (char *)NULL);
     struct dlist *dl = NULL;
@@ -385,7 +385,13 @@ int conversation_getstatus(struct conversations_state *state,
     }
 
     r = dlist_parsemap(&dl, 0, fdata, fdatalen);
-    if (r) goto done;
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: conversations invalid status %s", mboxname);
+	*existsp = 0;
+	*unseenp = 0;
+	r = 0;
+	goto done;
+    }
 
     n = dlist_getchild(dl, "EXISTS");
     if (n)
@@ -465,8 +471,12 @@ int conversation_load(struct conversations_state *state,
     }
 
     r = dlist_parsemap(&dl, 0, bdata, bdatalen);
-    if (r)
-	return r;
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
+	       CONV_FMT, cid);
+	*convp = NULL;
+	return 0;
+    }
 
     conv = conversation_new();
 
