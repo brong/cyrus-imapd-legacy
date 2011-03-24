@@ -592,6 +592,20 @@ void conversation_add_sender(conversation_t *conv,
     conv->dirty = 1;
 }
 
+static void _apply_delta(uint32_t *valp, int delta)
+{
+    if (delta >= 0) {
+	*valp += delta;
+    }
+    else {
+	uint32_t decrease = -delta;
+	if (decrease > *valp)
+	    *valp = 0;
+	else
+	    *valp -= decrease;
+    }
+}
+
 void conversation_update(conversation_t *conv, const char *mboxname,
 		         int delta_exists, int delta_unseen,
 		         int delta_drafts, modseq_t modseq)
@@ -601,16 +615,16 @@ void conversation_update(conversation_t *conv, const char *mboxname,
     folder = conversation_add_folder(conv, mboxname);
 
     if (delta_exists) {
-	conv->exists += delta_exists;
-	folder->exists += delta_exists;
+	_apply_delta(&conv->exists, delta_exists);
+	_apply_delta(&folder->exists, delta_exists);
 	conv->dirty = 1;
     }
     if (delta_unseen) {
-	conv->unseen += delta_unseen;
+	_apply_delta(&conv->unseen, delta_unseen);
 	conv->dirty = 1;
     }
     if (delta_drafts) {
-	conv->drafts += delta_drafts;
+	_apply_delta(&conv->drafts, delta_drafts);
 	conv->dirty = 1;
     }
     if (modseq > conv->modseq) {
