@@ -505,7 +505,8 @@ int conversation_load(struct conversations_state *state,
 	struct dlist *nn2;
 	nn = dlist_getchild(n, "EMAIL");
 	nn2 = dlist_getchild(n, "NAME");
-	conversation_add_sender(conv, nn->sval, nn2->sval);
+	if (nn && nn2)
+	    conversation_add_sender(conv, nn->sval, nn2->sval);
     }
 
     conv->prev_unseen = conv->unseen;
@@ -558,12 +559,15 @@ void conversation_add_sender(conversation_t *conv,
 {
     conv_sender_t *sender, **tailp = &conv->senders;
 
+    if (!name || !email) return;
+
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (!strcmp(sender->email, email)) {
 	    /* found it.  Just check if we should update the name */
 	    if (name[0] && !sender->name[0]) {
 		free(sender->name);
 		sender->name = xstrdup(name);
+		conv->dirty = 1;
 	    }
 	    return;
 	}
