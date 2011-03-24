@@ -352,7 +352,8 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 void cmd_fetch(char *tag, char *sequence, int usinguid);
 void cmd_xconvfetch(const char *tag, const char *cid);
 static int do_xconvfetch(conversation_id_t cid,
-			 struct hash_table *validities,
+			 uint32_t uidvalidity,
+			 modseq_t highestmodseq,
 			 struct fetchargs *fetchargs);
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
@@ -4477,65 +4478,6 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
 }
 
 /*
- * Parse validity tuples which are of the form
- * ( ( <folder-name> <uidvalidity> <modseq> ) ( <folder-name> ... ) * )
- */
-static int parse_xconv_validities(const char *tag,
-				  hash_table *validities)
-{
-    int c;
-    struct buf name = BUF_INITIALIZER;
-    uint32_t uidv;
-    modseq_t hms;
-    struct statusdata *sd;
-
-    /* parse the opening parenthesis of the tuple list */
-    c = prot_getc(imapd_in);
-    if (c != '(')
-	goto syntax_error;
-
-    for (;;)
-    {
-	c = prot_getc(imapd_in);
-	if (c == ')')
-	    break;	/* closing parenthesis of the tuple list */
-	if (c != '(')
-	    goto syntax_error;
-	/* found the opening parenthesis of a folder tuple */
-
-	c = getqstring(imapd_in, imapd_out, &name);
-	if (c != ' ' || !name.len)
-	    goto syntax_error;
-
-	c = getuint32(imapd_in, &uidv);
-	if (c != ' ')
-	    goto syntax_error;
-
-	c = getmodseq(imapd_in, &hms);
-	if (c != ')')
-	    goto syntax_error;
-
-	sd = xzmalloc(sizeof(*sd));
-	sd->uidvalidity = uidv;
-	sd->highestmodseq = hms;
-	hash_insert(buf_cstring(&name), sd, validities);
-    }
-
-    c = prot_getc(imapd_in);
-    if (c != ' ')
-	goto syntax_error;
-
-    buf_free(&name);
-    return 0;
-
-syntax_error:
-    buf_free(&name);
-    prot_printf(imapd_out, "%s BAD Syntax error in folder validities\r\n", tag);
-    eatline(imapd_in, c);
-    return IMAP_PROTOCOL_ERROR;
-}
-
-/*
  * Parse and perform a XCONVFETCH command.
  */
 void cmd_xconvfetch(const char *tag, const char *cidstr)
@@ -4545,7 +4487,8 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     int r;
     clock_t start = clock();
     conversation_id_t cid;
-    hash_table validities;
+    uint32_t uidv = 0;
+    modseq_t hms = 0;
     char mytime[100];
 
     if (backend_current) {
@@ -4569,12 +4512,29 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
 	return;
     }
 
-    construct_hash_table(&validities, 16, 0);
-    r = parse_xconv_validities(tag, &validities);
-    if (r) {
-	free_hash_table(&validities, free);
-	return;
+    /* parse (uidvalidity highestmodseq) tuple or () */
+    c = prot_getc(imapd_in);
+    if (c != '(')
+	goto syntax_error;
+
+    c = prot_getc(imapd_in);
+    if (c == EOF)
+	goto syntax_error;
+    if (c != ')') {
+	prot_ungetc(c, imapd_in);
+
+	c = getuint32(imapd_in, &uidv);
+	if (c != ' ')
+	    goto syntax_error;
+
+	c = getmodseq(imapd_in, &hms);
+	if (c != ')')
+	    goto syntax_error;
     }
+
+    c = prot_getc(imapd_in);
+    if (c != ' ')
+	goto syntax_error;
 
     r = parse_fetch_args(tag, "Xconvfetch", 0, &fetchargs);
     if (r)
@@ -4584,7 +4544,7 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     fetchargs.namespace = &imapd_namespace;
     fetchargs.userid = imapd_userid;
 
-    r = do_xconvfetch(cid, &validities, &fetchargs);
+    r = do_xconvfetch(cid, uidv, hms, &fetchargs);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
@@ -4602,7 +4562,11 @@ freeargs:
     freefieldlist(fetchargs.fsections);
     strarray_fini(&fetchargs.headers);
     strarray_fini(&fetchargs.headers_not);
-    free_hash_table(&validities, free);
+    return;
+
+syntax_error:
+    prot_printf(imapd_out, "%s BAD Syntax error\r\n", tag);
+    eatline(imapd_in, c);
 }
 
 static int compare_mboxnames(const void *v1, const void *v2)
@@ -4610,17 +4574,9 @@ static int compare_mboxnames(const void *v1, const void *v2)
     return strcmp(*(const char **)v1, *(const char **)v2);
 }
 
-static void do_xconvstate_notfound(char *key, void *data,
-				   void *rock __attribute__((unused)))
-{
-    struct statusdata *sd = data;
-
-    if (sd->messages != ~0U)
-	prot_printf(imapd_out, "* FOLDERSTATE \"%s\" NIL NIL\r\n", key);
-}
-
 static int do_xconvfetch(conversation_id_t cid,
-			 hash_table *validities,
+			 uint32_t uidvalidity,
+			 modseq_t highestmodseq,
 			 struct fetchargs *fetchargs)
 {
     struct conversations_state state;
@@ -4630,12 +4586,12 @@ static int do_xconvfetch(conversation_id_t cid,
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     struct index_state **states;
     int i;
-    char *vanished;
-    struct statusdata *client_sd;
+    char *vanished = NULL;
     struct statusdata server_sd;
     conversation_t *conv = NULL;
     conv_folder_t *folder;
     int dummy;
+    char extname[MAX_MAILBOX_BUFFER];
 
     inboxname = mboxname_user_inbox(imapd_userid);
     if (!inboxname)
@@ -4672,25 +4628,14 @@ static int do_xconvfetch(conversation_id_t cid,
 	r = index_status(states[i], &server_sd);
 	if (r)
 	    goto out;
-	client_sd = hash_lookup(mboxnames.data[i], validities);
-	if (client_sd)
-	    client_sd->messages = ~0U;
-	if (client_sd &&
-	    client_sd->uidvalidity == server_sd.uidvalidity &&
-	    client_sd->highestmodseq == server_sd.highestmodseq) {
-	    /* skip this folder, it has not changed since
-	       the client last received status for it */
-	    continue;
-	}
 
-	{
+	if (uidvalidity != server_sd.uidvalidity ||
+	    highestmodseq != server_sd.highestmodseq) {
 	    struct seqset *vanishedlist = NULL;
 	    struct vanished_params vparams;
 	    memset(&vparams, 0, sizeof(vparams));
-	    if (client_sd) {
-		vparams.uidvalidity = client_sd->uidvalidity;
-		vparams.modseq = client_sd->highestmodseq;
-	    }
+	    vparams.uidvalidity = uidvalidity;
+	    vparams.modseq = highestmodseq;
 	    vanishedlist = index_vanished(states[i], &vparams);
 	    vanished = (vanishedlist && vanishedlist->len ?
 			seqset_cstring(vanishedlist) :
@@ -4698,30 +4643,33 @@ static int do_xconvfetch(conversation_id_t cid,
 	    seqset_free(vanishedlist);
 	}
 
-	prot_printf(imapd_out,
-		    "* FOLDERSTATE \"%s\" %u " MODSEQ_FMT
-		    "%s%s%s"
-		    "\r\n",
-		    mboxnames.data[i],
-		    server_sd.uidvalidity,
-		    server_sd.highestmodseq,
-		    vanished ? " (VANISHED " : "",
-		    vanished ? vanished : "",
-		    vanished ? ")" : "");
-	free(vanished);
+	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
+					        mboxnames.data[i],
+					        imapd_userid, extname);
+	if (r)
+	    goto out;
 
-	fetchargs->changedsince = (client_sd ? client_sd->highestmodseq : 0);
+	prot_printf(imapd_out, "* FOLDERSTATE ");
+	prot_printastring(imapd_out, extname);
+	prot_printf(imapd_out, " %u " MODSEQ_FMT,
+		    server_sd.uidvalidity,
+		    server_sd.highestmodseq);
+	if (vanished)
+	    prot_printf(imapd_out, " (VANISHED %s)", vanished);
+	prot_printf(imapd_out, "\r\n");
+	free(vanished);
+	vanished = NULL;
+
+	if (highestmodseq == server_sd.highestmodseq)
+	    continue;
+
+	fetchargs->changedsince = highestmodseq;
 
 	r = index_fetch(states[i], "1:*", /*usinguid*/1,
 			fetchargs, &dummy);
 	if (r)
 	    goto out;
     }
-
-    /* Emit FOLDERSTATE notifications for any folders named
-     * by the client-sent validity tuples but no longer
-     * recorded as being touched by this conversation */
-    hash_enumerate(validities, do_xconvstate_notfound, NULL);
 
     r = 0;
 
@@ -4733,6 +4681,7 @@ out:
     }
     strarray_fini(&mboxnames);
     free(fname);
+    free(vanished);
     return r;
 }
 
