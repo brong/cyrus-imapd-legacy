@@ -2798,7 +2798,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     if ((fetchitems & FETCH_CID) &&
 	config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	struct buf buf = BUF_INITIALIZER;
-	if (im->record.cid)
+	if (!im->record.cid)
 	    buf_appendcstr(&buf, "NIL");
 	else
 	    buf_printf(&buf, CONV_FMT, im->record.cid);
