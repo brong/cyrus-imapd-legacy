@@ -626,12 +626,21 @@ conversation_t *conversation_new(void)
 void conversation_free(conversation_t *conv)
 {
     conv_folder_t *folder;
+    conv_sender_t *sender;
 
     while ((folder = conv->folders)) {
 	conv->folders = folder->next;
 	free(folder->mboxname);
 	free(folder);
     }
+
+    while ((sender = conv->senders)) {
+	conv->senders = sender->next;
+	free(sender->email);
+	free(sender->name);
+	free(sender);
+    }
+
     free(conv);
 }
 
