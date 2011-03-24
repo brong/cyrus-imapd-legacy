@@ -365,10 +365,10 @@ int conversation_getstatus(struct conversations_state *state,
     struct dlist *n;
     const char *fdata;
     int fdatalen;
-    int r;
+    int r = IMAP_IOERROR;
 
     if (!state->db)
-	return IMAP_IOERROR;
+	goto done;
 
     r = DB->fetch(state->db,
 		  key, strlen(key),
@@ -378,14 +378,14 @@ int conversation_getstatus(struct conversations_state *state,
     if (r == CYRUSDB_NOTFOUND) {
 	*existsp = 0;
 	*unseenp = 0;
-	return 0;
+	r = 0;
+	goto done;
     } else if (r != CYRUSDB_OK) {
-	return r;
+	goto done;
     }
 
     r = dlist_parsemap(&dl, 0, fdata, fdatalen);
-    if (r)
-	return r;
+    if (r) goto done;
 
     n = dlist_getchild(dl, "EXISTS");
     if (n)
@@ -394,10 +394,11 @@ int conversation_getstatus(struct conversations_state *state,
     if (n)
 	*unseenp = dlist_num(n);
 
+ done:
     dlist_free(&dl);
     free(key);
 
-    return 0;
+    return r;
 }
 
 int conversation_setstatus(struct conversations_state *state,
@@ -408,10 +409,10 @@ int conversation_setstatus(struct conversations_state *state,
     char *key = strconcat("F", mboxname, (char *)NULL);
     struct dlist *dl = NULL;
     struct buf buf = BUF_INITIALIZER;
-    int r;
+    int r = IMAP_IOERROR;
 
     if (!state->db)
-	return IMAP_IOERROR;
+	goto done;
 
     dl = dlist_newkvlist(NULL, NULL);
     dlist_setnum32(dl, "EXISTS", exists);
@@ -424,6 +425,8 @@ int conversation_setstatus(struct conversations_state *state,
 		  key, strlen(key),
 		  buf.s, buf.len,
 		  &state->txn);
+
+done:
 
     buf_free(&buf);
     free(key);
