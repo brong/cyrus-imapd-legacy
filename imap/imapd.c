@@ -4409,7 +4409,8 @@ static int parse_fetch_args(const char *tag, const char *cmd,
     if (fetchitems & FETCH_MODSEQ) {
 	if (!(imapd_client_capa & CAPA_CONDSTORE)) {
 	    imapd_client_capa |= CAPA_CONDSTORE;
-	    prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
+	    if (imapd_index)
+		prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 			index_highestmodseq(imapd_index));
 	}
     }
@@ -4572,12 +4573,6 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
 	return;
     }
 
-    if (!imapd_index) {
-	prot_printf(imapd_out, "%s BAD No mailbox is selected or specified\r\n", tag);
-	eatline(imapd_in, c);
-	return;
-    }
-
     /* parse CID */
     if (!conversation_id_decode(&cid, cidstr)) {
 	prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
@@ -4596,6 +4591,8 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
 	goto freeargs;
     fetchargs.cid = cid;
     fetchargs.fetchitems |= (FETCH_UIDVALIDITY|FETCH_FOLDER);
+    fetchargs.namespace = &imapd_namespace;
+    fetchargs.userid = imapd_userid;
 
     r = do_xconvfetch(cid, &validities, &fetchargs);
 
@@ -4638,6 +4635,7 @@ static int do_xconvfetch(conversation_id_t cid,
 {
     struct conversations_state state;
     int r = 0;
+    const char *inboxname;
     char *fname;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
     struct index_state **states;
@@ -4649,7 +4647,11 @@ static int do_xconvfetch(conversation_id_t cid,
     conv_folder_t *folder;
     int dummy;
 
-    fname = conversations_getpath(imapd_index->mailbox->name);
+    inboxname = mboxname_user_inbox(imapd_userid);
+    if (!inboxname)
+	return IMAP_MAILBOX_BADNAME;
+
+    fname = conversations_getpath(inboxname);
     if (!fname)
 	return IMAP_MAILBOX_BADNAME;
 
