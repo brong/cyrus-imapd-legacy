@@ -2799,10 +2799,12 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     }
     if ((fetchitems & FETCH_CID) &&
 	config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	struct buf buf;
-	buf_init(&buf);
-	buf_printf(&buf, "%cCID " CONV_FMT, sepchar, im->record.cid);
-	prot_putbuf(state->out, &buf);
+	struct buf buf = BUF_INITIALIZER;
+	if (im->record.cid)
+	    buf_appendcstr(&buf, "NIL");
+	else
+	    buf_printf(&buf, CONV_FMT, im->record.cid);
+	prot_printf(state->out, "%cCID %s", sepchar, buf_cstring(&buf));
 	buf_free(&buf);
 	sepchar = ' ';
     }
