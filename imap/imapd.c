@@ -4587,11 +4587,6 @@ syntax_error:
     eatline(imapd_in, c);
 }
 
-static int compare_mboxnames(const void *v1, const void *v2)
-{
-    return strcmp(*(const char **)v1, *(const char **)v2);
-}
-
 static int do_xconvfetch(conversation_id_t cid,
 			 uint32_t uidvalidity,
 			 modseq_t highestmodseq,
@@ -4601,15 +4596,9 @@ static int do_xconvfetch(conversation_id_t cid,
     int r = 0;
     const char *inboxname;
     char *fname = NULL;
-    strarray_t mboxnames = STRARRAY_INITIALIZER;
-    struct index_init init;
-    struct index_state **states = NULL;
-    int i;
-    char *vanished = NULL;
-    struct statusdata server_sd;
+    struct index_state *index_state = NULL;
     conversation_t *conv = NULL;
     conv_folder_t *folder;
-    int dummy;
     char extname[MAX_MAILBOX_BUFFER];
 
     inboxname = mboxname_user_inbox(imapd_userid);
@@ -4628,83 +4617,60 @@ static int do_xconvfetch(conversation_id_t cid,
     conversations_close(&state);
     if (r || !conv)
 	goto out;
-    for (folder = conv->folders ; folder ; folder = folder->next)
-	strarray_append(&mboxnames, folder->mboxname);
-    conversation_free(conv);
 
-    /* Force a fixed order on the folders, so that the locking order is stable */
-    qsort(mboxnames.data, mboxnames.count, sizeof(char *),
-	  compare_mboxnames);
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	struct index_init init;
+	struct seqset *seq;
 
-    states = xcalloc(mboxnames.count, sizeof(struct index_state*));
-
-    for (i = 0 ; i < mboxnames.count ; i++) {
-	memset(&init, 0, sizeof(init));
-	init.userid = imapd_userid;
-	init.authstate = imapd_authstate;
-	init.out = imapd_out;
-
-	r = index_open(mboxnames.data[i], &init, &states[i]);
-	if (r)
-	    goto out;
-
-	r = index_status(states[i], &server_sd);
-	if (r)
-	    goto out;
-
-	if (uidvalidity != server_sd.uidvalidity ||
-	    highestmodseq != server_sd.highestmodseq) {
-	    struct seqset *vanishedlist = NULL;
-	    struct vanished_params vparams;
-	    memset(&vparams, 0, sizeof(vparams));
-	    vparams.uidvalidity = uidvalidity;
-	    vparams.modseq = highestmodseq;
-	    vanishedlist = index_vanished(states[i], &vparams);
-	    vanished = (vanishedlist && vanishedlist->len ?
-			seqset_cstring(vanishedlist) :
-			NULL);
-	    seqset_free(vanishedlist);
-	}
+	/* XXX - check highestmodseq for don't bother */
 
 	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
-					        mboxnames.data[i],
+					        folder->mboxname,
 					        imapd_userid, extname);
+	if (r)
+	    goto out;
+
+	memset(&init, 0, sizeof(struct index_init));
+	init.userid = imapd_userid;
+	init.authstate = imapd_authstate;
+	init.examine_mode = 1;
+	init.vanished.uidvalidity = uidvalidity;
+	init.vanished.modseq = highestmodseq;
+	r = index_open(folder->mboxname, &init, &index_state);
 	if (r)
 	    goto out;
 
 	prot_printf(imapd_out, "* FOLDERSTATE ");
 	prot_printastring(imapd_out, extname);
 	prot_printf(imapd_out, " %u " MODSEQ_FMT,
-		    server_sd.uidvalidity,
-		    server_sd.highestmodseq);
-	if (vanished)
-	    prot_printf(imapd_out, " (VANISHED %s)", vanished);
-	prot_printf(imapd_out, "\r\n");
-	free(vanished);
-	vanished = NULL;
+		    index_state->mailbox->i.uidvalidity,
+		    index_state->mailbox->i.highestmodseq);
 
-	if (highestmodseq == server_sd.highestmodseq)
-	    continue;
+	if (init.vanishedlist) {
+	    char *vanished = seqset_cstring(init.vanishedlist);
+	    if (vanished)
+		prot_printf(imapd_out, " (VANISHED %s)", vanished);
+	    free(vanished);
+	    seqset_free(init.vanishedlist);
+	}
+
+	prot_printf(imapd_out, "\r\n");
 
 	fetchargs->changedsince = highestmodseq;
 
-	r = index_fetch(states[i], "1:*", /*usinguid*/1,
-			fetchargs, &dummy);
-	if (r)
-	    goto out;
+	seq = seqset_parse("1:*", NULL, index_state->mailbox->i.last_uid);
+	index_fetchresponses(index_state, seq, /*usinguid*/1,
+			     fetchargs, NULL);
+	seqset_free(seq);
+
+	index_close(&index_state);
     }
 
     r = 0;
 
 out:
-    if (states) {
-	for (i = mboxnames.count-1 ; i >= 0 ; --i)
-	    index_close(&states[i]);
-	free(states);
-    }
-    strarray_fini(&mboxnames);
+    if (index_state) index_close(&index_state);
     free(fname);
-    free(vanished);
     return r;
 }
 
