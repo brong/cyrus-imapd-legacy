@@ -5040,6 +5040,7 @@ void cmd_xconvsort(char *tag)
     int charset = 0;
     struct searchargs *searchargs = NULL;
     struct windowargs *windowargs = NULL;
+    struct index_state *state = NULL;
     clock_t start = clock();
     char mytime[100];
     int n;
@@ -5105,7 +5106,31 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
+    if (windowargs->changedsince) {
+	/* need to force a re-read from scratch into a new
+	 * index and then throw that away so as not to confuse
+	 * subsequent commands */
+	struct index_init init;
+	int r;
+
+	memset(&init, 0, sizeof(struct index_init));
+	init.userid = imapd_userid;
+	init.authstate = imapd_authstate;
+	init.out = imapd_out;
+	init.want_expunged = 1;
+
+	r = index_open(imapd_index->mailbox->name, &init, &state);
+	if (r)
+	    goto error;
+    } else {
+	state = imapd_index;
+    }
+
+
+    n = index_convsort(state, sortcrit, searchargs, windowargs);
+
+    if (state != imapd_index)
+	index_close(&state);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
