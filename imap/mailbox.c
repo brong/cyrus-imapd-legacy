@@ -2095,10 +2095,11 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	/* decrease any relevent counts */
 	if (!(old->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists--;
-	    if (!(old->system_flags & FLAG_SEEN))
-		delta_unseen--;
 	    if (old->system_flags & FLAG_DRAFT)
 		delta_drafts--;
+	    /* drafts don't count towards seen */
+	    else if (!(old->system_flags & FLAG_SEEN))
+		delta_unseen--;
 	}
 	modseq = MAX(modseq, old->modseq);
     }
@@ -2106,10 +2107,11 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	/* add any counts */
 	if (!(new->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists++;
-	    if (!(new->system_flags & FLAG_SEEN))
-		delta_unseen++;
 	    if (new->system_flags & FLAG_DRAFT)
 		delta_drafts++;
+	    /* drafts don't count towards seen */
+	    else if (!(new->system_flags & FLAG_SEEN))
+		delta_unseen++;
 	}
 	modseq = MAX(modseq, new->modseq);
     }
@@ -2118,6 +2120,8 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 			delta_exists, delta_unseen,
 			delta_drafts, modseq);
 
+    /* drafts don't generate sender records so you don't spuriously get
+     * yourself just for clicking on "reply" then aborting */
     if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
 	/* Need to find the sender */
 	if (!mailbox_cacherecord(mailbox, new)) {
