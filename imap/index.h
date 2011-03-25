@@ -86,6 +86,7 @@ struct index_init {
     int qresync;
     int select;
     struct vanished_params vanished;
+    int want_expunged;
 };
 
 struct index_map {
@@ -119,6 +120,7 @@ struct index_state {
     struct protstream *out;
     int qresync;
     struct auth_state *authstate;
+    int want_expunged;
 };
 
 struct copyargs {
