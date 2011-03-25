@@ -3770,6 +3770,8 @@ void cmd_select(char *tag, char *cmd, char *name)
 
     if (r) {
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+	if (init.vanishedlist) seqset_free(init.vanishedlist);
+	init.vanishedlist = NULL;
 	if (doclose) index_close(&imapd_index);
 	return;
     }
@@ -3808,6 +3810,11 @@ void cmd_select(char *tag, char *cmd, char *name)
 	    nextalert = now + 600; /* ALERT every 10 min regardless */
 	}
     }
+
+    index_select(imapd_index, &init);
+
+    if (init.vanishedlist) seqset_free(init.vanishedlist);
+    init.vanishedlist = NULL;
 
     prot_printf(imapd_out, "%s OK [READ-%s] %s\r\n", tag,
 		(imapd_index->myrights & ACL_READ_WRITE) ?
