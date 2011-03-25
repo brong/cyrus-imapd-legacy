@@ -4620,11 +4620,21 @@ static int do_xconvfetch(conversation_id_t cid,
     if (r || !conv)
 	goto out;
 
+    /* unchanged, woot */
+    if (highestmodseq >= conv->modseq)
+	goto out;
+
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	struct index_init init;
 	struct seqset *seq;
 
-	/* XXX - check highestmodseq for don't bother */
+	/* nothing to find */
+	if (!folder->exists)
+	    continue;
+
+	/* unchanged */
+	if (highestmodseq >= folder->modseq)
+	    continue;
 
 	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
 					        folder->mboxname,
