@@ -177,6 +177,8 @@ static void test_nextmodseq(void)
     struct mboxname_parts parts;
     char *fname;
 
+    imapopts[IMAPOPT_CONVERSATIONS].val.b = 1;
+
     /* ensure there is no file */
     mboxname_to_parts(FREDNAME, &parts);
     fname = mboxname_conf_getpath(&parts, "modseq");
@@ -195,6 +197,12 @@ static void test_nextmodseq(void)
 }
 
 static enum enum_value old_config_virtdomains;
+static union config_value old_config_unixhierarchysep;
+static union config_value old_config_altnamespace;
+static union config_value old_config_userprefix;
+static union config_value old_config_sharedprefix;
+static union config_value old_config_conversations;
+static const char *old_config_defdomain;
 static char *old_config_dir;
 
 static int set_up(void)
@@ -216,6 +224,14 @@ static int set_up(void)
     assert(s);
     config_dir = strconcat(cwd, "/conf.d", (char *)NULL);
 
+    old_config_defdomain = config_defdomain;
+
+    old_config_unixhierarchysep = imapopts[IMAPOPT_UNIXHIERARCHYSEP].val;
+    old_config_altnamespace = imapopts[IMAPOPT_ALTNAMESPACE].val;
+    old_config_userprefix = imapopts[IMAPOPT_USERPREFIX].val;
+    old_config_sharedprefix = imapopts[IMAPOPT_SHAREDPREFIX].val;
+    old_config_conversations = imapopts[IMAPOPT_CONVERSATIONS].val;
+
     return 0;
 }
 
@@ -232,6 +248,12 @@ static int tear_down(void)
     config_dir = old_config_dir;
 
     config_virtdomains = old_config_virtdomains;
+    config_defdomain = old_config_defdomain;
+    imapopts[IMAPOPT_UNIXHIERARCHYSEP].val = old_config_unixhierarchysep;
+    imapopts[IMAPOPT_ALTNAMESPACE].val = old_config_altnamespace;
+    imapopts[IMAPOPT_USERPREFIX].val = old_config_userprefix;
+    imapopts[IMAPOPT_SHAREDPREFIX].val = old_config_sharedprefix;
+    imapopts[IMAPOPT_CONVERSATIONS].val = old_config_conversations;
 
     return 0;
 }
