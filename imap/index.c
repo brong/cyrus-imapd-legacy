@@ -133,7 +133,7 @@ static int index_searchcacheheader(struct index_state *state, uint32_t msgno, ch
 				   comp_pat *pat);
 static int _index_search(unsigned **msgno_list, struct index_state *state,
 			 struct searchargs *searchargs,
-			 modseq_t *highestmodseq, int want_expunged);
+			 modseq_t *highestmodseq);
 
 static int index_copysetup(struct index_state *state, uint32_t msgno,
 			   struct copyargs *copyargs, int is_same_user);
@@ -235,6 +235,7 @@ int index_open(const char *name, struct index_init *init,
 
 	state->out = init->out;
 	state->qresync = init->qresync;
+	state->want_expunged = init->want_expunged;
     }
     else {
 	r = mailbox_open_iwl(name, &state->mailbox);
@@ -486,7 +487,8 @@ void index_refresh(struct index_state *state)
 	    continue; /* bogus read... should probably be fatal */
 
 	/* ignore expunged messages */
-	if (im->record.system_flags & FLAG_EXPUNGED) {
+	if (!state->want_expunged &&
+	    (im->record.system_flags & FLAG_EXPUNGED)) {
 	    /* http://www.rfc-editor.org/errata_search.php?rfc=5162
 	     * Errata ID: 1809 - if there are expunged records we
 	     * aren't telling about, need to make the highestmodseq
@@ -519,7 +521,8 @@ void index_refresh(struct index_state *state)
 	im = &state->map[msgno-1];
 	if (mailbox_read_index_record(mailbox, recno, &im->record))
 	    continue; /* bogus read... should probably be fatal */
-	if (im->record.system_flags & FLAG_EXPUNGED)
+	if (!state->want_expunged &&
+	    (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	/* make sure we don't overflow the memory we mapped */
@@ -1045,8 +1048,7 @@ int index_scan(struct index_state *state, const char *contents)
  */
 static int _index_search(unsigned **msgno_list, struct index_state *state,
 			 struct searchargs *searchargs,
-			 modseq_t *highestmodseq,
-			 int want_expunged)
+			 modseq_t *highestmodseq)
 {
     uint32_t msgno;
     struct mapfile msgfile;
@@ -1086,7 +1088,7 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	msgfile.size = 0;
 
 	/* expunged messages hardly ever match */
-	if (!want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
+	if (!state->want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	if (index_search_evaluate(state, searchargs, msgno, &msgfile)) {
@@ -1124,7 +1126,7 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	msgfile.size = 0;
 
 	/* expunged messages hardly ever match */
-	if (!want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
+	if (!state->want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	if (index_search_evaluate(state, searchargs, msgno, &msgfile)) {
@@ -1163,7 +1165,7 @@ int index_getuidsequence(struct index_state *state,
     unsigned *msgno_list;
     int i, n;
 
-    n = _index_search(&msgno_list, state, searchargs, NULL, 0);
+    n = _index_search(&msgno_list, state, searchargs, NULL);
     if (n == 0) {
 	*uid_list = NULL;
 	return 0;
@@ -1232,7 +1234,7 @@ int index_search(struct index_state *state, struct searchargs *searchargs,
 
     /* now do the search */
     n = _index_search(&list, state, searchargs, 
-		      searchargs->modseq ? &highestmodseq : NULL, 0);
+		      searchargs->modseq ? &highestmodseq : NULL);
 
     /* replace the values now */
     if (usinguid)
@@ -1319,7 +1321,7 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 
     /* Search for messages based on the given criteria */
     nmsg = _index_search(&msgno_list, state, searchargs,
-			 modseq ? &highestmodseq : NULL, 0);
+			 modseq ? &highestmodseq : NULL);
 
     prot_printf(state->out, "* SORT");
 
@@ -1429,8 +1431,7 @@ int index_convsort(struct index_state *state,
 
     /* Search for messages based on the given criteria */
     nmsg = _index_search(&msgno_list, state, searchargs,
-			 modseq ? &highestmodseq : NULL,
-			 windowargs->changedsince);
+			 modseq ? &highestmodseq : NULL);
     if (nmsg) {
 	/* Create/load the msgdata array */
 	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
@@ -1669,6 +1670,8 @@ int index_convsort(struct index_state *state,
     free_hash_table(&seen_cids, NULL);
     free_hash_table(&old_seen_cids, NULL);
 
+    state->want_expunged = 0;
+
     return nmsg;
 }
 
@@ -1692,7 +1695,7 @@ int index_thread(struct index_state *state, int algorithm,
 
     /* Search for messages based on the given criteria */
     nmsg = _index_search(&msgno_list, state, searchargs,
-			 searchargs->modseq ? &highestmodseq : NULL, 0);
+			 searchargs->modseq ? &highestmodseq : NULL);
 
     if (nmsg) {
 	/* Thread messages using given algorithm */
