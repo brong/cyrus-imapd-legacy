@@ -4597,6 +4597,7 @@ static int do_xconvfetch(conversation_id_t cid,
     const char *inboxname;
     char *fname = NULL;
     strarray_t mboxnames = STRARRAY_INITIALIZER;
+    struct index_init init;
     struct index_state **states = NULL;
     int i;
     char *vanished = NULL;
@@ -4633,10 +4634,14 @@ static int do_xconvfetch(conversation_id_t cid,
     states = xcalloc(mboxnames.count, sizeof(struct index_state*));
 
     for (i = 0 ; i < mboxnames.count ; i++) {
-	r = index_open(mboxnames.data[i], NULL, &states[i]);
+	memset(&init, 0, sizeof(init));
+	init.userid = imapd_userid;
+	init.authstate = imapd_authstate;
+	init.out = imapd_out;
+
+	r = index_open(mboxnames.data[i], &init, &states[i]);
 	if (r)
 	    goto out;
-	states[i]->out = imapd_out;
 
 	r = index_status(states[i], &server_sd);
 	if (r)
