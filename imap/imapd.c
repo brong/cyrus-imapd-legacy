@@ -4599,6 +4599,7 @@ static int do_xconvfetch(conversation_id_t cid,
     struct index_state *index_state = NULL;
     conversation_t *conv = NULL;
     conv_folder_t *folder;
+    conv_sender_t *sender;
     char extname[MAX_MAILBOX_BUFFER];
 
     inboxname = mboxname_user_inbox(imapd_userid);
@@ -4621,6 +4622,22 @@ static int do_xconvfetch(conversation_id_t cid,
     /* unchanged, woot */
     if (highestmodseq >= conv->modseq)
 	goto out;
+
+    /* if we're changed at all, send SENDERS information */
+    if (conv->senders) {
+	int want_space = 0;
+	prot_printf(imapd_out, "* SENDERS %s (", conversation_id_encode(cid));
+	for (sender = conv->senders; sender; sender = sender->next) {
+	    if (want_space) prot_putc(' ', imapd_out);
+	    want_space = 1;
+	    prot_putc('(', imapd_out);
+	    prot_printastring(imapd_out, sender->name);
+	    prot_putc(' ', imapd_out);
+	    prot_printastring(imapd_out, sender->email);
+	    prot_putc(')', imapd_out);
+	}
+	prot_printf(imapd_out, ")\r\n");
+    }
 
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	struct index_init init;
