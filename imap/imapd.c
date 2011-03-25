@@ -4636,6 +4636,7 @@ static int do_xconvfetch(conversation_id_t cid,
 	init.examine_mode = 1;
 	init.vanished.uidvalidity = uidvalidity;
 	init.vanished.modseq = highestmodseq;
+	init.out = imapd_out;
 	r = index_open(folder->mboxname, &init, &index_state);
 	if (r)
 	    goto out;
