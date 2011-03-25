@@ -86,6 +86,8 @@ struct index_init {
     int qresync;
     int select;
     struct vanished_params vanished;
+    int want_expunged;
+    struct seqset *vanishedlist;
 };
 
 struct index_map {
@@ -217,6 +219,7 @@ extern int find_thread_algorithm(char *arg);
 
 extern int index_open(const char *name, struct index_init *init,
 		      struct index_state **stateptr);
+extern void index_select(struct index_state *state, struct index_init *init);
 extern int index_status(struct index_state *state, struct statusdata *sdata);
 extern void index_close(struct index_state **stateptr);
 extern unsigned index_finduid(struct index_state *state, unsigned uid);
