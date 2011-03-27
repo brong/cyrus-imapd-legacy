@@ -89,8 +89,6 @@ void dlist_makenum64(struct dlist *dl, bit64 val);
 void dlist_makedate(struct dlist *dl, time_t val);
 void dlist_makehex64(struct dlist *dl, bit64 val);
 void dlist_makemap(struct dlist *dl, const char *val, size_t len);
-void dlist_makelist(struct dlist *val);
-void dlist_makekvlist(struct dlist *dl);
 void dlist_makeguid(struct dlist *dl, struct message_guid *guid);
 void dlist_makefile(struct dlist *dl,
 		    const char *part, struct message_guid *guid,
@@ -119,6 +117,7 @@ const char *dlist_cstring(struct dlist *dl);
 
 /* wrappers for use in a kvlist */
 struct dlist *dlist_newlist(struct dlist *parent, const char *name);
+struct dlist *dlist_newpklist(struct dlist *parent, const char *name);
 struct dlist *dlist_newkvlist(struct dlist *parent, const char *name);
 
 struct dlist *dlist_setatom(struct dlist *parent, const char *name,

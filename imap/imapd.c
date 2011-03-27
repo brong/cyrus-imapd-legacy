@@ -347,6 +347,8 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 			    struct fetchargs *fa);
 void cmd_fetch(char *tag, char *sequence, int usinguid);
 void cmd_xconvfetch(const char *tag, const char *cid);
+void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
+		   struct dlist *itemlist);
 static int do_xconvfetch(conversation_id_t cid,
 			 uint32_t uidvalidity,
 			 modseq_t highestmodseq,
@@ -2083,6 +2085,19 @@ void cmdloop(void)
 		cmd_xconvfetch(tag.s, arg1.s);
 
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
+	    }
+	    if (!strcmp(cmd.s, "Xconvmeta")) {
+		/* will parse folder validity and fetch items in cmd_xconvfetch */
+		struct dlist *cidlist = NULL;
+		struct dlist *itemlist = NULL;
+		c = dlist_parse(&cidlist, 0, imapd_in);
+		if (c != ' ') goto missingargs;
+		c = dlist_parse(&itemlist, 0, imapd_in);
+		if (c == '\r') c = prot_getc(imapd_in);
+		if (c != '\n') goto extraargs;
+		cmd_xconvmeta(tag.s, cidlist, itemlist);
+		dlist_free(&itemlist);
+		dlist_free(&cidlist);
 	    }
 	    else if (!strcmp(cmd.s, "Xconvsort")) {
 		if (!imapd_index && !backend_current) goto nomailbox;
@@ -4492,6 +4507,116 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
     freefieldlist(fetchargs.fsections);
     strarray_fini(&fetchargs.headers);
     strarray_fini(&fetchargs.headers_not);
+}
+
+/*
+ * Parse and perform a XCONVMETA command.
+ */
+void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
+		   struct dlist *itemlist)
+{
+    int r;
+    const char *inboxname = NULL;
+    char *fname = NULL;
+    struct dlist *dl = NULL;
+    struct dlist *outlist = NULL;
+    struct conversations_state state;
+
+    if (backend_current) {
+	/* remote mailbox */
+	prot_printf(backend_current->out, "%s XCONVMETA ", tag);
+	dlist_print(cidlist, 0, backend_current->out);
+	prot_putc(' ', backend_current->out);
+	dlist_print(itemlist, 0, backend_current->out);
+	prot_putc('\r', backend_current->out);
+	prot_putc('\n', backend_current->out);
+	pipe_including_tag(backend_current, tag, 0);
+	return;
+    }
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
+	return;
+    }
+
+    inboxname = mboxname_user_inbox(imapd_userid);
+    if (!inboxname) {
+	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
+	goto error;
+    }
+
+    fname = conversations_getpath(inboxname);
+    if (!fname) {
+	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
+	goto error;
+    }
+
+    r = conversations_open(&state, fname);
+    if (r) {
+	prot_printf(imapd_out, "%s BAD failed to open db: %s\r\n",
+		    tag, error_message(r));
+	goto error;
+    }
+
+    outlist = dlist_newlist(NULL, "");
+
+    for (dl = cidlist->head; dl; dl = dl->next) {
+	conversation_id_t cid;
+	conversation_t *conv = NULL;
+	const char *cidstr = dlist_cstring(dl);
+	struct dlist *fl;
+	struct dlist *item;
+
+	if (!conversation_id_decode(&cid, cidstr) || !cid) {
+	    prot_printf(imapd_out, "%s BAD Invalid CID %s\r\n", tag, cidstr);
+	    goto error;
+	}
+	r = conversation_load(&state, cid, &conv);
+	if (r) {
+	    prot_printf(imapd_out, "%s BAD Failed to read %s\r\n", tag, cidstr);
+	    goto error;
+	}
+
+	item = dlist_newpklist(outlist, cidstr);
+	for (fl = itemlist->head; fl; fl = fl->next) {
+	    /* xxx - parse to a fetchitems? */
+	    if (!strcasecmp(dlist_cstring(fl), "MODSEQ"))
+		dlist_setnum64(item, "MODSEQ", conv->modseq);
+	    else if (!strcasecmp(dlist_cstring(fl), "EXISTS"))
+		dlist_setnum32(item, "EXISTS", conv->exists);
+	    else if (!strcasecmp(dlist_cstring(fl), "UNSEEN"))
+		dlist_setnum32(item, "UNSEEN", conv->unseen);
+	    else if (!strcasecmp(dlist_cstring(fl), "DRAFTS"))
+		dlist_setnum32(item, "DRAFTS", conv->drafts);
+	    else if (!strcasecmp(dlist_cstring(fl), "FLAGGED"))
+		dlist_setnum32(item, "FLAGGED", conv->flagged);
+	    else if (!strcasecmp(dlist_cstring(fl), "SENDERS")) {
+		conv_sender_t *sender;
+		struct dlist *slist = dlist_newlist(item, "SENDERS");
+		for (sender = conv->senders; sender; sender = sender->next) {
+		    struct dlist *sli = dlist_newlist(slist, "");
+		    dlist_setatom(sli, "EMAIL", sender->email);
+		    dlist_setatom(sli, "NAME", sender->name);
+		}
+	    }
+	}
+    }
+
+    conversations_close(&state);
+    for (dl = outlist->head; dl; dl = dl->next) {
+	prot_printf(imapd_out, "* XCONVMETA ");
+	dlist_print(dl, 1, imapd_out);
+	prot_printf(imapd_out, "\r\n");
+    }
+    prot_printf(imapd_out, "%s OK Completed\r\n", tag);
+    dlist_free(&outlist);
+    free(fname);
+    return;
+
+ error:
+    conversations_close(&state);
+    dlist_free(&outlist);
+    free(fname);
 }
 
 /*
