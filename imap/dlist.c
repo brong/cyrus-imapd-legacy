@@ -383,6 +383,14 @@ struct dlist *dlist_newlist(struct dlist *parent, const char *name)
     return dl;
 }
 
+struct dlist *dlist_newpklist(struct dlist *parent, const char *name)
+{
+    struct dlist *dl = dlist_child(parent, name);
+    dl->type = DL_ATOMLIST;
+    dl->nval = 1;
+    return dl;
+}
+
 struct dlist *dlist_setatom(struct dlist *parent, const char *name, const char *val)
 {
     struct dlist *dl = dlist_child(parent, name);
@@ -524,20 +532,10 @@ struct dlist *dlist_updatefile(struct dlist *parent, const char *name,
     return dl;
 }
 
-/* PRINTING STUFF */
-
-static int nextlevel(const struct dlist *dl, int level)
-{
-    if (level == -1) return -1;
-    if (dl->type == DL_KVLIST) return level + 1;
-    return level;
-}
-
-static void dlist_print_helper(const struct dlist *dl, int printkeys,
-			       struct protstream *out, int level)
+void dlist_print(const struct dlist *dl, int printkeys,
+		 struct protstream *out)
 {
     struct dlist *di;
-    int i;
 
     if (printkeys)
 	prot_printf(out, "%s ", dl->name);
@@ -567,14 +565,9 @@ static void dlist_print_helper(const struct dlist *dl, int printkeys,
 	}
 	break;
     case DL_KVLIST:
-	if (level > 0) {
-	    prot_printf(out, "\r\n");
-	    for (i = 0; i <= level; i++)
-		prot_printf(out, " ");
-	}
 	prot_printf(out, "%%(");
 	for (di = dl->head; di; di = di->next) {
-	    dlist_print_helper(di, 1, out, level);
+	    dlist_print(di, 1, out);
 	    if (di->next) {
 		prot_printf(out, " ");
 	    }
@@ -584,7 +577,7 @@ static void dlist_print_helper(const struct dlist *dl, int printkeys,
     case DL_ATOMLIST:
 	prot_printf(out, "(");
 	for (di = dl->head; di; di = di->next) {
-	    dlist_print_helper(di, 0, out, nextlevel(di, level));
+	    dlist_print(di, dl->nval, out);
 	    if (di->next)
 		prot_printf(out, " ");
 	}
@@ -593,17 +586,12 @@ static void dlist_print_helper(const struct dlist *dl, int printkeys,
     }
 }
 
-void dlist_print(const struct dlist *dl, int printkeys, struct protstream *out)
-{
-    dlist_print_helper(dl, printkeys, out, 0);
-}
-
 void dlist_printbuf(const struct dlist *dl, int printkeys, struct buf *outbuf)
 {
     struct protstream *outstream;
 
     outstream = prot_writebuf(outbuf);
-    dlist_print_helper(dl, printkeys, outstream, -1);
+    dlist_print(dl, printkeys, outstream);
     prot_flush(outstream);
     prot_free(outstream);
 }
@@ -914,6 +902,18 @@ bit64 dlist_num(struct dlist *dl)
 	return v;
 
     return 0;
+}
+
+/* XXX - this stuff is all shitty, rationalise later */
+const char *dlist_cstring(struct dlist *dl)
+{
+    const char *res = NULL;
+    if (!dl) fatal("NO DL", EC_SOFTWARE);
+
+    if (dlist_toatom(dl, &res))
+	return res;
+
+    return res;
 }
 
 int dlist_getatom(struct dlist *parent, const char *name, const char **valp)
