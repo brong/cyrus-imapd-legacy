@@ -323,6 +323,8 @@ int conversation_save(struct conversations_state *state,
     dlist_setnum32(dl, "EXISTS", conv->exists);
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
     dlist_setnum32(dl, "DRAFTS", conv->drafts);
+    dlist_setnum32(dl, "FLAGGED", conv->flagged);
+    dlist_setnum32(dl, "ATTACHMENTS", conv->attachments);
 
     n = dlist_newkvlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
@@ -492,6 +494,12 @@ int conversation_load(struct conversations_state *state,
     n = dlist_getchild(dl, "DRAFTS");
     if (n)
 	conv->drafts = dlist_num(n);
+    n = dlist_getchild(dl, "FLAGGED");
+    if (n)
+	conv->flagged = dlist_num(n);
+    n = dlist_getchild(dl, "ATTACHMENTS");
+    if (n)
+	conv->attachments = dlist_num(n);
 
     n = dlist_getchild(dl, "FOLDER");
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
@@ -608,7 +616,8 @@ static void _apply_delta(uint32_t *valp, int delta)
 
 void conversation_update(conversation_t *conv, const char *mboxname,
 		         int delta_exists, int delta_unseen,
-		         int delta_drafts, modseq_t modseq)
+		         int delta_drafts, int delta_flagged,
+			 int delta_attachments, modseq_t modseq)
 {
     conv_folder_t *folder;
 
@@ -625,6 +634,14 @@ void conversation_update(conversation_t *conv, const char *mboxname,
     }
     if (delta_drafts) {
 	_apply_delta(&conv->drafts, delta_drafts);
+	conv->dirty = 1;
+    }
+    if (delta_flagged) {
+	_apply_delta(&conv->flagged, delta_flagged);
+	conv->dirty = 1;
+    }
+    if (delta_attachments) {
+	_apply_delta(&conv->attachments, delta_attachments);
 	conv->dirty = 1;
     }
     if (modseq > conv->modseq) {

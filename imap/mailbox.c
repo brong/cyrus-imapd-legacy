@@ -2087,6 +2087,8 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     int delta_exists = 0;
     int delta_unseen = 0;
     int delta_drafts = 0;
+    int delta_flagged = 0;
+    int delta_attachments = 0;
     modseq_t modseq = 0;
     conversation_id_t cid = NULLCONVERSATION;
 
@@ -2130,9 +2132,14 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	    delta_exists--;
 	    if (old->system_flags & FLAG_DRAFT)
 		delta_drafts--;
-	    /* drafts don't count towards seen */
-	    else if (!(old->system_flags & FLAG_SEEN))
-		delta_unseen--;
+	    /* drafts don't count towards anything else */
+	    else {
+		if (old->system_flags & FLAG_FLAGGED)
+		    delta_flagged--;
+		if (!(old->system_flags & FLAG_SEEN))
+		    delta_unseen--;
+		/* XXX - if attachments */
+	    }
 	}
 	modseq = MAX(modseq, old->modseq);
     }
@@ -2142,16 +2149,22 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	    delta_exists++;
 	    if (new->system_flags & FLAG_DRAFT)
 		delta_drafts++;
-	    /* drafts don't count towards seen */
-	    else if (!(new->system_flags & FLAG_SEEN))
-		delta_unseen++;
+	    /* drafts don't count towards anything else */
+	    else {
+		if (new->system_flags & FLAG_FLAGGED)
+		    delta_flagged++;
+		if (!(new->system_flags & FLAG_SEEN))
+		    delta_unseen++;
+		/* XXX - if attachments */
+	    }
 	}
 	modseq = MAX(modseq, new->modseq);
     }
 
     conversation_update(conv, mailbox->name,
 			delta_exists, delta_unseen,
-			delta_drafts, modseq);
+			delta_drafts, delta_flagged,
+			delta_attachments, modseq);
 
     /* drafts don't generate sender records so you don't spuriously get
      * yourself just for clicking on "reply" then aborting */
