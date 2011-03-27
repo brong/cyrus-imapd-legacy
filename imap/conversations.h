@@ -85,6 +85,8 @@ struct conversation {
     uint32_t	    unseen;
     uint32_t	    prev_unseen;
     uint32_t	    drafts;
+    uint32_t	    flagged;
+    uint32_t	    attachments;
     conv_folder_t   *folders;
     conv_sender_t   *senders;
     int		    dirty;
@@ -126,6 +128,8 @@ extern void conversation_update(conversation_t *conv,
 			        int delta_exists,
 			        int delta_unseen,
 			        int delta_drafts,
+			        int delta_flagged,
+			        int delta_attachments,
 			        modseq_t modseq);
 extern conv_folder_t *conversation_find_folder(conversation_t *,
 					       const char *mboxname);
