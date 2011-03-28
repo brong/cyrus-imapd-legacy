@@ -356,8 +356,11 @@ int conversation_save(struct conversations_state *state,
     n = dlist_newkvlist(dl, "SENDER");
     for (sender = conv->senders ; sender ; sender = sender->next) {
 	nn = dlist_newkvlist(n, "SENDER");
-	dlist_setatom(nn, "EMAIL", sender->email);
+	/* envelope form */
 	dlist_setatom(nn, "NAME", sender->name);
+	dlist_setatom(nn, "ROUTE", sender->route);
+	dlist_setatom(nn, "MAILBOX", sender->mailbox);
+	dlist_setatom(nn, "DOMAIN", sender->domain);
     }
 
     buf_printf(&buf, "%d ", version);
@@ -578,11 +581,14 @@ int conversation_load(struct conversations_state *state,
 
     n = dlist_getchild(dl, "SENDER");
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
-	struct dlist *nn2;
-	nn = dlist_getchild(n, "EMAIL");
-	nn2 = dlist_getchild(n, "NAME");
-	if (nn && nn2)
-	    conversation_add_sender(conv, nn->sval, nn2->sval);
+	struct dlist *nn2, *nn3, *nn4;
+	nn = dlist_getchild(n, "NAME");
+	nn2 = dlist_getchild(n, "ROUTE");
+	nn3 = dlist_getchild(n, "MAILBOX");
+	nn4 = dlist_getchild(n, "DOMAIN");
+	if (nn && nn2 && nn3 && nn4)
+	    conversation_add_sender(conv, nn->sval, nn2->sval,
+				    nn3->sval, nn4->sval);
     }
 
     conv->prev_unseen = conv->unseen;
@@ -630,15 +636,18 @@ conv_folder_t *conversation_add_folder(conversation_t *conv,
 }
 
 void conversation_add_sender(conversation_t *conv,
-			     const char *email,
-			     const char *name)
+			     const char *name,
+			     const char *route,
+			     const char *mailbox,
+			     const char *domain)
 {
     conv_sender_t *sender, **tailp = &conv->senders;
 
-    if (!name || !email) return;
+    if (!name || !route || !mailbox || !domain) return;
 
     for (sender = conv->senders; sender; sender = sender->next) {
-	if (!strcmp(sender->email, email)) {
+	if (!strcmp(sender->mailbox, mailbox) &&
+	    !strcmp(sender->domain, domain)) {
 	    /* found it.  Just check if we should update the name */
 	    if (name[0] && !sender->name[0]) {
 		free(sender->name);
@@ -651,8 +660,10 @@ void conversation_add_sender(conversation_t *conv,
     }
 
     sender = xzmalloc(sizeof(*sender));
-    sender->email = xstrdup(email);
     sender->name = xstrdup(name);
+    sender->route = xstrdup(route);
+    sender->mailbox = xstrdup(mailbox);
+    sender->domain = xstrdup(domain);
     *tailp = sender;
 
     conv->dirty = 1;
@@ -735,8 +746,10 @@ void conversation_free(conversation_t *conv)
 
     while ((sender = conv->senders)) {
 	conv->senders = sender->next;
-	free(sender->email);
 	free(sender->name);
+	free(sender->route);
+	free(sender->mailbox);
+	free(sender->domain);
 	free(sender);
     }
 
