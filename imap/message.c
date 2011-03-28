@@ -2446,7 +2446,7 @@ int message_update_conversations(struct conversations_state *state,
     conversation_id_t newcid = record->cid;
     int i;
     int j;
-    int r;
+    int r = 0;
     char *msgid;
 
     /*
