@@ -2089,7 +2089,7 @@ void cmdloop(void)
 
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
 	    }
-	    if (!strcmp(cmd.s, "Xconvmeta")) {
+	    else if (!strcmp(cmd.s, "Xconvmeta")) {
 		/* will parse folder validity and fetch items in cmd_xconvfetch */
 		struct dlist *cidlist = NULL;
 		struct dlist *itemlist = NULL;
