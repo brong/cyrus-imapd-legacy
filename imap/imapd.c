@@ -4499,6 +4499,73 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
     strarray_fini(&fetchargs.headers_not);
 }
 
+static void do_xconvmeta(const char *tag,
+			 struct conversations_state *state,
+			 struct dlist *cidlist,
+			 struct dlist *itemlist)
+{
+    struct dlist *outlist = dlist_newlist(NULL, "");
+    conversation_id_t cid;
+    conversation_t *conv = NULL;
+    struct dlist *dl;
+    struct dlist *fl;
+    struct dlist *item;
+    int r;
+
+    for (dl = cidlist->head; dl; dl = dl->next) {
+	const char *cidstr = dlist_cstring(dl);
+
+	if (!conversation_id_decode(&cid, cidstr) || !cid) {
+	    prot_printf(imapd_out, "%s BAD Invalid CID %s\r\n", tag, cidstr);
+	    goto done;
+	}
+
+	r = conversation_load(state, cid, &conv);
+	if (r) {
+	    prot_printf(imapd_out, "%s BAD Failed to read %s\r\n", tag, cidstr);
+	    goto done;
+	}
+
+	item = dlist_newpklist(outlist, cidstr);
+	for (fl = itemlist->head; fl; fl = fl->next) {
+	    /* xxx - parse to a fetchitems? */
+	    if (!strcasecmp(dlist_cstring(fl), "MODSEQ"))
+		dlist_setnum64(item, "MODSEQ", conv->modseq);
+	    else if (!strcasecmp(dlist_cstring(fl), "EXISTS"))
+		dlist_setnum32(item, "EXISTS", conv->exists);
+	    else if (!strcasecmp(dlist_cstring(fl), "UNSEEN"))
+		dlist_setnum32(item, "UNSEEN", conv->unseen);
+	    else if (!strcasecmp(dlist_cstring(fl), "DRAFTS"))
+		dlist_setnum32(item, "DRAFTS", conv->drafts);
+	    else if (!strcasecmp(dlist_cstring(fl), "FLAGGED"))
+		dlist_setnum32(item, "FLAGGED", conv->flagged);
+	    else if (!strcasecmp(dlist_cstring(fl), "ATTACHMENTS"))
+		dlist_setnum32(item, "ATTACHMENTS", conv->attachments);
+	    else if (!strcasecmp(dlist_cstring(fl), "SENDERS")) {
+		conv_sender_t *sender;
+		struct dlist *slist = dlist_newlist(item, "SENDERS");
+		for (sender = conv->senders; sender; sender = sender->next) {
+		    struct dlist *sli = dlist_newlist(slist, "");
+		    dlist_setatom(sli, "EMAIL", sender->email);
+		    dlist_setatom(sli, "NAME", sender->name);
+		}
+	    }
+	}
+	conversation_free(conv);
+    }
+
+    for (dl = outlist->head; dl; dl = dl->next) {
+	prot_printf(imapd_out, "* XCONVMETA ");
+	dlist_print(dl, 1, imapd_out);
+	prot_printf(imapd_out, "\r\n");
+    }
+
+    prot_printf(imapd_out, "%s OK Completed\r\n", tag);
+
+done:
+    dlist_free(&outlist);
+}
+
 /*
  * Parse and perform a XCONVMETA command.
  */
@@ -4508,8 +4575,6 @@ void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
     int r;
     const char *inboxname = NULL;
     char *fname = NULL;
-    struct dlist *dl = NULL;
-    struct dlist *outlist = NULL;
     struct conversations_state state;
 
     if (backend_current) {
@@ -4532,80 +4597,27 @@ void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
     inboxname = mboxname_user_inbox(imapd_userid);
     if (!inboxname) {
 	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
-	goto error;
+	goto done;
     }
 
     fname = conversations_getpath(inboxname);
     if (!fname) {
 	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
-	goto error;
+	goto done;
     }
 
     r = conversations_open(&state, fname);
     if (r) {
 	prot_printf(imapd_out, "%s BAD failed to open db: %s\r\n",
 		    tag, error_message(r));
-	goto error;
+	goto done;
     }
 
-    outlist = dlist_newlist(NULL, "");
+    do_xconvmeta(tag, &state, cidlist, itemlist);
 
-    for (dl = cidlist->head; dl; dl = dl->next) {
-	conversation_id_t cid;
-	conversation_t *conv = NULL;
-	const char *cidstr = dlist_cstring(dl);
-	struct dlist *fl;
-	struct dlist *item;
-
-	if (!conversation_id_decode(&cid, cidstr) || !cid) {
-	    prot_printf(imapd_out, "%s BAD Invalid CID %s\r\n", tag, cidstr);
-	    goto error;
-	}
-	r = conversation_load(&state, cid, &conv);
-	if (r) {
-	    prot_printf(imapd_out, "%s BAD Failed to read %s\r\n", tag, cidstr);
-	    goto error;
-	}
-
-	item = dlist_newpklist(outlist, cidstr);
-	for (fl = itemlist->head; fl; fl = fl->next) {
-	    /* xxx - parse to a fetchitems? */
-	    if (!strcasecmp(dlist_cstring(fl), "MODSEQ"))
-		dlist_setnum64(item, "MODSEQ", conv->modseq);
-	    else if (!strcasecmp(dlist_cstring(fl), "EXISTS"))
-		dlist_setnum32(item, "EXISTS", conv->exists);
-	    else if (!strcasecmp(dlist_cstring(fl), "UNSEEN"))
-		dlist_setnum32(item, "UNSEEN", conv->unseen);
-	    else if (!strcasecmp(dlist_cstring(fl), "DRAFTS"))
-		dlist_setnum32(item, "DRAFTS", conv->drafts);
-	    else if (!strcasecmp(dlist_cstring(fl), "FLAGGED"))
-		dlist_setnum32(item, "FLAGGED", conv->flagged);
-	    else if (!strcasecmp(dlist_cstring(fl), "SENDERS")) {
-		conv_sender_t *sender;
-		struct dlist *slist = dlist_newlist(item, "SENDERS");
-		for (sender = conv->senders; sender; sender = sender->next) {
-		    struct dlist *sli = dlist_newlist(slist, "");
-		    dlist_setatom(sli, "EMAIL", sender->email);
-		    dlist_setatom(sli, "NAME", sender->name);
-		}
-	    }
-	}
-    }
+ done:
 
     conversations_close(&state);
-    for (dl = outlist->head; dl; dl = dl->next) {
-	prot_printf(imapd_out, "* XCONVMETA ");
-	dlist_print(dl, 1, imapd_out);
-	prot_printf(imapd_out, "\r\n");
-    }
-    prot_printf(imapd_out, "%s OK Completed\r\n", tag);
-    dlist_free(&outlist);
-    free(fname);
-    return;
-
- error:
-    conversations_close(&state);
-    dlist_free(&outlist);
     free(fname);
 }
 
