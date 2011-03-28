@@ -345,7 +345,7 @@ int conversation_save(struct conversations_state *state,
     dlist_setnum32(dl, "FLAGGED", conv->flagged);
     dlist_setnum32(dl, "ATTACHMENTS", conv->attachments);
 
-    n = dlist_newkvlist(dl, "FOLDER");
+    n = dlist_newlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	nn = dlist_newkvlist(n, "FOLDER");
 	dlist_setatom(nn, "MBOXNAME", folder->mboxname);
@@ -353,12 +353,12 @@ int conversation_save(struct conversations_state *state,
 	dlist_setnum32(nn, "EXISTS", folder->exists);
     }
 
-    n = dlist_newkvlist(dl, "SENDER");
+    n = dlist_newlist(dl, "SENDER");
     for (sender = conv->senders ; sender ; sender = sender->next) {
 	nn = dlist_newkvlist(n, "SENDER");
 	/* envelope form */
 	dlist_setatom(nn, "NAME", sender->name);
-	dlist_setatom(nn, "ROUTE", sender->route);
+	if (sender->route) dlist_setatom(nn, "ROUTE", sender->route);
 	dlist_setatom(nn, "MAILBOX", sender->mailbox);
 	dlist_setatom(nn, "DOMAIN", sender->domain);
     }
@@ -586,8 +586,9 @@ int conversation_load(struct conversations_state *state,
 	nn2 = dlist_getchild(n, "ROUTE");
 	nn3 = dlist_getchild(n, "MAILBOX");
 	nn4 = dlist_getchild(n, "DOMAIN");
-	if (nn && nn2 && nn3 && nn4)
-	    conversation_add_sender(conv, nn->sval, nn2->sval,
+	if (nn && nn3 && nn4)
+	    conversation_add_sender(conv, nn->sval, 
+				    nn2 ? nn2->sval : NULL,
 				    nn3->sval, nn4->sval);
     }
 
@@ -643,7 +644,7 @@ void conversation_add_sender(conversation_t *conv,
 {
     conv_sender_t *sender, **tailp = &conv->senders;
 
-    if (!name || !route || !mailbox || !domain) return;
+    if (!name || !mailbox || !domain) return;
 
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (!strcmp(sender->mailbox, mailbox) &&
@@ -661,7 +662,7 @@ void conversation_add_sender(conversation_t *conv,
 
     sender = xzmalloc(sizeof(*sender));
     sender->name = xstrdup(name);
-    sender->route = xstrdup(route);
+    if (route) sender->route = xstrdup(route);
     sender->mailbox = xstrdup(mailbox);
     sender->domain = xstrdup(domain);
     *tailp = sender;
