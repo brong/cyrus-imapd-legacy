@@ -2182,10 +2182,8 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 	    if (envtokens[ENV_FROM])
 		message_parse_env_address(envtokens[ENV_FROM], &addr);
 
-	    if (addr.mailbox && addr.domain)
-		email = strconcat(addr.mailbox, "@", addr.domain, (char *)NULL);
-
-	    conversation_add_sender(conv, email, addr.name);
+	    conversation_add_sender(conv, addr.name, addr.route,
+				    addr.mailbox, addr.domain);
 
 	    /* and check if there are attachments */
 	    if (message_has_attachment(cacheitem_buf(new, CACHE_BODY)))
