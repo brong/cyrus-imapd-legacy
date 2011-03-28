@@ -907,13 +907,14 @@ bit64 dlist_num(struct dlist *dl)
 /* XXX - this stuff is all shitty, rationalise later */
 const char *dlist_cstring(struct dlist *dl)
 {
+    static char zerochar = '\0';
     const char *res = NULL;
     if (!dl) fatal("NO DL", EC_SOFTWARE);
 
-    if (dlist_toatom(dl, &res))
-	return res;
+    dlist_toatom(dl, &res);
+    if (res) return res;
 
-    return res;
+    return &zerochar;
 }
 
 int dlist_getatom(struct dlist *parent, const char *name, const char **valp)
