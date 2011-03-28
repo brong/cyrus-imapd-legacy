@@ -70,6 +70,8 @@
 /* config.c stuff */
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
 
+enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD };
+
 int verbose = 0;
 
 static int do_dump(const char *fname)
@@ -251,15 +253,62 @@ static int do_build(const char *inboxname)
 static int usage(const char *name)
     __attribute__((noreturn));
 
+static void do_user(const char *userid, int mode)
+{
+    const char *inboxname;
+    char *fname;
+    int r;
+
+    inboxname = mboxname_user_inbox(userid);
+    if (inboxname == NULL) {
+	fprintf(stderr, "Invalid userid %s", userid);
+	return;
+    }
+
+    fname = conversations_getpath(inboxname);
+    if (fname == NULL) {
+	fprintf(stderr, "Unable to get conversations database "
+			"filename for userid \"%s\"\n",
+			userid);
+	return;
+    }
+
+    switch (mode)
+    {
+    case DUMP:
+	if (do_dump(fname))
+	    r = EC_NOINPUT;
+	break;
+
+    case UNDUMP:
+	if (do_undump(fname))
+	    r = EC_NOINPUT;
+	break;
+
+    case ZERO:
+	if (do_zero(inboxname, fname))
+	    r = EC_NOINPUT;
+	break;
+
+    case BUILD:
+	if (do_build(inboxname))
+	    r = EC_NOINPUT;
+	break;
+
+    case UNKNOWN:
+	fatal("UNKNOWN MODE", EC_SOFTWARE);
+    }
+
+    free(fname);
+}
+
 int main(int argc, char **argv)
 {
     int c;
     const char *alt_config = NULL;
     const char *userid = NULL;
-    const char *inboxname = NULL;
-    char *fname;
     int r = 0;
-    enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD } mode = UNKNOWN;
+    int mode = UNKNOWN;
 
     if ((geteuid()) == 0 && (become_cyrus() != 0)) {
 	fatal("must run as the Cyrus user", EC_USAGE);
@@ -318,53 +367,12 @@ int main(int argc, char **argv)
     mboxlist_init(0);
     mboxlist_open(NULL);
 
+    do_user(userid, mode);
 
-    inboxname = mboxname_user_inbox(userid);
-    if (inboxname == NULL) {
-	fprintf(stderr, "Invalid userid %s", userid);
-	exit(EC_NOINPUT);
-    }
-
-    fname = conversations_getpath(inboxname);
-    if (fname == NULL) {
-	fprintf(stderr, "Unable to get conversations database "
-			"filename for userid \"%s\"\n",
-			userid);
-	exit(EC_NOINPUT);
-    }
-
-    switch (mode)
-    {
-    case DUMP:
-	if (do_dump(fname))
-	    r = EC_NOINPUT;
-	break;
-
-    case UNDUMP:
-	if (do_undump(fname))
-	    r = EC_NOINPUT;
-	break;
-
-    case ZERO:
-	if (do_zero(inboxname, fname))
-	    r = EC_NOINPUT;
-	break;
-
-    case BUILD:
-	if (do_build(inboxname))
-	    r = EC_NOINPUT;
-	break;
-
-    case UNKNOWN:
-	fatal("UNKNOWN MODE", EC_SOFTWARE);
-    }
-    
     mboxlist_close();
     mboxlist_done();
 
     cyrus_done();
-    free(fname);
-    fname = NULL;
 
     return r;
 }
