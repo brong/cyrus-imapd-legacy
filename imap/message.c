@@ -2609,13 +2609,6 @@ continue2:
 	}
     }
 
-    if (!nfound) {
-	/* TODO: is this an error?  It means we have no Message-Id:
-	 * which is almost certainly Wrong */
-	r = 0;
-	goto out;
-    }
-
     /*
      * For each unique message-id, lookup the conversations database
      * to work out which conversation id that message belongs to.
