@@ -2141,7 +2141,6 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 		    delta_flagged--;
 		if (!(old->system_flags & FLAG_SEEN))
 		    delta_unseen--;
-		/* XXX - if attachments */
 	    }
 	}
 	modseq = MAX(modseq, old->modseq);
@@ -2158,26 +2157,21 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 		    delta_flagged++;
 		if (!(new->system_flags & FLAG_SEEN))
 		    delta_unseen++;
-		/* XXX - if attachments */
 	    }
 	}
 	modseq = MAX(modseq, new->modseq);
     }
 
-    conversation_update(conv, mailbox->name,
-			delta_exists, delta_unseen,
-			delta_drafts, delta_flagged,
-			delta_attachments, modseq);
-
     /* drafts don't generate sender records so you don't spuriously get
      * yourself just for clicking on "reply" then aborting */
     if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
-	/* Need to find the sender */
 	if (!mailbox_cacherecord(mailbox, new)) {
 	    char *env = NULL;
 	    char *email = NULL;
 	    char *envtokens[NUMENVTOKENS];
 	    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
+
+	    /* Need to find the sender */
 
 	    /* +1 -> skip the leading paren */
 	    env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
@@ -2185,7 +2179,7 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 
 	    parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
 
-	    if (envtokens[ENV_FROM]) /* paranoia */
+	    if (envtokens[ENV_FROM])
 		message_parse_env_address(envtokens[ENV_FROM], &addr);
 
 	    if (addr.mailbox && addr.domain)
@@ -2193,10 +2187,19 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 
 	    conversation_add_sender(conv, email, addr.name);
 
+	    /* and check if there are attachments */
+	    if (message_has_attachment(cacheitem_buf(new, CACHE_BODY)))
+		delta_attachments++;
+
 	    free(env);
 	    free(email);
 	}
     }
+
+    conversation_update(conv, mailbox->name,
+			delta_exists, delta_unseen,
+			delta_drafts, delta_flagged,
+			delta_attachments, modseq);
 
     r = conversation_save(&mailbox->cstate, cid, conv);
 
