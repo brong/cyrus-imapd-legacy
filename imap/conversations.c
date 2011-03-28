@@ -90,6 +90,8 @@
 
 #define DB config_conversations_db
 
+#define CONVERSATIONS_VERSION 0
+
 
 char *conversations_getpath(const char *mboxname)
 {
@@ -168,13 +170,14 @@ static int _conversations_set_key(struct conversations_state *state,
 {
     int r;
     struct buf buf;
+    int version = CONVERSATIONS_VERSION;
 
     buf_init(&buf);
 
     if (state->db == NULL)
 	return IMAP_IOERROR;
 
-    buf_printf(&buf, CONV_FMT " %lu", cid, stamp);
+    buf_printf(&buf, "%d " CONV_FMT " %lu", version, cid, stamp);
 
     r = DB->store(state->db,
 		  key, keylen,
@@ -206,21 +209,36 @@ static int _conversations_parse(const char *data, int datalen,
 				conversation_id_t *cidp, time_t *stampp)
 { 
     const char *rest;
+    int restlen;
     int r;
     bit64 tval;
+    bit64 version;
 
-    r = parsehex(data, &rest, 16, cidp);
-    if (r) return IMAP_MAILBOX_BADFORMAT;
+    r = parsenum(data, &rest, datalen, &version);
+    if (r) return r;
 
-    /* should have parsed exactly 16 characters */
-    if (rest != data + 16)
-	return IMAP_MAILBOX_BADFORMAT;
-
-    /* next character is a space */
     if (rest[0] != ' ')
 	return IMAP_MAILBOX_BADFORMAT;
+    rest++; /* skip space */
+    restlen = datalen - (rest - data);
 
-    r = parsenum(rest+1, &rest, datalen-17, &tval);
+    if (version != CONVERSATIONS_VERSION) {
+	/* XXX - an error code for "incorrect version"? */
+	return IMAP_MAILBOX_BADFORMAT;
+    }
+
+    if (restlen < 17)
+	return IMAP_MAILBOX_BADFORMAT;
+
+    r = parsehex(rest, &rest, 16, cidp);
+    if (r) return IMAP_MAILBOX_BADFORMAT;
+
+    if (rest[0] != ' ')
+	return IMAP_MAILBOX_BADFORMAT;
+    rest++; /* skip space */
+    restlen = datalen - (rest - data);
+
+    r = parsenum(rest, &rest, restlen, &tval);
     if (r) return IMAP_MAILBOX_BADFORMAT;
 
     /* should have parsed to the end of the string */
@@ -277,6 +295,7 @@ int conversation_save(struct conversations_state *state,
     struct buf buf = BUF_INITIALIZER;
     const conv_folder_t *folder;
     const conv_sender_t *sender;
+    int version = CONVERSATIONS_VERSION;
     int r = 0;
     int unseen_diff;
 
@@ -341,6 +360,7 @@ int conversation_save(struct conversations_state *state,
 	dlist_setatom(nn, "NAME", sender->name);
     }
 
+    buf_printf(&buf, "%d ", version);
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
@@ -365,35 +385,47 @@ int conversation_getstatus(struct conversations_state *state,
     char *key = strconcat("F", mboxname, (char *)NULL);
     struct dlist *dl = NULL;
     struct dlist *n;
-    const char *fdata;
-    int fdatalen;
+    const char *data;
+    const char *rest;
+    int datalen;
+    int restlen;
+    bit64 version;
     int r = IMAP_IOERROR;
+
+    *existsp = 0;
+    *unseenp = 0;
 
     if (!state->db)
 	goto done;
 
     r = DB->fetch(state->db,
 		  key, strlen(key),
-		  &fdata, &fdatalen,
+		  &data, &datalen,
 		  &state->txn);
 
     if (r == CYRUSDB_NOTFOUND) {
-	*existsp = 0;
-	*unseenp = 0;
+	/* not existing is not an error */
 	r = 0;
 	goto done;
-    } else if (r != CYRUSDB_OK) {
+    } 
+    if (r) goto done;
+
+    r = parsenum(data, &rest, datalen, &version);
+    if (r) goto done;
+
+    if (rest[0] != ' ')
+	return IMAP_MAILBOX_BADFORMAT;
+    rest++; /* skip space */
+    restlen = datalen - (rest - data);
+
+    if (version != CONVERSATIONS_VERSION) {
+	/* XXX - an error code for "incorrect version"? */
+	r = IMAP_MAILBOX_BADFORMAT;
 	goto done;
     }
 
-    r = dlist_parsemap(&dl, 0, fdata, fdatalen);
-    if (r) {
-	syslog(LOG_ERR, "IOERROR: conversations invalid status %s", mboxname);
-	*existsp = 0;
-	*unseenp = 0;
-	r = 0;
-	goto done;
-    }
+    r = dlist_parsemap(&dl, 0, rest, restlen);
+    if (r) goto done;
 
     n = dlist_getchild(dl, "EXISTS");
     if (n)
@@ -403,6 +435,9 @@ int conversation_getstatus(struct conversations_state *state,
 	*unseenp = dlist_num(n);
 
  done:
+    if (r)
+	syslog(LOG_ERR, "IOERROR: conversations invalid status %s", mboxname);
+
     dlist_free(&dl);
     free(key);
 
@@ -418,6 +453,7 @@ int conversation_setstatus(struct conversations_state *state,
     struct dlist *dl = NULL;
     struct buf buf = BUF_INITIALIZER;
     int r = IMAP_IOERROR;
+    int version = CONVERSATIONS_VERSION;
 
     if (!state->db)
 	goto done;
@@ -426,6 +462,7 @@ int conversation_setstatus(struct conversations_state *state,
     dlist_setnum32(dl, "EXISTS", exists);
     dlist_setnum32(dl, "UNSEEN", unseen);
 
+    buf_printf(&buf, "%d ", version);
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
@@ -447,8 +484,11 @@ int conversation_load(struct conversations_state *state,
 		      conversation_id_t cid,
 		      conversation_t **convp)
 {
-    const char *bdata;
-    int bdatalen;
+    const char *data;
+    int datalen;
+    const char *rest;
+    int restlen;
+    bit64 version;
     char bkey[CONVERSATION_ID_STRMAX+2];
     struct dlist *dl = NULL;
     struct dlist *n, *nn;
@@ -462,7 +502,7 @@ int conversation_load(struct conversations_state *state,
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
     r = DB->fetch(state->db,
 		  bkey, strlen(bkey),
-		  &bdata, &bdatalen,
+		  &data, &datalen,
 		  &state->txn);
 
     if (r == CYRUSDB_NOTFOUND) {
@@ -472,7 +512,25 @@ int conversation_load(struct conversations_state *state,
 	return r;
     }
 
-    r = dlist_parsemap(&dl, 0, bdata, bdatalen);
+    r = parsenum(data, &rest, datalen, &version);
+    if (r) {
+	*convp = NULL;
+	return 0;
+    }
+
+    if (rest[0] != ' ') {
+	*convp = NULL;
+	return 0;
+    }
+    rest++; /* skip space */
+    restlen = datalen - (rest - data);
+
+    if (version != CONVERSATIONS_VERSION) {
+	*convp = NULL;
+	return 0;
+    }
+
+    r = dlist_parsemap(&dl, 0, rest, restlen);
     if (r) {
 	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
 	       CONV_FMT, cid);
