@@ -69,10 +69,14 @@
 
 /* config.c stuff */
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
+static struct namespace conv_namespace;
 
 enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD };
 
 int verbose = 0;
+
+char *prev_userid;
+int mode = UNKNOWN;
 
 static int do_dump(const char *fname)
 {
@@ -253,7 +257,7 @@ static int do_build(const char *inboxname)
 static int usage(const char *name)
     __attribute__((noreturn));
 
-static void do_user(const char *userid, int mode)
+static void do_user(const char *userid)
 {
     const char *inboxname;
     char *fname;
@@ -302,24 +306,48 @@ static void do_user(const char *userid, int mode)
     free(fname);
 }
 
+static int do_mailbox(char *name,
+		      int namelen,
+		      int maycreate __attribute__((unused)),
+		      void *rock __attribute__((unused)))
+{
+    char *mboxname = xstrndup(name, namelen);
+    const char *userid = mboxname_to_userid(mboxname);
+
+    if (userid && strcmp(userid, prev_userid)) {
+	printf("%s\n", userid);
+	do_user(userid);
+	free(prev_userid);
+	prev_userid = xstrdup(userid);
+    }
+
+    free(mboxname);
+
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int c;
     const char *alt_config = NULL;
     const char *userid = NULL;
     int r = 0;
-    int mode = UNKNOWN;
+    int recursive = 0;
 
     if ((geteuid()) == 0 && (become_cyrus() != 0)) {
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "duzbvC:")) != EOF) {
+    while ((c = getopt(argc, argv, "durzbvC:")) != EOF) {
 	switch (c) {
 	case 'd':
 	    if (mode != UNKNOWN)
 		usage(argv[0]);
 	    mode = DUMP;
+	    break;
+
+	case 'r':
+	    recursive = 1;
 	    break;
 
 	case 'u':
@@ -359,6 +387,8 @@ int main(int argc, char **argv)
 
     if (optind == argc-1)
 	userid = argv[optind];
+    else if (recursive)
+	userid = "";
     else
 	usage(argv[0]);
 
@@ -367,7 +397,25 @@ int main(int argc, char **argv)
     mboxlist_init(0);
     mboxlist_open(NULL);
 
-    do_user(userid, mode);
+    if (recursive) {
+	char *buf = xmalloc(strlen(userid) + 2);
+	prev_userid = xstrdup("");
+	strcpy(buf, userid);
+	strcat(buf, "*");
+
+	if ((r = mboxname_init_namespace(&conv_namespace, 1)) != 0) {
+	    syslog(LOG_ERR, "%s", error_message(r));
+	    fatal(error_message(r), EC_CONFIG);
+	}
+
+	(*conv_namespace.mboxlist_findall)(&conv_namespace, buf, 1, 0, 0,
+					   do_mailbox, NULL);
+
+	free(prev_userid);
+	free(buf);
+    }
+    else
+	do_user(userid);
 
     mboxlist_close();
     mboxlist_done();
@@ -379,7 +427,7 @@ int main(int argc, char **argv)
 
 static int usage(const char *name)
 {
-    fprintf(stderr, "usage: %s [options] [-u|-d|-z|-f] username\n", name);
+    fprintf(stderr, "usage: %s [options] [-u|-d|-z|-f] [-r] username\n", name);
     fprintf(stderr, "\n");
     fprintf(stderr, "options are:\n");
     fprintf(stderr, "    -v             be more verbose\n");
@@ -388,6 +436,8 @@ static int usage(const char *name)
     fprintf(stderr, "    -d             dump the conversations database to stdout\n");
     fprintf(stderr, "    -z             zero the conversations DB (make all NULLs)\n");
     fprintf(stderr, "    -b             build conversations entries for any NULL records\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "    -r             recursive mode: username is a prefix\n");
 
     exit(EC_USAGE);
 }
