@@ -5053,7 +5053,7 @@ void cmd_xconvsort(char *tag)
     int charset = 0;
     struct searchargs *searchargs = NULL;
     struct windowargs *windowargs = NULL;
-    struct index_state *state = NULL;
+    struct index_state *old_state = NULL;
     clock_t start = clock();
     char mytime[100];
     int n;
@@ -5107,6 +5107,32 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
+    if (windowargs->changedsince) {
+	/* need to force a re-read from scratch into a new
+	 * index and then throw that away so as not to confuse
+	 * subsequent commands */
+	struct index_init init;
+	struct index_state *state = NULL;
+	int r;
+
+	memset(&init, 0, sizeof(struct index_init));
+	init.userid = imapd_userid;
+	init.authstate = imapd_authstate;
+	init.out = imapd_out;
+	init.want_expunged = 1;
+
+	r = index_open(imapd_index->mailbox->name, &init, &state);
+	if (r)
+	    goto error;
+
+	/* Temporarily swap in our new index as the global one.
+	 * Note that we need to do this *before* parsing the
+	 * searchargs, as some parts of searchargs (like the
+	 * sequence 1:*) depends on details of imapd_index. */
+	old_state = imapd_index;
+	imapd_index = state;
+    }
+
     searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
 
     c = getsearchprogram(tag, searchargs, &charset, 0);
@@ -5119,31 +5145,13 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    if (windowargs->changedsince) {
-	/* need to force a re-read from scratch into a new
-	 * index and then throw that away so as not to confuse
-	 * subsequent commands */
-	struct index_init init;
-	int r;
+    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
 
-	memset(&init, 0, sizeof(struct index_init));
-	init.userid = imapd_userid;
-	init.authstate = imapd_authstate;
-	init.out = imapd_out;
-	init.want_expunged = 1;
-
-	r = index_open(imapd_index->mailbox->name, &init, &state);
-	if (r)
-	    goto error;
-    } else {
-	state = imapd_index;
+    /* swap index back */
+    if (old_state) {
+	index_close(&imapd_index);
+	imapd_index = old_state;
     }
-
-
-    n = index_convsort(state, sortcrit, searchargs, windowargs);
-
-    if (state != imapd_index)
-	index_close(&state);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
