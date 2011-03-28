@@ -349,8 +349,7 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 			    struct fetchargs *fa);
 void cmd_fetch(char *tag, char *sequence, int usinguid);
 void cmd_xconvfetch(const char *tag, const char *cid);
-void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
-		   struct dlist *itemlist);
+void cmd_xconvmeta(const char *tag);
 static int do_xconvfetch(conversation_id_t cid,
 			 uint32_t uidvalidity,
 			 modseq_t highestmodseq,
@@ -2089,17 +2088,7 @@ void cmdloop(void)
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
 	    }
 	    else if (!strcmp(cmd.s, "Xconvmeta")) {
-		/* will parse folder validity and fetch items in cmd_xconvfetch */
-		struct dlist *cidlist = NULL;
-		struct dlist *itemlist = NULL;
-		c = dlist_parse(&cidlist, 0, imapd_in);
-		if (c != ' ') goto missingargs;
-		c = dlist_parse(&itemlist, 0, imapd_in);
-		if (c == '\r') c = prot_getc(imapd_in);
-		if (c != '\n') goto extraargs;
-		cmd_xconvmeta(tag.s, cidlist, itemlist);
-		dlist_free(&itemlist);
-		dlist_free(&cidlist);
+		cmd_xconvmeta(tag.s);
 	    }
 	    else if (!strcmp(cmd.s, "Xconvsort")) {
 		if (!imapd_index && !backend_current) goto nomailbox;
@@ -4581,29 +4570,43 @@ done:
 /*
  * Parse and perform a XCONVMETA command.
  */
-void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
-		   struct dlist *itemlist)
+void cmd_xconvmeta(const char *tag)
 {
     int r;
+    char c = ' ';
     const char *inboxname = NULL;
     char *fname = NULL;
     struct conversations_state state;
+    struct dlist *cidlist = NULL;
+    struct dlist *itemlist = NULL;
 
     if (backend_current) {
 	/* remote mailbox */
 	prot_printf(backend_current->out, "%s XCONVMETA ", tag);
-	dlist_print(cidlist, 0, backend_current->out);
-	prot_putc(' ', backend_current->out);
-	dlist_print(itemlist, 0, backend_current->out);
-	prot_putc('\r', backend_current->out);
-	prot_putc('\n', backend_current->out);
-	pipe_including_tag(backend_current, tag, 0);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
 	return;
     }
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
-	return;
+	eatline(imapd_in, c);
+	goto done;
+    }
+
+    c = dlist_parse(&cidlist, 0, imapd_in);
+    if (c != ' ') {
+	prot_printf(imapd_out, "%s BAD Failed to parse CID list\r\n", tag);
+	eatline(imapd_in, c);
+	goto done;
+    }
+    c = dlist_parse(&itemlist, 0, imapd_in);
+    if (c == '\r') c = prot_getc(imapd_in);
+    if (c != '\n') {
+	prot_printf(imapd_out, "%s BAD Failed to parse item list\r\n", tag);
+	eatline(imapd_in, c);
+	goto done;
     }
 
     inboxname = mboxname_user_inbox(imapd_userid);
@@ -4629,6 +4632,8 @@ void cmd_xconvmeta(const char *tag, struct dlist *cidlist,
 
  done:
 
+    dlist_free(&itemlist);
+    dlist_free(&cidlist);
     conversations_close(&state);
     free(fname);
 }
