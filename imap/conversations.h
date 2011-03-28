@@ -75,8 +75,10 @@ struct conv_folder {
 
 struct conv_sender {
     conv_sender_t   *next;
-    char	    *email;
     char	    *name;
+    char	    *route;
+    char	    *mailbox;
+    char	    *domain;
 };
 
 struct conversation {
@@ -139,8 +141,10 @@ extern conversation_t *conversation_new(void);
 extern void conversation_free(conversation_t *);
 
 extern void conversation_add_sender(conversation_t *conv,
-				    const char *email,
-				    const char *name);
+				    const char *name,
+				    const char *route,
+				    const char *mailbox,
+				    const char *domain);
 
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,

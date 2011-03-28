@@ -4535,8 +4535,10 @@ static void do_xconvmeta(const char *tag,
 		struct dlist *slist = dlist_newlist(item, "SENDERS");
 		for (sender = conv->senders; sender; sender = sender->next) {
 		    struct dlist *sli = dlist_newlist(slist, "");
-		    dlist_setatom(sli, "EMAIL", sender->email);
 		    dlist_setatom(sli, "NAME", sender->name);
+		    dlist_setatom(sli, "ROUTE", sender->route);
+		    dlist_setatom(sli, "MAILBOX", sender->mailbox);
+		    dlist_setatom(sli, "DOMAIN", sender->domain);
 		}
 	    }
 	}
