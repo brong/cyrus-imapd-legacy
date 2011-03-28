@@ -400,12 +400,15 @@ static void test_cid_rename(void)
 
     conversation_update(conv, FOLDER1,
 			/*exists*/3, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
 			/*modseq*/1);
     conversation_update(conv, FOLDER2,
 			/*exists*/2, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
 			/*modseq*/8);
     conversation_update(conv, FOLDER3,
 			/*exists*/10, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
 			/*modseq*/5);
 
     r = conversation_save(&state, C_CID1, conv);
@@ -528,6 +531,7 @@ static void test_folders(void)
 
     conversation_update(conv, FOLDER1,
 			/*exists*/7, /*unseen*/5, /*drafts*/1,
+			/*flagged*/3, /*attachments*/2,
 			/*modseq*/4);
 
     /* make sure the data we just passed to conversation_update()
@@ -535,6 +539,8 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(conv->exists, 7);
     CU_ASSERT_EQUAL(conv->unseen, 5);
     CU_ASSERT_EQUAL(conv->drafts, 1);
+    CU_ASSERT_EQUAL(conv->flagged, 3);
+    CU_ASSERT_EQUAL(conv->attachments, 2);
     CU_ASSERT_EQUAL(conv->modseq, 4);
     CU_ASSERT_EQUAL(num_folders(conv), 1);
     folder = conversation_find_folder(conv, FOLDER1);
@@ -568,9 +574,11 @@ static void test_folders(void)
     /* some more updates should succeed */
     conversation_update(conv, FOLDER2,
 			/*exists*/1, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
 			/*modseq*/7);
     conversation_update(conv, FOLDER3,
 			/*exists*/10, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
 			/*modseq*/55);
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
@@ -725,6 +733,7 @@ static void test_dump(void)
 	for (j = 0 ; j < mboxnames.count ; j++) {
 	    conversation_update(conv, mboxnames.data[j],
 				/*exists*/1, /*unseen*/0, /*drafts*/0,
+				/*flagged*/0, /*attachments*/0,
 				/*modseq*/100);
 	}
 	r = conversation_save(&state, cid, conv);
