@@ -290,7 +290,7 @@ void dlist_makeatom(struct dlist *dl, const char *val)
     if (!dl) return;
     _dlist_clean(dl);
     dl->type = DL_ATOM;
-    dl->sval = xstrdup(val);
+    dl->sval = val ? xstrdup(val) : NULL;
 }
 
 void dlist_makeflag(struct dlist *dl, const char *val)
