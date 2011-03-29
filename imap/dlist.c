@@ -721,6 +721,7 @@ int dlist_parsemap(struct dlist **dlp, int parsekey,
     struct dlist *dl = NULL;
 
     stream = prot_readmap(base, len);
+    prot_setisclient(stream, 1); /* don't sync literals */
     c = dlist_parse(&dl, parsekey, stream);
     prot_free(stream);
 
