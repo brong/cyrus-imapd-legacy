@@ -246,9 +246,8 @@ int index_open(const char *name, struct index_init *init,
     index_refresh(state);
 
     /* have to get the vanished list while we're still locked */
-    if (init && init->vanished.uidvalidity == state->mailbox->i.uidvalidity) {
+    if (init)
 	init->vanishedlist = index_vanished(state, &init->vanished);
-    }
 
     index_unlock(state);
 
@@ -696,6 +695,14 @@ struct seqset *index_vanished(struct index_state *state,
     struct seqset *seq;
     uint32_t recno;
 
+    /* check uidvalidity match */
+    if (params->uidvalidity_is_max) {
+	if (params->uidvalidity < mailbox->i.uidvalidity) return NULL;
+    }
+    else {
+	if (params->uidvalidity != mailbox->i.uidvalidity) return NULL;
+    }
+
     /* No recently expunged messages */
     if (params->modseq >= state->highestmodseq) return NULL;
 
@@ -883,6 +890,7 @@ int index_fetch(struct index_state *state,
     if (fetchargs->vanished) {
 	struct vanished_params v;
 	v.sequence = sequence;;
+	v.uidvalidity = state->mailbox->i.uidvalidity;
 	v.modseq = fetchargs->changedsince;
 	v.match_seq = fetchargs->match_seq;
 	v.match_uid = fetchargs->match_uid;
