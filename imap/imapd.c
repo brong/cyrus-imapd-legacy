@@ -4777,7 +4777,6 @@ static int do_xconvfetch(conversation_id_t cid,
 	memset(&init, 0, sizeof(struct index_init));
 	init.userid = imapd_userid;
 	init.authstate = imapd_authstate;
-	init.examine_mode = 1;
 	init.vanished.uidvalidity = uidvalidity;
 	init.vanished.uidvalidity_is_max = 1;
 	init.vanished.modseq = highestmodseq;
