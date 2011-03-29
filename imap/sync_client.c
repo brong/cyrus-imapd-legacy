@@ -1038,12 +1038,15 @@ static int compare_one_record(struct mailbox *mailbox,
 
 	    r = sync_choose_cid(mp, rp, &cid);
 	    if ((r & SYNC_CHOOSE_CLASH)) {
+		mailbox_open_conversations(mailbox);
 		if ((r & SYNC_CHOOSE_REPLICA))
-		    conversations_rename_cid_mb(mailbox->name, mp->cid, rp->cid,
-						mailbox_cid_rename_cb, NULL);
+		    conversations_rename_cid(&mailbox->cstate,
+					     mp->cid, rp->cid,
+					     mailbox_cid_rename_cb, NULL);
 		else
-		    conversations_rename_cid_mb(mailbox->name, rp->cid, mp->cid,
-					        mailbox_cid_rename_cb, NULL);
+		    conversations_rename_cid(&mailbox->cstate,
+					     mp->cid, rp->cid,
+					     mailbox_cid_rename_cb, NULL);
 	    }
 	    mp->cid = cid;
 	}

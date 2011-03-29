@@ -167,10 +167,5 @@ extern int conversations_rename_cid(struct conversations_state *state,
 				    conversation_id_t to_cid,
 				    conversations_rename_cb_t renamecb,
 				    void *rock);
-extern int conversations_rename_cid_mb(const char *name,
-				       conversation_id_t from_cid,
-				       conversation_id_t to_cid,
-				       conversations_rename_cb_t renamecb,
-				       void *rock);
 
 #endif /* __CYRUS_CONVERSATIONS_H_ */
