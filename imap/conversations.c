@@ -277,15 +277,6 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
-static int bool_diff(uint32_t new, uint32_t old)
-{
-    if (old && !new)
-	return -1;
-    if (new && !old)
-	return 1;
-    return 0;
-}
-
 int conversation_save(struct conversations_state *state,
 		      conversation_id_t cid,
 		      conversation_t *conv)
@@ -297,7 +288,6 @@ int conversation_save(struct conversations_state *state,
     const conv_sender_t *sender;
     int version = CONVERSATIONS_VERSION;
     int r = 0;
-    int unseen_diff;
 
     if (!state->db)
 	return IMAP_IOERROR;
@@ -312,17 +302,41 @@ int conversation_save(struct conversations_state *state,
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
 
-    unseen_diff = bool_diff(conv->unseen, conv->prev_unseen);
-    
     /* see if any 'F' keys need to be changed */
     for (folder = conv->folders ; folder ; folder = folder->next) {
-	int exists_diff = bool_diff(folder->exists, folder->prev_exists);
+	int exists_diff = 0;
+	int unseen_diff = 0;
+
+	/* case: full removal of conversation - make sure to remove
+	 * unseen as well */
+	if (folder->exists) {
+	    if (folder->prev_exists) {
+		/* both exist, just check for unseen changes */
+		unseen_diff = !!conv->unseen - !!conv->prev_unseen;
+	    }
+	    else {
+		/* adding, check if it's unseen */
+		exists_diff = 1;
+		if (conv->unseen) unseen_diff = 1;
+	    }
+	}
+	else if (folder->prev_exists) {
+	    /* removing, check if it WAS unseen */
+	    exists_diff = -1;
+	    if (conv->prev_unseen) unseen_diff = -1;
+	}
+	else {
+	    /* we don't care about unseen if the cid is not registered
+	     * in this folder, and wasn't previously either */
+	}
+
 	if (unseen_diff || exists_diff) {
 	    uint32_t exists;
 	    uint32_t unseen;
 	    r = conversation_getstatus(state, folder->mboxname,
 				       &exists, &unseen);
 	    if (r) goto done;
+	    syslog(LOG_ERR, "CONV: %s %u %u %d %d", folder->mboxname, exists, unseen, exists_diff, unseen_diff);
 	    exists += exists_diff;
 	    unseen += unseen_diff;
 	    r = conversation_setstatus(state, folder->mboxname,
