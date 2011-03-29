@@ -331,12 +331,6 @@ int conversation_save(struct conversations_state *state,
 	}
     }
 
-    /* this conversation is over, delete it */
-    if (!conv->exists) {
-	r = DB->delete(state->db, bkey, strlen(bkey), &state->txn, 1);
-	goto done;
-    }
-
     dl = dlist_newkvlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
     dlist_setnum32(dl, "EXISTS", conv->exists);
