@@ -1253,8 +1253,8 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		} else if ((r & SYNC_CHOOSE_CLASH)) {
 		    /* We chose the master's CID but the replica has
 		     * a non-NULL CID which will need to be rewritten. */
-		    conversations_rename_cid_mb(mailbox->name, rrecord.cid, cid,
-						mailbox_cid_rename_cb, NULL);
+		    conversations_rename_cid(&mailbox->cstate, rrecord.cid, cid,
+					     mailbox_cid_rename_cb, NULL);
 		    rrecord.cid = cid;
 		}
 	    }
