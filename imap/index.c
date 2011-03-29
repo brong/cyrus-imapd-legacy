@@ -460,7 +460,11 @@ void index_refresh(struct index_state *state)
     uint32_t need_records;
     struct seqset *seenlist;
 
-    if (state->num_records) {
+    if (state->want_expunged) {
+	/* could need the lot! */
+	need_records = mailbox->i.num_records;
+    }
+    else if (state->num_records) {
 	need_records = mailbox->i.num_records -
 		       state->num_records + state->exists;
     }
