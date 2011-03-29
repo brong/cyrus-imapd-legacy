@@ -1240,23 +1240,26 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		}
 
 		r = sync_choose_cid(&mrecord, &rrecord, &cid);
-		if ((r & SYNC_CHOOSE_REPLICA)) {
-		    /* We needed to choose the replica's CID, and the
-		     * master's CID is different.  To avoid the master
-		     * getting confused, we force a full resync by
-		     * pretending to have a CRC failure.  The master will
-		     * eventually get all this information and make the same
-		     * decision, then tell us a CID we both agree on. */
-		    syslog(LOG_ERR, "SYNCERROR: choosing CID from replica %s %u",
-			   mailbox->name, mrecord.uid);
-		    return IMAP_SYNC_CHECKSUM;
-		} else if ((r & SYNC_CHOOSE_CLASH)) {
-		    /* We chose the master's CID but the replica has
-		     * a non-NULL CID which will need to be rewritten. */
-		    conversations_rename_cid(&mailbox->cstate, rrecord.cid, cid,
-					     mailbox_cid_rename_cb, NULL);
+		/* if we want the master CID, we can do that now */
+		if ((r & SYNC_CHOOSE_MASTER)) {
+		    if ((r & SYNC_CHOOSE_CLASH)) {
+			/* We chose the master's CID but the replica has
+		         * a non-NULL CID which will need to be rewritten. */
+			conversations_rename_cid(&mailbox->cstate, rrecord.cid, cid,
+						 mailbox_cid_rename_cb, NULL);
+		    }
+		    /* the rename_cid will do this anyway, but if we get in early
+		     * we can avoid the MODSEQ bump which would cause a CRC
+		     * failure and full resync */
 		    rrecord.cid = cid;
 		}
+
+		/* If we needed to choose the replica's CID, the master
+		 * will get confused.  Because this might only happen due
+		 * to earlier updates, we CAN NOT DETECT during the first
+		 * pass.  To avoid conflicted intermediate states, our
+		 * only choice is to ignore the CID, causing a later
+		 * CRC mismatch and a full sync */
 	    }
 
 	    /* skip out on the first pass */
