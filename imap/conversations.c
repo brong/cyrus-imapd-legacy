@@ -935,29 +935,6 @@ int conversations_rename_cid(struct conversations_state *state,
     return r;
 }
 
-int conversations_rename_cid_mb(const char *name,
-			        conversation_id_t from_cid,
-			        conversation_id_t to_cid,
-				conversations_rename_cb_t renamecb,
-				void *rock)
-{
-    struct conversations_state state;
-    char *path;
-    int r;
-
-    path = conversations_getpath(name);
-    r = conversations_open(&state, path);
-    if (r)
-	goto out;
-
-    r = conversations_rename_cid(&state, from_cid, to_cid, renamecb, rock);
-    conversations_close(&state);
-
-out:
-    free(path);
-    return r;
-}
-
 void conversations_dump(struct conversations_state *state, FILE *fp)
 {
     cyrusdb_dump(DB, state->db, "", 0, fp, &state->txn);
