@@ -4760,10 +4760,6 @@ static int do_xconvfetch(conversation_id_t cid,
 	struct index_init init;
 	struct seqset *seq;
 
-	/* nothing to find */
-	if (!folder->exists)
-	    continue;
-
 	/* unchanged */
 	if (highestmodseq >= folder->modseq)
 	    continue;
