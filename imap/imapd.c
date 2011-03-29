@@ -4789,6 +4789,7 @@ static int do_xconvfetch(conversation_id_t cid,
 	init.authstate = imapd_authstate;
 	init.examine_mode = 1;
 	init.vanished.uidvalidity = uidvalidity;
+	init.vanished.uidvalidity_is_max = 1;
 	init.vanished.modseq = highestmodseq;
 	init.out = imapd_out;
 	r = index_open(folder->mboxname, &init, &index_state);
