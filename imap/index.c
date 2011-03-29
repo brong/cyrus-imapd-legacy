@@ -142,7 +142,6 @@ static int index_storeflag(struct index_state *state, uint32_t msgno,
 static int index_fetchreply(struct index_state *state, uint32_t msgno,
 			    const struct fetchargs *fetchargs);
 static void index_printflags(struct index_state *state, uint32_t msgno, int usinguid);
-static void index_checkflags(struct index_state *state, int dirty);
 static char *get_localpart_addr(const char *header);
 static char *get_displayname(const char *header);
 static char *index_extract_subject(const char *subj, size_t len, int *is_refwd);
@@ -583,7 +582,7 @@ void index_select(struct index_state *state, struct index_init *init)
     index_tellexists(state);
 
     /* always print flags */
-    index_checkflags(state, 1);
+    index_checkflags(state, 1, 1);
 
     if (state->firstnotseen)
 	prot_printf(state->out, "* OK [UNSEEN %u] Ok\r\n", 
@@ -901,7 +900,7 @@ int index_fetch(struct index_state *state,
 
     index_unlock(state);
 
-    index_checkflags(state, 0);
+    index_checkflags(state, 1, 0);
 
     if (vanishedlist && vanishedlist->len) {
 	char *vanished = seqset_cstring(vanishedlist);
@@ -2535,7 +2534,7 @@ static void index_listflags(struct index_state *state)
     prot_printf(state->out, ")] Ok\r\n");
 }
 
-static void index_checkflags(struct index_state *state, int dirty)
+void index_checkflags(struct index_state *state, int print, int dirty)
 {
     struct mailbox *mailbox = state->mailbox;
     unsigned i;
@@ -2561,7 +2560,7 @@ static void index_checkflags(struct index_state *state, int dirty)
 	dirty = 1;
     }
 
-    if (dirty)
+    if (dirty && print)
 	index_listflags(state);
 }
 
@@ -2628,7 +2627,7 @@ void index_tellchanges(struct index_state *state, int canexpunge,
 
     if (state->oldexists != state->exists) index_tellexists(state);
 
-    index_checkflags(state, 0);
+    index_checkflags(state, 1, 0);
 
     /* print any changed message flags */
     for (msgno = 1; msgno <= state->exists; msgno++) {

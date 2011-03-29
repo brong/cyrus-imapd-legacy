@@ -4780,6 +4780,7 @@ static int do_xconvfetch(conversation_id_t cid,
 	r = index_open(folder->mboxname, &init, &index_state);
 	if (r)
 	    goto out;
+	index_checkflags(index_state, 0, 0);
 
 	prot_printf(imapd_out, "* FOLDERSTATE ");
 	prot_printastring(imapd_out, extname);
