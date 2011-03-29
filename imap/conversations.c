@@ -336,7 +336,6 @@ int conversation_save(struct conversations_state *state,
 	    r = conversation_getstatus(state, folder->mboxname,
 				       &exists, &unseen);
 	    if (r) goto done;
-	    syslog(LOG_ERR, "CONV: %s %u %u %d %d", folder->mboxname, exists, unseen, exists_diff, unseen_diff);
 	    exists += exists_diff;
 	    unseen += unseen_diff;
 	    r = conversation_setstatus(state, folder->mboxname,
