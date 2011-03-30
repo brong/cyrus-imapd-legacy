@@ -819,7 +819,7 @@ int dlist_tonum64(struct dlist *dl, bit64 *val)
 	*val = dl->nval;
 	return 1;
     default:
-	fatal("INVALID TYPE FOR NVAL", EC_SOFTWARE);
+	return 0;
     }
 
     /* shut GCC up - unreachable */
