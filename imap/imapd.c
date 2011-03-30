@@ -10421,7 +10421,7 @@ static int parse_windowargs(const char *tag, struct windowargs **wa)
 		goto syntax_error;
 	    c = prot_getc(imapd_in);
 	} else if (!strcasecmp(arg.s, "UNTIL"))
-	    windowargs.until = 1;
+	    c = getuint32(imapd_in, &windowargs.until);
 	else
 	    goto syntax_error;
 
