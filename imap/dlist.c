@@ -978,7 +978,7 @@ int dlist_toguid(struct dlist *dl, struct message_guid **valp)
 
     if (valp) *valp = dl->gval;
 
-    return 0;
+    return 1;
 }
 
 int dlist_tofile(struct dlist *dl,
