@@ -588,7 +588,7 @@ void dlist_print(const struct dlist *dl, int printkeys,
 	prot_printliteral(out, dl->sval, dl->nval);
 	break;
     case DL_GUID: 
-	prot_printf(out, message_guid_encode(dl->gval));
+	prot_printf(out, "%s", message_guid_encode(dl->gval));
 	break;
     case DL_HEX:
 	{
