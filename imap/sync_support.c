@@ -272,6 +272,7 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 			struct index_record *record)
 {
     struct dlist *fl;
+    struct message_guid *tmpguid;
     int r;
 
     memset(record, 0, sizeof(struct index_record));
@@ -288,8 +289,10 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
     if (!dlist_getnum32(kr, "SIZE", &record->size))
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
-    if (!dlist_getguid(kr, "GUID", &record->guid))
+    if (!dlist_getguid(kr, "GUID", &tmpguid))
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
+
+    record->guid = *tmpguid;
 
     /* parse the flags */
     r = sync_getflags(fl, mailbox, record);

@@ -1083,7 +1083,7 @@ void reserve_folder(const char *part, const char *mboxname,
 
 static int do_reserve(struct dlist *kl, struct sync_reserve_list *reserve_list)
 {
-    struct message_guid tmp_guid;
+    struct message_guid *tmpguid;
     struct sync_name_list *missing = sync_name_list_create();
     struct sync_name_list *folder_names = sync_name_list_create();
     struct sync_msgid_list *part_list;
@@ -1102,9 +1102,9 @@ static int do_reserve(struct dlist *kl, struct sync_reserve_list *reserve_list)
 
     part_list = sync_reserve_partlist(reserve_list, partition);
     for (i = gl->head; i; i = i->next) {
-	if (!i->sval || !message_guid_decode(&tmp_guid, i->sval))
+	if (!dlist_toguid(i, &tmpguid))
 	    goto parse_err;
-	sync_msgid_add(part_list, &tmp_guid);
+	sync_msgid_add(part_list, tmpguid);
     }
 
     /* need a list so we can mark items */
@@ -1134,11 +1134,11 @@ static int do_reserve(struct dlist *kl, struct sync_reserve_list *reserve_list)
     /* check if we missed any */
     kout = dlist_newlist(NULL, "MISSING");
     for (i = gl->head; i; i = i->next) {
-	if (!message_guid_decode(&tmp_guid, i->sval))
-	    continue;
-	item = sync_msgid_lookup(part_list, &tmp_guid);
+	if (!dlist_toguid(i, &tmpguid))
+	    goto parse_err;
+	item = sync_msgid_lookup(part_list, tmpguid);
 	if (item && !item->mark)
-	    dlist_setatom(kout, "GUID", i->sval);
+	    dlist_setguid(kout, "GUID", tmpguid);
     }
     if (kout->head)
 	sync_send_response(kout, sync_out);
