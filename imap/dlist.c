@@ -293,8 +293,10 @@ void dlist_makeatom(struct dlist *dl, const char *val)
     if (!dl) return;
     _dlist_clean(dl);
     dl->type = DL_ATOM;
-    dl->sval = val ? xstrdup(val) : NULL;
-    dl->nval = strlen(dl->sval);
+    if (val) {
+	dl->sval = xstrdup(val);
+	dl->nval = strlen(val);
+    }
 }
 
 void dlist_makeflag(struct dlist *dl, const char *val)
