@@ -364,7 +364,7 @@ int conversation_save(struct conversations_state *state,
     for (sender = conv->senders ; sender ; sender = sender->next) {
 	nn = dlist_newkvlist(n, "SENDER");
 	/* envelope form */
-	dlist_setatom(nn, "NAME", sender->name);
+	if (sender->name) dlist_setatom(nn, "NAME", sender->name);
 	if (sender->route) dlist_setatom(nn, "ROUTE", sender->route);
 	dlist_setatom(nn, "MAILBOX", sender->mailbox);
 	dlist_setatom(nn, "DOMAIN", sender->domain);
@@ -593,8 +593,8 @@ int conversation_load(struct conversations_state *state,
 	nn2 = dlist_getchild(n, "ROUTE");
 	nn3 = dlist_getchild(n, "MAILBOX");
 	nn4 = dlist_getchild(n, "DOMAIN");
-	if (nn && nn3 && nn4)
-	    conversation_add_sender(conv, nn->sval, 
+	if (nn3 && nn4)
+	    conversation_add_sender(conv, nn ? nn->sval : NULL,
 				    nn2 ? nn2->sval : NULL,
 				    nn3->sval, nn4->sval);
     }
@@ -651,14 +651,13 @@ void conversation_add_sender(conversation_t *conv,
 {
     conv_sender_t *sender, **tailp = &conv->senders;
 
-    if (!name || !mailbox || !domain) return;
+    if (!mailbox || !domain) return;
 
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (!strcmp(sender->mailbox, mailbox) &&
 	    !strcmp(sender->domain, domain)) {
 	    /* found it.  Just check if we should update the name */
-	    if (name[0] && !sender->name[0]) {
-		free(sender->name);
+	    if (name && !sender->name) {
 		sender->name = xstrdup(name);
 		conv->dirty = 1;
 	    }
@@ -668,7 +667,7 @@ void conversation_add_sender(conversation_t *conv,
     }
 
     sender = xzmalloc(sizeof(*sender));
-    sender->name = xstrdup(name);
+    if (name) sender->name = xstrdup(name);
     if (route) sender->route = xstrdup(route);
     sender->mailbox = xstrdup(mailbox);
     sender->domain = xstrdup(domain);
