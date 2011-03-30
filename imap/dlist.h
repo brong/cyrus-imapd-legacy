@@ -116,6 +116,7 @@ int dlist_iskvlist(const struct dlist *dl);
 int dlist_isfile(const struct dlist *dl);
 /* XXX - these two aren't const, they can fiddle internals */
 int dlist_isnum(struct dlist *dl);
+int dlist_ishex64(struct dlist *dl);
 int dlist_isguid(struct dlist *dl);
 
 /* special number and string readers - return 0 and "" if nothing */
