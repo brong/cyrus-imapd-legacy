@@ -744,6 +744,21 @@ fail:
     return EOF;
 }
 
+char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
+			    struct protstream *in)
+{
+    char c = dlist_parse(dlp, parsekey, in);
+
+    /* make a list with one item */
+    if (*dlp && !dlist_isatomlist(*dlp)) {
+	struct dlist *tmp = dlist_newlist(NULL, "");
+	dlist_stitch(tmp, *dlp);
+	*dlp = tmp;
+    }
+
+    return c;
+}
+
 int dlist_parsemap(struct dlist **dlp, int parsekey,
 		   const char *base, unsigned len)
 {
@@ -964,6 +979,7 @@ int dlist_toguid(struct dlist *dl, struct message_guid **valp)
     switch (dl->type) {
     case DL_ATOM:
     case DL_BUF:
+	syslog(LOG_ERR, "CONVERT GUID: %s %d", dl->sval, dl->nval);
 	if (dl->nval != 40)
 	    return 0;
 	if (!message_guid_decode(&tmpguid, dl->sval))

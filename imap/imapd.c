@@ -4591,13 +4591,14 @@ void cmd_xconvmeta(const char *tag)
 	goto done;
     }
 
-    c = dlist_parse(&cidlist, 0, imapd_in);
+    c = dlist_parse_asatomlist(&cidlist, 0, imapd_in);
     if (c != ' ') {
 	prot_printf(imapd_out, "%s BAD Failed to parse CID list\r\n", tag);
 	eatline(imapd_in, c);
 	goto done;
     }
-    c = dlist_parse(&itemlist, 0, imapd_in);
+
+    c = dlist_parse_asatomlist(&itemlist, 0, imapd_in);
     if (c == '\r') c = prot_getc(imapd_in);
     if (c != '\n') {
 	prot_printf(imapd_out, "%s BAD Failed to parse item list\r\n", tag);
