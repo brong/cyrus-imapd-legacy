@@ -890,12 +890,51 @@ int dlist_tofile(struct dlist *dl,
     return 1;
 }
 
+int dlist_isatomlist(struct dlist *dl)
+{
+    if (!dl) return 0;
+    return (dl->type == DL_ATOMLIST);
+}
+
+int dlist_iskvlist(struct dlist *dl);
+{
+    if (!dl) return 0;
+
+    return (dl->type == DL_KVLIST);
+}
+
+int dlist_isfile(struct dlist *dl)
+{
+    if (!dl) return 0;
+
+    return (dl->type == DL_FILE);
+}
+
+int dlist_isnum(struct dlist *dl)
+{
+    bit64 tmp;
+
+    if (!dl) return 0;
+
+    /* see if it can be parsed as a number */
+    return dlist_tonum64(dl, &tmp);
+}
+
+int dlist_isguid(struct dlist *dl)
+{
+    struct message_guid tmp;
+
+    if (!dl) return 0;
+
+    return dlist_toguid(dl, &tmp);
+}
+
 /* XXX - this stuff is all shitty, rationalise later */
 bit64 dlist_num(struct dlist *dl)
 {
     bit64 v;
 
-    if (!dl) fatal("NO DL", EC_SOFTWARE);
+    if (!dl) return 0;
 
     if (dlist_tonum64(dl, &v))
 	return v;
@@ -907,11 +946,12 @@ bit64 dlist_num(struct dlist *dl)
 const char *dlist_cstring(struct dlist *dl)
 {
     static char zerochar = '\0';
-    const char *res = NULL;
-    if (!dl) fatal("NO DL", EC_SOFTWARE);
 
-    dlist_toatom(dl, &res);
-    if (res) return res;
+    if (dl) {
+	const char *res = NULL;
+	dlist_toatom(dl, &res);
+	if (res) return res;
+    }
 
     return &zerochar;
 }
