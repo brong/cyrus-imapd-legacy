@@ -4648,6 +4648,7 @@ void cmd_xconvfetch(const char *tag)
     modseq_t hms = 0;
     char mytime[100];
     struct dlist *cidlist = NULL;
+    struct dlist *item;
 
     if (backend_current) {
 	/* remote mailbox */
@@ -4664,23 +4665,13 @@ void cmd_xconvfetch(const char *tag)
 	return;
     }
 
-    c = dlist_parse(&cidlist, 0, imapd_in);
+    c = dlist_parse_asatomlist(&cidlist, 0, imapd_in);
     if (c != ' ')
 	goto syntax_error;
 
     /* check CIDs */
-    if (dlist_isatomlist(cidlist)) {
-	struct dlist *item;
-	for (item = cidlist->head; item; item = item->next) {
-	    if (!dlist_ishex64(item)) {
-		prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
-		eatline(imapd_in, c);
-		return;
-	    }
-	}
-    }
-    else {
-	if (!dlist_ishex64(cidlist)) {
+    for (item = cidlist->head; item; item = item->next) {
+	if (!dlist_ishex64(item)) {
 	    prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
 	    eatline(imapd_in, c);
 	    return;
@@ -4718,10 +4709,7 @@ void cmd_xconvfetch(const char *tag)
     fetchargs.namespace = &imapd_namespace;
     fetchargs.userid = imapd_userid;
     fetchargs.changedsince = hms;
-    if (dlist_isatomlist(cidlist))
-	fetchargs.cidlist = cidlist;
-    else
-	fetchargs.cid = dlist_num(cidlist);
+    fetchargs.cidlist = cidlist;
 
     r = do_xconvfetch(uidv, hms, &fetchargs);
 
@@ -4792,6 +4780,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
     conversation_t *virtualconv = NULL;
     conv_folder_t *folder;
     char extname[MAX_MAILBOX_BUFFER];
+    struct dlist *dl;
 
     inboxname = mboxname_user_inbox(imapd_userid);
     if (!inboxname)
@@ -4806,18 +4795,10 @@ static int do_xconvfetch(uint32_t uidvalidity,
 
     virtualconv = conversation_new();
 
-    if (fetchargs->cidlist) {
-	/* we need to handle each cid, joy */
-	struct dlist *dl;
-	for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
-	    r = _conv_add_folder(&state, dlist_num(dl), virtualconv, highestmodseq);
-	    if (r) goto out;
-	}
-    }
-
-    if (fetchargs->cid) {
-	r = _conv_add_folder(&state, fetchargs->cid, virtualconv, highestmodseq);
-	if (r) goto out;
+    for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
+        r = _conv_add_folder(&state, dlist_num(dl),
+			     virtualconv, highestmodseq);
+        if (r) goto out;
     }
 
     conversations_close(&state);
