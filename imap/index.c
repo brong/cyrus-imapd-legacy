@@ -1399,12 +1399,12 @@ int index_convsort(struct index_state *state,
     int modseq = 0;
     hash_table seen_cids;
     hash_table old_seen_cids;
-    uint32_t pos = 0;
+    int32_t pos = 0;
     static const struct windowargs default_windowargs;    /* all zeroes */
     int found_anchor = 0;
     uint32_t anchor_pos = 0;
     uint32_t first_pos = 0;
-    uint32_t window_first = 0, window_last = 0;
+    int32_t window_first = 0, window_last = 0;
     unsigned int ninwindow = 0;
     unsigned int *results = NULL;
     unsigned int nresults = 0;		/* uids */
