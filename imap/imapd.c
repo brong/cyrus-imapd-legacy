@@ -76,6 +76,7 @@
 #include "backend.h"
 #include "bsearch.h"
 #include "charset.h"
+#include "conversations.h"
 #include "dlist.h"
 #include "exitcodes.h"
 #include "idle.h"
@@ -348,10 +349,9 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 			    int allow_vanished,
 			    struct fetchargs *fa);
 void cmd_fetch(char *tag, char *sequence, int usinguid);
-void cmd_xconvfetch(const char *tag, const char *cid);
+void cmd_xconvfetch(const char *tag);
 void cmd_xconvmeta(const char *tag);
-static int do_xconvfetch(conversation_id_t cid,
-			 uint32_t uidvalidity,
+static int do_xconvfetch(uint32_t uidvalidity,
 			 modseq_t highestmodseq,
 			 struct fetchargs *fetchargs);
 void cmd_store(char *tag, char *sequence, int usinguid);
@@ -2079,11 +2079,7 @@ void cmdloop(void)
 
 	case 'X':
 	    if (!strcmp(cmd.s, "Xconvfetch")) {
-		/* cid */
-		c = getastring(imapd_in, imapd_out, &arg1);
-		if (c != ' ') goto missingargs;
-		/* will parse folder validity and fetch items in cmd_xconvfetch */
-		cmd_xconvfetch(tag.s, arg1.s);
+		cmd_xconvfetch(tag.s);
 
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
 	    }
@@ -4643,20 +4639,20 @@ void cmd_xconvmeta(const char *tag)
 /*
  * Parse and perform a XCONVFETCH command.
  */
-void cmd_xconvfetch(const char *tag, const char *cidstr)
+void cmd_xconvfetch(const char *tag)
 {
     int c = ' ';
     struct fetchargs fetchargs;
     int r;
     clock_t start = clock();
-    conversation_id_t cid;
     uint32_t uidv = 0;
     modseq_t hms = 0;
     char mytime[100];
+    struct dlist *cidlist = NULL;
 
     if (backend_current) {
 	/* remote mailbox */
-	prot_printf(backend_current->out, "%s XCONVFETCH %s ", tag, cidstr);
+	prot_printf(backend_current->out, "%s XCONVFETCH ", tag);
 	if (!pipe_command(backend_current, 65536)) {
 	    pipe_including_tag(backend_current, tag, 0);
 	}
@@ -4669,11 +4665,27 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
 	return;
     }
 
-    /* parse CID */
-    if (!conversation_id_decode(&cid, cidstr) || !cid) {
-	prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
-	eatline(imapd_in, c);
-	return;
+    c = dlist_parse(&cidlist, 0, imapd_in);
+    if (c != ' ')
+	goto syntax_error;
+
+    /* check CIDs */
+    if (dlist_isatomlist(cidlist)) {
+	struct dlist *item;
+	for (item = cidlist->head; item; item = item->next) {
+	    if (!dlist_ishex64(item)) {
+		prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
+		eatline(imapd_in, c);
+		return;
+	    }
+	}
+    }
+    else {
+	if (!dlist_ishex64(cidlist)) {
+	    prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
+	    eatline(imapd_in, c);
+	    return;
+	}
     }
 
     /* parse (uidvalidity highestmodseq) tuple or () */
@@ -4703,12 +4715,16 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     r = parse_fetch_args(tag, "Xconvfetch", 0, &fetchargs);
     if (r)
 	goto freeargs;
-    fetchargs.cid = cid;
     fetchargs.fetchitems |= (FETCH_UIDVALIDITY|FETCH_FOLDER);
     fetchargs.namespace = &imapd_namespace;
     fetchargs.userid = imapd_userid;
+    fetchargs.changedsince = hms;
+    if (dlist_isatomlist(cidlist))
+	fetchargs.cidlist = cidlist;
+    else
+	fetchargs.cid = dlist_num(cidlist);
 
-    r = do_xconvfetch(cid, uidv, hms, &fetchargs);
+    r = do_xconvfetch(uidv, hms, &fetchargs);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
@@ -4722,6 +4738,7 @@ void cmd_xconvfetch(const char *tag, const char *cidstr)
     }
 
 freeargs:
+    dlist_free(&cidlist);
     section_list_free(fetchargs.bodysections);
     freefieldlist(fetchargs.fsections);
     strarray_fini(&fetchargs.headers);
@@ -4733,8 +4750,38 @@ syntax_error:
     eatline(imapd_in, c);
 }
 
-static int do_xconvfetch(conversation_id_t cid,
-			 uint32_t uidvalidity,
+static int _conv_add_folder(struct conversations_state *statep,
+			    conversation_id_t cid,
+			    conversation_t *virtualconv,
+			    modseq_t highestmodseq)
+{
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    conv_folder_t *tmp;
+    int r ;
+
+    r = conversation_load(statep, cid, &conv);
+    if (r) goto out;
+
+    if (highestmodseq >= conv->modseq)
+	goto out;
+
+    for (folder = conv->folders; folder; folder = folder->next) {
+	if (highestmodseq >= folder->modseq)
+	    continue;
+
+	/* finally, something worth looking at */
+	tmp = conversation_add_folder(virtualconv, folder->mboxname);
+	if (tmp->modseq < folder->modseq)
+	    tmp->modseq = folder->modseq;
+    }
+
+out:
+    conversation_free(conv);
+    return r;
+}
+
+static int do_xconvfetch(uint32_t uidvalidity,
 			 modseq_t highestmodseq,
 			 struct fetchargs *fetchargs)
 {
@@ -4743,7 +4790,7 @@ static int do_xconvfetch(conversation_id_t cid,
     const char *inboxname;
     char *fname = NULL;
     struct index_state *index_state = NULL;
-    conversation_t *conv = NULL;
+    conversation_t *virtualconv = NULL;
     conv_folder_t *folder;
     char extname[MAX_MAILBOX_BUFFER];
 
@@ -4756,25 +4803,33 @@ static int do_xconvfetch(conversation_id_t cid,
 	return IMAP_MAILBOX_BADNAME;
 
     r = conversations_open(&state, fname);
-    if (r)
-	goto out;
+    if (r) goto out;
 
-    r = conversation_load(&state, cid, &conv);
+    virtualconv = conversation_new();
+
+    if (fetchargs->cidlist) {
+	/* we need to handle each cid, joy */
+	struct dlist *dl;
+	for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
+	    r = _conv_add_folder(&state, dlist_num(dl), virtualconv, highestmodseq);
+	    if (r) goto out;
+	}
+    }
+
+    if (fetchargs->cid) {
+	r = _conv_add_folder(&state, fetchargs->cid, virtualconv, highestmodseq);
+	if (r) goto out;
+    }
+
     conversations_close(&state);
-    if (r || !conv)
-	goto out;
 
     /* unchanged, woot */
-    if (highestmodseq >= conv->modseq)
+    if (!virtualconv->folders)
 	goto out;
 
-    for (folder = conv->folders ; folder ; folder = folder->next) {
+    for (folder = virtualconv->folders; folder ; folder = folder->next) {
 	struct index_init init;
 	struct seqset *seq;
-
-	/* unchanged */
-	if (highestmodseq >= folder->modseq)
-	    continue;
 
 	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
 					        folder->mboxname,
@@ -4810,8 +4865,6 @@ static int do_xconvfetch(conversation_id_t cid,
 
 	prot_printf(imapd_out, "\r\n");
 
-	fetchargs->changedsince = highestmodseq;
-
 	seq = seqset_parse("1:*", NULL, index_state->mailbox->i.last_uid);
 	index_fetchresponses(index_state, seq, /*usinguid*/1,
 			     fetchargs, NULL);
@@ -4824,7 +4877,7 @@ static int do_xconvfetch(conversation_id_t cid,
 
 out:
     if (index_state) index_close(&index_state);
-    if (conv) conversation_free(conv);
+    if (virtualconv) conversation_free(virtualconv);
     free(fname);
     return r;
 }
