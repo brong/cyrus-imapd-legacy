@@ -264,7 +264,7 @@ struct windowargs {
 				 * @offset.  If not specified or not
 				 * found, @position will be used instead. */
     int32_t offset;
-    int until;			/* if 1, @anchor/@offset or @position
+    uint32_t until;		/* if set, @anchor/@offset or @position
 				 * marks the *end* of the window, if 0
 				 * the start */
     int changedsince;		/* if 1, show messages a) added since @uidnext,
