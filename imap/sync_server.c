@@ -2093,13 +2093,15 @@ static int do_upload(struct dlist *kin, struct sync_reserve_list *reserve_list)
     struct sync_msgid *msgid;
 
     for (ki = kin->head; ki; ki = ki->next) {
-	if (ki->type != DL_FILE)
+	struct message_guid *guid;
+	const char *part;
+	if (!dlist_tofile(ki, &part, &guid, NULL, NULL))
 	    continue;
 
-	part_list = sync_reserve_partlist(reserve_list, ki->part);
-	msgid = sync_msgid_lookup(part_list, &ki->gval);
+	part_list = sync_reserve_partlist(reserve_list, part);
+	msgid = sync_msgid_lookup(part_list, guid);
 	if (!msgid) 
-	    msgid = sync_msgid_add(part_list, &ki->gval);
+	    msgid = sync_msgid_add(part_list, guid);
 	if (!msgid->mark) {
 	    msgid->mark = 1;
 	    part_list->marked++;
