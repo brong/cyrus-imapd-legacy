@@ -111,6 +111,12 @@ int dlist_tofile(struct dlist *dl,
 		 const char **partp, struct message_guid *guid,
 		 unsigned long *sizep, const char **fnamep);
 
+int dlist_isatomlist(struct dlist *dl);
+int dlist_iskvlist(struct dlist *dl);
+int dlist_isnum(struct dlist *dl);
+int dlist_isguid(struct dlist *dl);
+int dlist_isfile(struct dlist *dl);
+
 /* special number and string readers - return 0 and "" if nothing */
 bit64 dlist_num(struct dlist *dl);
 const char *dlist_cstring(struct dlist *dl);
