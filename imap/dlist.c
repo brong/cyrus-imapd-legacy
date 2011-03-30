@@ -292,20 +292,26 @@ void dlist_makeatom(struct dlist *dl, const char *val)
 {
     if (!dl) return;
     _dlist_clean(dl);
-    dl->type = DL_ATOM;
     if (val) {
+	dl->type = DL_ATOM;
 	dl->sval = xstrdup(val);
 	dl->nval = strlen(val);
     }
+    else
+	dl->type = DL_NIL;
 }
 
 void dlist_makeflag(struct dlist *dl, const char *val)
 {
     if (!dl) return;
     _dlist_clean(dl);
-    dl->type = DL_FLAG;
-    dl->sval = xstrdup(val);
-    dl->nval = strlen(dl->sval);
+    if (val) {
+	dl->type = DL_FLAG;
+	dl->sval = xstrdup(val);
+	dl->nval = strlen(val);
+    }
+    else
+	dl->type = DL_NIL;
 }
 
 void dlist_makenum32(struct dlist *dl, uint32_t val)
@@ -344,9 +350,13 @@ void dlist_makeguid(struct dlist *dl, struct message_guid *guid)
 {
     if (!dl) return;
     _dlist_clean(dl);
-    dl->type = DL_GUID,
-    dl->gval = xzmalloc(sizeof(struct message_guid));
-    message_guid_copy(dl->gval, guid);
+    if (guid) {
+	dl->type = DL_GUID,
+	dl->gval = xzmalloc(sizeof(struct message_guid));
+	message_guid_copy(dl->gval, guid);
+    }
+    else
+	dl->type = DL_NIL;
 }
 
 void dlist_makefile(struct dlist *dl,
@@ -355,27 +365,35 @@ void dlist_makefile(struct dlist *dl,
 {
     if (!dl) return;
     _dlist_clean(dl);
-    dl->type = DL_FILE;
-    dl->gval = xzmalloc(sizeof(struct message_guid));
-    message_guid_copy(dl->gval, guid);
-    dl->sval = xstrdup(fname);
-    dl->nval = size;
-    dl->part = xstrdup(part);
+    if (part && guid && fname) {
+	dl->type = DL_FILE;
+	dl->gval = xzmalloc(sizeof(struct message_guid));
+	message_guid_copy(dl->gval, guid);
+	dl->sval = xstrdup(fname);
+	dl->nval = size;
+	dl->part = xstrdup(part);
+    }
+    else
+	dl->type = DL_NIL;
 }
 
 void dlist_makemap(struct dlist *dl, const char *val, size_t len)
 {
     if (!dl) return;
     _dlist_clean(dl);
-    dl->type = DL_BUF;
-    /* WARNING - DO NOT replace this with xstrndup - the
-     * data may be binary, and xstrndup does not copy
-     * binary data correctly - but we still want to NULL
-     * terminate for non-binary data */
-    dl->sval = xmalloc(len+1);
-    memcpy(dl->sval, val, len);
-    dl->sval[len] = '\0'; /* make it string safe too */
-    dl->nval = len;
+    if (val) {
+	dl->type = DL_BUF;
+	/* WARNING - DO NOT replace this with xstrndup - the
+	 * data may be binary, and xstrndup does not copy
+	 * binary data correctly - but we still want to NULL
+	 * terminate for non-binary data */
+	dl->sval = xmalloc(len+1);
+	memcpy(dl->sval, val, len);
+	dl->sval[len] = '\0'; /* make it string safe too */
+	dl->nval = len;
+    }
+    else
+	dl->type = DL_NIL;
 }
 
 struct dlist *dlist_newkvlist(struct dlist *parent, const char *name)
@@ -550,6 +568,9 @@ void dlist_print(const struct dlist *dl, int printkeys,
 	prot_printf(out, "%s ", dl->name);
 
     switch (dl->type) {
+    case DL_NIL:
+	prot_printf(out, "NIL");
+	break;
     case DL_ATOM:
 	prot_printastring(out, dl->sval);
 	break;
