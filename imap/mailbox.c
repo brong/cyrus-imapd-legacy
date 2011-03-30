@@ -2164,7 +2164,6 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
 	if (!mailbox_cacherecord(mailbox, new)) {
 	    char *env = NULL;
-	    char *email = NULL;
 	    char *envtokens[NUMENVTOKENS];
 	    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
 
@@ -2187,7 +2186,6 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 		delta_attachments++;
 
 	    free(env);
-	    free(email);
 	}
     }
 
