@@ -74,8 +74,8 @@ struct dlist {
     struct dlist *next;
     int type;
     char *sval;
-    modseq_t nval; /* biggest type we need, more or less */
-    struct message_guid gval; /* guid if any */
+    bit64 nval;
+    struct message_guid *gval; /* guid if any */
     char *part; /* so what if we're big! */
 };
 
@@ -106,16 +106,17 @@ int dlist_tomap(struct dlist *dl, const char **valp, size_t *lenp);
 /* these two don't actually do anything except check type */
 int dlist_tolist(struct dlist *dl, struct dlist **valp);
 int dlist_tokvlist(struct dlist *dl, struct dlist **valp);
-int dlist_toguid(struct dlist *dl, struct message_guid *guid);
+int dlist_toguid(struct dlist *dl, struct message_guid **valp);
 int dlist_tofile(struct dlist *dl,
-		 const char **partp, struct message_guid *guid,
+		 const char **partp, struct message_guid **guidp,
 		 unsigned long *sizep, const char **fnamep);
 
-int dlist_isatomlist(struct dlist *dl);
-int dlist_iskvlist(struct dlist *dl);
+int dlist_isatomlist(const struct dlist *dl);
+int dlist_iskvlist(const struct dlist *dl);
+int dlist_isfile(const struct dlist *dl);
+/* XXX - these two aren't const, they can fiddle internals */
 int dlist_isnum(struct dlist *dl);
 int dlist_isguid(struct dlist *dl);
-int dlist_isfile(struct dlist *dl);
 
 /* special number and string readers - return 0 and "" if nothing */
 bit64 dlist_num(struct dlist *dl);
@@ -189,9 +190,9 @@ int dlist_getlist(struct dlist *parent, const char *name,
 int dlist_getkvlist(struct dlist *parent, const char *name,
 		    struct dlist **valp);
 int dlist_getguid(struct dlist *parent, const char *name,
-		  struct message_guid *guid);
+		  struct message_guid **valp);
 int dlist_getfile(struct dlist *parent, const char *name,
-		  const char **partp, struct message_guid *guid,
+		  const char **partp, struct message_guid **guidp,
 		  unsigned long *sizep, const char **fnamep);
 
 void dlist_free(struct dlist **dlp);

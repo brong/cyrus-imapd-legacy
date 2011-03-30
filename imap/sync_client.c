@@ -774,6 +774,7 @@ static int fetch_file(struct mailbox *mailbox, unsigned long uid,
     struct dlist *kl;
     int r = 0;
     const char *fname = dlist_reserve_path(mailbox->part, &rp->guid);
+    struct message_guid *guid = NULL;
     struct stat sbuf;
 
     /* already reserved? great */
@@ -783,7 +784,7 @@ static int fetch_file(struct mailbox *mailbox, unsigned long uid,
     kl = dlist_newkvlist(NULL, cmd);
     dlist_setatom(kl, "MBOXNAME", mailbox->name);
     dlist_setatom(kl, "PARTITION", mailbox->part);
-    dlist_setatom(kl, "GUID", message_guid_encode(&rp->guid));
+    dlist_setguid(kl, "GUID", &rp->guid);
     dlist_setnum32(kl, "UID", uid);
     sync_send_lookup(kl, sync_out);
     dlist_free(&kl);
@@ -791,13 +792,12 @@ static int fetch_file(struct mailbox *mailbox, unsigned long uid,
     r = sync_parse_response(cmd, sync_in, &kin);
     if (r) return r;
 
-    kl = kin->head;
-    if (!kl) {
+    if (!dlist_tofile(kin->head, NULL, &guid, NULL, NULL)) {
 	r = IMAP_MAILBOX_NONEXISTENT;
 	goto done;
     }
 
-    if (!message_guid_equal(&kl->gval, &rp->guid))
+    if (!message_guid_equal(guid, &rp->guid))
 	r = IMAP_IOERROR;
 
 done:
@@ -1413,9 +1413,12 @@ static int update_mailbox_once(struct sync_folder *local,
 	    struct dlist *ki;
 	    struct sync_msgid *msgid;
 	    for (ki = kupload->head; ki; ki = ki->next) {
-		msgid = sync_msgid_lookup(part_list, &ki->gval);
+		struct message_guid *guid = NULL;
+		if (!dlist_toguid(ki, &guid))
+		    continue;
+		msgid = sync_msgid_lookup(part_list, guid);
 		if (!msgid)
-		    msgid = sync_msgid_add(part_list, &ki->gval);
+		    msgid = sync_msgid_add(part_list, guid);
 		msgid->mark = 1;
 		part_list->marked++; 
 	    }
