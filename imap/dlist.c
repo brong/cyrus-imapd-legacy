@@ -1029,6 +1029,18 @@ int dlist_isnum(struct dlist *dl)
 
 /* XXX - these ones aren't const, because they can change
  * things... */
+int dlist_ishex64(struct dlist *dl)
+{
+    bit64 tmp;
+
+    if (!dl) return 0;
+
+    /* see if it can be parsed as a number */
+    return dlist_tohex64(dl, &tmp);
+}
+
+/* XXX - these ones aren't const, because they can change
+ * things... */
 int dlist_isguid(struct dlist *dl)
 {
     struct message_guid *tmp;
