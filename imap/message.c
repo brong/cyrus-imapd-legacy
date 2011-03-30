@@ -2728,13 +2728,14 @@ int message_has_attachment(struct buf *body)
     ditem = dl->head;
 
     /* check for attachments */
-    if (ditem->type == DL_ATOMLIST) {
+    if (dlist_isatomlist(ditem)) {
 	struct dlist *subitem;
 	for (subitem = ditem->head; subitem; subitem = subitem->next) {
 	    /* sub part */
-	    if (subitem->type == DL_ATOMLIST) {
+	    if (dlist_isatomlist(subitem)) {
+		struct dlist *typeitem = dlist_getchildn(subitem, 0);
 		/* sub item that's not 'text', definitely an attachment */
-		if (strcasecmp(dlist_cstring(subitem->head), "text")) {
+		if (strcasecmp(dlist_cstring(typeitem), "text")) {
 		    res = 1;
 		    break;
 		}
@@ -2745,7 +2746,7 @@ int message_has_attachment(struct buf *body)
     }
     else {
 	/* single part - if it's not text */
-	if (strcasecmp(dlist_cstring(dl->head), "text")) {
+	if (strcasecmp(dlist_cstring(ditem), "text")) {
 	    res = 1;
 	}
     }
