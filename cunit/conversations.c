@@ -340,18 +340,6 @@ static void test_cid_decode(void)
     CU_ASSERT_EQUAL(cid, CID2);
 }
 
-static void rename_cb(const char *mboxname,
-		      conversation_id_t from_cid,
-		      conversation_id_t to_cid,
-		      void *rock)
-{
-    strarray_t *notifies = (strarray_t *)rock;
-
-    strarray_append(notifies, mboxname);
-    strarray_append(notifies, conversation_id_encode(from_cid));
-    strarray_append(notifies, conversation_id_encode(to_cid));
-}
-
 static int num_folders(conversation_t *conv)
 {
     int n = 0;
@@ -377,7 +365,6 @@ static void test_cid_rename(void)
     static const char C_MSGID3[] = "<0010.1288854309@example.com>";
     static const conversation_id_t C_CID1 = 0x10bcdef23456789a;
     static const conversation_id_t C_CID2 = 0x10cdef23456789ab;
-    strarray_t notifies = STRARRAY_INITIALIZER;
     conversation_id_t cid;
     conversation_t *conv;
     conv_folder_t *folder;
@@ -427,25 +414,8 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
 
     /* do a rename */
-    r = conversations_rename_cid(&state, C_CID1, C_CID2,
-				 rename_cb, (void *)&notifies);
+    r = conversations_rename_cid(&state, C_CID1, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
-    /* check that the rename callback was called with the right data */
-    CU_ASSERT_EQUAL_FATAL(notifies.count, 9);
-    CU_ASSERT_STRING_EQUAL(notifies.data[1], conversation_id_encode(C_CID1));
-    CU_ASSERT_STRING_EQUAL(notifies.data[2], conversation_id_encode(C_CID2));
-    CU_ASSERT_STRING_EQUAL(notifies.data[4], conversation_id_encode(C_CID1));
-    CU_ASSERT_STRING_EQUAL(notifies.data[5], conversation_id_encode(C_CID2));
-    CU_ASSERT_STRING_EQUAL(notifies.data[7], conversation_id_encode(C_CID1));
-    CU_ASSERT_STRING_EQUAL(notifies.data[8], conversation_id_encode(C_CID2));
-    r = strarray_find(&notifies, FOLDER1, 0);
-    CU_ASSERT(r >= 0 && (r % 3) == 0);
-    r = strarray_find(&notifies, FOLDER2, 0);
-    CU_ASSERT(r >= 0 && (r % 3) == 0);
-    r = strarray_find(&notifies, FOLDER3, 0);
-    CU_ASSERT(r >= 0 && (r % 3) == 0);
-    strarray_fini(&notifies);
-
 
     /* commit & close */
     r = conversations_commit(&state);
@@ -460,7 +430,7 @@ static void test_cid_rename(void)
     /*
      * The B records in the database are not renamed immediately, it's
      * caller's responsibility to do that.  In the real running system
-     * that happens via the callback to conversations_rename_cid() but
+     * that happens in mailbox_rename_cid() but
      * we're not doing that here in the test code.  So the old B records
      * will still be in the database at this point.
      */
