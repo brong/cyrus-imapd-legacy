@@ -4729,12 +4729,12 @@ syntax_error:
 
 static int _conv_add_folder(struct conversations_state *statep,
 			    conversation_id_t cid,
-			    conversation_t *virtualconv,
+			    strarray_t *folder_listp,
+			    uint32_t uidvalidity,
 			    modseq_t highestmodseq)
 {
     conversation_t *conv = NULL;
     conv_folder_t *folder;
-    conv_folder_t *tmp;
     int r ;
 
     r = conversation_load(statep, cid, &conv);
@@ -4744,13 +4744,16 @@ static int _conv_add_folder(struct conversations_state *statep,
 	goto out;
 
     for (folder = conv->folders; folder; folder = folder->next) {
+	/* no changes */
 	if (highestmodseq >= folder->modseq)
 	    continue;
 
+	/* not looking for vanished, and no messages */
+	if (!uidvalidity && !folder->exists)
+	    continue;
+
 	/* finally, something worth looking at */
-	tmp = conversation_add_folder(virtualconv, folder->mboxname);
-	if (tmp->modseq < folder->modseq)
-	    tmp->modseq = folder->modseq;
+	strarray_add(folder_listp, folder->mboxname);
     }
 
 out:
@@ -4768,9 +4771,10 @@ static int do_xconvfetch(uint32_t uidvalidity,
     char *fname = NULL;
     struct index_state *index_state = NULL;
     conversation_t *virtualconv = NULL;
-    conv_folder_t *folder;
     char extname[MAX_MAILBOX_BUFFER];
     struct dlist *dl;
+    strarray_t folder_list = STRARRAY_INITIALIZER;
+    int i;
 
     inboxname = mboxname_user_inbox(imapd_userid);
     if (!inboxname)
@@ -4786,23 +4790,24 @@ static int do_xconvfetch(uint32_t uidvalidity,
     virtualconv = conversation_new();
 
     for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
-        r = _conv_add_folder(&state, dlist_num(dl),
-			     virtualconv, highestmodseq);
+        r = _conv_add_folder(&state, dlist_num(dl), &folder_list,
+			     uidvalidity, highestmodseq);
         if (r) goto out;
     }
 
     conversations_close(&state);
 
     /* unchanged, woot */
-    if (!virtualconv->folders)
+    if (!folder_list.count)
 	goto out;
 
-    for (folder = virtualconv->folders; folder ; folder = folder->next) {
+    for (i = 0; i < folder_list.count; i++) {
+	const char *mboxname = folder_list.data[i];
 	struct index_init init;
 	struct seqset *seq;
 
 	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
-					        folder->mboxname,
+					        mboxname,
 					        imapd_userid, extname);
 	if (r)
 	    goto out;
@@ -4814,7 +4819,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
 	init.vanished.uidvalidity_is_max = 1;
 	init.vanished.modseq = highestmodseq;
 	init.out = imapd_out;
-	r = index_open(folder->mboxname, &init, &index_state);
+	r = index_open(mboxname, &init, &index_state);
 	if (r == IMAP_MAILBOX_NONEXISTENT) {
 	    /* just got removed, that's OK */
 	    if (highestmodseq) {
@@ -4857,7 +4862,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
 
 out:
     if (index_state) index_close(&index_state);
-    if (virtualconv) conversation_free(virtualconv);
+    strarray_free(&folder_list);
     free(fname);
     return r;
 }
