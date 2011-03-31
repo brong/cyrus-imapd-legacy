@@ -2611,7 +2611,7 @@ int message_has_attachment(struct buf *body)
     struct dlist *ditem = NULL;
     int res = 0;
     int r;
-    int count;
+    int count = 0;
 
     r = dlist_parsemap(&dl, 0, body->s, body->len);
     if (r) return 0;
