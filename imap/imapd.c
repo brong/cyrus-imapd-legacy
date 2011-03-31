@@ -4815,6 +4815,13 @@ static int do_xconvfetch(uint32_t uidvalidity,
 	init.vanished.modseq = highestmodseq;
 	init.out = imapd_out;
 	r = index_open(folder->mboxname, &init, &index_state);
+	if (r == IMAP_MAILBOX_NONEXISTENT) {
+	    /* just got removed, that's OK */
+	    prot_printf(imapd_out, "* FOLDERSTATE ");
+	    prot_printastring(imapd_out, extname);
+	    prot_printf(imapd_out, " 0 0\r\n");
+	    continue;
+	}
 	if (r)
 	    goto out;
 	index_checkflags(index_state, 0, 0);
