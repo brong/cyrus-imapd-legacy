@@ -164,8 +164,6 @@ typedef void (*conversations_rename_cb_t)(const char *mboxname,
 
 extern int conversations_rename_cid(struct conversations_state *state,
 				    conversation_id_t from_cid,
-				    conversation_id_t to_cid,
-				    conversations_rename_cb_t renamecb,
-				    void *rock);
+				    conversation_id_t to_cid);
 
 #endif /* __CYRUS_CONVERSATIONS_H_ */

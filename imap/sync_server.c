@@ -1245,8 +1245,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		    if ((r & SYNC_CHOOSE_CLASH)) {
 			/* We chose the master's CID but the replica has
 		         * a non-NULL CID which will need to be rewritten. */
-			conversations_rename_cid(&mailbox->cstate, rrecord.cid, cid,
-						 mailbox_cid_rename_cb, NULL);
+			mailbox_rename_cid(&mailbox->cstate, rrecord.cid, cid);
 		    }
 		    /* the rename_cid will do this anyway, but if we get in early
 		     * we can avoid the MODSEQ bump which would cause a CRC
