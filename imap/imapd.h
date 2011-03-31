@@ -243,7 +243,8 @@ enum {
     SORT_SUBJECT,
     SORT_TO,
     SORT_ANNOTATION,
-    SORT_MODSEQ
+    SORT_MODSEQ,
+    SORT_UID
     /* values > 255 are reserved for internal use */
 };
 
