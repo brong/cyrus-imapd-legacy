@@ -2639,8 +2639,7 @@ continue2:
 
 	if (found[i].cid != NULLCONVERSATION) {
 	    /* CIDs clashed */
-	    r = conversations_rename_cid(state, found[i].cid, newcid,
-					 mailbox_cid_rename_cb, NULL);
+	    r = mailbox_rename_cid(state, found[i].cid, newcid);
 	    if (r)
 		goto out;
 	}

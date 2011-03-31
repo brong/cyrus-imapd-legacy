@@ -533,12 +533,11 @@ extern int mailbox_repack_add(struct mailbox_repack *repack,
 extern void mailbox_repack_abort(struct mailbox_repack **repackptr);
 extern int mailbox_repack_commit(struct mailbox_repack **repackptr);
 
-/* This function's odd signature is intended to allow
- * it to act as a callback to conversations_rename_cid */
-extern void mailbox_cid_rename_cb(const char *name,
-			         conversation_id_t from_cid,
-			         conversation_id_t to_cid,
-				 void *rock);
+/* Rename a CID.  Note this will post delayed actions on
+ * potentially multiple mailboxes */
+extern int mailbox_rename_cid(struct conversations_state *state,
+			      conversation_id_t from_cid,
+			      conversation_id_t to_cid);
 /* used for testing */
 extern int mailbox_post_nop_action(const char *name, unsigned int tag);
 extern unsigned int mailbox_nop_action_count, mailbox_nop_action_tag;
