@@ -4284,6 +4284,9 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	case SORT_MODSEQ:
 	    ret = numcmp(md1->modseq, md2->modseq);
 	    break;
+	case SORT_UID:
+	    ret = numcmp(md1->uid, md2->uid);
+	    break;
 	}
     } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
 

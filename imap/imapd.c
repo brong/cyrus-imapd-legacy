@@ -10342,6 +10342,8 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 #endif
 	else if (!strcmp(criteria.s, "modseq"))
 	    (*sortcrit)[n].key = SORT_MODSEQ;
+	else if (!strcmp(criteria.s, "uid"))
+	    (*sortcrit)[n].key = SORT_UID;
 	else {
 	    prot_printf(imapd_out, "%s BAD Invalid Sort criterion %s\r\n",
 			tag, criteria.s);
