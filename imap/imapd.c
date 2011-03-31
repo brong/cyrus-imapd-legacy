@@ -4770,7 +4770,7 @@ syntax_error:
 
 static int _conv_add_folder(struct conversations_state *statep,
 			    conversation_id_t cid,
-			    strarray_t *folder_listp,
+			    strarray_t *folder_list,
 			    uint32_t uidvalidity,
 			    modseq_t highestmodseq)
 {
@@ -4794,7 +4794,7 @@ static int _conv_add_folder(struct conversations_state *statep,
 	    continue;
 
 	/* finally, something worth looking at */
-	strarray_add(folder_listp, folder->mboxname);
+	strarray_add(folder_list, folder->mboxname);
     }
 
 out:
@@ -4814,7 +4814,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
     conversation_t *virtualconv = NULL;
     char extname[MAX_MAILBOX_NAME];
     struct dlist *dl;
-    strarray_t folder_list = STRARRAY_INITIALIZER;
+    strarray_t *folder_list = strarray_new();
     int i;
 
     inboxname = mboxname_user_inbox(imapd_userid);
@@ -4831,7 +4831,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
     virtualconv = conversation_new();
 
     for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
-        r = _conv_add_folder(&state, dlist_num(dl), &folder_list,
+        r = _conv_add_folder(&state, dlist_num(dl), folder_list,
 			     uidvalidity, highestmodseq);
         if (r) goto out;
     }
@@ -4839,11 +4839,11 @@ static int do_xconvfetch(uint32_t uidvalidity,
     conversations_close(&state);
 
     /* unchanged, woot */
-    if (!folder_list.count)
+    if (!folder_list->count)
 	goto out;
 
-    for (i = 0; i < folder_list.count; i++) {
-	const char *mboxname = folder_list.data[i];
+    for (i = 0; i < folder_list->count; i++) {
+	const char *mboxname = folder_list->data[i];
 	struct index_init init;
 	struct seqset *seq;
 
@@ -4903,7 +4903,7 @@ static int do_xconvfetch(uint32_t uidvalidity,
 
 out:
     if (index_state) index_close(&index_state);
-    strarray_free(&folder_list);
+    strarray_free(folder_list);
     free(fname);
     return r;
 }
