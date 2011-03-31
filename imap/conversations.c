@@ -876,16 +876,10 @@ static int do_one_rename(void *rock,
 
 int conversations_rename_cid(struct conversations_state *state,
 			     conversation_id_t from_cid,
-			     conversation_id_t to_cid,
-			     conversations_rename_cb_t renamecb,
-			     void *rock)
+			     conversation_id_t to_cid)
 {
     struct rename_rock rrock;
-    const char *bdata = NULL;
-    int bdatalen = 0;
-    char bkey[CONVERSATION_ID_STRMAX+2];
-    struct dlist *fromdata = NULL;
-    int r;
+    int r = 0;
 
     if (!state->db)
 	return IMAP_IOERROR;
@@ -900,37 +894,6 @@ int conversations_rename_cid(struct conversations_state *state,
     syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu",
 			rrock.entries_seen, rrock.entries_renamed);
 
-    if (!renamecb) return 0;
-
-    /* Use the B record to notify mailboxes of a CID rename.
-     * We don't actually alter the values, because the EXPUNGE
-     * events later will decrease the EXISTS back to zero, and
-     * then it will delete itself */
-    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, from_cid);
-    r = DB->fetch(state->db,
-		  bkey, strlen(bkey),
-		  &bdata, &bdatalen,
-		  &state->txn);
-    if (r == CYRUSDB_NOTFOUND)
-	return 0;
-
-    if (r == CYRUSDB_OK)
-	dlist_parsemap(&fromdata, 0, bdata, bdatalen);
-
-    if (fromdata) {
-	struct dlist *fl;
-	struct dlist *ditem;
-	if (dlist_getlist(fromdata, "FOLDER", &fl)) {
-	    for (ditem = fl->head; ditem; ditem = ditem->next) {
-		const char *mboxname;
-		if (dlist_getatom(ditem, "MBOXNAME", &mboxname)) {
-		    renamecb(mboxname, from_cid, to_cid, rock);
-		}
-	    }
-	}
-    }
-
-    dlist_free(&fromdata);
     return r;
 }
 

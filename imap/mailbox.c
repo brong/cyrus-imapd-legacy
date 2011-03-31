@@ -4432,22 +4432,42 @@ out:
     return 0;
 }
 
-void mailbox_cid_rename_cb(const char *name,
-		          conversation_id_t from_cid,
-		          conversation_id_t to_cid,
-			  void *rock __attribute__((unused)))
+int mailbox_rename_cid(struct conversations_state *state,
+		       conversation_id_t from_cid,
+		       conversation_id_t to_cid)
 {
     struct buf action = BUF_INITIALIZER;
-    int r;
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    int r = 0;
 
-    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
-	       from_cid, to_cid);
-
-    r = mailbox_post_action(name, &action);
+    r = conversations_rename_cid(state, from_cid, to_cid);
     if (r)
-	syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
-	       name, error_message(r));
+	goto out;
+
+    /* Use the B record to notify mailboxes of a CID rename.
+     * We don't actually alter the values, because the EXPUNGE
+     * events later will decrease the EXISTS back to zero, and
+     * then it will delete itself */
+    r = conversation_load(state, from_cid, &conv);
+    if (!r && conv) {
+	for (folder = conv->folders ; folder ; folder = folder->next) {
+	    buf_reset(&action);
+	    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
+		       from_cid, to_cid);
+
+	    r = mailbox_post_action(folder->mboxname, &action);
+	    if (r)
+		syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
+		       folder->mboxname, error_message(r));
+	    r = 0;	/* ignore any error and keep going */
+	}
+	conversation_free(conv);
+    }
+
+out:
     buf_free(&action);
+    return r;
 }
 
 int mailbox_post_nop_action(const char *name, unsigned int tag)
