@@ -979,7 +979,6 @@ int dlist_toguid(struct dlist *dl, struct message_guid **valp)
     switch (dl->type) {
     case DL_ATOM:
     case DL_BUF:
-	syslog(LOG_ERR, "CONVERT GUID: %s %d", dl->sval, dl->nval);
 	if (dl->nval != 40)
 	    return 0;
 	if (!message_guid_decode(&tmpguid, dl->sval))
