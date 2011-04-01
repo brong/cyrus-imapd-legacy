@@ -123,6 +123,7 @@ struct statusdata {
     modseq_t highestmodseq;
     uint32_t xconvexists;
     uint32_t xconvunseen;
+    modseq_t xconvmodseq;
 };
 
 struct index_record {

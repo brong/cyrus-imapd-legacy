@@ -7605,6 +7605,9 @@ static int parse_statusitems(unsigned *statusitemsp, const char **errstr)
 	else if (!strcmp(arg.s, "xconvunseen")) {
 	    statusitems |= STATUS_XCONVUNSEEN;
 	}
+	else if (!strcmp(arg.s, "xconvmodseq")) {
+	    statusitems |= STATUS_XCONVMODSEQ;
+	}
 	else {
 	    static char buf[200];
 	    snprintf(buf, 200, "Invalid Status attributes %s", arg.s);
@@ -7694,7 +7697,8 @@ static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
 
     if (r) goto out;
 
-    if (statusitems & (STATUS_XCONVEXISTS | STATUS_XCONVUNSEEN)) {
+    if (statusitems & (STATUS_XCONVEXISTS | STATUS_XCONVUNSEEN 
+		    | STATUS_XCONVMODSEQ)) {
 	/* can only get for ourselves for now */
 	struct conversations_state state;
 	fname = conversations_getpath(mailboxname);
@@ -7707,7 +7711,7 @@ static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
 	r = conversations_open(&state, fname);
 	if (r) goto out;
 	    
-	r = conversation_getstatus(&state, mailboxname,
+	r = conversation_getstatus(&state, mailboxname, &sd->xconvmodseq,
 				   &sd->xconvexists, &sd->xconvunseen);
 	conversations_close(&state);
     }
