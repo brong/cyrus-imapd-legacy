@@ -287,7 +287,8 @@ enum {
     STATUS_UNSEEN =		(1<<4),
     STATUS_HIGHESTMODSEQ =	(1<<5),
     STATUS_XCONVEXISTS =	(1<<6),
-    STATUS_XCONVUNSEEN =	(1<<7)
+    STATUS_XCONVUNSEEN =	(1<<7),
+    STATUS_XCONVMODSEQ =	(1<<8)
 };
 
 /* Arguments to List functions */
