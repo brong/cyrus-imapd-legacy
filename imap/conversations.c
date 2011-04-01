@@ -306,6 +306,9 @@ int conversation_save(struct conversations_state *state,
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	int exists_diff = 0;
 	int unseen_diff = 0;
+	modseq_t modseq;
+	uint32_t exists;
+	uint32_t unseen;
 
 	/* case: full removal of conversation - make sure to remove
 	 * unseen as well */
@@ -330,16 +333,19 @@ int conversation_save(struct conversations_state *state,
 	     * in this folder, and wasn't previously either */
 	}
 
-	if (unseen_diff || exists_diff) {
-	    uint32_t exists;
-	    uint32_t unseen;
-	    r = conversation_getstatus(state, folder->mboxname,
-				       &exists, &unseen);
-	    if (r) goto done;
+	/* XXX - it's super inefficient to be doing this for
+	 * every cid in every folder in the transaction.  Big
+	 * wins available by caching these in memory and writing
+	 * once at the end of the transaction */
+	r = conversation_getstatus(state, folder->mboxname,
+				   &modseq, &exists, &unseen);
+	if (r) goto done;
+	if (exists_diff || unseen_diff || modseq < conv->modseq) {
+	    if (modseq < conv->modseq) modseq = conv->modseq;
 	    exists += exists_diff;
 	    unseen += unseen_diff;
 	    r = conversation_setstatus(state, folder->mboxname,
-				       exists, unseen);
+				       modseq, exists, unseen);
 	    if (r) goto done;
 	}
     }
@@ -389,6 +395,7 @@ done:
 
 int conversation_getstatus(struct conversations_state *state,
 			   const char *mboxname,
+			   modseq_t *modseqp,
 			   uint32_t *existsp,
 			   uint32_t *unseenp)
 {
@@ -437,6 +444,9 @@ int conversation_getstatus(struct conversations_state *state,
     r = dlist_parsemap(&dl, 0, rest, restlen);
     if (r) goto done;
 
+    n = dlist_getchild(dl, "MODSEQ");
+    if (n)
+	*modseqp = dlist_num(n);
     n = dlist_getchild(dl, "EXISTS");
     if (n)
 	*existsp = dlist_num(n);
@@ -456,6 +466,7 @@ int conversation_getstatus(struct conversations_state *state,
 
 int conversation_setstatus(struct conversations_state *state,
 			   const char *mboxname,
+			   modseq_t modseq,
 			   uint32_t exists,
 			   uint32_t unseen)
 {
@@ -469,6 +480,7 @@ int conversation_setstatus(struct conversations_state *state,
 	goto done;
 
     dl = dlist_newkvlist(NULL, NULL);
+    dlist_setnum64(dl, "MODSEQ", modseq);
     dlist_setnum32(dl, "EXISTS", exists);
     dlist_setnum32(dl, "UNSEEN", unseen);
 

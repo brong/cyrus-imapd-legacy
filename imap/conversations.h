@@ -109,10 +109,12 @@ extern int conversations_get_msgid(struct conversations_state *state,
 				   conversation_id_t *cidp);
 extern int conversation_getstatus(struct conversations_state *state,
 				  const char *mboxname,
+				  modseq_t *modseqp,
 				  uint32_t *existsp,
 				  uint32_t *unseenp);
 extern int conversation_setstatus(struct conversations_state *state,
 				  const char *mboxname,
+				  modseq_t modseq,
 				  uint32_t exists,
 				  uint32_t unseen);
 extern int conversation_save(struct conversations_state *state,
