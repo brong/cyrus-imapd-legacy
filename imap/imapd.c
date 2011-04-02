@@ -408,21 +408,25 @@ void cmd_compress(char *tag, char *alg);
 void cmd_netscrape(char* tag);
 #endif
 
-void cmd_getannotation(char* tag, char *mboxpat);
-void cmd_getmetadata(char* tag, char *mboxpat);
-void cmd_setannotation(char* tag, char *mboxpat);
-void cmd_setmetadata(char* tag, char *mboxpat);
+static void cmd_getannotation(const char* tag, char *mboxpat);
+static void cmd_getmetadata(const char* tag, char *mboxpat);
+static void cmd_setannotation(const char* tag, char *mboxpat);
+static void cmd_setmetadata(const char* tag, char *mboxpat);
 
 void cmd_enable(char* tag);
 
 int parsecreateargs(struct dlist **extargs);
 
-int getannotatefetchdata(char *tag,
-			 struct strlist **entries, struct strlist **attribs);
-int getmetadatafetchdata(char *tag,
-			 struct strlist **entries, struct strlist **attribs);
-int getannotatestoredata(char *tag, struct entryattlist **entryatts);
-int getmetadatastoredata(char *tag, struct entryattlist **entryatts);
+static int parse_annotate_fetch_data(const char *tag,
+				     struct strlist **entries,
+				     struct strlist **attribs);
+static int parse_metadata_fetch_data(const char *tag,
+				     struct strlist **entries,
+				     struct strlist **attribs);
+static int parse_annotate_store_data(const char *tag,
+				     struct entryattlist **entryatts);
+static int parse_metadata_store_data(const char *tag,
+				     struct entryattlist **entryatts);
 
 void annotate_response(struct entryattlist *l);
 
@@ -7958,8 +7962,9 @@ int parsecreateargs(struct dlist **extargs)
  * GETANNOTATION, FETCH.
  */
 
-int getannotatefetchdata(char *tag,
-			 struct strlist **entries, struct strlist **attribs)
+static int parse_annotate_fetch_data(const char *tag,
+				     struct strlist **entries,
+				     struct strlist **attribs)
 {
     int c;
     static struct buf arg;
@@ -8066,8 +8071,9 @@ int getannotatefetchdata(char *tag,
  * Any surrounding command text must be parsed elsewhere, ie,
  * GETANNOTATION, FETCH.
  */
-int getmetadatafetchdata(char *tag,
-			 struct strlist **entries, struct strlist **attribs)
+static int parse_metadata_fetch_data(const char *tag,
+				     struct strlist **entries,
+				     struct strlist **attribs)
 {
     int c;
     static struct buf arg;
@@ -8172,7 +8178,8 @@ int getmetadatafetchdata(char *tag,
  * SETANNOTATION, STORE, APPEND.
  */
 
-int getannotatestoredata(char *tag, struct entryattlist **entryatts)
+static int parse_annotate_store_data(const char *tag,
+				     struct entryattlist **entryatts)
 {
     int c, islist = 0;
     static struct buf entry, attrib, value;
@@ -8275,7 +8282,8 @@ int getannotatestoredata(char *tag, struct entryattlist **entryatts)
  * Any surrounding command text must be parsed elsewhere, ie,
  * SETANNOTATION, STORE, APPEND.
  */
-int getmetadatastoredata(char *tag, struct entryattlist **entryatts)
+static int parse_metadata_store_data(const char *tag,
+				     struct entryattlist **entryatts)
 {
     int c;
     const char *name;
@@ -8408,13 +8416,13 @@ void annotate_response(struct entryattlist *l)
  * Perform a GETANNOTATION command
  *
  * The command has been parsed up to the entries
- */    
-void cmd_getannotation(char *tag, char *mboxpat)
+ */
+static void cmd_getannotation(const char *tag, char *mboxpat)
 {
     int c, r = 0;
     struct strlist *entries = NULL, *attribs = NULL;
 
-    c = getannotatefetchdata(tag, &entries, &attribs);
+    c = parse_annotate_fetch_data(tag, &entries, &attribs);
     if (c == EOF) {
 	eatline(imapd_in, c);
 	return;
@@ -8454,8 +8462,8 @@ void cmd_getannotation(char *tag, char *mboxpat)
  * Perform a GETMETADATA command
  *
  * The command has been parsed up to the entries
- */    
-void cmd_getmetadata(char *tag, char *mboxpat)
+ */
+static void cmd_getmetadata(const char *tag, char *mboxpat)
 {
     int c, r = 0;
     struct strlist *entries = NULL, *attribs = NULL;
@@ -8469,7 +8477,7 @@ void cmd_getmetadata(char *tag, char *mboxpat)
     int have_shared = 0;
     int have_private = 0;
 
-    c = getmetadatafetchdata(tag, &entries, &attribs);
+    c = parse_metadata_fetch_data(tag, &entries, &attribs);
     if (c == EOF) {
 	eatline(imapd_in, c);
 	return;
@@ -8587,13 +8595,13 @@ void cmd_getmetadata(char *tag, char *mboxpat)
  * Perform a SETANNOTATION command
  *
  * The command has been parsed up to the entry-att list
- */    
-void cmd_setannotation(char *tag, char *mboxpat)
+ */
+static void cmd_setannotation(const char *tag, char *mboxpat)
 {
     int c, r = 0;
     struct entryattlist *entryatts = NULL;
 
-    c = getannotatestoredata(tag, &entryatts);
+    c = parse_annotate_store_data(tag, &entryatts);
     if (c == EOF) {
 	eatline(imapd_in, c);
 	return;
@@ -8631,13 +8639,13 @@ void cmd_setannotation(char *tag, char *mboxpat)
  * Perform a SETMETADATA command
  *
  * The command has been parsed up to the entry-att list
- */    
-void cmd_setmetadata(char *tag, char *mboxpat)
+ */
+static void cmd_setmetadata(const char *tag, char *mboxpat)
 {
     int c, r = 0;
     struct entryattlist *entryatts = NULL;
 
-    c = getmetadatastoredata(tag, &entryatts);
+    c = parse_metadata_store_data(tag, &entryatts);
     if (c == EOF) {
 	eatline(imapd_in, c);
 	return;
