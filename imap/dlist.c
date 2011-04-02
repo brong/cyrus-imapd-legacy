@@ -461,7 +461,7 @@ struct dlist *dlist_sethex64(struct dlist *parent, const char *name, bit64 val)
 }
 
 struct dlist *dlist_setmap(struct dlist *parent, const char *name,
-			   const char *val, unsigned long len)
+			   const char *val, size_t len)
 {
     struct dlist *dl = dlist_child(parent, name);
     dlist_makemap(dl, val, len);
@@ -535,7 +535,7 @@ struct dlist *dlist_updatehex64(struct dlist *parent, const char *name, bit64 va
 }
 
 struct dlist *dlist_updatemap(struct dlist *parent, const char *name,
-			   const char *val, unsigned long len)
+			   const char *val, size_t len)
 {
     struct dlist *dl = dlist_updatechild(parent, name);
     dlist_makemap(dl, val, len);

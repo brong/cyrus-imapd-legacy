@@ -146,7 +146,7 @@ struct dlist *dlist_setguid(struct dlist *parent, const char *name,
 			    struct message_guid *guid);
 struct dlist *dlist_setfile(struct dlist *parent, const char *name,
 			    const char *part, struct message_guid *guid,
-			    unsigned long size, const char *fname);
+			    size_t size, const char *fname);
 
 /* special number and string readers - return 0 and "" if nothing */
 bit64 dlist_childvaln(struct dlist *parent, const char *name);
@@ -170,7 +170,7 @@ struct dlist *dlist_updateguid(struct dlist *parent, const char *name,
 			       struct message_guid *guid);
 struct dlist *dlist_updatefile(struct dlist *parent, const char *name,
 			       const char *part, struct message_guid *guid,
-			       unsigned long size, const char *fname);
+			       size_t size, const char *fname);
 
 int dlist_getatom(struct dlist *parent, const char *name,
 		  const char **valp);
