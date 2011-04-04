@@ -5322,13 +5322,14 @@ void cmd_xconvsort(char *tag)
 
     /* need to force a re-read from scratch into a new
      * index - even if this mailbox is selected - because
-     * we ask for deleted messages */
+     * we might ask for deleted messages */
 
     memset(&init, 0, sizeof(struct index_init));
     init.userid = imapd_userid;
     init.authstate = imapd_authstate;
     init.out = imapd_out;
-    init.want_expunged = 1;
+    if (windowargs->changedsince)
+	init.want_expunged = 1;
 
     r = index_open(internalname, &init, &imapd_index);
     if (r)
