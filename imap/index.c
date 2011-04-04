@@ -1442,6 +1442,9 @@ int index_convsort(struct index_state *state,
 
     if (windowargs->changedsince) {
 	modseq_t lasttouch = 0;
+
+	mailbox_open_conversations(state->mailbox);
+
 	if (!conversation_getstatus(&state->mailbox->cstate,
 				    state->mailbox->name,
 				    &lasttouch, 0, 0)) {
@@ -1531,7 +1534,6 @@ int index_convsort(struct index_state *state,
 	    /* stash these, we'll need them later */
 	    msg->was_old_exemplar = was_old_exemplar;
 	    msg->is_new_exemplar = is_new_exemplar;
-	    msg->is_changed = is_changed;
 
 	    /* detach from msgdata list */
 	    msgdata = msg->next;
@@ -1601,24 +1603,26 @@ int index_convsort(struct index_state *state,
 		    results[nresults++] = record->uid;
 		}
 	    } else {
+		/* we opened conversations above */
 		if (msg->was_old_exemplar && !msg->is_new_exemplar) {
 		    assert(nremoved < maxresults);
 		    removed[nremoved++] = record->uid;
-		} else if (msg->is_new_exemplar && !msg->was_old_exemplar) {
+		}
+		else if (msg->is_new_exemplar && !msg->was_old_exemplar) {
 		    assert(nadded < maxresults);
 		    added[nadded].uid = record->uid;
 		    added[nadded].pos = pos;
 		    nadded++;
 		}
-		if (msg->was_old_exemplar &&
-		    msg->is_new_exemplar &&
-		    msg->is_changed) {
-		    /* TODO: instead of msg->is_changed, lookup conversation
-		     * and compare the conversation's highestmodseq to
-		     * windowargs->modseq */
-		    /* TODO: do this only if windowargs->conversations */
-		    assert(nchanged < maxresults);
-		    changed[nchanged++] = record;
+		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
+		    conversation_t *convdata = NULL;
+		    conversation_load(&state->mailbox->cstate,
+				      record->cid, &convdata);
+		    if (convdata->modseq > windowargs->modseq) {
+			assert(nchanged < maxresults);
+			changed[nchanged++] = record;
+		    }
+		    conversation_free(convdata);
 		}
 	    }
 	}
