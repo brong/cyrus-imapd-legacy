@@ -1438,17 +1438,15 @@ int index_convsort(struct index_state *state,
 	}
     }
 
-    if (windowargs->changedsince) {
-	mailbox_open_conversations(state->mailbox);
+    /* always grab xconvmodseq, so we report a growing
+     * highestmodseq to all callers */
+    mailbox_open_conversations(state->mailbox);
+    conversation_getstatus(&state->mailbox->cstate,
+			   state->mailbox->name,
+			   &xconvmodseq, 0, 0);
 
-	if (!conversation_getstatus(&state->mailbox->cstate,
-				    state->mailbox->name,
-				    &xconvmodseq, 0, 0)) {
-	    /* no changes? */
-	    if (xconvmodseq <= windowargs->modseq)
-		return 0;
-	}
-    }
+    if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
+	return 0;
 
     construct_hash_table(&seen_cids, 1024, 0);
     construct_hash_table(&old_seen_cids, 1024, 0);
