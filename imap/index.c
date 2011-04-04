@@ -60,6 +60,7 @@
 #include "append.h"
 #include "assert.h"
 #include "charset.h"
+#include "conversations.h"
 #include "dlist.h"
 #include "exitcodes.h"
 #include "hash.h"
@@ -1435,6 +1436,17 @@ int index_convsort(struct index_state *state,
 		modseq = 1;
 		break;
 	    }
+	}
+    }
+
+    if (windowargs->changedsince) {
+	modseq_t lasttouch = 0;
+	if (!conversation_getstatus(&state->mailbox->cstate,
+				    state->mailbox->name,
+				    &lasttouch, 0, 0)) {
+	    /* no changes? */
+	    if (lasttouch <= windowargs->modseq)
+		return 0;
 	}
     }
 
