@@ -1400,8 +1400,8 @@ int index_convsort(struct index_state *state,
     modseq_t xconvmodseq = 0;
     unsigned int i;
     int modseq = 0;
-    hash_table seen_cids;
-    hash_table old_seen_cids;
+    hash_table seen_cids = HASH_TABLE_INITIALIZER;
+    hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
     int32_t pos = 0;
     static const struct windowargs default_windowargs;    /* all zeroes */
     int found_anchor = 0;
