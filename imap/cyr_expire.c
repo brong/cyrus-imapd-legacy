@@ -453,7 +453,7 @@ int main(int argc, char *argv[])
 	do_cid_expire = config_getswitch(IMAPOPT_CONVERSATIONS);
 
     annotatemore_init(0, NULL, NULL);
-    annotatemore_open(NULL);
+    annotatemore_open();
 
     mboxlist_init(0);
     mboxlist_open(NULL);
