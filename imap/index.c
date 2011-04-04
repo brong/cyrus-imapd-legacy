@@ -1425,10 +1425,6 @@ int index_convsort(struct index_state *state,
     if (!windowargs)
 	windowargs = &default_windowargs;
 
-    /* update the index */
-    if (index_check(state, 0, 0))
-	return 0;
-
     if (searchargs->modseq) modseq = 1;
     else if (windowargs->changedsince) modseq = 1;
     else {
@@ -1448,7 +1444,7 @@ int index_convsort(struct index_state *state,
 			   &xconvmodseq, 0, 0);
 
     if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
-	return 0;
+	goto skip;
 
     construct_hash_table(&seen_cids, 1024, 0);
     construct_hash_table(&old_seen_cids, 1024, 0);
@@ -1667,6 +1663,7 @@ int index_convsort(struct index_state *state,
 	prot_printf(state->out, "\r\n");
     }
 
+skip:
     if (first_pos)
 	prot_printf(state->out, "* OK [POSITION %u]\r\n", first_pos);
 
@@ -1692,8 +1689,6 @@ int index_convsort(struct index_state *state,
     free(changed);
     free_hash_table(&seen_cids, NULL);
     free_hash_table(&old_seen_cids, NULL);
-
-    state->want_expunged = 0;
 
     return nmsg;
 }

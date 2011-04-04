@@ -2088,7 +2088,6 @@ void cmdloop(void)
 		cmd_xconvmeta(tag.s);
 	    }
 	    else if (!strcmp(cmd.s, "Xconvsort")) {
-		if (!imapd_index && !backend_current) goto nomailbox;
 		if (c != ' ') goto missingargs;
 		cmd_xconvsort(tag.s);
 
@@ -5238,14 +5237,18 @@ void cmd_xconvsort(char *tag)
 {
     int c;
     struct sortcrit *sortcrit = NULL;
+    static struct buf mailboxname;
     static struct buf arg;
     int charset = 0;
     struct searchargs *searchargs = NULL;
     struct windowargs *windowargs = NULL;
-    struct index_state *old_state = NULL;
+    struct index_init init;
+    struct index_state *oldstate = NULL;
     clock_t start = clock();
+    char internalname[MAX_MAILBOX_NAME];
     char mytime[100];
     int n;
+    int r;
 
     if (backend_current) {
 	/* remote mailbox */
@@ -5258,7 +5261,13 @@ void cmd_xconvsort(char *tag)
 	return;
     }
 
+    oldstate = imapd_index;
+    imapd_index = NULL;
+
     /* local mailbox */
+    c = getastring(imapd_in, imapd_out, &mailboxname);
+    if (c == EOF) goto error;
+
     c = getsortcriteria(tag, &sortcrit);
     if (c == EOF) goto error;
 
@@ -5296,32 +5305,24 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    if (windowargs->changedsince) {
-	/* need to force a re-read from scratch into a new
-	 * index and then throw that away so as not to confuse
-	 * subsequent commands */
-	struct index_init init;
-	struct index_state *state = NULL;
-	int r;
+    r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
+					       imapd_userid, internalname);
 
-	memset(&init, 0, sizeof(struct index_init));
-	init.userid = imapd_userid;
-	init.authstate = imapd_authstate;
-	init.out = imapd_out;
-	init.want_expunged = 1;
+    /* need to force a re-read from scratch into a new
+     * index - even if this mailbox is selected - because
+     * we ask for deleted messages */
 
-	r = index_open(imapd_index->mailbox->name, &init, &state);
-	if (r)
-	    goto error;
+    memset(&init, 0, sizeof(struct index_init));
+    init.userid = imapd_userid;
+    init.authstate = imapd_authstate;
+    init.out = imapd_out;
+    init.want_expunged = 1;
 
-	/* Temporarily swap in our new index as the global one.
-	 * Note that we need to do this *before* parsing the
-	 * searchargs, as some parts of searchargs (like the
-	 * sequence 1:*) depends on details of imapd_index. */
-	old_state = imapd_index;
-	imapd_index = state;
-    }
+    r = index_open(internalname, &init, &imapd_index);
+    if (r)
+	goto error;
 
+    /* need index loaded to even parse searchargs! */
     searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
 
     c = getsearchprogram(tag, searchargs, &charset, 0);
@@ -5336,11 +5337,8 @@ void cmd_xconvsort(char *tag)
 
     n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
 
-    /* swap index back */
-    if (old_state) {
-	index_close(&imapd_index);
-	imapd_index = old_state;
-    }
+    index_close(&imapd_index);
+    imapd_index = oldstate;
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
@@ -5363,6 +5361,8 @@ error:
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
     free_windowargs(windowargs);
+    index_close(&imapd_index);
+    imapd_index = oldstate;
 }
 
 /*
