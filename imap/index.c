@@ -1418,6 +1418,7 @@ int index_convsort(struct index_state *state,
     unsigned int *removed = NULL;	/* uids */
     unsigned int nremoved = 0;
     unsigned int maxremoved = 0;
+    unsigned int numresults = 0;
     struct index_record **changed = NULL;
     unsigned int nchanged = 0;
 
@@ -1440,8 +1441,9 @@ int index_convsort(struct index_state *state,
     mailbox_open_conversations(state->mailbox);
     conversation_getstatus(&state->mailbox->cstate,
 			   state->mailbox->name,
-			   &xconvmodseq, 0, 0);
+			   &xconvmodseq, &numresults, 0);
 
+    /* XXX - counts for a search - might need to cache somehow? */
     if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
 	goto skip;
 
@@ -1672,6 +1674,8 @@ skip:
 		state->mailbox->i.uidvalidity);
     prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
 		state->mailbox->i.last_uid + 1);
+    prot_printf(state->out, "* OK [NUMRESULTS %u]\r\n",
+		numresults);
 
     /* free all our temporary data */
     assert(!msgdata);
