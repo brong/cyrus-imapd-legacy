@@ -1668,6 +1668,8 @@ skip:
 
     prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
 		MAX(xconvmodseq, state->mailbox->i.highestmodseq));
+    prot_printf(state->out, "* OK [UIDVALIDITY %u]\r\n",
+		state->mailbox->i.uidvalidity);
     prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
 		state->mailbox->i.last_uid + 1);
 
