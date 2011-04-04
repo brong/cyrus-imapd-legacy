@@ -1397,6 +1397,7 @@ int index_convsort(struct index_state *state,
     int nexemplars = 0;
     int nmsg;
     modseq_t highestmodseq = 0;
+    modseq_t xconvmodseq = 0;
     unsigned int i;
     int modseq = 0;
     hash_table seen_cids;
@@ -1418,8 +1419,6 @@ int index_convsort(struct index_state *state,
     unsigned int maxremoved = 0;
     struct index_record **changed = NULL;
     unsigned int nchanged = 0;
-    struct statusdata sdata;
-    int r;
 
     if (!windowargs)
 	windowargs = &default_windowargs;
@@ -1440,15 +1439,13 @@ int index_convsort(struct index_state *state,
     }
 
     if (windowargs->changedsince) {
-	modseq_t lasttouch = 0;
-
 	mailbox_open_conversations(state->mailbox);
 
 	if (!conversation_getstatus(&state->mailbox->cstate,
 				    state->mailbox->name,
-				    &lasttouch, 0, 0)) {
+				    &xconvmodseq, 0, 0)) {
 	    /* no changes? */
-	    if (lasttouch <= windowargs->modseq)
+	    if (xconvmodseq <= windowargs->modseq)
 		return 0;
 	}
     }
@@ -1672,13 +1669,11 @@ int index_convsort(struct index_state *state,
 
     if (first_pos)
 	prot_printf(state->out, "* OK [POSITION %u]\r\n", first_pos);
-    r = index_status(state, &sdata);
-    if (!r) {
-	prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
-		    sdata.highestmodseq);
-	prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
-		    sdata.uidnext);
-    }
+
+    prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
+		MAX(xconvmodseq, state->mailbox->i.highestmodseq));
+    prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
+		state->mailbox->i.last_uid + 1);
 
     /* free all our temporary data */
     assert(!msgdata);
