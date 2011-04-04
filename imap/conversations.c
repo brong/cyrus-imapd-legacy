@@ -409,8 +409,9 @@ int conversation_getstatus(struct conversations_state *state,
     bit64 version;
     int r = IMAP_IOERROR;
 
-    *existsp = 0;
-    *unseenp = 0;
+    if (modseqp) *modseqp = 0;
+    if (existsp) *existsp = 0;
+    if (unseenp) *unseenp = 0;
 
     if (!state->db)
 	goto done;
@@ -444,15 +445,21 @@ int conversation_getstatus(struct conversations_state *state,
     r = dlist_parsemap(&dl, 0, rest, restlen);
     if (r) goto done;
 
-    n = dlist_getchild(dl, "MODSEQ");
-    if (n)
-	*modseqp = dlist_num(n);
-    n = dlist_getchild(dl, "EXISTS");
-    if (n)
-	*existsp = dlist_num(n);
-    n = dlist_getchild(dl, "UNSEEN");
-    if (n)
-	*unseenp = dlist_num(n);
+    if (modseqp) {
+	n = dlist_getchild(dl, "MODSEQ");
+	if (n)
+	    *modseqp = dlist_num(n);
+    }
+    if (existsp) {
+	n = dlist_getchild(dl, "EXISTS");
+	if (n)
+	    *existsp = dlist_num(n);
+    }
+    if (unseenp) {
+	n = dlist_getchild(dl, "UNSEEN");
+	if (n)
+	    *unseenp = dlist_num(n);
+    }
 
  done:
     if (r)
