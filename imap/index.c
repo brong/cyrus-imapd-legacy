@@ -1395,7 +1395,7 @@ int index_convsort(struct index_state *state,
     MsgData *chaff = NULL;
     MsgData *exemplars = NULL, **exemplars_tailp = &exemplars;
     int nexemplars = 0;
-    int nmsg;
+    int nmsg = 0;
     modseq_t highestmodseq = 0;
     modseq_t xconvmodseq = 0;
     unsigned int i;
