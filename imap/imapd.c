@@ -7679,6 +7679,10 @@ static int print_statusline(const char *extname, unsigned statusitems,
 	prot_printf(imapd_out, "%cXCONVUNSEEN %u", sepchar, sd->xconvunseen);
 	sepchar = ' ';
     }
+    if (statusitems & STATUS_XCONVMODSEQ) {
+	prot_printf(imapd_out, "%cXCONVMODSEQ %u", sepchar, sd->xconvunseen);
+	sepchar = ' ';
+    }
     prot_printf(imapd_out, ")\r\n");
 
     return 0;
