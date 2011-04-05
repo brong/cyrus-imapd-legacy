@@ -5266,14 +5266,18 @@ void cmd_xconvsort(char *tag)
 
     /* local mailbox */
     c = getastring(imapd_in, imapd_out, &mailboxname);
-    if (c == EOF) goto error;
+    if (c == EOF) {
+	prot_printf(imapd_out, "%s BAD Missing mailbox name in XconvSort\r\n",
+		    tag);
+	goto error;
+    }
 
     c = getsortcriteria(tag, &sortcrit);
     if (c == EOF) goto error;
 
     /* get charset */
     if (c != ' ') {
-	prot_printf(imapd_out, "%s BAD Missing charset in Sort\r\n",
+	prot_printf(imapd_out, "%s BAD Missing charset in XConvSort\r\n",
 		    tag);
 	goto error;
     }
@@ -5305,8 +5309,8 @@ void cmd_xconvsort(char *tag)
 	goto error;
     }
 
-    r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
-					       imapd_userid, internalname);
+    (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
+					   imapd_userid, internalname);
 
     /* need to force a re-read from scratch into a new
      * index - even if this mailbox is selected - because
@@ -5320,8 +5324,11 @@ void cmd_xconvsort(char *tag)
 	init.want_expunged = 1;
 
     r = index_open(internalname, &init, &imapd_index);
-    if (r)
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag,
+		    error_message(r));
 	goto error;
+    }
 
     /* need index loaded to even parse searchargs! */
     searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
