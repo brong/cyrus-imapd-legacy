@@ -1527,6 +1527,7 @@ int index_convsort(struct index_state *state,
 	    /* stash these, we'll need them later */
 	    msg->was_old_exemplar = was_old_exemplar;
 	    msg->is_new_exemplar = is_new_exemplar;
+	    msg->is_changed = is_changed;
 
 	    /* detach from msgdata list */
 	    msgdata = msg->next;
@@ -1608,14 +1609,21 @@ int index_convsort(struct index_state *state,
 		    nadded++;
 		}
 		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
-		    conversation_t *convdata = NULL;
-		    conversation_load(&state->mailbox->cstate,
-				      record->cid, &convdata);
-		    if (convdata->modseq > windowargs->modseq) {
-			assert(nchanged < maxresults);
-			changed[nchanged++] = record;
+		    if (windowargs->conversations) {
+			conversation_t *convdata = NULL;
+			conversation_load(&state->mailbox->cstate,
+					  record->cid, &convdata);
+			if (convdata->modseq > windowargs->modseq) {
+			    assert(nchanged < maxresults);
+			    changed[nchanged++] = record;
+			}
+			conversation_free(convdata);
+		    } else {
+			if (msg->is_changed) {
+			    assert(nchanged < maxresults);
+			    changed[nchanged++] = record;
+			}
 		    }
-		    conversation_free(convdata);
 		}
 	    }
 	}
