@@ -7686,7 +7686,7 @@ static int print_statusline(const char *extname, unsigned statusitems,
 	sepchar = ' ';
     }
     if (statusitems & STATUS_XCONVMODSEQ) {
-	prot_printf(imapd_out, "%cXCONVMODSEQ %u", sepchar, sd->xconvmodseq);
+	prot_printf(imapd_out, "%cXCONVMODSEQ " MODSEQ_FMT, sepchar, sd->xconvmodseq);
 	sepchar = ' ';
     }
     prot_printf(imapd_out, ")\r\n");
