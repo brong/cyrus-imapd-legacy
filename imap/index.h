@@ -160,6 +160,7 @@ typedef struct msgdata {
 
     unsigned int was_old_exemplar:1;
     unsigned int is_new_exemplar:1;
+    unsigned int is_changed:1;
 } MsgData;
 
 typedef struct thread {
