@@ -1650,7 +1650,7 @@ restart:
     }
 
     /* fix up 2.4.0 bug breakage */
-    if (mailbox->i.uidvalidity == 0) {
+    if (!mailbox->i.uidvalidity) {
 	mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
 							  time(0));
 	if (locktype == LOCK_EXCLUSIVE) {
@@ -1659,7 +1659,7 @@ restart:
 	    syslog(LOG_ERR, "%s: fixing zero uidvalidity", mailbox->name);
 	}
     }
-    if (mailbox->i.highestmodseq == 0) {
+    if (!mailbox->i.highestmodseq) {
 	mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
 	if (locktype == LOCK_EXCLUSIVE) {
 	    mailbox_index_dirty(mailbox);
@@ -3314,7 +3314,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     if (r) goto fail;
 
     /* update uidvalidity */
-    newmailbox->i.uidvalidity = time(0);
+    newmailbox->i.uidvalidity = mboxname_nextuidvalidity(newname, time(0));
 
     /* INBOX rename - change uniqueid */
     if (!userid) mailbox_make_uniqueid(newmailbox);
@@ -3967,7 +3967,8 @@ static int mailbox_reconstruct_compare_update(struct mailbox *mailbox,
 	syslog(LOG_ERR, "%s uid %u future modseq " MODSEQ_FMT " found",
 		   mailbox->name, record->uid, record->modseq);
 	mailbox_index_dirty(mailbox);
-	mailbox->i.highestmodseq = record->modseq;
+	mailbox->i.highestmodseq = mboxname_setmodseq(mailbox->name,
+						      record->modseq);
     }
 
     if (record->uid > mailbox->i.last_uid) {
@@ -4315,7 +4316,7 @@ int mailbox_reconstruct(const char *name, int flags)
     reconstruct_compare_headers(mailbox, &old_header, &mailbox->i);
 
     /* fix up 2.4.0 bug breakage */
-    if (mailbox->i.uidvalidity == 0) {
+    if (!mailbox->i.uidvalidity) {
 	if (make_changes) {
 	    mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
 							      time(0));
@@ -4323,7 +4324,7 @@ int mailbox_reconstruct(const char *name, int flags)
 	}
 	syslog(LOG_ERR, "%s: zero uidvalidity", mailbox->name);
     }
-    if (mailbox->i.highestmodseq == 0) {
+    if (!mailbox->i.highestmodseq) {
 	if (make_changes) {
 	    mailbox_index_dirty(mailbox);
 	    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
