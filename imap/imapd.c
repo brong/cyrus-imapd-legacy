@@ -4778,10 +4778,6 @@ static int xconvfetch_lookup(struct conversations_state *statep,
     hash_insert(key, (void *)1, wanted_cids);
 
     for (folder = conv->folders; folder; folder = folder->next) {
-	/* no changes */
-	if (ifchangedsince >= folder->modseq)
-	    continue;
-
 	/* no contents */
 	if (!folder->exists)
 	    continue;
