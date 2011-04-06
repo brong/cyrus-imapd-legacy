@@ -4483,102 +4483,107 @@ void cmd_fetch(char *tag, char *sequence, int usinguid)
     strarray_fini(&fetchargs.headers_not);
 }
 
+static void do_one_xconvmeta(conversation_id_t cid,
+			     conversation_t *conv,
+			     struct dlist *itemlist)
+{
+    struct dlist *item = dlist_newpklist(NULL, "");
+    struct dlist *fl;
+
+    assert(conv);
+    assert(itemlist);
+
+    for (fl = itemlist->head; fl; fl = fl->next) {
+	const char *key = dlist_cstring(fl);
+
+	/* xxx - parse to a fetchitems? */
+	if (!strcasecmp(key, "MODSEQ"))
+	    dlist_setnum64(item, "MODSEQ", conv->modseq);
+	else if (!strcasecmp(key, "EXISTS"))
+	    dlist_setnum32(item, "EXISTS", conv->exists);
+	else if (!strcasecmp(key, "UNSEEN"))
+	    dlist_setnum32(item, "UNSEEN", conv->unseen);
+	else if (!strcasecmp(key, "DRAFTS"))
+	    dlist_setnum32(item, "DRAFTS", conv->drafts);
+	else if (!strcasecmp(key, "FLAGGED"))
+	    dlist_setnum32(item, "FLAGGED", conv->flagged);
+	else if (!strcasecmp(key, "ATTACHMENTS"))
+	    dlist_setnum32(item, "ATTACHMENTS", conv->attachments);
+	else if (!strcasecmp(key, "SENDERS")) {
+	    conv_sender_t *sender;
+	    struct dlist *slist = dlist_newlist(item, "SENDERS");
+	    for (sender = conv->senders; sender; sender = sender->next) {
+		struct dlist *sli = dlist_newlist(slist, "");
+		dlist_setatom(sli, "NAME", sender->name);
+		dlist_setatom(sli, "ROUTE", sender->route);
+		dlist_setatom(sli, "MAILBOX", sender->mailbox);
+		dlist_setatom(sli, "DOMAIN", sender->domain);
+	    }
+	}
+	else if (!strcasecmp(key, "FOLDEREXISTS")) {
+	    struct dlist *flist = dlist_newlist(item, "FOLDEREXISTS");
+	    struct dlist *tmp;
+	    conv_folder_t *folder;
+	    fl = fl->next;
+	    if (dlist_isatomlist(fl)) {
+		for (tmp = fl->head; tmp; tmp = tmp->next) {
+		    const char *fname = dlist_cstring(tmp);
+		    char intname[MAX_MAILBOX_NAME];
+		    /* ugly city */
+		    if ((*imapd_namespace.mboxname_tointernal)(&imapd_namespace, fname,
+							       imapd_userid, intname))
+			continue;
+		    folder = conversation_find_folder(conv, intname);
+		    dlist_setatom(flist, "MBOXNAME", fname);
+		    /* ok if it's not there */
+		    dlist_setnum32(flist, "EXISTS", folder ? folder->exists : 0);
+		}
+	    }
+	}
+	else {
+	    dlist_setatom(item, key, NULL); /* add a NIL response */
+	}
+    }
+
+    prot_printf(imapd_out, "* XCONVMETA %s ", conversation_id_encode(cid));
+    dlist_print(item, 0, imapd_out);
+    prot_printf(imapd_out, "\r\n");
+
+    dlist_free(&item);
+}
+
 static void do_xconvmeta(const char *tag,
 			 struct conversations_state *state,
 			 struct dlist *cidlist,
 			 struct dlist *itemlist)
 {
-    struct dlist *outlist = dlist_newlist(NULL, "");
     conversation_id_t cid;
-    conversation_t *conv = NULL;
     struct dlist *dl;
-    struct dlist *fl;
-    struct dlist *item;
     int r;
 
     for (dl = cidlist->head; dl; dl = dl->next) {
 	const char *cidstr = dlist_cstring(dl);
+	conversation_t *conv = NULL;
 
 	if (!conversation_id_decode(&cid, cidstr) || !cid) {
 	    prot_printf(imapd_out, "%s BAD Invalid CID %s\r\n", tag, cidstr);
-	    goto done;
+	    return;
 	}
 
 	r = conversation_load(state, cid, &conv);
 	if (r) {
 	    prot_printf(imapd_out, "%s BAD Failed to read %s\r\n", tag, cidstr);
-	    goto done;
+	    conversation_free(conv);
+	    return;
 	}
 
-	item = dlist_newpklist(outlist, cidstr);
-	for (fl = itemlist->head; fl; fl = fl->next) {
-	    const char *key = dlist_cstring(fl);
-	    /* xxx - parse to a fetchitems? */
-	    if (!strcasecmp(key, "MODSEQ"))
-		dlist_setnum64(item, "MODSEQ", conv->modseq);
-	    else if (!strcasecmp(key, "EXISTS"))
-		dlist_setnum32(item, "EXISTS", conv->exists);
-	    else if (!strcasecmp(key, "UNSEEN"))
-		dlist_setnum32(item, "UNSEEN", conv->unseen);
-	    else if (!strcasecmp(key, "DRAFTS"))
-		dlist_setnum32(item, "DRAFTS", conv->drafts);
-	    else if (!strcasecmp(key, "FLAGGED"))
-		dlist_setnum32(item, "FLAGGED", conv->flagged);
-	    else if (!strcasecmp(key, "ATTACHMENTS"))
-		dlist_setnum32(item, "ATTACHMENTS", conv->attachments);
-	    else if (!strcasecmp(key, "SENDERS")) {
-		conv_sender_t *sender;
-		struct dlist *slist = dlist_newlist(item, "SENDERS");
-		for (sender = conv->senders; sender; sender = sender->next) {
-		    struct dlist *sli = dlist_newlist(slist, "");
-		    dlist_setatom(sli, "NAME", sender->name);
-		    dlist_setatom(sli, "ROUTE", sender->route);
-		    dlist_setatom(sli, "MAILBOX", sender->mailbox);
-		    dlist_setatom(sli, "DOMAIN", sender->domain);
-		}
-	    }
-	    else if (!strcasecmp(key, "FOLDEREXISTS")) {
-		struct dlist *flist = dlist_newlist(item, "FOLDEREXISTS");
-		struct dlist *tmp;
-		conv_folder_t *folder;
-		fl = fl->next;
-		if (dlist_isatomlist(fl)) {
-		    for (tmp = fl->head; tmp; tmp = tmp->next) {
-			const char *fname = dlist_cstring(tmp);
-			char intname[MAX_MAILBOX_NAME];
-			/* ugly city */
-			if ((*imapd_namespace.mboxname_tointernal)(&imapd_namespace, fname,
-								   imapd_userid, intname)) {
-			    prot_printf(imapd_out, "%s BAD INVALID META FOLDER NAME %s\r\n",
-				        tag, fname);
-			    goto done;
-			}
-			folder = conversation_find_folder(conv, intname);
-			dlist_setatom(flist, "MBOXNAME", fname);
-			/* ok if it's not there */
-			dlist_setnum32(flist, "EXISTS", folder ? folder->exists : 0);
-		    }
-		}
-	    }
-	    else {
-		prot_printf(imapd_out, "%s BAD INVALID META ITEM %s\r\n",
-			    tag, key);
-		goto done;
-	    }
-	}
+	if (conv->exists)
+	    do_one_xconvmeta(cid, conv, itemlist);
+
 	conversation_free(conv);
     }
 
-    for (dl = outlist->head; dl; dl = dl->next) {
-	prot_printf(imapd_out, "* XCONVMETA ");
-	dlist_print(dl, 1, imapd_out);
-	prot_printf(imapd_out, "\r\n");
-    }
-
     prot_printf(imapd_out, "%s OK Completed\r\n", tag);
-
-done:
-    dlist_free(&outlist);
 }
 
 /*
