@@ -101,8 +101,7 @@ struct fetchargs {
 
     bit32 cache_atleast;          /* to do headers we need atleast this
 				   * cache version */
-    conversation_id_t cid;	  /* for XCONVFETCH */
-    struct dlist *cidlist;        /* it just gets crazier */
+    hash_table *cidhash;          /* for XCONVFETCH */
     struct namespace *namespace;  /* for the FOLDER fetchitem */
     const char *userid;
 };

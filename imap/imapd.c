@@ -349,8 +349,8 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 void cmd_fetch(char *tag, char *sequence, int usinguid);
 void cmd_xconvfetch(const char *tag);
 void cmd_xconvmeta(const char *tag);
-static int do_xconvfetch(uint32_t uidvalidity,
-			 modseq_t highestmodseq,
+static int do_xconvfetch(struct dlist *cidlist,
+			 modseq_t ifchangedsince,
 			 struct fetchargs *fetchargs);
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
@@ -4677,8 +4677,7 @@ void cmd_xconvfetch(const char *tag)
     struct fetchargs fetchargs;
     int r;
     clock_t start = clock();
-    uint32_t uidv = 0;
-    modseq_t hms = 0;
+    modseq_t ifchangedsince = 0;
     char mytime[100];
     struct dlist *cidlist = NULL;
     struct dlist *item;
@@ -4711,27 +4710,7 @@ void cmd_xconvfetch(const char *tag)
 	}
     }
 
-    /* parse (uidvalidity highestmodseq) tuple or () */
-    c = prot_getc(imapd_in);
-    if (c != '(')
-	goto syntax_error;
-
-    c = prot_getc(imapd_in);
-    if (c == EOF)
-	goto syntax_error;
-    if (c != ')') {
-	prot_ungetc(c, imapd_in);
-
-	c = getuint32(imapd_in, &uidv);
-	if (c != ' ')
-	    goto syntax_error;
-
-	c = getmodseq(imapd_in, &hms);
-	if (c != ')')
-	    goto syntax_error;
-    }
-
-    c = prot_getc(imapd_in);
+    c = getmodseq(imapd_in, &ifchangedsince);
     if (c != ' ')
 	goto syntax_error;
 
@@ -4741,10 +4720,8 @@ void cmd_xconvfetch(const char *tag)
     fetchargs.fetchitems |= (FETCH_UIDVALIDITY|FETCH_FOLDER);
     fetchargs.namespace = &imapd_namespace;
     fetchargs.userid = imapd_userid;
-    fetchargs.changedsince = hms;
-    fetchargs.cidlist = cidlist;
 
-    r = do_xconvfetch(uidv, hms, &fetchargs);
+    r = do_xconvfetch(cidlist, ifchangedsince, &fetchargs);
 
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
@@ -4770,29 +4747,43 @@ syntax_error:
     eatline(imapd_in, c);
 }
 
-static int _conv_add_folder(struct conversations_state *statep,
-			    conversation_id_t cid,
-			    strarray_t *folder_list,
-			    uint32_t uidvalidity,
-			    modseq_t highestmodseq)
+static int xconvfetch_lookup(struct conversations_state *statep,
+			     conversation_id_t cid,
+			     modseq_t ifchangedsince,
+			     hash_table *wanted_cids,
+			     strarray_t *folder_list)
 {
+    const char *key = conversation_id_encode(cid);
     conversation_t *conv = NULL;
     conv_folder_t *folder;
-    int r ;
+    int r;
 
     r = conversation_load(statep, cid, &conv);
-    if (r) goto out;
+    if (r) return r;
 
-    if (highestmodseq >= conv->modseq)
+    if (!conv->exists)
 	goto out;
+
+    /* output the metadata for this conversation */
+    {
+	struct dlist *dl = dlist_newlist(NULL, "");
+	dlist_setatom(dl, "", "MODSEQ");
+	do_one_xconvmeta(cid, conv, dl);
+	dlist_free(&dl);
+    }
+
+    if (ifchangedsince >= conv->modseq)
+	goto out;
+
+    hash_insert(key, (void *)1, wanted_cids);
 
     for (folder = conv->folders; folder; folder = folder->next) {
 	/* no changes */
-	if (highestmodseq >= folder->modseq)
+	if (ifchangedsince >= folder->modseq)
 	    continue;
 
-	/* not looking for vanished, and no messages */
-	if (!uidvalidity && !folder->exists)
+	/* no contents */
+	if (!folder->exists)
 	    continue;
 
 	/* finally, something worth looking at */
@@ -4801,11 +4792,11 @@ static int _conv_add_folder(struct conversations_state *statep,
 
 out:
     conversation_free(conv);
-    return r;
+    return 0;
 }
 
-static int do_xconvfetch(uint32_t uidvalidity,
-			 modseq_t highestmodseq,
+static int do_xconvfetch(struct dlist *cidlist,
+			 modseq_t ifchangedsince,
 			 struct fetchargs *fetchargs)
 {
     struct conversations_state state;
@@ -4813,9 +4804,10 @@ static int do_xconvfetch(uint32_t uidvalidity,
     const char *inboxname;
     char *fname = NULL;
     struct index_state *index_state = NULL;
-    char extname[MAX_MAILBOX_NAME];
     struct dlist *dl;
-    strarray_t *folder_list = strarray_new();
+    hash_table wanted_cids = HASH_TABLE_INITIALIZER;
+    strarray_t folder_list = STRARRAY_INITIALIZER;
+    struct index_init init;
     int i;
 
     inboxname = mboxname_user_inbox(imapd_userid);
@@ -4829,71 +4821,40 @@ static int do_xconvfetch(uint32_t uidvalidity,
     r = conversations_open(&state, fname);
     if (r) goto out;
 
-    for (dl = fetchargs->cidlist->head; dl; dl = dl->next) {
-        r = _conv_add_folder(&state, dlist_num(dl), folder_list,
-			     uidvalidity, highestmodseq);
-        if (r) goto out;
+    construct_hash_table(&wanted_cids, 1024, 0);
+
+    for (dl = cidlist->head; dl; dl = dl->next) {
+	r = xconvfetch_lookup(&state, dlist_num(dl), ifchangedsince,
+			      &wanted_cids, &folder_list);
+	if (r) goto out;
     }
 
     conversations_close(&state);
 
     /* unchanged, woot */
-    if (!folder_list->count)
+    if (!folder_list.count)
 	goto out;
 
-    for (i = 0; i < folder_list->count; i++) {
-	const char *mboxname = folder_list->data[i];
-	struct index_init init;
-	struct seqset *seq;
+    fetchargs->cidhash = &wanted_cids;
 
-	r = imapd_namespace.mboxname_toexternal(&imapd_namespace,
-					        mboxname,
-					        imapd_userid, extname);
-	if (r)
-	    goto out;
+    memset(&init, 0, sizeof(struct index_init));
+    init.userid = imapd_userid;
+    init.authstate = imapd_authstate;
+    init.out = imapd_out;
 
-	memset(&init, 0, sizeof(struct index_init));
-	init.userid = imapd_userid;
-	init.authstate = imapd_authstate;
-	init.vanished.uidvalidity = uidvalidity;
-	init.vanished.uidvalidity_is_max = 1;
-	init.vanished.modseq = highestmodseq;
-	init.out = imapd_out;
+    for (i = 0; i < folder_list.count; i++) {
+	const char *mboxname = folder_list.data[i];
+
 	r = index_open(mboxname, &init, &index_state);
-	if (r == IMAP_MAILBOX_NONEXISTENT) {
-	    /* just got removed, that's OK */
-	    if (highestmodseq) {
-		/* only tell them if they might have known about it */
-		prot_printf(imapd_out, "* FOLDERSTATE ");
-		prot_printastring(imapd_out, extname);
-		prot_printf(imapd_out, " 0 0\r\n");
-	    }
+	if (r == IMAP_MAILBOX_NONEXISTENT)
 	    continue;
-	}
 	if (r)
 	    goto out;
+
 	index_checkflags(index_state, 0, 0);
 
-	prot_printf(imapd_out, "* FOLDERSTATE ");
-	prot_printastring(imapd_out, extname);
-	prot_printf(imapd_out, " %u " MODSEQ_FMT,
-		    index_state->mailbox->i.uidvalidity,
-		    index_state->mailbox->i.highestmodseq);
-
-	if (init.vanishedlist) {
-	    char *vanished = seqset_cstring(init.vanishedlist);
-	    if (vanished)
-		prot_printf(imapd_out, " (VANISHED %s)", vanished);
-	    free(vanished);
-	    seqset_free(init.vanishedlist);
-	}
-
-	prot_printf(imapd_out, "\r\n");
-
-	seq = seqset_parse("1:*", NULL, index_state->mailbox->i.last_uid);
-	index_fetchresponses(index_state, seq, /*usinguid*/1,
+	index_fetchresponses(index_state, NULL, /*usinguid*/1,
 			     fetchargs, NULL);
-	seqset_free(seq);
 
 	index_close(&index_state);
     }
@@ -4901,8 +4862,9 @@ static int do_xconvfetch(uint32_t uidvalidity,
     r = 0;
 
 out:
-    if (index_state) index_close(&index_state);
-    strarray_free(folder_list);
+    index_close(&index_state);
+    free_hash_table(&wanted_cids, NULL);
+    strarray_fini(&folder_list);
     free(fname);
     return r;
 }
