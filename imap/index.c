@@ -2752,27 +2752,11 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     int r = 0;
     struct index_map *im = &state->map[msgno-1];
 
-    /* Check against the CID filter */
-    if (fetchargs->cid && im->record.cid != fetchargs->cid)
-	return 0;
-
     /* Check against the CID list filter */
-    if (fetchargs->cidlist) {
-	int found = 0;
-	if (dlist_isatomlist(fetchargs->cidlist)) {
-	    struct dlist *tmp;
-	    for (tmp = fetchargs->cidlist->head; tmp; tmp = tmp->next) {
-		if (dlist_num(tmp) == im->record.cid) {
-		    found = 1;
-		    break;
-		}
-	    }
-	}
-	else {
-	    if (dlist_num(fetchargs->cidlist) == im->record.cid)
-		found = 1;
-	}
-	if (!found) return 0;
+    if (fetchargs->cidhash) {
+	const char *key = conversation_id_encode(im->record.cid);
+	if (!hash_lookup(key, fetchargs->cidhash))
+	    return 0;
     }
 
     /* Check the modseq against changedsince */
