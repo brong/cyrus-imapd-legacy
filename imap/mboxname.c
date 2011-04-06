@@ -1550,14 +1550,18 @@ static bit64 mboxname_setval(const char *mboxname, const char *metaname,
 	if (fileval > last) last = fileval;
     }
 
+    retval = last + add;
+
+    /* unchanged, no need to write */
+    if (retval == fileval)
+	goto done;
+
     snprintf(newfname, MAX_MAILBOX_PATH, "%s.NEW", fname);
     newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
     if (newfd == -1) {
 	syslog(LOG_ERR, "IOERROR: failed to open for write %s: %m", newfname);
 	goto done;
     }
-
-    retval = last + add;
 
     snprintf(numbuf, 30, "%llu", retval);
     n = retry_write(newfd, numbuf, strlen(numbuf));
