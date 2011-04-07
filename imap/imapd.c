@@ -4761,6 +4761,9 @@ static int xconvfetch_lookup(struct conversations_state *statep,
     r = conversation_load(statep, cid, &conv);
     if (r) return r;
 
+    if (!conv)
+	goto out;
+
     if (!conv->exists)
 	goto out;
 
