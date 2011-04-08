@@ -567,7 +567,7 @@ static int set_sub(const char *userid, const char *mboxname, int add)
 }
 
 static int folder_setannotation(const char *mboxname, const char *entry,
-				const char *userid, const char *value)
+				const char *userid, const struct buf *value)
 {
     const char *cmd = "ANNOTATION";
     struct dlist *kl;
@@ -576,7 +576,7 @@ static int folder_setannotation(const char *mboxname, const char *entry,
     dlist_setatom(kl, "MBOXNAME", mboxname);
     dlist_setatom(kl, "ENTRY", entry);
     dlist_setatom(kl, "USERID", userid);
-    dlist_setatom(kl, "VALUE", value);
+    dlist_setmap(kl, "VALUE", value->s, value->len);
     sync_send_apply(kl, sync_out);
     dlist_free(&kl);
 
@@ -1526,11 +1526,11 @@ static int do_quota(const char *root)
 
 static int getannotation_cb(const char *mailbox __attribute__((unused)),
 			    const char *entry, const char *userid,
-			    struct annotation_data *attrib, void *rock)
+			    const struct buf *value, void *rock)
 {
     struct sync_annot_list *l = (struct sync_annot_list *) rock;
 
-    sync_annot_list_add(l, entry, userid, attrib->value);
+    sync_annot_list_add(l, entry, userid, value);
 
     return 0;
 }
@@ -1541,16 +1541,19 @@ static int parse_annotation(struct dlist *kin,
     struct dlist *kl;
     const char *entry;
     const char *userid;
-    const char *value;
+    const char *valmap = NULL;
+    size_t vallen = 0;
+    struct buf value = BUF_INITIALIZER;
 
     for (kl = kin->head; kl; kl = kl->next) {
 	if (!dlist_getatom(kl, "ENTRY", &entry))
 	    return IMAP_PROTOCOL_BAD_PARAMETERS;
 	if (!dlist_getatom(kl, "USERID", &userid))
 	    return IMAP_PROTOCOL_BAD_PARAMETERS;
-	if (!dlist_getatom(kl, "VALUE", &value))
+	if (!dlist_getmap(kl, "VALUE", &valmap, &vallen))
 	    return IMAP_PROTOCOL_BAD_PARAMETERS;
-	sync_annot_list_add(replica_annot, entry, userid, value);
+	buf_init_ro(&value, valmap, vallen);
+	sync_annot_list_add(replica_annot, entry, userid, &value);
     }
 
     return 0;
@@ -1612,7 +1615,7 @@ static int do_annotation(const char *mboxname)
 
 	if (n == 0) {
 	    /* already have the annotation, but is the value different? */
-	    if (!strcmp(ra->value, ma->value)) {
+	    if (!buf_cmp(&ra->value, &ma->value)) {
 		ra = ra->next;
 		ma = ma->next;
 		continue;
@@ -1621,7 +1624,7 @@ static int do_annotation(const char *mboxname)
 	}
 
 	/* add the current client annotation */
-	r = folder_setannotation(mboxname, ma->entry, ma->userid, ma->value);
+	r = folder_setannotation(mboxname, ma->entry, ma->userid, &ma->value);
 	if (r) goto bail;
 
 	ma = ma->next;
