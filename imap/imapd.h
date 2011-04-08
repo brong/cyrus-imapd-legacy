@@ -104,6 +104,10 @@ struct fetchargs {
     hash_table *cidhash;          /* for XCONVFETCH */
     struct namespace *namespace;  /* for the FOLDER fetchitem */
     const char *userid;
+    strarray_t entries;		  /* for FETCH_ANNOTATION */
+    strarray_t attribs;
+    int isadmin;
+    struct auth_state *authstate;
 };
 
 /* Bitmasks for fetchitems */
@@ -127,7 +131,8 @@ enum {
     FETCH_FILESIZE =  (1<<16),
     FETCH_CID =			(1<<17),
     FETCH_FOLDER =		(1<<18),
-    FETCH_UIDVALIDITY =		(1<<19)
+    FETCH_UIDVALIDITY =		(1<<19),
+    FETCH_ANNOTATION =		(1<<20)
 };
 
 enum {
