@@ -764,6 +764,8 @@ void conversation_free(conversation_t *conv)
     conv_folder_t *folder;
     conv_sender_t *sender;
 
+    if (!conv) return;
+
     while ((folder = conv->folders)) {
 	conv->folders = folder->next;
 	free(folder->mboxname);
