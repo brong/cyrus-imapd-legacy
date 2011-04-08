@@ -424,6 +424,7 @@ static int parse_metadata_fetch_data(const char *tag,
 				     strarray_t *entries,
 				     strarray_t *attribs);
 static int parse_annotate_store_data(const char *tag,
+				     int must_be_list,
 				     struct entryattlist **entryatts);
 static int parse_metadata_store_data(const char *tag,
 				     struct entryattlist **entryatts);
@@ -4962,13 +4963,30 @@ void cmd_store(char *tag, char *sequence, int usinguid)
     }
     
     if (!strcmp(operation.s, "+flags")) {
-	storeargs.operation = STORE_ADD;
+	storeargs.operation = STORE_ADD_FLAGS;
     }
     else if (!strcmp(operation.s, "-flags")) {
-	storeargs.operation = STORE_REMOVE;
+	storeargs.operation = STORE_REMOVE_FLAGS;
     }
     else if (!strcmp(operation.s, "flags")) {
-	storeargs.operation = STORE_REPLACE;
+	storeargs.operation = STORE_REPLACE_FLAGS;
+    }
+    else if (!strcmp(operation.s, "annotation")) {
+	storeargs.operation = STORE_ANNOTATION;
+	/* ANNOTATION has implicit .SILENT behaviour */
+	storeargs.silent = 1;
+
+	c = parse_annotate_store_data(tag, /*must_be_list*/1,
+				      &storeargs.entryatts);
+	if (c == EOF) {
+	    eatline(imapd_in, c);
+	    goto freeflags;
+	}
+	storeargs.namespace = &imapd_namespace;
+	storeargs.isadmin = imapd_userisadmin;
+	storeargs.userid = imapd_userid;
+	storeargs.authstate = imapd_authstate;
+	goto notflagsdammit;
     }
     else {
 	prot_printf(imapd_out, "%s BAD Invalid %s attribute\r\n", tag, cmd);
@@ -5036,6 +5054,7 @@ void cmd_store(char *tag, char *sequence, int usinguid)
 	eatline(imapd_in, c);
 	goto freeflags;
     }
+notflagsdammit:
     if (c == '\r') c = prot_getc(imapd_in);
     if (c != '\n') {
 	prot_printf(imapd_out, "%s BAD Unexpected extra arguments to %s\r\n", tag, cmd);
@@ -5073,6 +5092,7 @@ void cmd_store(char *tag, char *sequence, int usinguid)
     }
 
  freeflags:
+    freeentryatts(storeargs.entryatts);
     strarray_fini(&storeargs.flags);
     seqset_free(storeargs.modified);
     free(modified);
@@ -8202,6 +8222,7 @@ static int parse_metadata_fetch_data(const char *tag,
  */
 
 static int parse_annotate_store_data(const char *tag,
+				     int must_be_list,
 				     struct entryattlist **entryatts)
 {
     int c, islist = 0;
@@ -8219,6 +8240,11 @@ static int parse_annotate_store_data(const char *tag,
     else if (c == '(') {
 	/* entry list */
 	islist = 1;
+    }
+    else if (must_be_list) {
+	prot_printf(imapd_out,
+		    "%s BAD Missing paren for annotation entry\r\n", tag);
+	goto baddata;
     }
     else {
 	/* single entry -- put the char back */
@@ -8599,7 +8625,7 @@ static void cmd_setannotation(const char *tag, char *mboxpat)
     struct entryattlist *entryatts = NULL;
     annotate_scope_t scope;
 
-    c = parse_annotate_store_data(tag, &entryatts);
+    c = parse_annotate_store_data(tag, 0, &entryatts);
     if (c == EOF) {
 	eatline(imapd_in, c);
 	return;
