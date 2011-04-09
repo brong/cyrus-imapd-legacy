@@ -4587,7 +4587,7 @@ static void do_xconvmeta(const char *tag,
 	    return;
 	}
 
-	if (conv->exists)
+	if (conv && conv->exists)
 	    do_one_xconvmeta(cid, conv, itemlist);
 
 	conversation_free(conv);
