@@ -10388,9 +10388,10 @@ static char *sortcrit_as_string(const struct sortcrit *sortcrit)
 {
     struct buf b = BUF_INITIALIZER;
     static const char * const key_names[] = {
-	"SEQUENCE", "ARRIVAL", "CC", "DATE", "FROM",
-	"SIZE", "SUBJECT", "TO", "ANNOTATION", "MODSEQ",
-	"DISPLAYFROM", "DISPLAYTO"
+	"SEQUENCE", "ARRIVAL", "CC", "DATE",
+	"DISPLAYFROM", "DISPLAYTO", "FROM",
+	"SIZE", "SUBJECT", "TO", "ANNOTATION",
+	"MODSEQ", "UID"
     };
 
     for ( ; sortcrit->key ; sortcrit++) {
