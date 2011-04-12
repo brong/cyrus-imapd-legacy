@@ -10404,18 +10404,24 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    (*sortcrit)[n].key = SORT_SUBJECT;
 	else if (!strcmp(criteria.s, "to"))
 	    (*sortcrit)[n].key = SORT_TO;
-#if 0
 	else if (!strcmp(criteria.s, "annotation")) {
+	    const char *userid = NULL;
+
 	    (*sortcrit)[n].key = SORT_ANNOTATION;
 	    if (c != ' ') goto missingarg;
-	    c = getstring(imapd_in, &arg);
+	    c = getastring(imapd_in, imapd_out, &criteria);
 	    if (c != ' ') goto missingarg;
-	    (*sortcrit)[n].args.annot.entry = xstrdup(arg.s);
-	    c = getstring(imapd_in, &arg);
+	    (*sortcrit)[n].args.annot.entry = xstrdup(criteria.s);
+	    c = getastring(imapd_in, imapd_out, &criteria);
 	    if (c == EOF) goto missingarg;
-	    (*sortcrit)[n].args.annot.attrib = xstrdup(arg.s);
+	    if (!strcmp(criteria.s, "value.shared"))
+		userid = "";
+	    else if (!strcmp(criteria.s, "value.priv"))
+		userid = imapd_userid;
+	    else
+		goto missingarg;
+	    (*sortcrit)[n].args.annot.userid = xstrdup(userid);
 	}
-#endif
 	else if (!strcmp(criteria.s, "modseq"))
 	    (*sortcrit)[n].key = SORT_MODSEQ;
 	else if (!strcmp(criteria.s, "uid"))
@@ -10459,13 +10465,11 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
     prot_printf(imapd_out, "%s BAD Missing Sort criteria\r\n", tag);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
-#if 0 /* For annotations stuff above */
  missingarg:
     prot_printf(imapd_out, "%s BAD Missing argument to Sort criterion %s\r\n",
 		tag, criteria.s);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
-#endif
 }
 
 static char *sortcrit_as_string(const struct sortcrit *sortcrit)
@@ -10493,7 +10497,8 @@ static char *sortcrit_as_string(const struct sortcrit *sortcrit)
 	case SORT_ANNOTATION:
 	    buf_printf(&b, " \"%s\" \"%s\"",
 		       sortcrit->args.annot.entry,
-		       sortcrit->args.annot.attrib);
+		       *sortcrit->args.annot.userid ?
+			    "value.priv" : "value.shared");
 	    break;
 	}
     }
@@ -10849,7 +10854,7 @@ static void freesortcrit(struct sortcrit *s)
 	switch (s[i].key) {
 	case SORT_ANNOTATION:
 	    free(s[i].args.annot.entry);
-	    free(s[i].args.annot.attrib);
+	    free(s[i].args.annot.userid);
 	    break;
 	}
 	i++;

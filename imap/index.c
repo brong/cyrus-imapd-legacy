@@ -4075,10 +4075,20 @@ static MsgData *index_msgdata_load(struct index_state *state,
 	    case SORT_TO:
 		cur->to = get_localpart_addr(cacheitem_base(&im->record, CACHE_TO));
 		break;
- 	    case SORT_ANNOTATION:
- 		/* fetch attribute value - we fake it for now */
-		strarray_append(&cur->annot, sortcrit[j].args.annot.attrib);
+ 	    case SORT_ANNOTATION: {
+		struct buf value = BUF_INITIALIZER;
+
+		annotatemore_msg_lookup(state->mailbox->name,
+					im->record.uid,
+					sortcrit[j].args.annot.entry,
+					sortcrit[j].args.annot.userid,
+					&value);
+
+		/* buf_release() never returns NULL, so if the lookup
+		 * fails for any reason we just get an empty string here */
+		strarray_append(&cur->annot, buf_release(&value));
  		break;
+	    }
 	    case LOAD_IDS:
 		index_get_ids(cur, envtokens, cacheitem_base(&im->record, CACHE_HEADERS),
 					      cacheitem_size(&im->record, CACHE_HEADERS));

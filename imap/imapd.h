@@ -242,7 +242,7 @@ struct sortcrit {
     union {			/* argument(s) to the sort key */
 	struct {
 	    char *entry;
-	    char *attrib;
+	    char *userid;
 	} annot;
     } args;
 };
