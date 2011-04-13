@@ -75,6 +75,7 @@
 #include "message_guid.h"
 #include "strarray.h"
 #include "conversations.h"
+#include "annotate.h"
 
 struct stagemsg {
     char fname[1024];
@@ -693,6 +694,10 @@ int append_copy(struct mailbox *mailbox,
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);
 	if (r) goto fail;
+
+	r = annotate_msg_copy(mailbox->name, copymsg[msg].uid,
+			      as->mailbox->name, record.uid,
+			      as->userid);
     }
 
  fail:
