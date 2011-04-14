@@ -1790,7 +1790,9 @@ index_copy(struct index_state *state,
 	   int usinguid,
 	   char *name, 
 	   char **copyuidp,
-	   int nolink)
+	   int nolink,
+	   struct namespace *namespace,
+	   int isadmin)
 {
     static struct copyargs copyargs;
     int i;
@@ -1837,7 +1839,8 @@ index_copy(struct index_state *state,
 	totalsize += copyargs.copymsg[i].size;
 
     r = append_setup(&appendstate, name, state->userid,
-		     state->authstate, ACL_INSERT, totalsize);
+		     state->authstate, ACL_INSERT, totalsize,
+		     namespace, isadmin);
     if (r) return r;
 
     docopyuid = (appendstate.myrights & ACL_READ);
