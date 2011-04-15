@@ -57,6 +57,7 @@
 #include "imap_err.h"
 #include "index.h"
 #include "conversations.h"
+#include "mailbox.h"
 #include "mboxlist.h"
 #include "message.h"
 #include "sysexits.h"
@@ -71,7 +72,7 @@
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
 static struct namespace conv_namespace;
 
-enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD };
+enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD, RECALC };
 
 int verbose = 0;
 
@@ -178,13 +179,15 @@ static int zero_cid_cb(const char *mboxname,
     return r;
 }
 
-static int do_zero(const char *inboxname, const char *fname)
+static int do_zero(const char *inboxname)
 {
     char buf[MAX_MAILBOX_NAME];
     int r;
+    struct conversations_state *state = NULL;
 
-    /* XXX: truncate?  What about corruption */
-    unlink(fname);
+    r = conversations_open_mbox(inboxname, &state);
+
+    conversations_truncate(state);
 
     r = zero_cid_cb(inboxname, 0, 0, NULL);
     if (r) return r;
@@ -193,20 +196,24 @@ static int do_zero(const char *inboxname, const char *fname)
     r = mboxlist_findall(NULL, buf, 1, NULL,
 			 NULL, zero_cid_cb, NULL);
 
+    conversations_commit(&state);
+
     return r;
 }
 
 static int build_cid_cb(const char *mboxname,
 		        int matchlen __attribute__((unused)),
 		        int maycreate __attribute__((unused)),
-		        void *rock)
+		        void *rock __attribute__((unused)))
 {
     struct mailbox *mailbox = NULL;
     const char *fname = NULL;
     struct index_record record;
     uint32_t recno;
     int r;
-    struct conversations_state *cstate = (struct conversations_state *)rock;
+    struct conversations_state *cstate = conversations_get_mbox(mboxname);
+
+    if (!cstate) return IMAP_CONVERSATIONS_NOT_OPEN;
 
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r) return r;
@@ -242,6 +249,9 @@ static int do_build(const char *inboxname)
 {
     char buf[MAX_MAILBOX_NAME];
     int r;
+    struct conversations_state *state = NULL;
+
+    r = conversations_open_mbox(inboxname, &state);
 
     r = build_cid_cb(inboxname, 0, 0, NULL);
     if (r) return r;
@@ -249,6 +259,63 @@ static int do_build(const char *inboxname)
     snprintf(buf, sizeof(buf), "%s.*", inboxname);
     r = mboxlist_findall(NULL, buf, 1, NULL,
 			 NULL, build_cid_cb, NULL);
+
+    conversations_commit(&state);
+    return r;
+}
+
+static int recalc_counts_cb(const char *mboxname,
+			    int matchlen __attribute__((unused)),
+			    int maycreate __attribute__((unused)),
+			    void *rock __attribute__((unused)))
+{
+    struct mailbox *mailbox = NULL;
+    struct index_record record;
+    uint32_t recno;
+    int r;
+
+    r = mailbox_open_irl(mboxname, &mailbox);
+    if (r) return r;
+
+    for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+	r = mailbox_read_index_record(mailbox, recno, &record);
+	if (r) goto done;
+
+	/* not assigned, skip */
+	if (!record.cid)
+	    continue;
+
+	/* we don't care about expunged messages */
+	if (record.system_flags & FLAG_EXPUNGED)
+	    continue;
+
+	mailbox_update_conversations(mailbox, NULL, &record);
+	if (r) goto done;
+    }
+
+ done:
+    mailbox_close(&mailbox);
+    return r;
+}
+
+static int do_recalc(const char *inboxname)
+{
+    char buf[MAX_MAILBOX_NAME];
+    int r;
+    struct conversations_state *state = NULL;
+
+    r = conversations_open_mbox(inboxname, &state);
+
+    conversations_wipe_counts(state);
+
+    r = recalc_counts_cb(inboxname, 0, 0, NULL);
+    if (r) return r;
+
+    snprintf(buf, sizeof(buf), "%s.*", inboxname);
+    r = mboxlist_findall(NULL, buf, 1, NULL,
+			 NULL, recalc_counts_cb, NULL);
+
+    conversations_commit(&state);
     return r;
 }
 
@@ -288,12 +355,17 @@ static void do_user(const char *userid)
 	break;
 
     case ZERO:
-	if (do_zero(inboxname, fname))
+	if (do_zero(inboxname))
 	    r = EC_NOINPUT;
 	break;
 
     case BUILD:
 	if (do_build(inboxname))
+	    r = EC_NOINPUT;
+	break;
+
+    case RECALC:
+	if (do_recalc(inboxname))
 	    r = EC_NOINPUT;
 	break;
 
@@ -336,7 +408,7 @@ int main(int argc, char **argv)
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "durzbvC:")) != EOF) {
+    while ((c = getopt(argc, argv, "durzbvRC:")) != EOF) {
 	switch (c) {
 	case 'd':
 	    if (mode != UNKNOWN)
@@ -364,6 +436,12 @@ int main(int argc, char **argv)
 	    if (mode != UNKNOWN)
 		usage(argv[0]);
 	    mode = BUILD;
+	    break;
+
+	case 'R':
+	    if (mode != UNKNOWN)
+		usage(argv[0]);
+	    mode = RECALC;
 	    break;
 
 	case 'v':
@@ -434,6 +512,7 @@ static int usage(const char *name)
     fprintf(stderr, "    -d             dump the conversations database to stdout\n");
     fprintf(stderr, "    -z             zero the conversations DB (make all NULLs)\n");
     fprintf(stderr, "    -b             build conversations entries for any NULL records\n");
+    fprintf(stderr, "    -R             recalculate all counts\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    -r             recursive mode: username is a prefix\n");
 

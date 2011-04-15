@@ -2061,9 +2061,9 @@ int mailbox_index_recalc(struct mailbox *mailbox)
     return 0;
 }
 
-static int mailbox_update_conversations(struct mailbox *mailbox,
-					struct index_record *old,
-					struct index_record *new)
+int mailbox_update_conversations(struct mailbox *mailbox,
+				 struct index_record *old,
+				 struct index_record *new)
 {
     int r = 0;
     conversation_t *conv = NULL;

@@ -607,8 +607,6 @@ int conversation_setstatus(struct conversations_state *state,
 		  buf.s, buf.len,
 		  &state->txn);
 
-done:
-
     buf_free(&buf);
     free(key);
 
@@ -1016,6 +1014,31 @@ int conversations_rename_cid(struct conversations_state *state,
     syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu",
 			rrock.entries_seen, rrock.entries_renamed);
 
+    return r;
+}
+
+
+static int delete_cb(void *rock,
+		     const char *key,
+		     int keylen,
+		     const char *val __attribute__((unused)),
+		     int vallen __attribute__((unused)))
+{
+    struct conversations_state *state = (struct conversations_state *)rock;
+    return DB->delete(state->db, key, keylen, &state->txn, 1);
+}
+
+int conversations_wipe_counts(struct conversations_state *state)
+{
+    int r = 0;
+    /* wipe B counts */
+    r = DB->foreach(state->db, "B", 1, NULL, delete_cb,
+		    state->txn, &state->txn);
+    if (r) return r;
+
+    /* wipe F counts */
+    r = DB->foreach(state->db, "F", 1, NULL, delete_cb,
+		    state->txn, &state->txn);
     return r;
 }
 
