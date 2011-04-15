@@ -2835,8 +2835,8 @@ int mailbox_create(const char *name,
 		   const char *specialuse,
 		   int options,
 		   unsigned uidvalidity,
+		   modseq_t highestmodseq,
 		   struct mailbox **mailboxptr)
-    
 {
     int r = 0;
     char quotaroot[MAX_MAILBOX_BUFFER];
@@ -2940,14 +2940,21 @@ int mailbox_create(const char *name,
     /* ensure a UIDVALIDITY is set */
     if (!uidvalidity)
 	uidvalidity = mboxname_nextuidvalidity(name, time(0));
+    else
+	mboxname_setuidvalidity(mailbox->name, uidvalidity);
+    /* and highest modseq */
+    if (!highestmodseq) 
+	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
+    else
+	mboxname_setmodseq(mailbox->name, highestmodseq);
     /* init non-zero fields */
     mailbox_index_dirty(mailbox);
     mailbox->i.minor_version = MAILBOX_MINOR_VERSION;
     mailbox->i.start_offset = INDEX_HEADER_SIZE;
     mailbox->i.record_size = INDEX_RECORD_SIZE;
-    mailbox->i.uidvalidity = uidvalidity;
     mailbox->i.options = options;
-    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
+    mailbox->i.uidvalidity = uidvalidity;
+    mailbox->i.highestmodseq = highestmodseq;
 
     /* initialise header size field so appends calculate the
      * correct map size */
@@ -3263,7 +3270,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     r = mailbox_create(newname, newpartition,
 		       oldmailbox->acl, (userid ? NULL : oldmailbox->uniqueid),
 		       oldmailbox->specialuse, oldmailbox->i.options,
-		       0, &newmailbox);
+		       0, oldmailbox->i.highestmodseq, &newmailbox);
 
     if (r) return r;
 
@@ -3677,7 +3684,7 @@ static int mailbox_reconstruct_create(const char *name, struct mailbox **mbptr)
          * no point trying to rescue anything else... */
 	mailbox_close(&mailbox);
 	return mailbox_create(name, mbentry->partition, mbentry->acl,
-			      mbentry->specialuse, NULL, options, 0, mbptr);
+			      mbentry->specialuse, NULL, options, 0, 0, mbptr);
     }
 
     mboxlist_entry_free(&mbentry);
