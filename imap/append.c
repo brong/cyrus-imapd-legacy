@@ -205,13 +205,6 @@ int append_setup(struct appendstate *as, const char *name,
     as->baseuid = as->mailbox->i.last_uid + 1;
     as->s = APPEND_READY;
 
-    /* open conversations db */
-    r = mailbox_open_conversations(as->mailbox);
-    if (r) {
-	mailbox_close(&as->mailbox);
-	return r;
-    }
-
     return 0;
 }
 
@@ -427,8 +420,13 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
-	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS))
-	    r = message_update_conversations(&mailbox->cstate, &record, *body);
+	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    if (cstate)
+		r = message_update_conversations(cstate, &record, *body);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
+	}
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -684,8 +682,11 @@ int append_copy(struct mailbox *mailbox,
 
 	if (record.cid == NULLCONVERSATION &&
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	    r = message_update_conversations_file(&mailbox->cstate,
-						  &record, destfname);
+	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    if (cstate)
+		r = message_update_conversations_file(cstate, &record, destfname);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
 	    if (r) goto fail;
 	}
 

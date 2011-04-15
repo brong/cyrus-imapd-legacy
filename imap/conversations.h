@@ -55,11 +55,18 @@ typedef bit64	conversation_id_t;
 #define CONV_FMT "%016llx"
 #define NULLCONVERSATION	(0ULL)
 
-struct conversations_state
-{
+struct conversations_state {
     struct db *db;
     struct txn *txn;
+    char *path;
 };
+
+struct conversations_open {
+    struct conversations_state s;
+    struct conversations_open *next;
+};
+
+struct conversations_open *open_conversations;
 
 typedef struct conversation conversation_t;
 typedef struct conv_folder  conv_folder_t;
@@ -94,19 +101,32 @@ struct conversation {
     int		    dirty;
 };
 
-extern char *conversations_getpath(const char *mboxname);
-extern int conversations_open(struct conversations_state *state,
-			      const char *fname);
-extern int conversations_close(struct conversations_state *state);
+extern char *conversations_getmboxpath(const char *mboxname);
+extern char *conversations_getuserpath(const char *username);
 
-extern int conversations_commit(struct conversations_state *state);
+extern int conversations_open_path(const char *path,
+				   struct conversations_state **statep);
+extern int conversations_open_user(const char *username,
+				   struct conversations_state **statep);
+extern int conversations_open_mbox(const char *mboxname,
+				   struct conversations_state **statep);
+extern struct conversations_state *conversations_get_path(const char *path);
+extern struct conversations_state *conversations_get_user(const char *username);
+extern struct conversations_state *conversations_get_mbox(const char *mboxname);
 
+/* either of these close */
+extern int conversations_abort(struct conversations_state **state);
+extern int conversations_commit(struct conversations_state **state);
+
+/* functions for CONVDB_MSGID database only */
 extern int conversations_set_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t cid);
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
+
+/* functions for CONVDB_COUNTS only */
 extern int conversation_getstatus(struct conversations_state *state,
 				  const char *mboxname,
 				  modseq_t *modseqp,

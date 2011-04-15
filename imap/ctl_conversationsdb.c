@@ -80,7 +80,7 @@ int mode = UNKNOWN;
 
 static int do_dump(const char *fname)
 {
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     struct stat sb;
     int r;
 
@@ -94,7 +94,7 @@ static int do_dump(const char *fname)
 	return -1;
     }
 
-    r = conversations_open(&state, fname);
+    r = conversations_open_path(fname, &state);
     if (r) {
 	/* TODO: wouldn't it be nice if we could translate this
 	 * error code into somethine useful for humans? */
@@ -103,18 +103,18 @@ static int do_dump(const char *fname)
 	return -1;
     }
 
-    conversations_dump(&state, stdout);
+    conversations_dump(state, stdout);
 
-    conversations_close(&state);
+    conversations_abort(&state);
     return 0;
 }
 
 static int do_undump(const char *fname)
 {
-    struct conversations_state state;
+    struct conversations_state *state;
     int r;
 
-    r = conversations_open(&state, fname);
+    r = conversations_open_path(fname, &state);
     if (r) {
 	/* TODO: wouldn't it be nice if we could translate this
 	 * error code into somethine useful for humans? */
@@ -123,14 +123,14 @@ static int do_undump(const char *fname)
 	return -1;
     }
 
-    r = conversations_truncate(&state);
+    r = conversations_truncate(state);
     if (r) {
 	fprintf(stderr, "Failed to truncate conversations database %s: %s\n",
 		fname, error_message(r));
 	goto out;
     }
 
-    r = conversations_undump(&state, stdin);
+    r = conversations_undump(state, stdin);
     if (r) {
 	fprintf(stderr, "Failed to undump to conversations database %s: %s\n",
 		fname, error_message(r));
@@ -143,7 +143,7 @@ static int do_undump(const char *fname)
 		fname, error_message(r));
 
 out:
-    conversations_close(&state);
+    conversations_abort(&state);
     return r;
 }
 
@@ -199,19 +199,17 @@ static int do_zero(const char *inboxname, const char *fname)
 static int build_cid_cb(const char *mboxname,
 		        int matchlen __attribute__((unused)),
 		        int maycreate __attribute__((unused)),
-		        void *rock __attribute__((unused)))
+		        void *rock)
 {
     struct mailbox *mailbox = NULL;
     const char *fname = NULL;
     struct index_record record;
     uint32_t recno;
     int r;
+    struct conversations_state *cstate = (struct conversations_state *)rock;
 
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r) return r;
-
-    r = mailbox_open_conversations(mailbox);
-    if (r) goto done;
 
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
@@ -228,7 +226,7 @@ static int build_cid_cb(const char *mboxname,
 	/* parse the file - XXX: should abstract this bit */
 	fname = mailbox_message_fname(mailbox, record.uid);
 
-	r = message_update_conversations_file(&mailbox->cstate, &record, fname);
+	r = message_update_conversations_file(cstate, &record, fname);
 	if (r) goto done;
 
 	r = mailbox_rewrite_index_record(mailbox, &record);
@@ -263,17 +261,17 @@ static void do_user(const char *userid)
     char *fname;
     int r;
 
-    inboxname = mboxname_user_inbox(userid);
-    if (inboxname == NULL) {
-	fprintf(stderr, "Invalid userid %s", userid);
-	return;
-    }
-
-    fname = conversations_getpath(inboxname);
+    fname = conversations_getuserpath(userid);
     if (fname == NULL) {
 	fprintf(stderr, "Unable to get conversations database "
 			"filename for userid \"%s\"\n",
 			userid);
+	return;
+    }
+
+    inboxname = mboxname_user_inbox(userid);
+    if (inboxname == NULL) {
+	fprintf(stderr, "Invalid userid %s", userid);
 	return;
     }
 
