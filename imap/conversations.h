@@ -188,4 +188,6 @@ extern int conversations_rename_cid(struct conversations_state *state,
 				    conversation_id_t from_cid,
 				    conversation_id_t to_cid);
 
+extern int conversations_wipe_counts(struct conversations_state *state);
+
 #endif /* __CYRUS_CONVERSATIONS_H_ */
