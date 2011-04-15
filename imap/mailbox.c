@@ -796,13 +796,6 @@ static void mailbox_release_resources(struct mailbox *mailbox)
     }
     if (mailbox->cache_buf.s)
 	map_free((const char **)&mailbox->cache_buf.s, &mailbox->cache_len);
-
-    if (mailbox->local_cstate) {
-	int r = conversations_commit(&mailbox->local_cstate);
-	if (r)
-	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
-		   mailbox->name, error_message(r));
-    }
 }
 
 /*
@@ -1051,6 +1044,8 @@ void mailbox_close(struct mailbox **mailboxptr)
 	    else if (mailbox->i.options & OPT_MAILBOX_NEEDS_UNLINK)
 		mailbox_index_unlink(mailbox);
 	    /* or we missed out - someone else beat us to it */
+	    /* anyway, unlock again */
+	    mailbox_unlock_index(mailbox, NULL);
 	}
 	/* otherwise someone else has the mailbox locked 
 	 * already, so they can handle the cleanup in
@@ -1705,6 +1700,13 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	    syslog(LOG_ERR, "IOERROR: unlocking index of %s: %m", 
 		mailbox->name);
 	mailbox->index_locktype = 0;
+    }
+
+    if (mailbox->local_cstate) {
+	int r = conversations_commit(&mailbox->local_cstate);
+	if (r)
+	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
+		   mailbox->name, error_message(r));
     }
 }
 
