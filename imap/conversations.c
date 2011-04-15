@@ -222,6 +222,7 @@ void _conv_remove (struct conversations_state **statep)
 	    *statep = NULL;
 	    return;
 	}
+	prevp = &cur->next;
     }
 
     fatal("unknown conversation db closed", EC_SOFTWARE);
