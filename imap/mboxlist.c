@@ -650,6 +650,7 @@ int mboxlist_createmailbox_full(const char *name, int mbtype,
 				int isadmin, const char *userid,
 				struct auth_state *auth_state,
 				int options, unsigned uidvalidity,
+				modseq_t highestmodseq,
 				const char *copyacl, const char *uniqueid,
 				int localonly, int forceuser, int dbonly,
 				struct mailbox **mboxptr, struct dlist *extargs)
@@ -692,10 +693,10 @@ int mboxlist_createmailbox_full(const char *name, int mbtype,
     }
 
     if (!dbonly && !isremote) {
-
 	/* Filesystem Operations */
 	r = mailbox_create(name, newpartition, acl, uniqueid,
-			   useptr, options, uidvalidity, &newmailbox);
+			   useptr, options, uidvalidity,
+			   highestmodseq, &newmailbox);
     }
 
     if (r) goto done; /* CREATE failed */ 
@@ -758,7 +759,7 @@ int mboxlist_createmailbox(const char *name, int mbtype,
 		  | OPT_POP3_NEW_UIDL;
     return mboxlist_createmailbox_full(name, mbtype, partition,
 				       isadmin, userid, auth_state,
-				       options, 0, NULL, NULL, localonly,
+				       options, 0, 0, NULL, NULL, localonly,
 				       forceuser, dbonly, NULL, extargs);
 }
 
@@ -766,12 +767,14 @@ int mboxlist_createsync(const char *name, int mbtype,
 			const char *partition,
 			const char *userid, struct auth_state *auth_state,
 			int options, unsigned uidvalidity,
+			modseq_t highestmodseq,
 			const char *acl, const char *uniqueid,
 			struct mailbox **mboxptr)
 {
     return mboxlist_createmailbox_full(name, mbtype, partition,
 				       1, userid, auth_state,
-				       options, uidvalidity, acl, uniqueid,
+				       options, uidvalidity, 
+				       highestmodseq, acl, uniqueid,
 				       0, 1, 0, mboxptr, NULL);
 }
 
