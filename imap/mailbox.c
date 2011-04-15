@@ -796,6 +796,13 @@ static void mailbox_release_resources(struct mailbox *mailbox)
     }
     if (mailbox->cache_buf.s)
 	map_free((const char **)&mailbox->cache_buf.s, &mailbox->cache_len);
+
+    if (mailbox->local_cstate) {
+	int r = conversations_commit(&mailbox->local_cstate);
+	if (r)
+	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
+		   mailbox->name, error_message(r));
+    }
 }
 
 /*
@@ -1534,6 +1541,12 @@ restart:
 	    mailbox->is_readonly = 0;
 	    r = mailbox_open_index(mailbox);
 	}
+	/* XXX - this could be handled out a layer, but we always
+	 * need to have a locked conversations DB */
+	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)
+	    && !conversations_get_mbox(mailbox->name)) {
+	    r = conversations_open_mbox(mailbox->name, &mailbox->local_cstate);
+	}
 	if (!r) r = lock_blocking(mailbox->index_fd);
     }
     else if (locktype == LOCK_SHARED) {
@@ -1876,20 +1889,7 @@ int mailbox_commit_quota(struct mailbox *mailbox)
     return 0;
 }
 
-static int mailbox_commit_conversations(struct mailbox *mailbox)
-{
-    int r = 0;
-    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 
-    if (cstate) {
-	r = conversations_commit(&cstate);
-	if (r)
-	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
-		   mailbox->name, error_message(r));
-    }
-
-    return r;
-}
 
 /*
  * Write the index header for 'mailbox'
@@ -1908,9 +1908,6 @@ int mailbox_commit(struct mailbox *mailbox)
     if (r) return r;
 
     r = mailbox_commit_header(mailbox);
-    if (r) return r;
-
-    r = mailbox_commit_conversations(mailbox);
     if (r) return r;
 
     if (!mailbox->i.dirty)

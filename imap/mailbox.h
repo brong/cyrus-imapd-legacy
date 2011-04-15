@@ -225,6 +225,9 @@ struct mailbox {
     char *quotaroot;
     char *flagname[MAX_USER_FLAGS];
 
+    /* conversations */
+    struct conversations_state *local_cstate;
+
     /* change management */
     int modseq_dirty;
     int header_dirty;
