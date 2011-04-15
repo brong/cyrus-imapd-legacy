@@ -1421,6 +1421,7 @@ int index_convsort(struct index_state *state,
     unsigned int numresults = 0;
     struct index_record **changed = NULL;
     unsigned int nchanged = 0;
+    struct conversations_state *cstate = NULL;
 
     if (!windowargs)
 	windowargs = &default_windowargs;
@@ -1438,9 +1439,10 @@ int index_convsort(struct index_state *state,
 
     /* always grab xconvmodseq, so we report a growing
      * highestmodseq to all callers */
-    mailbox_open_conversations(state->mailbox);
-    conversation_getstatus(&state->mailbox->cstate,
-			   state->mailbox->name,
+    cstate = conversations_get_mbox(state->mailbox->name);
+    if (!cstate) return IMAP_CONVERSATIONS_NOT_OPEN;
+
+    conversation_getstatus(cstate, state->mailbox->name,
 			   &xconvmodseq, &numresults, 0);
 
     /* XXX - counts for a search - might need to cache somehow? */
@@ -1611,8 +1613,7 @@ int index_convsort(struct index_state *state,
 		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
 		    if (windowargs->conversations) {
 			conversation_t *convdata = NULL;
-			conversation_load(&state->mailbox->cstate,
-					  record->cid, &convdata);
+			conversation_load(cstate, record->cid, &convdata);
 			if (convdata->modseq > windowargs->modseq) {
 			    assert(nchanged < maxresults);
 			    changed[nchanged++] = record;

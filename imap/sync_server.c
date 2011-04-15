@@ -1243,9 +1243,10 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		/* if we want the master CID, we can do that now */
 		if ((r & SYNC_CHOOSE_MASTER)) {
 		    if ((r & SYNC_CHOOSE_CLASH)) {
+			struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 			/* We chose the master's CID but the replica has
 		         * a non-NULL CID which will need to be rewritten. */
-			mailbox_rename_cid(&mailbox->cstate, rrecord.cid, cid);
+			mailbox_rename_cid(cstate, rrecord.cid, cid);
 		    }
 		    /* the rename_cid will do this anyway, but if we get in early
 		     * we can avoid the MODSEQ bump which would cause a CRC

@@ -93,57 +93,171 @@
 #define CONVERSATIONS_VERSION 0
 
 
-char *conversations_getpath(const char *mboxname)
+char *conversations_getuserpath(const char *username)
+{
+    struct mboxname_parts parts;
+    char *fname;
+
+    if (mboxname_userid_to_parts(username, &parts))
+	return NULL;
+    fname = mboxname_conf_getpath(&parts, FNAME_CONVERSATIONS_SUFFIX);
+    mboxname_free_parts(&parts);
+
+    return fname;
+}
+
+char *conversations_getmboxpath(const char *mboxname)
 {
     struct mboxname_parts parts;
     char *fname;
 
     if (mboxname_to_parts(mboxname, &parts))
 	return NULL;
-
     fname = mboxname_conf_getpath(&parts, FNAME_CONVERSATIONS_SUFFIX);
-
     mboxname_free_parts(&parts);
+
     return fname;
 }
 
-
-int conversations_open(struct conversations_state *state, const char *fname)
+int conversations_open_path(const char *fname, struct conversations_state **statep)
 {
     int r;
+    struct conversations_open *open = NULL;
+    const char *key = "";
+    const char *val;
+    int keylen = 0;
+    int vallen;
 
     if (!fname)
 	return IMAP_MAILBOX_BADNAME;
-    memset(state, 0, sizeof(*state));
 
-    r = DB->open(fname, CYRUSDB_CREATE, &state->db);
-    if (r || state->db == NULL)
+    for (open = open_conversations; open; open = open->next) {
+	if (!strcmp(open->s.path, fname))
+	    return IMAP_CONVERSATIONS_ALREADY_OPEN;
+    }
+
+    open = xzmalloc(sizeof(struct conversations_open));
+
+    r = DB->open(fname, CYRUSDB_CREATE, &open->s.db);
+    if (r || open->s.db == NULL) {
+	free(open);
 	return IMAP_IOERROR;
+    }
+
+    open->s.path = xstrdup(fname);
+    open->next = open_conversations;
+    open_conversations = open;
+
+    /* XXX - nicer way to ensure a write lock immediately */
+    r = DB->fetchlock(open->s.db, key, keylen, &val, &vallen, &open->s.txn);
+
+    *statep = &open->s;
 
     return 0;
 }
 
-int conversations_close(struct conversations_state *state)
+int conversations_open_user(const char *username, struct conversations_state **statep)
 {
-    if (state->txn != NULL) {
-	DB->abort(state->db, state->txn);
-	state->txn = NULL;
+    char *path = conversations_getuserpath(username);
+    int r;
+    if (!path) return IMAP_MAILBOX_BADNAME;
+    r = conversations_open_path(path, statep);
+    free(path);
+    return r;
+}
+
+int conversations_open_mbox(const char *mboxname, struct conversations_state **statep)
+{
+    char *path = conversations_getmboxpath(mboxname);
+    int r;
+    if (!path) return IMAP_MAILBOX_BADNAME;
+    r = conversations_open_path(path, statep);
+    free(path);
+    return r;
+}
+
+struct conversations_state *conversations_get_path(const char *fname)
+{
+    struct conversations_open *open = NULL;
+
+    for (open = open_conversations; open; open = open->next) {
+	if (!strcmp(open->s.path, fname))
+	    return &open->s;
     }
-    if (state->db != NULL) {
+    
+    return NULL;
+}
+
+struct conversations_state *conversations_get_user(const char *username)
+{
+    struct conversations_state *state;
+    char *path = conversations_getuserpath(username);
+    if (!path) return NULL;
+    state = conversations_get_path(path);
+    free(path);
+    return state;
+}
+
+struct conversations_state *conversations_get_mbox(const char *mboxname)
+{
+    struct conversations_state *state;
+    char *path = conversations_getmboxpath(mboxname);
+    if (!path) return NULL;
+    state = conversations_get_path(path);
+    free(path);
+    return state;
+}
+
+
+void _conv_remove (struct conversations_state **statep)
+{
+    struct conversations_open **prevp = &open_conversations;
+    struct conversations_open *cur;
+
+    for (cur = open_conversations; cur; cur = cur->next) {
+	if (*statep == &cur->s) {
+	    /* found it! */
+	    *prevp = cur->next;
+	    free(cur);
+	    *statep = NULL;
+	    return;
+	}
+    }
+
+    fatal("unknown conversation db closed", EC_SOFTWARE);
+}
+
+int conversations_abort(struct conversations_state **statep)
+{
+    struct conversations_state *state = *statep;
+
+    if (!state) return 0;
+    
+    if (state->db) {
+	if (state->txn)
+	    DB->abort(state->db, state->txn);
 	DB->close(state->db);
-	state->db = NULL;
     }
+
+    _conv_remove(statep);
+
     return 0;
 }
 
-int conversations_commit(struct conversations_state *state)
+int conversations_commit(struct conversations_state **statep)
 {
+    struct conversations_state *state = *statep;
     int r = 0;
 
-    if (state->db != NULL && state->txn != NULL) {
-	r = DB->commit(state->db, state->txn);
-	state->txn = NULL;
+    if (!state) return 0;
+
+    if (state->db) {
+	if (state->txn)
+	    r = DB->commit(state->db, state->txn);
+	DB->close(state->db);
     }
+
+    _conv_remove(statep);
 
     return r;
 }
@@ -259,8 +373,6 @@ int conversations_get_msgid(struct conversations_state *state,
     const char *data;
     int r;
 
-    if (state->db == NULL)
-	return IMAP_IOERROR;
     r = check_msgid(msgid, 0, &keylen);
     if (r)
 	return r;
@@ -289,8 +401,6 @@ int conversation_save(struct conversations_state *state,
     int version = CONVERSATIONS_VERSION;
     int r = 0;
 
-    if (!state->db)
-	return IMAP_IOERROR;
     if (!conv)
 	return IMAP_INTERNAL;
     if (!conv->dirty)
@@ -483,9 +593,6 @@ int conversation_setstatus(struct conversations_state *state,
     int r = IMAP_IOERROR;
     int version = CONVERSATIONS_VERSION;
 
-    if (!state->db)
-	goto done;
-
     dl = dlist_newkvlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", modseq);
     dlist_setnum32(dl, "EXISTS", exists);
@@ -524,9 +631,6 @@ int conversation_load(struct conversations_state *state,
     conversation_t *conv;
     conv_folder_t *folder;
     int r;
-
-    if (!state->db)
-	return IMAP_IOERROR;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
     r = DB->fetch(state->db,
@@ -901,9 +1005,6 @@ int conversations_rename_cid(struct conversations_state *state,
 {
     struct rename_rock rrock;
     int r = 0;
-
-    if (!state->db)
-	return IMAP_IOERROR;
 
     memset(&rrock, 0, sizeof(rrock));
     rrock.state = state;
