@@ -4793,8 +4793,6 @@ static int do_xconvfetch(struct dlist *cidlist,
 	if (r) goto out;
     }
 
-    conversations_commit(&state);
-
     /* unchanged, woot */
     if (!folder_list.count)
 	goto out;
@@ -4827,6 +4825,7 @@ static int do_xconvfetch(struct dlist *cidlist,
 
 out:
     index_close(&index_state);
+    conversations_commit(&state);
     free_hash_table(&wanted_cids, NULL);
     strarray_fini(&folder_list);
     return r;
