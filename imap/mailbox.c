@@ -1486,6 +1486,19 @@ int mailbox_read_index_record(struct mailbox *mailbox,
     return r;
 }
 
+int mailbox_lock_conversations(struct mailbox *mailbox)
+{
+    /* not needed */
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    /* already locked */
+    if (conversations_get_mbox(mailbox->name))
+	return 0;
+
+    return conversations_open_mbox(mailbox->name, &mailbox->local_cstate);
+}
+
 /*
  * bsearch() function to compare two index record buffers by UID
  */
@@ -1535,6 +1548,7 @@ int mailbox_lock_index(struct mailbox *mailbox, int locktype)
     assert(!mailbox->index_locktype);
 
 restart:
+    r = 0;
 
     if (locktype == LOCK_EXCLUSIVE) {
 	/* handle read-only case cleanly - we need to re-open read-write first! */
@@ -1544,10 +1558,7 @@ restart:
 	}
 	/* XXX - this could be handled out a layer, but we always
 	 * need to have a locked conversations DB */
-	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)
-	    && !conversations_get_mbox(mailbox->name)) {
-	    r = conversations_open_mbox(mailbox->name, &mailbox->local_cstate);
-	}
+	if (!r) r = mailbox_lock_conversations(mailbox);
 	if (!r) r = lock_blocking(mailbox->index_fd);
     }
     else if (locktype == LOCK_SHARED) {
@@ -2912,6 +2923,13 @@ int mailbox_create(const char *name,
 	goto done;
     }
     mailbox->index_locktype = LOCK_EXCLUSIVE;
+    r = mailbox_lock_conversations(mailbox);
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: locking conversations %s %s",
+	       mailbox->name, error_message(r));
+	r = IMAP_IOERROR;
+	goto done;
+    }
 
     fname = mailbox_meta_fname(mailbox, META_CACHE);
     if (!fname) {
