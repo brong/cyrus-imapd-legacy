@@ -1033,12 +1033,12 @@ int conversations_wipe_counts(struct conversations_state *state)
     int r = 0;
     /* wipe B counts */
     r = DB->foreach(state->db, "B", 1, NULL, delete_cb,
-		    state->txn, &state->txn);
+		    state, &state->txn);
     if (r) return r;
 
     /* wipe F counts */
     r = DB->foreach(state->db, "F", 1, NULL, delete_cb,
-		    state->txn, &state->txn);
+		    state, &state->txn);
     return r;
 }
 
