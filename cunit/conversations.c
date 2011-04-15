@@ -17,123 +17,108 @@
 static void test_open(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
 static void test_getset(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     static const char C_MSGID[] = "<0001.1288854309@example.com>";
     static const conversation_id_t C_CID = 0x12345689abcdef0;
     conversation_id_t cid;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Database is empty, so get should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set_msgid(&state, C_MSGID, C_CID);
+    r = conversations_set_msgid(state, C_MSGID, C_CID);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
 
-    /* get should still succeed after the transaction is over */
-    memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
-    CU_ASSERT_EQUAL(r, 0);
-    CU_ASSERT_EQUAL(cid, C_CID);
-
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should still succeed after the db is closed & reopened */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
-    r = conversations_close(&state);
+    r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
 static void test_abort(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     static const char C_MSGID[] = "<0002.1288854309@example.com>";
     static const conversation_id_t C_CID = 0x10345689abcdef2;
     conversation_id_t cid;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Database is empty, so get should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set_msgid(&state, C_MSGID, C_CID);
+    r = conversations_set_msgid(state, C_MSGID, C_CID);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID);
 
-    /* closing without a commit aborts the txn */
-    r = conversations_close(&state);
+    /* abort the txn */
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* open the db again */
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* the set vanished with the txn abort, so get should
      * succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID, &cid);
+    r = conversations_get_msgid(state, C_MSGID, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
 static void test_prune(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     static const char C_MSGID1[] = "<0003.1288854309@example.com>";
     static const conversation_id_t C_CID1 = 0x1045689abcdef23;
     time_t stamp1;
@@ -146,27 +131,25 @@ static void test_prune(void)
     conversation_id_t cid;
     unsigned int nseen = 0, ndeleted = 0;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Add keys, with delays in between */
     /* TODO: CUnit needs a time warping system */
 
-    r = conversations_set_msgid(&state, C_MSGID1, C_CID1);
+    r = conversations_set_msgid(state, C_MSGID1, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
     stamp1 = time(NULL);
 
     sleep(4);
 
-    r = conversations_set_msgid(&state, C_MSGID2, C_CID2);
+    r = conversations_set_msgid(state, C_MSGID2, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
     stamp2 = time(NULL);
 
     sleep(4);
 
-    r = conversations_set_msgid(&state, C_MSGID3, C_CID3);
+    r = conversations_set_msgid(state, C_MSGID3, C_CID3);
     CU_ASSERT_EQUAL(r, 0);
     stamp3 = time(NULL);
 
@@ -175,25 +158,28 @@ static void test_prune(void)
 
     /* Should be able to get all 3 msgids */
 
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID1, &cid);
+    r = conversations_get_msgid(state, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID1);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID2, &cid);
+    r = conversations_get_msgid(state, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID3, &cid);
+    r = conversations_get_msgid(state, C_MSGID3, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID3);
 
     /* Prune out the oldest two.  Note we try to make this test
      * stable with respect to timing artifacts, such as clock
      * granularity, by careful choice of sleep times. */
-    r = conversations_prune(&state, stamp2+(stamp3-stamp2)/2,
+    r = conversations_prune(state, stamp2+(stamp3-stamp2)/2,
 			    &nseen, &ndeleted);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT(nseen >= 3);
@@ -205,21 +191,21 @@ static void test_prune(void)
      * record should succeed */
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID1, &cid);
+    r = conversations_get_msgid(state, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID2, &cid);
+    r = conversations_get_msgid(state, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID3, &cid);
+    r = conversations_get_msgid(state, C_MSGID3, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID3);
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
@@ -228,78 +214,75 @@ static void test_prune(void)
 static void test_two(void)
 {
     int r;
-    struct conversations_state state1;
-    struct conversations_state state2;
+    struct conversations_state *state1 = NULL;
+    struct conversations_state *state2 = NULL;
     static const char C_MSGID1[] = "<0006.1288854309@example.com>";
     static const conversation_id_t C_CID1 = 0x1089abcdef23456;
     static const char C_MSGID2[] = "<0007.1288854309@example.com>";
     static const conversation_id_t C_CID2 = 0x109abcdef234567;
     conversation_id_t cid;
 
-    memset(&state1, 0, sizeof(state1));
-    memset(&state2, 0, sizeof(state2));
-
-    r = conversations_open(&state1, DBNAME);
+    r = conversations_open_path(DBNAME, &state1);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_open(&state2, DBNAME2);
+    r = conversations_open_path(DBNAME2, &state2);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Databases are empty, so gets of either msgid from either db
      * should succeed and report no results */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state1, C_MSGID1, &cid);
+    r = conversations_get_msgid(state1, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state1, C_MSGID2, &cid);
+    r = conversations_get_msgid(state1, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state2, C_MSGID2, &cid);
+    r = conversations_get_msgid(state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state2, C_MSGID2, &cid);
+    r = conversations_get_msgid(state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     /* set should succeed */
-    r = conversations_set_msgid(&state1, C_MSGID1, C_CID1);
+    r = conversations_set_msgid(state1, C_MSGID1, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_set_msgid(&state2, C_MSGID2, C_CID2);
+    r = conversations_set_msgid(state2, C_MSGID2, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should now succeed and report the value we gave it
      * and not the value in the other db */
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state1, C_MSGID1, &cid);
+    r = conversations_get_msgid(state1, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID1);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state1, C_MSGID2, &cid);
+    r = conversations_get_msgid(state1, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state2, C_MSGID1, &cid);
+    r = conversations_get_msgid(state2, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, NULLCONVERSATION);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state2, C_MSGID2, &cid);
+    r = conversations_get_msgid(state2, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
-    r = conversations_close(&state1);
+    r = conversations_abort(&state1);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_close(&state2);
+    r = conversations_abort(&state2);
     CU_ASSERT_EQUAL(r, 0);
 }
 
@@ -356,7 +339,7 @@ static int num_folders(conversation_t *conv)
 static void test_cid_rename(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     static const char FOLDER1[] = "fnarp.com!user.smurf";
     static const char FOLDER2[] = "fnarp.com!user.smurf.foo bar";
     static const char FOLDER3[] = "fnarp.com!user.smurf.quux.foonly";
@@ -369,17 +352,15 @@ static void test_cid_rename(void)
     conversation_t *conv;
     conv_folder_t *folder;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* setup the records we expect */
-    r = conversations_set_msgid(&state, C_MSGID1, C_CID1);
+    r = conversations_set_msgid(state, C_MSGID1, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_set_msgid(&state, C_MSGID2, C_CID1);
+    r = conversations_set_msgid(state, C_MSGID2, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_set_msgid(&state, C_MSGID3, C_CID1);
+    r = conversations_set_msgid(state, C_MSGID3, C_CID1);
     CU_ASSERT_EQUAL(r, 0);
 
     conv = conversation_new();
@@ -398,33 +379,29 @@ static void test_cid_rename(void)
 			/*flagged*/0, /*attachments*/0,
 			/*modseq*/5);
 
-    r = conversation_save(&state, C_CID1, conv);
+    r = conversation_save(state, C_CID1, conv);
     CU_ASSERT_EQUAL(r, 0);
 
     /* commit & close */
     r = conversations_commit(&state);
-    CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
     CU_ASSERT_EQUAL(r, 0);
     conversation_free(conv);
     conv = NULL;
 
     /* open the db again */
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* do a rename */
-    r = conversations_rename_cid(&state, C_CID1, C_CID2);
+    r = conversations_rename_cid(state, C_CID1, C_CID2);
     CU_ASSERT_EQUAL(r, 0);
 
     /* commit & close */
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
 
     /* open the db again */
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /*
@@ -435,7 +412,7 @@ static void test_cid_rename(void)
      * will still be in the database at this point.
      */
     conv = NULL;
-    r = conversation_load(&state, C_CID1, &conv);
+    r = conversation_load(state, C_CID1, &conv);
     CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
     CU_ASSERT_EQUAL(conv->modseq, 8);
     CU_ASSERT_EQUAL(num_folders(conv), 3);
@@ -449,33 +426,33 @@ static void test_cid_rename(void)
     conv = NULL;
 
     conv = NULL;
-    r = conversation_load(&state, C_CID2, &conv);
+    r = conversation_load(state, C_CID2, &conv);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NULL(conv);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID1, &cid);
+    r = conversations_get_msgid(state, C_MSGID1, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID2, &cid);
+    r = conversations_get_msgid(state, C_MSGID2, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
     memset(&cid, 0x45, sizeof(cid));
-    r = conversations_get_msgid(&state, C_MSGID3, &cid);
+    r = conversations_get_msgid(state, C_MSGID3, &cid);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(cid, C_CID2);
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
 static void test_folders(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     static const char FOLDER1[] = "foobar.com!user.smurf";
     static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
     static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
@@ -483,14 +460,12 @@ static void test_folders(void)
     conversation_t *conv;
     conv_folder_t *folder;
 
-    memset(&state, 0, sizeof(state));
-
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* Database is empty, so get should succeed and report no results */
     conv = NULL;
-    r = conversation_load(&state, C_CID, &conv);
+    r = conversation_load(state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NULL(conv);
 
@@ -519,14 +494,14 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(folder->modseq, 4);
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
-    r = conversation_save(&state, C_CID, conv);
+    r = conversation_save(state, C_CID, conv);
     CU_ASSERT_EQUAL(r, 0);
     conversation_free(conv);
     conv = NULL;
 
     /* get should now succeed and report the value we gave it */
     conv = NULL;
-    r = conversation_load(&state, C_CID, &conv);
+    r = conversation_load(state, C_CID, &conv);
     CU_ASSERT_EQUAL(conv->dirty, 0);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL(conv);
@@ -552,7 +527,7 @@ static void test_folders(void)
 			/*modseq*/55);
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
-    r = conversation_save(&state, C_CID, conv);
+    r = conversation_save(state, C_CID, conv);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_EQUAL(conv->dirty, 0);
     conversation_free(conv);
@@ -560,7 +535,7 @@ static void test_folders(void)
 
     /* get should now succeed and report all values we gave it */
     conv = NULL;
-    r = conversation_load(&state, C_CID, &conv);
+    r = conversation_load(state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL(conv);
     CU_ASSERT_EQUAL(conv->exists, 18);
@@ -586,16 +561,14 @@ static void test_folders(void)
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
 
     /* open the db again */
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* get should still succeed and report all values we gave it */
     conv = NULL;
-    r = conversation_load(&state, C_CID, &conv);
+    r = conversation_load(state, C_CID, &conv);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL(conv);
     CU_ASSERT_EQUAL(conv->exists, 18);
@@ -619,7 +592,7 @@ static void test_folders(void)
     conversation_free(conv);
     conv = NULL;
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 }
 
@@ -664,7 +637,7 @@ static void gen_cid_folder(int i, conversation_id_t *cidp,
 static void test_dump(void)
 {
     int r;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     int fd;
     FILE *fp;
     char filename[64];
@@ -688,12 +661,12 @@ static void test_dump(void)
     memset(&state, 0, sizeof(state));
 
     /* generate some data in the database */
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
 	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
-	r = conversations_set_msgid(&state, msgid, cid);
+	r = conversations_set_msgid(state, msgid, cid);
 	CU_ASSERT_EQUAL(r, 0);
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
@@ -706,7 +679,7 @@ static void test_dump(void)
 				/*flagged*/0, /*attachments*/0,
 				/*modseq*/100);
 	}
-	r = conversation_save(&state, cid, conv);
+	r = conversation_save(state, cid, conv);
 	CU_ASSERT_EQUAL(r, 0);
 	conversation_free(conv);
 	conv = NULL;
@@ -714,17 +687,14 @@ static void test_dump(void)
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
 
     /* open and dump the database */
-    memset(&state, 0, sizeof(state));
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
-    conversations_dump(&state, fp);
+    conversations_dump(state, fp);
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 
     /* do some basic checks on the output file */
@@ -738,61 +708,54 @@ static void test_dump(void)
     CU_ASSERT_EQUAL(r, 0);
 
     /* open and truncate the database */
-    memset(&state, 0, sizeof(state));
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
-    r = conversations_truncate(&state);
+    r = conversations_truncate(state);
     CU_ASSERT_EQUAL(r, 0);
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
 
     /* check we can no longer find any of the data */
-    memset(&state, 0, sizeof(state));
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
 	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
-	r = conversations_get_msgid(&state, msgid, &cid2);
+	r = conversations_get_msgid(state, msgid, &cid2);
 	CU_ASSERT_EQUAL(r, 0);
 	CU_ASSERT_EQUAL(cid2, NULLCONVERSATION);
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
 	conv = NULL;
-	r = conversation_load(&state, cid, &conv);
+	r = conversation_load(state, cid, &conv);
 	CU_ASSERT_EQUAL(r, 0);
 	CU_ASSERT_PTR_NULL(conv);
     }
 
     /* now undump */
-    r = conversations_undump(&state, fp);
+    r = conversations_undump(state, fp);
     CU_ASSERT_EQUAL(r, 0);
 
     r = conversations_commit(&state);
     CU_ASSERT_EQUAL(r, 0);
-    r = conversations_close(&state);
-    CU_ASSERT_EQUAL(r, 0);
 
     /* finally check that we got all the data back */
-    memset(&state, 0, sizeof(state));
-    r = conversations_open(&state, DBNAME);
+    r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
 
     for (i = 0 ; i < N_MSGID_TO_CID ; i++) {
 	gen_msgid_cid(i, msgid, sizeof(msgid), &cid);
-	r = conversations_get_msgid(&state, msgid, &cid2);
+	r = conversations_get_msgid(state, msgid, &cid2);
 	CU_ASSERT_EQUAL(r, 0);
 	CU_ASSERT_EQUAL(cid, cid2);
     }
     for (i = 0 ; i < N_CID_TO_FOLDER ; i++) {
 	gen_cid_folder(i, &cid, &mboxnames);
 	conv = NULL;
-	r = conversation_load(&state, cid, &conv);
+	r = conversation_load(state, cid, &conv);
 	CU_ASSERT_EQUAL(r, 0);
 	CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
 	CU_ASSERT_EQUAL(conv->modseq, 100);
@@ -806,7 +769,7 @@ static void test_dump(void)
 	conv = NULL;
     }
 
-    r = conversations_close(&state);
+    r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 
     fclose(fp);
