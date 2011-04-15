@@ -225,9 +225,6 @@ struct mailbox {
     char *quotaroot;
     char *flagname[MAX_USER_FLAGS];
 
-    int conversations_open;
-    struct conversations_state cstate;
-
     /* change management */
     int modseq_dirty;
     int header_dirty;
@@ -544,7 +541,5 @@ extern int mailbox_post_nop_action(const char *name, unsigned int tag);
 extern unsigned int mailbox_nop_action_count, mailbox_nop_action_tag;
 extern unsigned int mailbox_nop_action_count;
 extern unsigned int mailbox_nop_action_tag;
-
-extern int mailbox_open_conversations(struct mailbox *mailbox);
 
 #endif /* INCLUDED_MAILBOX_H */

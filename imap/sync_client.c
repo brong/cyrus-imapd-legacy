@@ -1038,11 +1038,11 @@ static int compare_one_record(struct mailbox *mailbox,
 
 	    r = sync_choose_cid(mp, rp, &cid);
 	    if ((r & SYNC_CHOOSE_CLASH)) {
-		mailbox_open_conversations(mailbox);
+		struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 		if ((r & SYNC_CHOOSE_REPLICA))
-		    mailbox_rename_cid(&mailbox->cstate, mp->cid, rp->cid);
+		    mailbox_rename_cid(cstate, mp->cid, rp->cid);
 		else
-		    mailbox_rename_cid(&mailbox->cstate, rp->cid, mp->cid);
+		    mailbox_rename_cid(cstate, rp->cid, mp->cid);
 	    }
 	    mp->cid = cid;
 	}

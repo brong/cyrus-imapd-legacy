@@ -1882,14 +1882,13 @@ int mailbox_commit_quota(struct mailbox *mailbox)
 static int mailbox_commit_conversations(struct mailbox *mailbox)
 {
     int r = 0;
+    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 
-    if (mailbox->conversations_open) {
-	r = conversations_commit(&mailbox->cstate);
+    if (cstate) {
+	r = conversations_commit(&cstate);
 	if (r)
 	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
 		   mailbox->name, error_message(r));
-	conversations_close(&mailbox->cstate);
-	mailbox->conversations_open = 0;
     }
 
     return r;
@@ -2062,25 +2061,6 @@ int mailbox_index_recalc(struct mailbox *mailbox)
     return 0;
 }
 
-int mailbox_open_conversations(struct mailbox *mailbox)
-{
-    int r;
-
-    if (!mailbox->conversations_open) {
-	char *fname = conversations_getpath(mailbox->name);
-	r = conversations_open(&mailbox->cstate, fname);
-	if (r)
-	    syslog(LOG_ERR, "Error opening conversations database %s: %s",
-		   fname, error_message(r));
-	free(fname);
-	if (r)
-	    return r;
-	mailbox->conversations_open = 1;
-    }
-
-    return 0;
-}
-
 static int mailbox_update_conversations(struct mailbox *mailbox,
 					struct index_record *old,
 					struct index_record *new)
@@ -2094,9 +2074,14 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     int delta_attachments = 0;
     modseq_t modseq = 0;
     conversation_id_t cid = NULLCONVERSATION;
+    struct conversations_state *cstate = NULL;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
+
+    cstate = conversations_get_mbox(mailbox->name);
+    if (!cstate)
+	return IMAP_CONVERSATIONS_NOT_OPEN;
 
     if (!old && !new)
 	return IMAP_INTERNAL;
@@ -2118,11 +2103,7 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
     }
     cid = (new ? new->cid : old->cid);
 
-    r = mailbox_open_conversations(mailbox);
-    if (r)
-	return r;
-
-    r = conversation_load(&mailbox->cstate, cid, &conv);
+    r = conversation_load(cstate, cid, &conv);
     if (r)
 	return r;
     if (!conv)
@@ -2197,7 +2178,7 @@ static int mailbox_update_conversations(struct mailbox *mailbox,
 			delta_drafts, delta_flagged,
 			delta_attachments, modseq);
 
-    r = conversation_save(&mailbox->cstate, cid, conv);
+    r = conversation_save(cstate, cid, conv);
 
     conversation_free(conv);
     return r;

@@ -4603,9 +4603,7 @@ void cmd_xconvmeta(const char *tag)
 {
     int r;
     char c = ' ';
-    const char *inboxname = NULL;
-    char *fname = NULL;
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     struct dlist *cidlist = NULL;
     struct dlist *itemlist = NULL;
 
@@ -4639,33 +4637,20 @@ void cmd_xconvmeta(const char *tag)
 	goto done;
     }
 
-    inboxname = mboxname_user_inbox(imapd_userid);
-    if (!inboxname) {
-	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
-	goto done;
-    }
-
-    fname = conversations_getpath(inboxname);
-    if (!fname) {
-	prot_printf(imapd_out, "%s BAD no inbox for user\r\n", tag);
-	goto done;
-    }
-
-    r = conversations_open(&state, fname);
+    r = conversations_open_user(imapd_userid, &state);
     if (r) {
 	prot_printf(imapd_out, "%s BAD failed to open db: %s\r\n",
 		    tag, error_message(r));
 	goto done;
     }
 
-    do_xconvmeta(tag, &state, cidlist, itemlist);
+    do_xconvmeta(tag, state, cidlist, itemlist);
 
  done:
 
     dlist_free(&itemlist);
     dlist_free(&cidlist);
-    conversations_close(&state);
-    free(fname);
+    conversations_commit(&state);
 }
 
 /*
@@ -4798,10 +4783,8 @@ static int do_xconvfetch(struct dlist *cidlist,
 			 modseq_t ifchangedsince,
 			 struct fetchargs *fetchargs)
 {
-    struct conversations_state state;
+    struct conversations_state *state = NULL;
     int r = 0;
-    const char *inboxname;
-    char *fname = NULL;
     struct index_state *index_state = NULL;
     struct dlist *dl;
     hash_table wanted_cids = HASH_TABLE_INITIALIZER;
@@ -4809,26 +4792,18 @@ static int do_xconvfetch(struct dlist *cidlist,
     struct index_init init;
     int i;
 
-    inboxname = mboxname_user_inbox(imapd_userid);
-    if (!inboxname)
-	return IMAP_MAILBOX_BADNAME;
-
-    fname = conversations_getpath(inboxname);
-    if (!fname)
-	return IMAP_MAILBOX_BADNAME;
-
-    r = conversations_open(&state, fname);
+    r = conversations_open_user(imapd_userid, &state);
     if (r) goto out;
 
     construct_hash_table(&wanted_cids, 1024, 0);
 
     for (dl = cidlist->head; dl; dl = dl->next) {
-	r = xconvfetch_lookup(&state, dlist_num(dl), ifchangedsince,
+	r = xconvfetch_lookup(state, dlist_num(dl), ifchangedsince,
 			      &wanted_cids, &folder_list);
 	if (r) goto out;
     }
 
-    conversations_close(&state);
+    conversations_commit(&state);
 
     /* unchanged, woot */
     if (!folder_list.count)
@@ -4864,7 +4839,6 @@ out:
     index_close(&index_state);
     free_hash_table(&wanted_cids, NULL);
     strarray_fini(&folder_list);
-    free(fname);
     return r;
 }
 
@@ -7678,20 +7652,14 @@ static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
     if (statusitems & (STATUS_XCONVEXISTS | STATUS_XCONVUNSEEN 
 		    | STATUS_XCONVMODSEQ)) {
 	/* can only get for ourselves for now */
-	struct conversations_state state;
-	fname = conversations_getpath(mailboxname);
+	struct conversations_state *state = NULL;
 
-	if (!fname) {
-	    r = IMAP_MAILBOX_BADNAME;
-	    goto out;
-	}
-
-	r = conversations_open(&state, fname);
+	r = conversations_open_mbox(mailboxname, &state);
 	if (r) goto out;
-	    
-	r = conversation_getstatus(&state, mailboxname, &sd->xconvmodseq,
+
+	r = conversation_getstatus(state, mailboxname, &sd->xconvmodseq,
 				   &sd->xconvexists, &sd->xconvunseen);
-	conversations_close(&state);
+	conversations_abort(&state);
     }
 
 out:

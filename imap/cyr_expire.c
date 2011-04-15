@@ -303,8 +303,8 @@ static int expire_conversations(char *name,
 			        void *rock)
 {
     struct conversations_rock *crock = (struct conversations_rock *)rock;
-    char *filename = conversations_getpath(name);
-    struct conversations_state state;
+    char *filename = conversations_getmboxpath(name);
+    struct conversations_state *state = NULL;
     unsigned int nseen = 0, ndeleted = 0;
 
     if (hash_lookup(filename, &crock->seen)) {
@@ -316,10 +316,10 @@ static int expire_conversations(char *name,
     if (verbose)
 	fprintf(stderr, "Pruning conversations from db %s\n", filename);
 
-    conversations_open(&state, filename);
-    conversations_prune(&state, crock->expire_mark, &nseen, &ndeleted);
-    conversations_commit(&state);
-    conversations_close(&state);
+    if (!conversations_open_path(filename, &state)) {
+	conversations_prune(state, crock->expire_mark, &nseen, &ndeleted);
+	conversations_commit(&state);
+    }
     /* filename is in the hash table and will be freed later */
 
     crock->databases_seen++;

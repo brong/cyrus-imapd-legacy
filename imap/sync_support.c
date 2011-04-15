@@ -1587,10 +1587,10 @@ int sync_append_copyfile(struct mailbox *mailbox,
     }
 
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	r = mailbox_open_conversations(mailbox);
+	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 	if (!r) {
 	    record->cid = cid;	/* use the CID given us */
-	    r = message_update_conversations(&mailbox->cstate, record, body);
+	    r = message_update_conversations(cstate, record, body);
 	}
     }
     message_free_body(body);
