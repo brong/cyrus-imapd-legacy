@@ -23,7 +23,7 @@ static void test_actions(void)
     r = mailbox_create(MBOXNAME1, PARTITION, /*acl*/ACL,
 		       /*uniqueid*/NULL, /*specialuse*/NULL,
 		       /*options*/0, /*uidvalidity*/0,
-		       &mailbox);
+		       /*highestmodseq*/0, &mailbox);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL(mailbox);
     mailbox_close(&mailbox);
@@ -67,7 +67,7 @@ static void test_actions_rename_race(void)
     r = mailbox_create(MBOXNAME1, PARTITION, /*acl*/ACL,
 		       /*uniqueid*/NULL, /*specialuse*/NULL,
 		       /*options*/0, /*uidvalidity*/0,
-		       &mailbox);
+		       /*highestmodseq*/0, &mailbox);
     CU_ASSERT_EQUAL(r, 0);
     CU_ASSERT_PTR_NOT_NULL(mailbox);
     mailbox_close(&mailbox);
