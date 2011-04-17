@@ -390,28 +390,16 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
-int conversation_save(struct conversations_state *state,
-		      conversation_id_t cid,
-		      conversation_t *conv)
+int _conversation_save(struct conversations_state *state,
+		       const char *key, int keylen,
+		       conversation_t *conv)
 {
-    char bkey[CONVERSATION_ID_STRMAX+2];
     struct dlist *dl, *n, *nn;
     struct buf buf = BUF_INITIALIZER;
     const conv_folder_t *folder;
     const conv_sender_t *sender;
     int version = CONVERSATIONS_VERSION;
     int r = 0;
-
-    if (!conv)
-	return IMAP_INTERNAL;
-    if (!conv->dirty)
-	return 0;
-
-    /* old pre-conversations message, nothing to do */
-    if (!cid)
-	return 0;
-
-    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
 
     /* see if any 'F' keys need to be changed */
     for (folder = conv->folders ; folder ; folder = folder->next) {
@@ -492,7 +480,7 @@ int conversation_save(struct conversations_state *state,
     dlist_free(&dl);
 
     r = DB->store(state->db,
-		  bkey, strlen(bkey),
+		  key, keylen,
 		  buf.s, buf.len,
 		  &state->txn);
 
@@ -502,6 +490,26 @@ done:
     if (!r)
 	conv->dirty = 0;
     return r;
+}
+
+int conversation_save(struct conversations_state *state,
+		      conversation_id_t cid,
+		      conversation_t *conv)
+{
+    char bkey[CONVERSATION_ID_STRMAX+2];
+
+    if (!conv)
+	return IMAP_INTERNAL;
+    if (!conv->dirty)
+	return 0;
+
+    /* old pre-conversations message, nothing to do */
+    if (!cid)
+	return 0;
+
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
+
+    return _conversation_save(state, bkey, strlen(bkey), conv);
 }
 
 int conversation_getstatus(struct conversations_state *state,
@@ -614,35 +622,17 @@ int conversation_setstatus(struct conversations_state *state,
     return r;
 }
 
-
-int conversation_load(struct conversations_state *state,
-		      conversation_id_t cid,
-		      conversation_t **convp)
+int _conversation_load(const char *data, int datalen,
+		       conversation_t **convp)
 {
-    const char *data;
-    int datalen;
     const char *rest;
     int restlen;
     bit64 version;
-    char bkey[CONVERSATION_ID_STRMAX+2];
     struct dlist *dl = NULL;
     struct dlist *n, *nn;
     conversation_t *conv;
     conv_folder_t *folder;
     int r;
-
-    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
-    r = DB->fetch(state->db,
-		  bkey, strlen(bkey),
-		  &data, &datalen,
-		  &state->txn);
-
-    if (r == CYRUSDB_NOTFOUND) {
-	*convp = NULL;
-	return 0;
-    } else if (r != CYRUSDB_OK) {
-	return r;
-    }
 
     r = parsenum(data, &rest, datalen, &version);
     if (r) {
@@ -663,12 +653,7 @@ int conversation_load(struct conversations_state *state,
     }
 
     r = dlist_parsemap(&dl, 0, rest, restlen);
-    if (r) {
-	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
-	       CONV_FMT, cid);
-	*convp = NULL;
-	return 0;
-    }
+    if (r) return r;
 
     conv = conversation_new();
 
@@ -726,6 +711,38 @@ int conversation_load(struct conversations_state *state,
     dlist_free(&dl);
     conv->dirty = 0;
     *convp = conv;
+    return 0;
+}
+
+int conversation_load(struct conversations_state *state,
+		      conversation_id_t cid,
+		      conversation_t **convp)
+{
+    const char *data;
+    int datalen;
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    int r;
+
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &data, &datalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND) {
+	*convp = NULL;
+	return 0;
+    } else if (r != CYRUSDB_OK) {
+	return r;
+    }
+
+    r = _conversation_load(data, datalen, convp);
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
+	       CONV_FMT, cid);
+	*convp = NULL;
+    }
+
     return 0;
 }
 
@@ -972,6 +989,14 @@ struct rename_rock {
     unsigned long entries_renamed;
 };
 
+struct frename_rock {
+    struct conversations_state *state;
+    const char *from_name;
+    const char *to_name;
+    unsigned long entries_seen;
+    unsigned long entries_renamed;
+};
+
 static int do_one_rename(void *rock,
 		         const char *key, int keylen,
 		         const char *data, int datalen)
@@ -1014,6 +1039,89 @@ int conversations_rename_cid(struct conversations_state *state,
 
     syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu",
 			rrock.entries_seen, rrock.entries_renamed);
+
+    return r;
+}
+
+static int do_folder_rename(void *rock,
+			    const char *key, int keylen,
+			    const char *data, int datalen)
+{
+    struct frename_rock *frock = (struct frename_rock *)rock;
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    int r = 0;
+
+    _conversation_load(data, datalen, &conv);
+    if (!conv) return 0;
+
+    frock->entries_seen++;
+
+    for (folder = conv->folders; folder; folder = folder->next) {
+	if (strcmp(folder->mboxname, frock->from_name))
+	    continue;
+
+	/* change the record */
+	free(folder->mboxname);
+	folder->mboxname = xstrdup(frock->to_name);
+	r = _conversation_save(frock->state, key, keylen, conv);
+	frock->entries_renamed++;
+
+	break;
+    }
+
+    conversation_free(conv);
+
+    return r;
+}
+
+static int folder_key_rename(struct conversations_state *state,
+			     const char *from_name,
+			     const char *to_name)
+{
+    const char *val;
+    int vallen;
+    char *oldkey = strconcat("F", from_name, (void *)NULL);
+    char *newkey = strconcat("F", to_name, (void *)NULL);
+    int r = 0;
+
+    r = DB->fetch(state->db, oldkey, strlen(oldkey),
+		  &val, &vallen, &state->txn);
+    if (r) goto done;
+
+    DB->delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
+    r = DB->store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+
+ done:
+    free(oldkey);
+    free(newkey);
+
+    return r;
+}
+
+int conversations_rename_folder(struct conversations_state *state,
+			        const char *from_name,
+			        const char *to_name)
+{
+    struct frename_rock frock;
+    int r = 0;
+
+    memset(&frock, 0, sizeof(frock));
+    frock.state = state;
+    frock.from_name = from_name;
+    frock.to_name = to_name;
+
+    /* alternatively, find all conversations named in the folder.
+     * in a world with a million folders with a few conversations only
+     * this would make sense - but that's not really likely, so this
+     * is probably faster */
+
+    DB->foreach(state->db, "B", 1, NULL, do_folder_rename, &frock, &state->txn);
+
+    folder_key_rename(state, from_name, to_name);
+
+    syslog(LOG_NOTICE, "conversations_rename_folder: saw %lu cids, renamed folder in %lu",
+			frock.entries_seen, frock.entries_renamed);
 
     return r;
 }
