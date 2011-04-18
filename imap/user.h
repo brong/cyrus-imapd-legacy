@@ -46,6 +46,7 @@
 #define INCLUDED_USER_H
 
 #include "auth.h"
+#include "imap_err.h"
 
 /* path to user's sieve directory */
 const char *user_sieve_path(const char *user);
@@ -65,6 +66,9 @@ int user_renamedata(char *olduser, char *newuser, char *userid,
 
 /* Rename ACL for 'olduser' to 'newuser' on mailbox 'name'. */
 int user_renameacl(char *name, char *olduser, char *newuser);
+
+/* Rename conversations from 'olduser' to 'newuser' */
+int user_renameconversations(char *olduser, char *newuser);
 
 /* Copy a quotaroot from mailbox 'oldname' to 'newname' */
 int user_copyquotaroot(char *oldname, char *newname);
