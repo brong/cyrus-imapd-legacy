@@ -369,11 +369,6 @@ int user_renamedata(char *olduser, char *newuser,
 	user_renamesieve(olduser, newuser);
     }
 
-    if (!r) {
-	/* move conversations DB */
-	user_renameconversations(olduser, newuser);
-    }
-    
     return r;
 }
 
