@@ -3190,6 +3190,12 @@ int mailbox_delete(struct mailbox **mailboxptr)
 {
     int r = 0;
     struct mailbox *mailbox = *mailboxptr;
+    struct conversations_state *cstate = NULL;
+
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	cstate = conversations_get_mbox(mailbox->name);
+	assert(cstate);
+    }
 
     /* mark the quota removed */
     mailbox_quota_dirty(mailbox);
@@ -3204,6 +3210,10 @@ int mailbox_delete(struct mailbox **mailboxptr)
 
     /* remove any seen */
     seen_delete_mailbox(NULL, mailbox);
+
+    /* remove conversations records */
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	conversations_rename_folder(cstate, mailbox->name, NULL);
 
     /* can't unlink any files yet, because our promise to other
      * users of the mailbox applies! Can only unlink with an
@@ -3380,9 +3390,26 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 {
     int r;
     struct mailbox *newmailbox = NULL;
+    struct conversations_state *cstate = NULL;
     char *newquotaroot = NULL;
 
     assert(mailbox_index_islocked(oldmailbox, 1));
+
+    /* NOTE: in the case of renaming a user to another user, we
+     * update all the names in the SOURCE username.conversations,
+     * then we rename the conversation file last */
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	cstate = conversations_get_mbox(oldmailbox->name);
+	assert(cstate);
+    }
+
+    /* we can't rename back from a deleted mailbox, because the conversations
+     * information will be wrong.  Ideally we might re-calculate, but for now
+     * we just throw a big fat error */
+    if (mboxname_isdeletedmailbox(oldmailbox->name, NULL)) {
+	syslog(LOG_ERR, "can't rename a deleted mailbox %s", oldmailbox->name);
+	return IMAP_MAILBOX_BADNAME;
+    }
 
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
@@ -3437,6 +3464,14 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     /* commit the index changes */
     r = mailbox_commit(newmailbox);
     if (r) goto fail;
+
+    /* if new name is deleted, don't keep the numbers */
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	if (mboxname_isdeletedmailbox(newname, NULL))
+	    conversations_rename_folder(cstate, oldmailbox->name, NULL);
+	else
+	    conversations_rename_folder(cstate, oldmailbox->name, newname);
+    }
 
     if (config_auditlog)
 	syslog(LOG_NOTICE, "auditlog: rename sessionid=<%s> "
