@@ -3075,6 +3075,9 @@ int mailbox_delete(struct mailbox **mailboxptr)
 {
     int r = 0;
     struct mailbox *mailbox = *mailboxptr;
+    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+
+    assert(cstate);
     
     /* mark the mailbox deleted */
     mailbox_index_dirty(mailbox);
@@ -3090,6 +3093,9 @@ int mailbox_delete(struct mailbox **mailboxptr)
 
     /* remove any seen */
     seen_delete_mailbox(NULL, mailbox);
+
+    /* remove conversations records */
+    conversations_rename_folder(cstate, mailbox->name, NULL);
 
     /* can't unlink any files yet, because our promise to other
      * users of the mailbox applies! Can only unlink with an
