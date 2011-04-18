@@ -6350,8 +6350,10 @@ void cmd_rename(char *tag, char *oldname, char *newname, char *partition)
     }
 
     /* take care of deleting old ACLs, subscriptions, seen state and quotas */
-    if (!r && rename_user)
+    if (!r && rename_user) {
+	user_renameconversations(olduser, newuser);
 	user_deletedata(olduser, 1);
+    }
 
     imapd_check(NULL, 0);
 
