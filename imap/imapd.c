@@ -10463,7 +10463,7 @@ static int parse_windowargs(const char *tag, struct windowargs **wa)
 	}
 
 	if (!strcasecmp(arg.s, "CONVERSATIONS"))
-	    c = getuint32(imapd_in, &windowargs.conversations);
+	    windowargs.conversations = 1;
 	else if (!strcasecmp(arg.s, "LIMIT"))
 	    c = getuint32(imapd_in, &windowargs.limit);
 	else if (!strcasecmp(arg.s, "POSITION"))
