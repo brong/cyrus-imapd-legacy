@@ -3279,6 +3279,14 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     cstate = conversations_get_mbox(oldmailbox->name);
     assert(cstate);
 
+    /* we can't rename back from a deleted mailbox, because the conversations
+     * information will be wrong.  Ideally we might re-calculate, but for now
+     * we just throw a big fat error */
+    if (mboxname_isdeletedmailbox(oldmailbox->name, NULL)) {
+	syslog(LOG_ERR, "can't rename a deleted mailbox %s", oldmailbox->name);
+	return IMAP_MAILBOX_BADNAME;
+    }
+
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
 		       oldmailbox->acl, (userid ? NULL : oldmailbox->uniqueid),
@@ -3340,7 +3348,11 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     r = mailbox_commit(newmailbox);
     if (r) goto fail;
 
-    conversations_rename_folder(cstate, oldmailbox->name, newname);
+    /* if new name is deleted, don't keep the numbers */
+    if (mboxname_isdeletedmailbox(newname, NULL))
+	conversations_rename_folder(cstate, oldmailbox->name, NULL);
+    else
+	conversations_rename_folder(cstate, oldmailbox->name, newname);
 
     if (config_auditlog)
 	syslog(LOG_NOTICE, "auditlog: rename sessionid=<%s> "
