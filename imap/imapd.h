@@ -252,7 +252,7 @@ enum {
 
 /* Windowing arguments for the XCONVSORT command */
 struct windowargs {
-    uint32_t conversations;	/* whether to limit the results by
+    int conversations;		/* whether to limit the results by
 				   conversation id */
     uint32_t limit;		/* limit on how many messages to return,
 				 * 0 means unlimited. */
