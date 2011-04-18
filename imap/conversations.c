@@ -1073,6 +1073,7 @@ static int do_folder_rename(void *rock,
 	else {
 	    /* remove the record */
 	    *prevp = folder->next;
+	    conv->exists -= folder->exists;
 	    free(folder->mboxname);
 	    free(folder);
 	}
