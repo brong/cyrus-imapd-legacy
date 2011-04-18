@@ -368,6 +368,11 @@ int user_renamedata(char *olduser, char *newuser,
 	/* move sieve scripts */
 	user_renamesieve(olduser, newuser);
     }
+
+    if (!r) {
+	/* move conversations DB */
+	user_renameconversations(olduser, newuser);
+    }
     
     return r;
 }
@@ -408,6 +413,37 @@ int user_renameacl(char *name, char *olduser, char *newuser)
 
     free(aclalloc);
     mboxlist_entry_free(&mbentry);
+
+    return r;
+}
+
+int user_renameconversations(char *olduser, char *newuser)
+{
+    char *oldpath = conversations_getuserpath(olduser);
+    char *newpath = conversations_getuserpath(newuser);
+    int r = 0;
+
+    if (!strcmp(oldpath, newpath))
+	goto done;
+
+    if (cyrus_mkdir(newpath, 0755)) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    if (rename(oldpath, newpath)) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+    
+
+ done:
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: failed to rename conversations %s => %s: %m",
+	       olduser, newuser);
+    }
+    free(oldpath);
+    free(newpath);
 
     return r;
 }

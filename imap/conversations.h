@@ -190,4 +190,7 @@ extern int conversations_rename_cid(struct conversations_state *state,
 
 extern int conversations_wipe_counts(struct conversations_state *state);
 
+extern int conversations_rename_folder(struct conversations_state *state,
+			               const char *from_name,
+			               const char *to_name);
 #endif /* __CYRUS_CONVERSATIONS_H_ */
