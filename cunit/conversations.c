@@ -449,6 +449,125 @@ static void test_cid_rename(void)
     CU_ASSERT_EQUAL(r, 0);
 }
 
+static void test_folder_rename(void)
+{
+    int r;
+    struct conversations_state *state = NULL;
+    static const char FOLDER1[] = "fnarp.com!user.smurf";
+    static const char FOLDER2[] = "fnarp.com!user.smurf.foo";
+    static const char FOLDER3[] = "fnarp.com!user.smurf.bar";
+    static const char C_MSGID1[] = "<0008.1288854309@example.com>";
+    static const char C_MSGID2[] = "<0009.1288854309@example.com>";
+    static const char C_MSGID3[] = "<0010.1288854309@example.com>";
+    static const conversation_id_t C_CID = 0x10bcdef23456789a;
+    conversation_id_t cid;
+    conversation_t *conv;
+    conv_folder_t *folder;
+
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* setup the records we expect */
+    r = conversations_set_msgid(state, C_MSGID1, C_CID);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_set_msgid(state, C_MSGID2, C_CID);
+    CU_ASSERT_EQUAL(r, 0);
+    r = conversations_set_msgid(state, C_MSGID3, C_CID);
+    CU_ASSERT_EQUAL(r, 0);
+
+    conv = conversation_new();
+    CU_ASSERT_PTR_NOT_NULL(conv);
+
+    conversation_update(conv, FOLDER1,
+			/*exists*/3, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
+			/*modseq*/1);
+    conversation_update(conv, FOLDER2,
+			/*exists*/2, /*unseen*/0, /*drafts*/0,
+			/*flagged*/0, /*attachments*/0,
+			/*modseq*/8);
+
+    r = conversation_save(state, C_CID, conv);
+    CU_ASSERT_EQUAL(r, 0);
+
+    conversation_free(conv);
+    conv = NULL;
+
+    /* commit & close */
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* do a rename */
+    r = conversations_rename_folder(state, FOLDER2, FOLDER3);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* commit & close */
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 8);
+    CU_ASSERT_EQUAL(num_folders(conv), 2);
+    CU_ASSERT_EQUAL(conv->exists, 5);
+    folder = conversation_find_folder(conv, FOLDER1);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
+    CU_ASSERT_EQUAL(folder->exists, 3);
+    /* no record for folder2 */
+    folder = conversation_find_folder(conv, FOLDER2);
+    /* have a record for folder3 */
+    CU_ASSERT_PTR_NULL_FATAL(folder);
+    folder = conversation_find_folder(conv, FOLDER3);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
+    CU_ASSERT_EQUAL(folder->exists, 2);
+    conversation_free(conv);
+    conv = NULL;
+
+    /* now "delete" the folder */
+    r = conversations_rename_folder(state, FOLDER3, NULL);
+    CU_ASSERT_EQUAL(r, 0);
+
+    conversation_free(conv);
+    conv = NULL;
+
+    /* commit & close */
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
+    CU_ASSERT_EQUAL(conv->modseq, 8);
+    CU_ASSERT_EQUAL(num_folders(conv), 1);
+    CU_ASSERT_EQUAL(conv->exists, 3);
+    folder = conversation_find_folder(conv, FOLDER1);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
+    CU_ASSERT_EQUAL(folder->exists, 3);
+    /* no record for folder2 */
+    folder = conversation_find_folder(conv, FOLDER2);
+    /* have a record for folder3 */
+    CU_ASSERT_PTR_NULL_FATAL(folder);
+    folder = conversation_find_folder(conv, FOLDER3);
+    CU_ASSERT_PTR_NULL_FATAL(folder);
+    conversation_free(conv);
+    conv = NULL;
+
+    r = conversations_abort(&state);
+    CU_ASSERT_EQUAL(r, 0);
+}
+
 static void test_folders(void)
 {
     int r;
