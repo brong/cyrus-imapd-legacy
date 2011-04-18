@@ -1050,6 +1050,7 @@ static int do_folder_rename(void *rock,
     struct frename_rock *frock = (struct frename_rock *)rock;
     conversation_t *conv = NULL;
     conv_folder_t *folder;
+    conv_folder_t **prevp;
     int r = 0;
 
     _conversation_load(data, datalen, &conv);
@@ -1057,16 +1058,27 @@ static int do_folder_rename(void *rock,
 
     frock->entries_seen++;
 
+    prevp = &conv->folders;
     for (folder = conv->folders; folder; folder = folder->next) {
-	if (strcmp(folder->mboxname, frock->from_name))
+	if (strcmp(folder->mboxname, frock->from_name)) {
+	    prevp = &folder->next;
 	    continue;
+	}
 
-	/* change the record */
-	free(folder->mboxname);
-	folder->mboxname = xstrdup(frock->to_name);
+	if (frock->to_name) {
+	    /* change the record */
+	    free(folder->mboxname);
+	    folder->mboxname = xstrdup(frock->to_name);
+	}
+	else {
+	    /* remove the record */
+	    *prevp = folder->next;
+	    free(folder->mboxname);
+	    free(folder);
+	}
+
 	r = _conversation_save(frock->state, key, keylen, conv);
 	frock->entries_renamed++;
-
 	break;
     }
 
@@ -1082,7 +1094,7 @@ static int folder_key_rename(struct conversations_state *state,
     const char *val;
     int vallen;
     char *oldkey = strconcat("F", from_name, (void *)NULL);
-    char *newkey = strconcat("F", to_name, (void *)NULL);
+    char *newkey = NULL;
     int r = 0;
 
     r = DB->fetch(state->db, oldkey, strlen(oldkey),
@@ -1090,7 +1102,11 @@ static int folder_key_rename(struct conversations_state *state,
     if (r) goto done;
 
     DB->delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
-    r = DB->store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+
+    if (to_name) {
+	newkey = strconcat("F", to_name, (void *)NULL);
+	r = DB->store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+    }
 
  done:
     free(oldkey);
