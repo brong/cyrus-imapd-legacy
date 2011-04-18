@@ -86,6 +86,8 @@
 
 #define FNAME_SUBSSUFFIX "sub"
 
+static char *user_hash_meta(const char *userid, const char *suffix);
+
 #if 0
 static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 {
@@ -205,6 +207,26 @@ int user_deletedata(const char *userid, int wipe_user)
 
     /* delete sieve scripts */
     user_deletesieve(userid);
+
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	/* delete conversations file */
+	fname = conversations_getuserpath(userid);
+	(void) unlink(fname);
+	free(fname);
+
+	/* delete highestmodseq file */
+	fname = user_hash_meta(userid, "modseq");
+	(void) unlink(fname);
+	free(fname);
+
+	/* XXX: one could make an argument for keeping the UIDVALIDITY
+	 * file forever, so that UIDVALIDITY never gets reused. */
+
+	/* delete uidvalidity file */
+	fname = user_hash_meta(userid, "uidvalidity");
+	(void) unlink(fname);
+	free(fname);
+    }
 
     return 0;
 }
@@ -366,7 +388,7 @@ int user_renamedata(char *olduser, char *newuser,
 	/* move sieve scripts */
 	user_renamesieve(olduser, newuser);
     }
-    
+
     return r;
 }
 
@@ -406,6 +428,42 @@ int user_renameacl(char *name, char *olduser, char *newuser)
 
     free(aclalloc);
     mboxlist_entry_free(&mbentry);
+
+    return r;
+}
+
+int user_renameconversations(char *olduser, char *newuser)
+{
+    char *oldpath = NULL;
+    char *newpath = NULL;
+    int r = 0;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    oldpath = conversations_getuserpath(olduser);
+    newpath = conversations_getuserpath(newuser);
+
+    if (!strcmp(oldpath, newpath))
+	goto done;
+
+    if (cyrus_mkdir(newpath, 0755)) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    if (rename(oldpath, newpath)) {
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+ done:
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: failed to rename conversations %s => %s: %m",
+	       olduser, newuser);
+    }
+    free(oldpath);
+    free(newpath);
 
     return r;
 }
