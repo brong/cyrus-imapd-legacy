@@ -3265,9 +3265,16 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 {
     int r;
     struct mailbox *newmailbox = NULL;
+    struct conversations_state *cstate;
     char *newquotaroot = NULL;
 
     assert(mailbox_index_islocked(oldmailbox, 1));
+
+    /* NOTE: in the case of renaming a user to another user, we
+     * update all the names in the SOURCE username.conversations,
+     * then we rename the conversation file last */
+    cstate = conversations_get_mbox(oldmailbox->name);
+    assert(cstate);
 
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
@@ -3329,6 +3336,8 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     /* commit the index changes */
     r = mailbox_commit(newmailbox);
     if (r) goto fail;
+
+    conversations_rename_folder(cstate, oldmailbox->name, newname);
 
     if (config_auditlog)
 	syslog(LOG_NOTICE, "auditlog: rename sessionid=<%s> "
