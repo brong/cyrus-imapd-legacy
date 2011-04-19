@@ -5195,6 +5195,7 @@ void cmd_xconvsort(char *tag)
     struct windowargs *windowargs = NULL;
     struct index_init init;
     struct index_state *oldstate = NULL;
+    struct conversations_state *cstate = NULL;
     clock_t start = clock();
     char internalname[MAX_MAILBOX_NAME];
     char mytime[100];
@@ -5263,6 +5264,10 @@ void cmd_xconvsort(char *tag)
     (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
 					   imapd_userid, internalname);
 
+    /* open the conversations state first - we don't care if it fails,
+     * because that probably just means it's already open */
+    conversations_open_mbox(internalname, &cstate);
+
     /* need to force a re-read from scratch into a new
      * index - even if this mailbox is selected - because
      * we might ask for deleted messages */
@@ -5310,6 +5315,7 @@ void cmd_xconvsort(char *tag)
     prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
 		error_message(IMAP_OK_COMPLETED), n, mytime);
 
+    conversations_abort(&cstate);
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
     free_windowargs(windowargs);
@@ -5317,6 +5323,7 @@ void cmd_xconvsort(char *tag)
 
 error:
     eatline(imapd_in, (c == EOF ? ' ' : c));
+    conversations_abort(&cstate);
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
     free_windowargs(windowargs);
