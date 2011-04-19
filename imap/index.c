@@ -1442,7 +1442,7 @@ int index_convsort(struct index_state *state,
     /* always grab xconvmodseq, so we report a growing
      * highestmodseq to all callers */
     cstate = conversations_get_mbox(state->mailbox->name);
-    if (!cstate) return IMAP_CONVERSATIONS_NOT_OPEN;
+    if (!cstate) return 0;
 
     conversation_getstatus(cstate, state->mailbox->name,
 			   &xconvmodseq, &numresults, 0);
