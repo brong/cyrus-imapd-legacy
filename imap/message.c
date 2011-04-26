@@ -381,6 +381,27 @@ int message_parse_binary_file(FILE *infile, struct body **body)
     return 0;
 }
 
+static int message_has_attachment(const struct body *body)
+{
+    int i;
+
+    /* if it's multipart, if more than 2 parts or any non-text
+     * parts, it has an attachment */
+    if (!strcasecmp(body->type, "MULTIPART")) {
+	if (body->numparts > 2)
+	    return 1;
+	for (i = 0; i < body->numparts; i++) {
+	    if (strcasecmp(body->subpart[i].type, "TEXT"))
+		return 1;
+	}
+    }
+    /* if single part and not text, it's an attachment */
+    else if (strcasecmp(body->type, "TEXT")) {
+	return 1;
+    }
+
+    return 0;
+}
 
 /*
  * Parse the message at 'msg_base' of length 'msg_len'.
@@ -399,6 +420,9 @@ int message_parse_mapped(const char *msg_base, unsigned long msg_len,
 		       DEFAULT_CONTENT_TYPE, (strarray_t *)0);
 
     message_guid_generate(&body->guid, msg_base, msg_len);
+
+    if (message_has_attachment(body))
+	body->message_flags |= FLAG_HASATTACHMENT;
 
     return 0;
 }
@@ -507,6 +531,9 @@ int message_create_record(struct index_record *record,
     record->header_size = body->header_size;
     record->content_lines = body->content_lines;
     message_guid_copy(&record->guid, &body->guid);
+
+    /* track found attachemnts or truedomain headers */
+    record->system_flags |= body->message_flags;
 
     message_write_cache(record, body);
 
@@ -758,6 +785,11 @@ static int message_parse_headers(struct msg *msg, struct body *body,
 		    body->received_date = 0;
 		}
 		message_parse_string(value, &body->received_date);
+		break;
+	    case RFC822_X_TRUEDOMAIN:
+		/* only want to look at the top level */
+		if (boundaries->count == 0 && strstr(value, "True"))
+		    body->message_flags |= FLAG_HASTRUEDOMAIN;
 		break;
 	    default:
 		break;
@@ -2711,46 +2743,4 @@ void message_parse_env_address(char *str, struct address *addr)
     addr->mailbox = parse_nstring(&str);
     str++; /* skip SP */
     addr->domain = parse_nstring(&str);
-}
-
-int message_has_attachment(struct buf *body)
-{
-    struct dlist *dl = NULL;
-    struct dlist *ditem = NULL;
-    int res = 0;
-    int r;
-    int count = 0;
-
-    r = dlist_parsemap(&dl, 0, body->s, body->len);
-    if (r) return 0;
-
-    ditem = dl->head;
-
-    /* check for attachments */
-    if (dlist_isatomlist(ditem)) {
-	struct dlist *subitem;
-	for (subitem = ditem->head; subitem; subitem = subitem->next) {
-	    /* sub part */
-	    if (dlist_isatomlist(subitem)) {
-		struct dlist *typeitem = dlist_getchildn(subitem, 0);
-		/* sub item that's not 'text', definitely an attachment */
-		if (strcasecmp(dlist_cstring(typeitem), "text")) {
-		    res = 1;
-		    break;
-		}
-		count++;
-	    }
-	}
-	if (count > 2) res = 1;
-    }
-    else {
-	/* single part - if it's not text */
-	if (strcasecmp(dlist_cstring(ditem), "text")) {
-	    res = 1;
-	}
-    }
-
-    dlist_free(&dl);
-    
-    return res;
 }

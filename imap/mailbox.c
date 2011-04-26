@@ -2078,8 +2078,8 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     int r = 0;
     conversation_t *conv = NULL;
     int delta_exists = 0;
-    int delta_unseen = 0;
     int delta_drafts = 0;
+    int delta_unseen = 0;
     int delta_flagged = 0;
     int delta_attachments = 0;
     modseq_t modseq = 0;
@@ -2126,29 +2126,30 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    delta_exists--;
 	    if (old->system_flags & FLAG_DRAFT)
 		delta_drafts--;
-	    /* drafts don't count towards anything else */
-	    else {
-		if (old->system_flags & FLAG_FLAGGED)
-		    delta_flagged--;
-		if (!(old->system_flags & FLAG_SEEN))
-		    delta_unseen--;
-	    }
+	    /* drafts are never unseen */
+	    else if (!(old->system_flags & FLAG_SEEN))
+		delta_unseen--;
+	    if (old->system_flags & FLAG_FLAGGED)
+		delta_flagged--;
+	    if (old->system_flags & FLAG_HASATTACHMENT)
+		delta_attachments--;
 	}
 	modseq = MAX(modseq, old->modseq);
     }
+
     if (new) {
 	/* add any counts */
 	if (!(new->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists++;
 	    if (new->system_flags & FLAG_DRAFT)
 		delta_drafts++;
-	    /* drafts don't count towards anything else */
-	    else {
-		if (new->system_flags & FLAG_FLAGGED)
-		    delta_flagged++;
-		if (!(new->system_flags & FLAG_SEEN))
-		    delta_unseen++;
-	    }
+	    /* drafts are never unseen */
+	    else if (!(new->system_flags & FLAG_SEEN))
+		delta_unseen++;
+	    if (new->system_flags & FLAG_FLAGGED)
+		delta_flagged++;
+	    if (new->system_flags & FLAG_HASATTACHMENT)
+		delta_attachments++;
 	}
 	modseq = MAX(modseq, new->modseq);
     }
@@ -2174,10 +2175,6 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 
 	    conversation_add_sender(conv, addr.name, addr.route,
 				    addr.mailbox, addr.domain);
-
-	    /* and check if there are attachments */
-	    if (message_has_attachment(cacheitem_buf(new, CACHE_BODY)))
-		delta_attachments++;
 
 	    free(env);
 	}
