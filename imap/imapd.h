@@ -344,7 +344,8 @@ enum {
 /* Bitmask for client capabilities */
 enum {
     CAPA_CONDSTORE =	(1<<0),
-    CAPA_QRESYNC = 	(1<<1)
+    CAPA_QRESYNC = 	(1<<1),
+    CAPA_FASTMAILMODE = (1<<2)
 };
 
 /* Bitmask for urlfetch params */

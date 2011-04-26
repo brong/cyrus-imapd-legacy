@@ -84,7 +84,7 @@ struct index_init {
     struct auth_state *authstate;
     struct protstream *out;
     int examine_mode;
-    int qresync;
+    unsigned client_capa;
     int select;
     struct vanished_params vanished;
     int want_expunged;
@@ -120,7 +120,7 @@ struct index_state {
     char *flagname[MAX_USER_FLAGS];
     char *userid;
     struct protstream *out;
-    int qresync;
+    int client_capa;
     struct auth_state *authstate;
     int want_expunged;
 };
