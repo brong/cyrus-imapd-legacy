@@ -2706,6 +2706,17 @@ static void index_fetchflags(struct index_state *state,
 	sepchar = ' ';
     }
 
+    if (state->client_capa & CAPA_FASTMAILMODE) {
+	if (im->record.system_flags & FLAG_HASATTACHMENT) {
+	    prot_printf(state->out, "%c\\HasAttachment", sepchar);
+	    sepchar = ' ';
+	}
+	if (im->record.system_flags & FLAG_HASTRUEDOMAIN) {
+	    prot_printf(state->out, "%c\\HasTruedomain", sepchar);
+	    sepchar = ' ';
+	}
+    }
+
     /* magic flags */
     for (flag = 0; flag < VECTOR_SIZE(state->flagname); flag++) {
 	if ((flag & 31) == 0) {
