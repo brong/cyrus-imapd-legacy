@@ -302,11 +302,16 @@ struct mailbox {
 #define INDEX_HEADER_SIZE (OFFSET_HEADER_CRC+4)
 #define INDEX_RECORD_SIZE (OFFSET_RECORD_CRC+4)
 
+/* real flags */
 #define FLAG_ANSWERED (1<<0)
 #define FLAG_FLAGGED (1<<1)
 #define FLAG_DELETED (1<<2)
 #define FLAG_DRAFT (1<<3)
 #define FLAG_SEEN (1<<4)
+/* message content informational flags */
+#define FLAG_HASATTACHMENT (1<<17)
+#define FLAG_HASTRUEDOMAIN (1<<18)
+/* tracking message lifecycle */
 #define FLAG_UNLINKED (1<<30)
 #define FLAG_EXPUNGED (1U<<31)
 
