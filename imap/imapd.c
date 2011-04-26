@@ -3789,7 +3789,7 @@ void cmd_select(char *tag, char *cmd, char *name)
 
     if (wasopen) prot_printf(imapd_out, "* OK [CLOSED] Ok\r\n");
 
-    init.qresync = imapd_client_capa & CAPA_QRESYNC;
+    init.client_capa = imapd_client_capa;
     init.userid = imapd_userid;
     init.authstate = imapd_authstate;
     init.out = imapd_out;
@@ -12047,9 +12047,13 @@ void cmd_enable(char *tag)
 	}
 	else if (!strcmp(arg.s, "qresync")) {
 	    imapd_client_capa |= CAPA_QRESYNC | CAPA_CONDSTORE;
-	    if (imapd_index) imapd_index->qresync = 1;
 	    prot_printf(imapd_out, " QRESYNC CONDSTORE");
 	}
+	else if (!strcmp(arg.s, "fastmailmode")) {
+	    imapd_client_capa |= CAPA_QRESYNC | CAPA_CONDSTORE | CAPA_FASTMAILMODE;
+	    prot_printf(imapd_out, " QRESYNC CONDSTORE FASTMAILMODE");
+	}
+	if (imapd_index) imapd_index->client_capa = imapd_client_capa;
     } while (c == ' ');
 
     prot_printf(imapd_out, "\r\n");

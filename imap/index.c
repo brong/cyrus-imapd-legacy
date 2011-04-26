@@ -235,7 +235,7 @@ int index_open(const char *name, struct index_init *init,
 	state->examining = init->examine_mode;
 
 	state->out = init->out;
-	state->qresync = init->qresync;
+	state->client_capa = init->client_capa;
 	state->want_expunged = init->want_expunged;
     }
     else {
@@ -652,7 +652,7 @@ int index_check(struct index_state *state, int usinguid, int printuid)
 	    fatal("Mailbox has been (re)moved", EC_IOERR);
 	}
 
-	if (state->exists && state->qresync) {
+	if (state->exists && (state->client_capa & CAPA_QRESYNC)) {
 	    /* XXX - is it OK to just expand to entire possible range? */
 	    prot_printf(state->out, "* VANISHED 1:%lu\r\n", state->last_uid);
 	}
@@ -2608,7 +2608,7 @@ static void index_tellexpunge(struct index_state *state)
 	    if (msgno > state->oldexists)
 		continue;
 	    state->oldexists--;
-	    if (state->qresync)
+	    if (state->client_capa & CAPA_QRESYNC)
 		seqset_add(vanishedlist, im->record.uid, 1);
 	    else
 		prot_printf(state->out, "* %u EXPUNGE\r\n", msgno);
@@ -2705,6 +2705,8 @@ static void index_fetchflags(struct index_state *state,
 	prot_printf(state->out, "%c\\Seen", sepchar);
 	sepchar = ' ';
     }
+
+    /* magic flags */
     for (flag = 0; flag < VECTOR_SIZE(state->flagname); flag++) {
 	if ((flag & 31) == 0) {
 	    flagmask = im->record.user_flags[flag/32];
@@ -2728,9 +2730,9 @@ static void index_printflags(struct index_state *state,
     /* http://www.rfc-editor.org/errata_search.php?rfc=5162
      * Errata ID: 1807 - MUST send UID and MODSEQ to all
      * untagged FETCH unsolicited responses */
-    if (usinguid || state->qresync)
+    if (usinguid || (state->client_capa & CAPA_QRESYNC))
 	prot_printf(state->out, " UID %u", im->record.uid);
-    if (state->qresync)
+    if (state->client_capa & CAPA_QRESYNC)
 	prot_printf(state->out, " MODSEQ (" MODSEQ_FMT ")", im->record.modseq);
     prot_printf(state->out, ")\r\n");
 }
