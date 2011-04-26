@@ -121,6 +121,9 @@ struct body {
      */
     char *decoded_body;
 
+    /* content related flags to set on the message */
+    bit32 message_flags;
+
     /* Message GUID. Only filled in at top level */
     struct message_guid guid;
 };
@@ -174,8 +177,6 @@ extern int message_update_conversations(struct conversations_state *,
 			         struct index_record *, const struct body *);
 extern int message_update_conversations_file(struct conversations_state *,
 				      struct index_record *, const char *);
-
-extern int message_has_attachment(struct buf *body);
 
 /* NOTE - scribbles on its input */
 extern void message_parse_env_address(char *str, struct address *addr);

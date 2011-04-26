@@ -1,5 +1,5 @@
 /* ANSI-C code produced by gperf version 3.0.3 */
-/* Command-line: gperf /tmp/compile_st_BRI5sx.gperf  */
+/* Command-line: gperf /tmp/compile_st_n1b2do.gperf  */
 /* Computed positions: -k'1,10,$' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -35,7 +35,7 @@
 struct rfc822_header_desc { const char *name; enum rfc822_header value; };
 #include <string.h>
 
-#define TOTAL_KEYWORDS 21
+#define TOTAL_KEYWORDS 22
 #define MIN_WORD_LENGTH 2
 #define MAX_WORD_LENGTH 25
 #define MIN_HASH_VALUE 2
@@ -178,7 +178,7 @@ __rfc822_header_lookup (register const char *str, register unsigned int len)
       {"Content-Disposition", RFC822_CONTENT_DISPOSITION},
       {"Message-ID", RFC822_MESSAGE_ID},
       {"In-Reply-To", RFC822_IN_REPLY_TO},
-      {"", 0},
+      {"X-Truedomain", RFC822_X_TRUEDOMAIN},
       {"Reply-To", RFC822_REPLY_TO},
       {"Content-Description", RFC822_CONTENT_DESCRIPTION},
       {"", 0},
@@ -241,6 +241,7 @@ const char *rfc822_header_to_string(enum rfc822_header v)
 	"Sender", /* RFC822_SENDER */
 	"To", /* RFC822_TO */
 	"X-Deliveredinternaldate", /* RFC822_X_DELIVEREDINTERNALDATE */
+	"X-Truedomain", /* RFC822_X_TRUEDOMAIN */
     };
     return (v >= 0 && v < (int)(sizeof(strs)/sizeof(strs[0])) ? strs[v] : NULL);
 }
