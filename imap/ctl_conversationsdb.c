@@ -277,6 +277,9 @@ static int recalc_counts_cb(const char *mboxname,
     r = mailbox_open_irl(mboxname, &mailbox);
     if (r) return r;
 
+    if (verbose)
+	printf("%s\n", mboxname);
+
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
 	if (r) goto done;
