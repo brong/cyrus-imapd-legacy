@@ -3072,7 +3072,7 @@ int mailbox_delete(struct mailbox **mailboxptr)
 {
     int r = 0;
     struct mailbox *mailbox = *mailboxptr;
-    struct conversations_state *cstate;
+    struct conversations_state *cstate = NULL;
 
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	cstate = conversations_get_mbox(mailbox->name);
@@ -3272,7 +3272,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 {
     int r;
     struct mailbox *newmailbox = NULL;
-    struct conversations_state *cstate;
+    struct conversations_state *cstate = NULL;
     char *newquotaroot = NULL;
 
     assert(mailbox_index_islocked(oldmailbox, 1));
