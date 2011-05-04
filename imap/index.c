@@ -1453,6 +1453,8 @@ int index_convsort(struct index_state *state,
 	    goto skip;
     } else {
 	numresults = state->exists;
+	if (windowargs->changedsince && state->highestmodseq <= windowargs->modseq)
+	    goto skip;
     }
 
     construct_hash_table(&seen_cids, 1024, 0);
