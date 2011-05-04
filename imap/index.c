@@ -1444,12 +1444,16 @@ int index_convsort(struct index_state *state,
     cstate = conversations_get_mbox(state->mailbox->name);
     if (!cstate) return 0;
 
-    conversation_getstatus(cstate, state->mailbox->name,
-			   &xconvmodseq, &numresults, 0);
+    if (windowargs->conversations) {
+	conversation_getstatus(cstate, state->mailbox->name,
+			       &xconvmodseq, &numresults, 0);
 
-    /* XXX - counts for a search - might need to cache somehow? */
-    if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
-	goto skip;
+	/* XXX - counts for a search - might need to cache somehow? */
+	if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
+	    goto skip;
+    } else {
+	numresults = state->exists;
+    }
 
     construct_hash_table(&seen_cids, 1024, 0);
     construct_hash_table(&old_seen_cids, 1024, 0);
