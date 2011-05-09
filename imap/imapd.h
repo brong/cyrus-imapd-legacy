@@ -144,6 +144,9 @@ struct storeargs {
     int silent;
     int seen;
     bit32 system_flags;
+    /* Note that we must pass the user flags as names because the
+     * lookup of user flag names must proceed under the index lock */
+    strarray_t flags;
     /* private to index.c */
     bit32 user_flags[MAX_USER_FLAGS/32];
     time_t update_time;
