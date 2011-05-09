@@ -3247,12 +3247,22 @@ static int index_storeflag(struct index_state *state, uint32_t msgno,
     struct index_map *im = &state->map[msgno-1];
     int r;
 
-    /* if it's changed already, skip out now */
-    if (im->record.modseq > storeargs->unchangedsince) return 0;
-
     /* if it's expunged already, skip out now */
     if (im->record.system_flags & FLAG_EXPUNGED)
 	return 0;
+
+    /* if it's changed already, skip out now */
+    if (im->record.modseq > storeargs->unchangedsince) {
+	if (!storeargs->modified) {
+	    unsigned int maxval = (storeargs->usinguid ?
+				    state->last_uid : state->exists);
+	    storeargs->modified = seqset_init(maxval, SEQ_SPARSE);
+	}
+	seqset_add(storeargs->modified,
+		   (storeargs->usinguid ? im->record.uid : msgno),
+		   /*ismember*/1);
+	return 0;
+    }
 
     oldmodseq = im->record.modseq;
 
