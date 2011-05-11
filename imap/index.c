@@ -965,11 +965,16 @@ int index_store(struct index_state *state, char *sequence,
 
     for (i = 0; i < flags->count ; i++) {
 	r = mailbox_user_flag(mailbox, flags->data[i], &userflag);
-	if (r) goto fail;
+	if (r) goto out;
 	storeargs->user_flags[userflag/32] |= 1<<(userflag&31);
     }
 
     storeargs->update_time = time((time_t *)0);
+
+    if (storeargs->operation == STORE_ANNOTATION) {
+	r = annotatemore_begin();
+	if (r) goto out;
+    }
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
 	im = &state->map[msgno-1];
@@ -1009,10 +1014,12 @@ int index_store(struct index_state *state, char *sequence,
 	    r = IMAP_INTERNAL;
 	    break;
 	}
-	if (r) goto fail;
+	if (r) goto out;
     }
 
-fail:
+out:
+    if (storeargs->operation == STORE_ANNOTATION && !r)
+	annotatemore_commit();
     seqset_free(seq);
     index_unlock(state);
     index_tellchanges(state, storeargs->usinguid, storeargs->usinguid,
