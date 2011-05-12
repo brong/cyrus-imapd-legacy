@@ -79,6 +79,7 @@
 #define FNAME_EXPUNGE "/cyrus.expunge"
 #define FNAME_ACTIONS "/cyrus.actions"
 #define FNAME_ACTIONSX "/cyrus.actionsx"
+#define FNAME_ANNOTATIONS "/annotations.db"
 
 enum meta_filename {
   META_HEADER = 1,
@@ -87,7 +88,8 @@ enum meta_filename {
   META_SQUAT,
   META_EXPUNGE,
   META_ACTIONS,
-  META_ACTIONSX
+  META_ACTIONSX,
+  META_ANNOTATIONS,
 };
 
 #define MAILBOX_FNAME_LEN 256
