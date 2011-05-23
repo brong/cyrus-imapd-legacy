@@ -228,6 +228,8 @@ extern void index_tellchanges(struct index_state *state, int canexpunge,
 extern unsigned index_getuid(struct index_state *state, uint32_t msgno);
 extern modseq_t index_highestmodseq(struct index_state *state);
 extern int index_check(struct index_state *state, int usinguid, int printuid);
+extern struct seqset *index_vanished(struct index_state *state,
+				    struct vanished_params *params);
 extern int index_urlfetch(struct index_state *state, uint32_t msgno,
 			  unsigned params, const char *section,
 			  unsigned long start_octet, unsigned long octet_count,

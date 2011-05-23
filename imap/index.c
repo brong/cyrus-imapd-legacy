@@ -684,8 +684,8 @@ int index_check(struct index_state *state, int usinguid, int printuid)
 /*
  * Perform UID FETCH (VANISHED) on a sequence.
  */
-static struct seqset *_index_vanished(struct index_state *state,
-				      struct vanished_params *params)
+struct seqset *index_vanished(struct index_state *state,
+			      struct vanished_params *params)
 {
     struct mailbox *mailbox = state->mailbox;
     struct index_record record;
@@ -884,7 +884,7 @@ int index_fetch(struct index_state *state,
 	v.match_seq = fetchargs->match_seq;
 	v.match_uid = fetchargs->match_uid;
 	/* XXX - return error unless usinguid? */
-	vanishedlist = _index_vanished(state, &v);
+	vanishedlist = index_vanished(state, &v);
     }
 
     index_unlock(state);
@@ -2532,7 +2532,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	sepchar = ' ';
     }
     if ((fetchitems & FETCH_FOLDER)) {
-	char mboxname[MAX_MAILBOX_PATH+1];
+// 	char mboxname[MAX_MAILBOX_PATH+1];
 // 	(*imapd_namespace.mboxname_toexternal)(&imapd_namespace,
 // 					       state->mailbox->name,
 // 					       imapd_userid, mboxname);
