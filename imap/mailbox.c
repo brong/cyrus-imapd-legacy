@@ -4595,7 +4595,7 @@ static void mailbox_action_cid_rename(struct mailbox *mailbox,
 	    r = mailbox_rewrite_index_record(mailbox, &record);
 
 	/* finally, remove the old message file */
-	if (unlink(msgfile) < 0)
+	if (!r && unlink(msgfile) < 0)
 	    r = IMAP_IOERROR;
 
 	if (r) {
