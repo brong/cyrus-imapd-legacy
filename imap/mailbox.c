@@ -107,6 +107,8 @@
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 
+#include "mailbox_update_notifier.h"
+
 struct mailboxlist {
     struct mailboxlist *next;
     struct mailbox m;
@@ -1833,6 +1835,10 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
 	if (updatenotifier) updatenotifier(mailbox->name);
 	sync_log_mailbox(mailbox->name);
 	statuscache_invalidate(mailbox->name, sdata);
+
+	if (config_getstring(IMAPOPT_MAILBOX_UPDATE_NOTIFIER_SOCKET))
+	    send_push_notification(mailbox);
+
 	mailbox->has_changed = 0;
     }
     else if (sdata) {
