@@ -84,7 +84,9 @@ bin_PROGRAMS = imtest/imtest
 if SERVER
 BUILT_SOURCES += imap/imap_err.c imap/mupdate_err.c imap/nntp_err.c \
 	imap/lmtpstats.c imap/pushstats.c imap/rfc822_header.c \
-	imap/rfc822_header.h
+	imap/rfc822_header.h \
+	imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
+CLEANFILES += imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
 lib_LTLIBRARIES += imap/libcyrus_imap.la
 service_PROGRAMS += imap/arbitron imap/chk_cyrus imap/ctl_cyrusdb \
 	imap/ctl_deliver imap/ctl_mboxlist imap/cvt_cyrusdb imap/cyr_df \
@@ -207,6 +209,9 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 	@${top_srcdir}/com_err/et/config_script ${top_srcdir}/com_err/et/compile_et.sh ${AWK} ${SED} > $@
 	@chmod 755 $@
 
+imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c: imap/mailbox_update_notifier.proto
+	cd imap && protoc-c --c_out=. mailbox_update_notifier.proto
+
 # ---- Libraries ----
 
 # BASIC is the libraries that every Cyrus program (except master) will
@@ -215,7 +220,7 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 # Note that several places in the code use -lcrypto, e.g. for SHA1 or
 # MD5 algorithms, without needing SSL.  Currently we have no way of
 # minimally linking such code.
-LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS}
+LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS} -lprotobuf-c
 
 # UTILITY is the libraries that utility programs which use Cyrus'
 # mailbox and message handling code need to link with.
