@@ -95,6 +95,7 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "pusher.h"
 
 struct mailboxlist {
     struct mailboxlist *next;
@@ -1699,10 +1700,19 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
     }
 
     if (mailbox->has_changed) {
+	int	ret;
+
 	if (updatenotifier) updatenotifier(mailbox->name);
 	sync_log_mailbox(mailbox->name);
 	if (config_getswitch(IMAPOPT_STATUSCACHE))
 	    statuscache_invalidate(mailbox->name, sdata);
+
+	ret = send_push_notification(mailbox);
+	if (ret) {
+	    errno = ret;
+	    syslog(LOG_ERR, "PUSHER: notification failed: %m");
+	}
+
 	mailbox->has_changed = 0;
     }
 
