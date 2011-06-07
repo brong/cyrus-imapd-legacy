@@ -87,7 +87,7 @@ void   mod_seq_update__free_unpacked
   PROTOBUF_C_ASSERT (message->base.descriptor == &mod_seq_update__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
-static const ProtobufCFieldDescriptor channel_ready__field_descriptors[3] =
+static const ProtobufCFieldDescriptor channel_ready__field_descriptors[4] =
 {
   {
     "user",
@@ -122,16 +122,28 @@ static const ProtobufCFieldDescriptor channel_ready__field_descriptors[3] =
     NULL,
     NULL,NULL    /* reserved1, reserved2 */
   },
+  {
+    "frontend",
+    4,
+    PROTOBUF_C_LABEL_REQUIRED,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    PROTOBUF_C_OFFSETOF(ChannelReady, frontend),
+    NULL,
+    NULL,
+    NULL,NULL    /* reserved1, reserved2 */
+  },
 };
 static const unsigned channel_ready__field_indices_by_name[] = {
   2,   /* field[2] = channel */
+  3,   /* field[3] = frontend */
   1,   /* field[1] = session */
   0,   /* field[0] = user */
 };
 static const ProtobufCIntRange channel_ready__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 3 }
+  { 0, 4 }
 };
 const ProtobufCMessageDescriptor channel_ready__descriptor =
 {
@@ -141,14 +153,14 @@ const ProtobufCMessageDescriptor channel_ready__descriptor =
   "ChannelReady",
   "",
   sizeof(ChannelReady),
-  3,
+  4,
   channel_ready__field_descriptors,
   channel_ready__field_indices_by_name,
   1,  channel_ready__number_ranges,
   (ProtobufCMessageInit) channel_ready__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor mod_seq_update__field_descriptors[5] =
+static const ProtobufCFieldDescriptor mod_seq_update__field_descriptors[6] =
 {
   {
     "user",
@@ -205,10 +217,22 @@ static const ProtobufCFieldDescriptor mod_seq_update__field_descriptors[5] =
     NULL,
     NULL,NULL    /* reserved1, reserved2 */
   },
+  {
+    "service",
+    6,
+    PROTOBUF_C_LABEL_REQUIRED,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    PROTOBUF_C_OFFSETOF(ModSeqUpdate, service),
+    NULL,
+    NULL,
+    NULL,NULL    /* reserved1, reserved2 */
+  },
 };
 static const unsigned mod_seq_update__field_indices_by_name[] = {
   1,   /* field[1] = folders */
   2,   /* field[2] = modseq */
+  5,   /* field[5] = service */
   3,   /* field[3] = uidnext */
   4,   /* field[4] = uidvalidity */
   0,   /* field[0] = user */
@@ -216,7 +240,7 @@ static const unsigned mod_seq_update__field_indices_by_name[] = {
 static const ProtobufCIntRange mod_seq_update__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 5 }
+  { 0, 6 }
 };
 const ProtobufCMessageDescriptor mod_seq_update__descriptor =
 {
@@ -226,7 +250,7 @@ const ProtobufCMessageDescriptor mod_seq_update__descriptor =
   "ModSeqUpdate",
   "",
   sizeof(ModSeqUpdate),
-  5,
+  6,
   mod_seq_update__field_descriptors,
   mod_seq_update__field_indices_by_name,
   1,  mod_seq_update__number_ranges,
