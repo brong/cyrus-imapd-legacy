@@ -1159,6 +1159,27 @@ AC_CHECK_FUNC(dlopen,,[AC_CHECK_LIB(dl, dlopen)])
 CMU_SASL2_REQUIRE_VER(2,1,7)
 CMU_SASL2_CHECKAPOP_REQUIRED
 
+GPB_LIBS=""
+GPB_CPPFLAGS=""
+AC_ARG_WITH(protobuf,  [  --with-protobuf=PROTOBUF use Google Protocol Buffers],
+	with_gpb="$withval", with_gpb="/usr")
+if test "${with_gpb}" = yes; then
+	with_gpb="/usr"
+fi
+if test "${with_gpb}" != no; then
+	AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack, GPB_LIBS="-lprotobuf-c", with_gpb=notfound)
+fi
+if test "${with_gpb}" = "notfound"; then
+	AC_MSG_WARN("Google Protocol Buffers not installed")
+elif test "${with_gpb}" != "no"; then
+	if test "${with_gpb}" != "/usr"; then
+		GPB_CPPFLAGS="-I${with_gpb}/include -L${with_gpb}/lib"
+	fi
+	AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
+fi
+AC_SUBST(GPB_LIBS)
+AC_SUBST(GPB_CPPFLAGS)
+
 AC_ARG_WITH(perl,       [  --with-perl=PERL        use PERL for perl],
 	with_perl="$withval", with_perl="perl")
 
