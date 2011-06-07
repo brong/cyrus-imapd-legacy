@@ -1857,10 +1857,12 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	statuscache_invalidate(mailbox->name, sdata);
 
 #ifdef HAVE_GPB
-	ret = send_push_notification(mailbox);
-	if (ret) {
-	    errno = ret;
-	    syslog(LOG_ERR, "PUSHER: notification failed: %m");
+	if (config_getstring(IMAPOPT_MODSEQ_NOTIFY_SOCKET)) {
+	    ret = send_push_notification(mailbox);
+	    if (ret) {
+		errno = ret;
+		syslog(LOG_ERR, "PUSHER: notification failed: %m");
+	    }
 	}
 #endif
 

@@ -23,10 +23,11 @@ struct  _ChannelReady
   char *user;
   char *session;
   char *channel;
+  char *frontend;
 };
 #define CHANNEL_READY__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&channel_ready__descriptor) \
-    , NULL, NULL, NULL }
+    , NULL, NULL, NULL, NULL }
 
 
 struct  _ModSeqUpdate
@@ -38,10 +39,11 @@ struct  _ModSeqUpdate
   uint32_t modseq;
   uint32_t uidnext;
   uint32_t uidvalidity;
+  char *service;
 };
 #define MOD_SEQ_UPDATE__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&mod_seq_update__descriptor) \
-    , NULL, 0,NULL, 0, 0, 0 }
+    , NULL, 0,NULL, 0, 0, 0, NULL }
 
 
 /* ChannelReady methods */
