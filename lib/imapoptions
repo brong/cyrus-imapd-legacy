@@ -716,6 +716,9 @@ Blank lines and lines beginning with ``#'' are ignored.
    \fBmetapartition-name\fR option, so that you can selectively choose
    which spool partitions will have separate metadata partitions. */
 
+{ "modseq_notify_socket", NULL, STRING }
+/* The socket where a daemon is listening for mailbox update notifications */
+
 { "mupdate_authname", NULL, STRING }
 /* The SASL username (Authentication Name) to use when authenticating to the
    mupdate server (if needed). */
