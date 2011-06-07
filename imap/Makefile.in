@@ -59,13 +59,14 @@ CYRUS_USER=@cyrus_user@
 CYRUS_GROUP=@cyrus_group@
 
 DEFS = @DEFS@ @LOCALDEFS@
-CPPFLAGS = -I.. -I$(srcdir)/../lib @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@
+CPPFLAGS = -I.. -I$(srcdir)/../lib @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS@ @SASLFLAGS@ @GPB_CPPFLAGS@
 IMAP_LIBS = @IMAP_LIBS@ @LIB_RT@
 SIEVE_OBJS = @SIEVE_OBJS@
 SIEVE_LIBS = @SIEVE_LIBS@
+GPB_LIBS = @GPB_LIBS@
 IMAP_COM_ERR_LIBS = @IMAP_COM_ERR_LIBS@
 LIB_WRAP = @LIB_WRAP@
-LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
+LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS) $(GPB_LIBS)
 DEPLIBS = ../lib/libcyrus.a ../lib/libcyrus_min.a @DEPLIBS@
 
 CFLAGS = @CFLAGS@ $(EXTRACFLAGS)
@@ -103,6 +104,10 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
 	dlist.o version.o rfc822_header.o conversations.o
+
+ifneq ($(GPB_LIBS), "")
+	LOBJS += Pusher.pb-c.o pusher.o
+endif
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
