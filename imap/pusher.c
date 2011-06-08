@@ -18,7 +18,7 @@
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
-int
+void
 send_push_notification(struct mailbox *mailbox)
 {
     ModSeqUpdate	msu;
@@ -34,21 +34,19 @@ send_push_notification(struct mailbox *mailbox)
 
     named_socket = config_getstring(IMAPOPT_MODSEQ_NOTIFY_SOCKET);
     if (!named_socket)
-	return 0;
+	return;
 
     ret = mboxname_to_parts(mailbox->name, &mboxname_parts);
     if (ret) {
 	syslog(LOG_ERR, "PUSHER: mboxname_to_parts failed");
-	return EINVAL;
+	return;
     }
 
     user = malloc(strlen(mboxname_parts.userid) + strlen(mboxname_parts.domain)
 									+ 2);
     if (!user) {
-        ret = ENOMEM;
-	syslog(LOG_ERR, "PUSHER: out of memory");
-        goto out_free_parts;
-	return ENOMEM;
+	syslog(LOG_ERR, "PUSHER: malloc failed: %m");
+	goto out_free_parts;
     }
     sprintf(user, "%s@%s", mboxname_parts.userid, mboxname_parts.domain);
 
@@ -69,7 +67,7 @@ send_push_notification(struct mailbox *mailbox)
     len = mod_seq_update__get_packed_size(&msu);
     buf = calloc(len, 1);
     if (!buf) {
-	ret = errno;
+	syslog(LOG_ERR, "PUSHER: calloc failed: %m");
 	goto out_free_user;
     }
 
@@ -81,7 +79,7 @@ send_push_notification(struct mailbox *mailbox)
 	s = socket(PF_UNIX, SOCK_DGRAM, 0);
 	if (s == -1) {
 	    s = 0;
-	    ret = errno;
+	    syslog(LOG_ERR, "PUSHER: socket failed: %m");
 	    goto out_free_buf;
 	}
     }
@@ -91,8 +89,11 @@ send_push_notification(struct mailbox *mailbox)
     strcpy(sun.sun_path, named_socket);
 
     /* send the data, set the return code to the errno or 0 */
-    ret = sendto(s, buf, len, 0, (struct sockaddr *)&sun, sizeof(sun)) == -1 ?
-                errno : 0;
+    ret = sendto(s, buf, len, 0, (struct sockaddr *)&sun, sizeof(sun));
+    if (ret == -1)
+	syslog(LOG_ERR, "PUSHER: sendto failed: %m");
+    else if (ret != len)
+	syslog(LOG_INFO, "PUSHER: sendto short write: %d < %d", ret, len);
 
     /* And we're done, cleanup */
 out_free_buf:
@@ -101,5 +102,5 @@ out_free_user:
     free(user);
 out_free_parts:
     mboxname_free_parts(&mboxname_parts);
-    return ret;
+    return;
 }
