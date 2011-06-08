@@ -4,6 +4,6 @@
 #include <stdint.h>
 #include "mailbox.h"
 
-int send_push_notification(struct mailbox *);
+void send_push_notification(struct mailbox *);
 
 #endif /* PUSHER_H */
