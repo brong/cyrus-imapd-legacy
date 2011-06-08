@@ -28,20 +28,23 @@ send_push_notification(struct mailbox *mailbox)
     static int          s;
 
     char		*user;
-    char		*folders[2];
-    char		*named_socket;
+    const char		*folders[2];
+    const char		*named_socket;
     struct mboxname_parts mboxname_parts;
 
+    /* double check this option is enabled */
     named_socket = config_getstring(IMAPOPT_MODSEQ_NOTIFY_SOCKET);
     if (!named_socket)
 	return;
 
+    /* deconstruct the mailbox name */
     ret = mboxname_to_parts(mailbox->name, &mboxname_parts);
     if (ret) {
 	syslog(LOG_ERR, "PUSHER: mboxname_to_parts failed");
 	return;
     }
 
+    /* provision space and construct the username */
     user = malloc(strlen(mboxname_parts.userid) + strlen(mboxname_parts.domain)
 									+ 2);
     if (!user) {
@@ -50,6 +53,7 @@ send_push_notification(struct mailbox *mailbox)
     }
     sprintf(user, "%s@%s", mboxname_parts.userid, mboxname_parts.domain);
 
+    /* setup the folders array */
     folders[0] = mboxname_parts.box;
     folders[1] = NULL;
 
@@ -61,7 +65,7 @@ send_push_notification(struct mailbox *mailbox)
     msu.modseq		= mailbox->i.highestmodseq;
     msu.uidnext		= mailbox->i.last_uid + 1;
     msu.uidvalidity	= mailbox->i.uidvalidity;
-    msu.service		= config_ident;
+    msu.service		= (char *)config_ident;
 
     /* Allocate a buffer for the packed output */
     len = mod_seq_update__get_packed_size(&msu);
