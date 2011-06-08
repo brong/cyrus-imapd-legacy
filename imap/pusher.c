@@ -23,8 +23,9 @@ send_push_notification(struct mailbox *mailbox)
 {
     ModSeqUpdate	msu;
     uint8_t		*buf;
-    int			len, s, ret;
+    int			len, ret;
     struct sockaddr_un	sun;
+    static int          s;
 
     char		*user;
     char		*folders[2];
@@ -42,7 +43,7 @@ send_push_notification(struct mailbox *mailbox)
     }
 
     user = malloc(strlen(mboxname_parts.userid) + strlen(mboxname_parts.domain)
-									+ 1);
+									+ 2);
     if (!user) {
         ret = ENOMEM;
 	syslog(LOG_ERR, "PUSHER: out of memory");
@@ -66,7 +67,7 @@ send_push_notification(struct mailbox *mailbox)
 
     /* Allocate a buffer for the packed output */
     len = mod_seq_update__get_packed_size(&msu);
-    buf = malloc(len);
+    buf = calloc(len, 1);
     if (!buf) {
 	ret = errno;
 	goto out_free_user;
@@ -76,27 +77,24 @@ send_push_notification(struct mailbox *mailbox)
     mod_seq_update__pack(&msu, buf);
 
     /* Create UNIX domain socket */
-    s = socket(PF_UNIX, SOCK_DGRAM, 0);
-    if (s == -1) {
-	ret = errno;
-	goto out_free_buf;
+    if (!s) {
+	s = socket(PF_UNIX, SOCK_DGRAM, 0);
+	if (s == -1) {
+	    s = 0;
+	    ret = errno;
+	    goto out_free_buf;
+	}
     }
 
-    /* Connect UNIX domain socket */
+    /* Create UNIX address */
     sun.sun_family = AF_UNIX;
     strcpy(sun.sun_path, named_socket);
-    ret = connect(s, (struct sockaddr *)&sun, sizeof(sun));
-    if (ret) {
-	ret = errno;
-	goto out_close;
-    }
 
     /* send the data, set the return code to the errno or 0 */
-    ret = send(s, buf, len, 0) == -1 ? errno : 0;
+    ret = sendto(s, buf, len, 0, (struct sockaddr *)&sun, sizeof(sun)) == -1 ?
+                errno : 0;
 
     /* And we're done, cleanup */
-out_close:
-    close(s);
 out_free_buf:
     free(buf);
 out_free_user:
