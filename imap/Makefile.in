@@ -63,10 +63,9 @@ CPPFLAGS = -I.. -I$(srcdir)/../lib @COM_ERR_CPPFLAGS@ @SIEVE_CPPFLAGS@ @CPPFLAGS
 IMAP_LIBS = @IMAP_LIBS@ @LIB_RT@
 SIEVE_OBJS = @SIEVE_OBJS@
 SIEVE_LIBS = @SIEVE_LIBS@
-GPB_LIBS = @GPB_LIBS@
 IMAP_COM_ERR_LIBS = @IMAP_COM_ERR_LIBS@
 LIB_WRAP = @LIB_WRAP@
-LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS) $(GPB_LIBS)
+LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
 DEPLIBS = ../lib/libcyrus.a ../lib/libcyrus_min.a @DEPLIBS@
 
 CFLAGS = @CFLAGS@ $(EXTRACFLAGS)
@@ -105,7 +104,7 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
 	dlist.o version.o rfc822_header.o conversations.o
 
-ifneq ($(GPB_LIBS), "")
+ifneq ("", $(findstring -lprotobuf-c,$(IMAP_LIBS)))
 	LOBJS += Pusher.pb-c.o pusher.o
 endif
 
