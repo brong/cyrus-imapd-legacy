@@ -40,10 +40,11 @@ struct  _ModSeqUpdate
   uint32_t uidnext;
   uint32_t uidvalidity;
   char *service;
+  char *session;
 };
 #define MOD_SEQ_UPDATE__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&mod_seq_update__descriptor) \
-    , NULL, 0,NULL, 0, 0, 0, NULL }
+    , NULL, 0,NULL, 0, 0, 0, NULL, NULL }
 
 
 /* ChannelReady methods */
