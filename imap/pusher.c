@@ -15,6 +15,7 @@
 #include "Pusher.pb-c.h"
 #include "mailbox.h"
 #include "mboxname.h"
+#include "global.h"
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
@@ -66,6 +67,7 @@ send_push_notification(struct mailbox *mailbox)
     msu.uidnext		= mailbox->i.last_uid + 1;
     msu.uidvalidity	= mailbox->i.uidvalidity;
     msu.service		= (char *)config_ident;
+    msu.session		= session_id();
 
     /* Allocate a buffer for the packed output */
     len = mod_seq_update__get_packed_size(&msu);
