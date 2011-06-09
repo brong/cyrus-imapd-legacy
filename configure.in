@@ -1177,7 +1177,6 @@ elif test "${with_gpb}" != "no"; then
 	fi
 	AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
 fi
-AC_SUBST(GPB_LIBS)
 AC_SUBST(GPB_CPPFLAGS)
 
 AC_ARG_WITH(perl,       [  --with-perl=PERL        use PERL for perl],
@@ -1269,7 +1268,7 @@ for flag in ${ldflags} ${default_ldflags}; do
 done
 
 IMAP_COM_ERR_LIBS="${COM_ERR_LIBS}"
-IMAP_LIBS="${LIB_SASL} ${LIBS} ${SQL_LIBS}"
+IMAP_LIBS="${LIB_SASL} ${LIBS} ${SQL_LIBS} ${GPB_LIBS}" 
 
 AC_SUBST(LIB_RT)
 AC_SUBST(IMAP_COM_ERR_LIBS)
