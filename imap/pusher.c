@@ -67,7 +67,7 @@ send_push_notification(struct mailbox *mailbox)
     msu.uidnext		= mailbox->i.last_uid + 1;
     msu.uidvalidity	= mailbox->i.uidvalidity;
     msu.service		= (char *)config_ident;
-    msu.session		= session_id();
+    msu.session		= (char *)session_id();
 
     /* Allocate a buffer for the packed output */
     len = mod_seq_update__get_packed_size(&msu);
