@@ -55,7 +55,7 @@ send_push_notification(struct mailbox *mailbox)
     sprintf(user, "%s@%s", mboxname_parts.userid, mboxname_parts.domain);
 
     /* setup the folders array */
-    folders[0] = mboxname_parts.box;
+    folders[0] = mboxname_parts.box ? mboxname_parts.box : "INBOX";
     folders[1] = NULL;
 
     /* create the ModSeqUpdate message */
