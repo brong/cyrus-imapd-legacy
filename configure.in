@@ -1167,7 +1167,15 @@ if test "${with_gpb}" = yes; then
 	with_gpb="/usr"
 fi
 if test "${with_gpb}" != no; then
-	AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack, GPB_LIBS="-lprotobuf-c", with_gpb=notfound)
+	SAVE_LDFLAGS=$LDFLAGS
+	LDFLAGS="$CPPFLAGS -L${with_gpb}/lib"
+	AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack,
+		GPB_LIBS="-lprotobuf-c",
+		[
+			with_gpb=notfound
+			LDFLAGS="$SAVE_LDFLAGS"
+		])
+
 fi
 if test "${with_gpb}" = "notfound"; then
 	AC_MSG_WARN("Google Protocol Buffers not installed")
