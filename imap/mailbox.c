@@ -106,7 +106,7 @@
 #include "xstrlcat.h"
 
 #ifdef HAVE_GPB
-#include "pusher.h"
+#include "mailbox_update_notifier.h"
 #endif
 
 struct mailboxlist {
@@ -1855,7 +1855,7 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	statuscache_invalidate(mailbox->name, sdata);
 
 #ifdef HAVE_GPB
-	if (config_getstring(IMAPOPT_MODSEQ_NOTIFY_SOCKET))
+	if (config_getstring(IMAPOPT_MAILBOX_UPDATE_NOTIFIER_SOCKET))
 	    send_push_notification(mailbox);
 #endif
 
