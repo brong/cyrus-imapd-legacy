@@ -105,8 +105,11 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	dlist.o version.o rfc822_header.o conversations.o
 
 ifneq ("", $(findstring -lprotobuf-c,$(IMAP_LIBS)))
-	LOBJS += Pusher.pb-c.o pusher.o
+	LOBJS += mailbox_update_notifier.pb-c.o mailbox_update_notifier.o
 endif
+
+%.pb-c.c: %.proto
+	protoc-c --c_out=. $<
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
