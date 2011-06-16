@@ -1,0 +1,13 @@
+message MailboxUpdate {
+    message Mailbox {
+	required string MailboxName  = 1;
+	required uint32 ModSeq       = 2;
+	required uint32 UidNext      = 3;
+	required uint32 UidValidity  = 4;
+    }
+
+    required string User	= 1;
+    required string service	= 2;
+    required string session     = 3;
+    repeated Mailbox Mailboxes	= 4;
+}
