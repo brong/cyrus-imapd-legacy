@@ -1183,7 +1183,14 @@ elif test "${with_gpb}" != "no"; then
 	if test "${with_gpb}" != "/usr"; then
 		GPB_CPPFLAGS="-I${with_gpb}/include -L${with_gpb}/lib"
 	fi
-	AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
+	AC_CHECK_PROG(PROTOC_C,protoc-c,yes,no)
+	if test "$PROTOC_C" != "yes"; then
+	    AC_MSG_WARN([protoc-c is not installed on this system, but is required when building protocol buffers support, disabling protobuf])
+	    GPB_LIBS=""
+    	else
+	    AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
+	fi
+
 fi
 AC_SUBST(GPB_CPPFLAGS)
 
