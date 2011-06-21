@@ -218,6 +218,7 @@ void _conv_remove (struct conversations_state **statep)
 	if (*statep == &cur->s) {
 	    /* found it! */
 	    *prevp = cur->next;
+	    free(cur->s.path);
 	    free(cur);
 	    *statep = NULL;
 	    return;
