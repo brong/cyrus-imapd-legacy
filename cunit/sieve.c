@@ -490,7 +490,8 @@ static void config_read_string(const char *s)
     close(fd);
 }
 
-static void init(void) {
+static int init(void)
+{
     libcyrus_config_setstring(CYRUSOPT_CONFIG_DIR, DBDIR);
     config_read_string(
 	"configdirectory: "DBDIR"/conf\n"
@@ -501,10 +502,13 @@ static void init(void) {
 	    " envelope body relational regex subaddress copy\n"
     );
     libcyrus_init();
+    return 0;
 }
 
-static void cleanup(void) {
+static int cleanup(void)
+{
     libcyrus_done();
+    return 0;
 }
 
 static void context_setup(sieve_test_context_t *ctx,
