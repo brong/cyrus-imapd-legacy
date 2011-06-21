@@ -460,7 +460,6 @@ static void test_folder_rename(void)
     static const char C_MSGID2[] = "<0009.1288854309@example.com>";
     static const char C_MSGID3[] = "<0010.1288854309@example.com>";
     static const conversation_id_t C_CID = 0x10bcdef23456789a;
-    conversation_id_t cid;
     conversation_t *conv;
     conv_folder_t *folder;
 
