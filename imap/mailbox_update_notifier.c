@@ -18,8 +18,6 @@
 #include "global.h"
 #include "xmalloc.h"
 
-#define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
-
 void
 send_push_notification(struct mailbox *mailbox)
 {
@@ -84,6 +82,7 @@ send_push_notification(struct mailbox *mailbox)
     }
 
     /* Create UNIX address */
+    memset(&sun, 0, sizeof(sun));
     sun.sun_family = AF_UNIX;
     strcpy(sun.sun_path, named_socket);
 
