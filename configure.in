@@ -1160,7 +1160,9 @@ CMU_SASL2_REQUIRE_VER(2,1,7)
 CMU_SASL2_CHECKAPOP_REQUIRED
 
 GPB_LIBS=""
+GPB_LDFLAGS=""
 GPB_CPPFLAGS=""
+GPB_LOBJS=""
 AC_ARG_WITH(protobuf,  [  --with-protobuf=PROTOBUF use Google Protocol Buffers],
 	with_gpb="$withval", with_gpb="/usr")
 if test "${with_gpb}" = yes; then
@@ -1181,17 +1183,21 @@ if test "${with_gpb}" = "notfound"; then
 	AC_MSG_WARN("Google Protocol Buffers not installed")
 elif test "${with_gpb}" != "no"; then
 	if test "${with_gpb}" != "/usr"; then
-		GPB_CPPFLAGS="-I${with_gpb}/include -L${with_gpb}/lib"
+		GPB_LDFLAGS="-L${with_gpb}/lib"
+		GPB_CPPFLAGS="-I${with_gpb}/include"
 	fi
 	AC_CHECK_PROG(PROTOC_C,protoc-c,yes,no)
 	if test "$PROTOC_C" != "yes"; then
 	    AC_MSG_WARN([protoc-c is not installed on this system, but is required when building protocol buffers support, disabling protobuf])
 	    GPB_LIBS=""
     	else
+	    GPB_LOBJS="mailbox_update_notifier.pb-c.o mailbox_update_notifier.o"
 	    AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
 	fi
 
 fi
+AC_SUBST(GPB_LOBJS)
+AC_SUBST(GPB_LDFLAGS)
 AC_SUBST(GPB_CPPFLAGS)
 
 AC_ARG_WITH(perl,       [  --with-perl=PERL        use PERL for perl],
