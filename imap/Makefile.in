@@ -69,7 +69,7 @@ LIBS = $(IMAP_LIBS) $(IMAP_COM_ERR_LIBS)
 DEPLIBS = ../lib/libcyrus.a ../lib/libcyrus_min.a @DEPLIBS@
 
 CFLAGS = @CFLAGS@ $(EXTRACFLAGS)
-LDFLAGS = @LDFLAGS@ @COM_ERR_LDFLAGS@ $(EXTRALDFLAGS)
+LDFLAGS = @LDFLAGS@ @COM_ERR_LDFLAGS@ @GPB_LDFLAGS@ $(EXTRALDFLAGS)
 
 SHELL = /bin/sh
 MAKEDEPEND = @MAKEDEPEND@
@@ -102,11 +102,7 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	imapparse.o telemetry.o user.o notify.o idle.o quota_db.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
-	dlist.o version.o rfc822_header.o conversations.o
-
-ifneq ("", $(findstring -lprotobuf-c,$(IMAP_LIBS)))
-	LOBJS += mailbox_update_notifier.pb-c.o mailbox_update_notifier.o
-endif
+	dlist.o version.o rfc822_header.o conversations.o @GPB_LOBJS@
 
 %.pb-c.c: %.proto
 	protoc-c --c_out=. $<
