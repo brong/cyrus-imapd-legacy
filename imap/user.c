@@ -414,9 +414,15 @@ int user_renameacl(char *name, char *olduser, char *newuser)
 
 int user_renameconversations(char *olduser, char *newuser)
 {
-    char *oldpath = conversations_getuserpath(olduser);
-    char *newpath = conversations_getuserpath(newuser);
+    char *oldpath = NULL;
+    char *newpath = NULL;
     int r = 0;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return;
+
+    oldpath = conversations_getuserpath(olduser);
+    newpath = conversations_getuserpath(newuser);
 
     if (!strcmp(oldpath, newpath))
 	goto done;
