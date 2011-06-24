@@ -86,6 +86,8 @@
 
 #define FNAME_SUBSSUFFIX "sub"
 
+static char *user_hash_meta(const char *userid, const char *suffix);
+
 #if 0
 static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
 {
@@ -206,8 +208,28 @@ int user_deletedata(const char *userid, int wipe_user)
     /* delete sieve scripts */
     user_deletesieve(userid);
 
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	/* delete conversations file */
+	fname = conversations_getuserpath(userid);
+	(void) unlink(fname);
+	free(fname);
+
+	/* delete highestmodseq file */
+	fname = user_hash_meta(userid, "modseq");
+	(void) unlink(fname);
+	free(fname);
+
+	/* XXX: one could make an argument for keeping the UIDVALIDITY
+	 * file forever, so that UIDVALIDITY never gets reused. */
+
+	/* delete uidvalidity file */
+	fname = user_hash_meta(userid, "uidvalidity");
+	(void) unlink(fname);
+	free(fname);
+    }
+
     sync_log_user(userid);
-    
+
     return 0;
 }
 
@@ -419,7 +441,7 @@ int user_renameconversations(char *olduser, char *newuser)
     int r = 0;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
-	return;
+	return 0;
 
     oldpath = conversations_getuserpath(olduser);
     newpath = conversations_getuserpath(newuser);
