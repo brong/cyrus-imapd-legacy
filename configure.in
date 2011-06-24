@@ -1164,41 +1164,73 @@ GPB_LDFLAGS=""
 GPB_CPPFLAGS=""
 GPB_LOBJS=""
 AC_ARG_WITH(protobuf,  [  --with-protobuf=PROTOBUF use Google Protocol Buffers],
-	with_gpb="$withval", with_gpb="/usr")
+					with_gpb="$withval", with_gpb="/usr")
+dnl /usr is the default if 'yes' is specified against --with-protobuf
 if test "${with_gpb}" = yes; then
-	with_gpb="/usr"
+    with_gpb="/usr"
 fi
+
+dnl only perform tests when user has not specified --with-protobuf=no
 if test "${with_gpb}" != no; then
-	SAVE_LDFLAGS=$LDFLAGS
-	LDFLAGS="$CPPFLAGS -L${with_gpb}/lib"
-	AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack,
-		GPB_LIBS="-lprotobuf-c",
-		[
-			with_gpb=notfound
-			LDFLAGS="$SAVE_LDFLAGS"
-		])
+    dnl check for the GPB libs and headers
+    SAVE_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS -L${with_gpb}/lib"
+    AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack,
+	[
+	    SAVE_CPPFLAGS=$CPPFLAGS
+	    CPPFLAGS="$CPPFLAGS -I${with_gpb}/include"
+	    AC_CHECK_HEADER(google/protobuf-c/protobuf-c.h,
+		[ GPB_LIBS="-lprotobuf-c" ], [ with_gpb=notfound ])
+	    CPPFLAGS=$SAVE_CPPFLAGS
+	],
+	[
+	    with_gpb=notfound
+	])
+    LDFLAGS=$SAVE_LDFLAGS
 
-fi
-if test "${with_gpb}" = "notfound"; then
-	AC_MSG_WARN("Google Protocol Buffers not installed")
-elif test "${with_gpb}" != "no"; then
+    dnl check for the protoc-c binary, first in the path then in the 
+    dnl --with-gpb dir
+    AC_CHECK_PROG(PROTOC_C,protoc-c,protoc-c,false)
+    if test "$PROTOC_C" = "false"; then
+    	dnl stupid autoconf has no way to unset a cached variable except for
+	dnl messing with it's variables
+	unset PROTOC_C
+	unset ac_cv_prog_PROTOC_C
+	AC_CHECK_PROG(PROTOC_C,protoc-c,"${with_gpb}/bin/protoc-c",false,
+							    "${with_gpb}/bin")
+	if test "$PROTOC_C" = "false"; then
+	    AC_MSG_WARN(
+		Protocol Buffers C compiler protoc-c required for GPB support)
+	    with_gpb=notfound
+	fi
+    fi
+
+    dnl if all the above tests passed setup the Make variables
+    dnl $with_gpb == 'notfound' is set if we tried to include GPB but failed
+    if test "${with_gpb}" = "notfound"; then
+	AC_MSG_WARN(Google Protocol Buffers not installed)
+    else
 	if test "${with_gpb}" != "/usr"; then
-		GPB_LDFLAGS="-L${with_gpb}/lib"
-		GPB_CPPFLAGS="-I${with_gpb}/include"
+	    GPB_LDFLAGS="-L${with_gpb}/lib"
+	    GPB_CPPFLAGS="-I${with_gpb}/include"
 	fi
-	AC_CHECK_PROG(PROTOC_C,protoc-c,yes,no)
-	if test "$PROTOC_C" != "yes"; then
-	    AC_MSG_WARN([protoc-c is not installed on this system, but is required when building protocol buffers support, disabling protobuf])
-	    GPB_LIBS=""
-    	else
-	    GPB_LOBJS="mailbox_update_notifier.pb-c.o mailbox_update_notifier.o"
-	    AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
-	fi
-
+	GPB_LOBJS="mailbox_update_notifier.pb-c.o mailbox_update_notifier.o"
+	AC_DEFINE(HAVE_GPB,[],[Build with Google Protocol Buffers support?])
+    fi
 fi
+
+dnl setup the default for protoc-c after the tests, we do it in this order
+dnl so that we don't alter the AC behaviour of allowing the environment to
+dnl specify PROTOC_C
+if test -z "$PROTOC_C"; then
+    PROTOC_C=false
+fi
+
+dnl substitute GPB variables into Makefiles
 AC_SUBST(GPB_LOBJS)
 AC_SUBST(GPB_LDFLAGS)
 AC_SUBST(GPB_CPPFLAGS)
+AC_ARG_VAR(PROTOC_C, Location of the Google Protocol Buffers c compiler)
 
 AC_ARG_WITH(perl,       [  --with-perl=PERL        use PERL for perl],
 	with_perl="$withval", with_perl="perl")

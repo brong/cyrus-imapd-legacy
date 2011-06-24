@@ -67,6 +67,8 @@ imap/ipurge
 imap/lmtpd
 imap/lmtpstats.c
 imap/lmtpstats.h
+imap/mailbox_update_notifier.pb-c.c
+imap/mailbox_update_notifier.pb-c.h
 imap/mbexamine
 imap/mbpath
 imap/mupdate_err.c
