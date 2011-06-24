@@ -229,7 +229,7 @@ static int build_cid_cb(const char *mboxname,
 	/* we don't care about expunged messages */
 	if (record.system_flags & FLAG_EXPUNGED)
 	    continue;
-    
+
 	/* parse the file - XXX: should abstract this bit */
 	fname = mailbox_message_fname(mailbox, record.uid);
 
@@ -286,10 +286,6 @@ static int recalc_counts_cb(const char *mboxname,
 
 	/* not assigned, skip */
 	if (!record.cid)
-	    continue;
-
-	/* we don't care about expunged messages */
-	if (record.system_flags & FLAG_EXPUNGED)
 	    continue;
 
 	mailbox_update_conversations(mailbox, NULL, &record);

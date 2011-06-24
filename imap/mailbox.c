@@ -2962,7 +2962,7 @@ int mailbox_create(const char *name,
     else
 	mboxname_setuidvalidity(mailbox->name, uidvalidity);
     /* and highest modseq */
-    if (!highestmodseq) 
+    if (!highestmodseq)
 	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
     else
 	mboxname_setmodseq(mailbox->name, highestmodseq);
