@@ -102,10 +102,11 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	imapparse.o telemetry.o user.o notify.o idle.o quota_db.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
-	dlist.o version.o rfc822_header.o conversations.o @GPB_LOBJS@
+	dlist.o version.o rfc822_header.o conversations.o \
+	@GPB_LOBJS@
 
 %.pb-c.c: %.proto
-	protoc-c --c_out=. $<
+	@PROTOC_C@ --c_out=. $<
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
