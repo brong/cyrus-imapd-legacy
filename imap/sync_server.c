@@ -1084,7 +1084,6 @@ void reserve_folder(const char *part, const char *mboxname,
 static int do_reserve(struct dlist *kl, struct sync_reserve_list *reserve_list)
 {
     struct message_guid *tmpguid;
-    struct sync_name_list *missing = sync_name_list_create();
     struct sync_name_list *folder_names = sync_name_list_create();
     struct sync_msgid_list *part_list;
     struct sync_msgid *item;
@@ -1145,14 +1144,12 @@ static int do_reserve(struct dlist *kl, struct sync_reserve_list *reserve_list)
     dlist_free(&kout);
 
     sync_name_list_free(&folder_names);
-    sync_name_list_free(&missing);
     mboxlist_entry_free(&mbentry);
 
     return 0;
 
  parse_err:
     sync_name_list_free(&folder_names);
-    sync_name_list_free(&missing);
     mboxlist_entry_free(&mbentry);
 
     return IMAP_PROTOCOL_BAD_PARAMETERS;
