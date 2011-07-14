@@ -108,6 +108,7 @@ static void config_read_string(const char *s)
     char *fname = xstrdup("/tmp/cyrus-cunit-configXXXXXX");
     int fd = mkstemp(fname);
     retry_write(fd, s, strlen(s));
+    config_reset();
     config_read(fname);
     unlink(fname);
     free(fname);
@@ -152,15 +153,15 @@ static int set_up(void)
     );
 
     cyrusdb_init();
-    config_mboxlist_db = cyrusdb_fromname("berkeley");
+    config_mboxlist_db = cyrusdb_fromname("skiplist");
     config_subscription_db = cyrusdb_fromname("berkeley");
-    config_quota_db = cyrusdb_fromname("berkeley");
+    config_quota_db = cyrusdb_fromname("skiplist");
 
     quotadb_init(0);
-    quotadb_open("quota.db");
+    quotadb_open(NULL);
 
     mboxlist_init(0);
-    mboxlist_open("mailboxes.db");
+    mboxlist_open(NULL);
 
     memset(&mbentry, 0, sizeof(mbentry));
     mbentry.name = MBOXNAME1;
