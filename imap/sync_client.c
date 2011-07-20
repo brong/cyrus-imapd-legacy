@@ -2713,6 +2713,9 @@ void replica_connect(const char *channel)
 	sleep(wait);
     }
 
+    free_callbacks(cb);
+    cb = NULL;
+
     if (!sync_backend) {
 	fprintf(stderr, "Can not connect to server '%s'\n",
 		servername);
