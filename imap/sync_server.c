@@ -1575,9 +1575,12 @@ static int mailbox_cb(char *name,
 
     r = mailbox_open_irl(name, &mailbox);
     /* doesn't exist?  Probably not finished creating or removing yet */
-    if (r == IMAP_MAILBOX_NONEXISTENT) return 0;
-    if (r == IMAP_MAILBOX_RESERVED) return 0;
-    if (r) return r;
+    if (r == IMAP_MAILBOX_NONEXISTENT ||
+        r == IMAP_MAILBOX_RESERVED) {
+	r = 0;
+	goto out;
+    }
+    if (r) goto out;
 
     if (qrl && mailbox->quotaroot &&
 	 !sync_name_lookup(qrl, mailbox->quotaroot))
@@ -1585,8 +1588,9 @@ static int mailbox_cb(char *name,
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 0);
     if (!r) sync_send_response(kl, sync_out);
-    dlist_free(&kl);
     mailbox_close(&mailbox);
+out:
+    dlist_free(&kl);
 
     return r;
 }
