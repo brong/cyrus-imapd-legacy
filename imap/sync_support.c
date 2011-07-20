@@ -1611,6 +1611,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	}
     }
     message_free_body(body);
+    free(body);
     body = NULL;
 
     if (!message_guid_equal(&tmp_guid, &record->guid)) {
