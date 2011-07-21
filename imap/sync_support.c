@@ -358,6 +358,7 @@ struct sync_msgid *sync_msgid_add(struct sync_msgid_list *l,
     return(result);
 }
 
+#if 0
 void sync_msgid_remove(struct sync_msgid_list *l,
 		       struct message_guid *guid)
 {
@@ -373,6 +374,7 @@ void sync_msgid_remove(struct sync_msgid_list *l,
 	}
     }
 }
+#endif
 
 void sync_msgid_list_free(struct sync_msgid_list **lp)
 {
@@ -529,6 +531,7 @@ struct sync_folder *sync_folder_lookup(struct sync_folder_list *l,
     return NULL;
 }
 
+#if 0
 struct sync_folder *sync_folder_lookup_byname(struct sync_folder_list *l,
 					      const char *name)
 {
@@ -540,7 +543,9 @@ struct sync_folder *sync_folder_lookup_byname(struct sync_folder_list *l,
     }
     return NULL;
 }
+#endif
 
+#if 0
 int sync_folder_mark(struct sync_folder_list *l, const char *uniqueid)
 {
     struct sync_folder *p = sync_folder_lookup(l, uniqueid);
@@ -552,6 +557,7 @@ int sync_folder_mark(struct sync_folder_list *l, const char *uniqueid)
 
     return 0;
 }
+#endif
 
 void sync_folder_list_free(struct sync_folder_list **lp)
 {
