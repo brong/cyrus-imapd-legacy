@@ -51,6 +51,7 @@
 #include "prot.h"
 #include "mboxname.h"
 #include "signals.h"
+#include "strarray.h"
 #include "util.h"
 
 /* Flags for cyrus_init() */
@@ -161,6 +162,7 @@ extern char *find_msgid(char *, char **);
 extern int in_shutdown;
 extern int config_fulldirhash;
 extern int config_implicitrights;
+extern strarray_t config_counted_flags;
 extern unsigned long config_metapartition_files;
 extern struct cyrusdb_backend *config_mboxlist_db;
 extern struct cyrusdb_backend *config_quota_db;

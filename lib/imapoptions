@@ -304,6 +304,9 @@ Blank lines and lines beginning with ``#'' are ignored.
 { "conversations_db", "skiplist", STRINGLIST("berkeley", "berkeley-nosync", "berkeley-hash", "berkeley-hash-nosync", "skiplist", "sql")}
 /* The cyrusdb backend to use for the per-user conversations database. */
 
+{ "conversations_counted_flags", NULL, STRING }
+/* list of flags for which per-conversation counts will be kept */
+
 { "conversations_expire_days", 90, INT }
 /* How long the conversations database keeps the message tracking
    information needed for receiving new messages in existing

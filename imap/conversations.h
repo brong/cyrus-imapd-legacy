@@ -72,6 +72,8 @@ typedef struct conversation conversation_t;
 typedef struct conv_folder  conv_folder_t;
 typedef struct conv_sender  conv_sender_t;
 
+#define MAX_CONVERSATION_FLAGS 256
+
 struct conv_folder {
     conv_folder_t   *next;
     char	    *mboxname;
@@ -93,9 +95,7 @@ struct conversation {
     uint32_t	    exists;
     uint32_t	    unseen;
     uint32_t	    prev_unseen;
-    uint32_t	    drafts;
-    uint32_t	    flagged;
-    uint32_t	    attachments;
+    uint32_t	    counts[MAX_CONVERSATION_FLAGS];
     conv_folder_t   *folders;
     conv_sender_t   *senders;
     int		    dirty;
@@ -151,9 +151,7 @@ extern void conversation_update(conversation_t *conv,
 			        const char *mboxname,
 			        int delta_exists,
 			        int delta_unseen,
-			        int delta_drafts,
-			        int delta_flagged,
-			        int delta_attachments,
+			        int *delta_counts,
 			        modseq_t modseq);
 extern conv_folder_t *conversation_find_folder(conversation_t *,
 					       const char *mboxname);

@@ -400,6 +400,7 @@ int _conversation_save(struct conversations_state *state,
     const conv_folder_t *folder;
     const conv_sender_t *sender;
     int version = CONVERSATIONS_VERSION;
+    int i;
     int r = 0;
 
     /* see if any 'F' keys need to be changed */
@@ -454,9 +455,11 @@ int _conversation_save(struct conversations_state *state,
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
     dlist_setnum32(dl, "EXISTS", conv->exists);
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
-    dlist_setnum32(dl, "DRAFTS", conv->drafts);
-    dlist_setnum32(dl, "FLAGGED", conv->flagged);
-    dlist_setnum32(dl, "ATTACHMENTS", conv->attachments);
+    n = dlist_newlist(dl, "COUNTS");
+    for (i = 0; i < config_counted_flags.count; i++) {
+	const char *flag = strarray_nth(&config_counted_flags, i);
+	dlist_setnum32(n, flag, conv->counts[i]);
+    }
 
     n = dlist_newlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
@@ -627,6 +630,7 @@ int _conversation_load(const char *data, int datalen,
 		       conversation_t **convp)
 {
     const char *rest;
+    int i;
     int restlen;
     bit64 version;
     struct dlist *dl = NULL;
@@ -667,15 +671,16 @@ int _conversation_load(const char *data, int datalen,
     n = dlist_getchild(dl, "UNSEEN");
     if (n)
 	conv->unseen = dlist_num(n);
-    n = dlist_getchild(dl, "DRAFTS");
-    if (n)
-	conv->drafts = dlist_num(n);
-    n = dlist_getchild(dl, "FLAGGED");
-    if (n)
-	conv->flagged = dlist_num(n);
-    n = dlist_getchild(dl, "ATTACHMENTS");
-    if (n)
-	conv->attachments = dlist_num(n);
+    n = dlist_getchild(dl, "COUNTS");
+    nn = n ? n->head : NULL;
+    for (i = 0; i < config_counted_flags.count; i++) {
+	if (nn) {
+	    conv->counts[i] = dlist_num(nn);
+	    nn = nn->next;
+	}
+	else
+	    conv->counts[i] = 0;
+    }
 
     n = dlist_getchild(dl, "FOLDER");
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
@@ -831,11 +836,11 @@ static void _apply_delta(uint32_t *valp, int delta)
 }
 
 void conversation_update(conversation_t *conv, const char *mboxname,
-		         int delta_exists, int delta_unseen,
-		         int delta_drafts, int delta_flagged,
-			 int delta_attachments, modseq_t modseq)
+			 int delta_exists, int delta_unseen,
+			 int *delta_counts, modseq_t modseq)
 {
     conv_folder_t *folder;
+    int i;
 
     folder = conversation_add_folder(conv, mboxname);
 
@@ -848,17 +853,11 @@ void conversation_update(conversation_t *conv, const char *mboxname,
 	_apply_delta(&conv->unseen, delta_unseen);
 	conv->dirty = 1;
     }
-    if (delta_drafts) {
-	_apply_delta(&conv->drafts, delta_drafts);
-	conv->dirty = 1;
-    }
-    if (delta_flagged) {
-	_apply_delta(&conv->flagged, delta_flagged);
-	conv->dirty = 1;
-    }
-    if (delta_attachments) {
-	_apply_delta(&conv->attachments, delta_attachments);
-	conv->dirty = 1;
+    for (i = 0; i < config_counted_flags.count; i++) {
+	if (delta_counts[i]) {
+	    _apply_delta(&conv->counts[i], delta_counts[i]);
+	    conv->dirty = 1;
+	}
     }
     if (modseq > conv->modseq) {
 	conv->modseq = modseq;

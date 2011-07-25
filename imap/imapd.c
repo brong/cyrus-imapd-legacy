@@ -4571,6 +4571,7 @@ static void do_one_xconvmeta(conversation_id_t cid,
 {
     struct dlist *item = dlist_newpklist(NULL, "");
     struct dlist *fl;
+    int i;
 
     assert(conv);
     assert(itemlist);
@@ -4585,12 +4586,24 @@ static void do_one_xconvmeta(conversation_id_t cid,
 	    dlist_setnum32(item, "EXISTS", conv->exists);
 	else if (!strcasecmp(key, "UNSEEN"))
 	    dlist_setnum32(item, "UNSEEN", conv->unseen);
-	else if (!strcasecmp(key, "DRAFTS"))
-	    dlist_setnum32(item, "DRAFTS", conv->drafts);
-	else if (!strcasecmp(key, "FLAGGED"))
-	    dlist_setnum32(item, "FLAGGED", conv->flagged);
-	else if (!strcasecmp(key, "ATTACHMENTS"))
-	    dlist_setnum32(item, "ATTACHMENTS", conv->attachments);
+	else if (!strcasecmp(key, "COUNT")) {
+	    struct dlist *flist = dlist_newlist(item, "COUNT");
+	    fl = fl->next;
+	    if (dlist_isatomlist(fl)) {
+		struct dlist *tmp;
+		for (tmp = fl->head; tmp; tmp = tmp->next) {
+		    const char *lookup = dlist_cstring(tmp);
+		    uint32_t val = 0;
+		    for (i = 0; i < config_counted_flags.count; i++) {
+			const char *flag = strarray_nth(&config_counted_flags, i);
+			if (!strcasecmp(lookup, flag))
+			    val = conv->counts[i];
+		    }
+		    dlist_setflag(flist, "FLAG", lookup);
+		    dlist_setnum32(flist, "COUNT", val);
+		}
+	    }
+	}
 	else if (!strcasecmp(key, "SENDERS")) {
 	    conv_sender_t *sender;
 	    struct dlist *slist = dlist_newlist(item, "SENDERS");
@@ -4604,10 +4617,10 @@ static void do_one_xconvmeta(conversation_id_t cid,
 	}
 	else if (!strcasecmp(key, "FOLDEREXISTS")) {
 	    struct dlist *flist = dlist_newlist(item, "FOLDEREXISTS");
-	    struct dlist *tmp;
 	    conv_folder_t *folder;
 	    fl = fl->next;
 	    if (dlist_isatomlist(fl)) {
+		struct dlist *tmp;
 		for (tmp = fl->head; tmp; tmp = tmp->next) {
 		    const char *fname = dlist_cstring(tmp);
 		    char intname[MAX_MAILBOX_NAME];

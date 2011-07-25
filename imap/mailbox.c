@@ -2133,9 +2133,8 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     conversation_t *conv = NULL;
     int delta_exists = 0;
     int delta_unseen = 0;
-    int delta_drafts = 0;
-    int delta_flagged = 0;
-    int delta_attachments = 0;
+    int delta_counts[MAX_CONVERSATION_FLAGS];
+    int i;
     modseq_t modseq = 0;
     conversation_id_t cid = NULLCONVERSATION;
     struct conversations_state *cstate = NULL;
@@ -2173,19 +2172,25 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     if (!conv)
 	conv = conversation_new();
 
+    /* fixed counts 'r' us, boohoo */
+    if (config_counted_flags.count > MAX_CONVERSATION_FLAGS)
+	fatal("TOO MANY COUNTED FLAGS", EC_SOFTWARE);
+
+    for (i = 0; i < config_counted_flags.count; i++)
+	delta_counts[i] = 0;
+
     /* calculate the changes */
     if (old) {
 	/* decrease any relevent counts */
 	if (!(old->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists--;
-	    if (old->system_flags & FLAG_DRAFT)
-		delta_drafts--;
-	    /* drafts don't count towards anything else */
-	    else {
-		if (old->system_flags & FLAG_FLAGGED)
-		    delta_flagged--;
-		if (!(old->system_flags & FLAG_SEEN))
-		    delta_unseen--;
+	    /* drafts are never unseen */
+	    if (!(old->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
+		delta_unseen--;
+	    for (i = 0; i < config_counted_flags.count; i++) {
+		const char *flag = strarray_nth(&config_counted_flags, i);
+		if (mailbox_record_hasflag(mailbox, old, flag))
+		    delta_counts[i]--;
 	    }
 	}
 	modseq = MAX(modseq, old->modseq);
@@ -2194,14 +2199,13 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	/* add any counts */
 	if (!(new->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists++;
-	    if (new->system_flags & FLAG_DRAFT)
-		delta_drafts++;
-	    /* drafts don't count towards anything else */
-	    else {
-		if (new->system_flags & FLAG_FLAGGED)
-		    delta_flagged++;
-		if (!(new->system_flags & FLAG_SEEN))
-		    delta_unseen++;
+	    /* drafts are never unseen */
+	    if (!(new->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
+		delta_unseen++;
+	    for (i = 0; i < config_counted_flags.count; i++) {
+		const char *flag = strarray_nth(&config_counted_flags, i);
+		if (mailbox_record_hasflag(mailbox, new, flag))
+		    delta_counts[i]++;
 	    }
 	}
 	modseq = MAX(modseq, new->modseq);
@@ -2229,18 +2233,13 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    conversation_add_sender(conv, addr.name, addr.route,
 				    addr.mailbox, addr.domain);
 
-	    /* and check if there are attachments */
-	    if (message_has_attachment(cacheitem_buf(new, CACHE_BODY)))
-		delta_attachments++;
-
 	    free(env);
 	}
     }
 
     conversation_update(conv, mailbox->name,
 			delta_exists, delta_unseen,
-			delta_drafts, delta_flagged,
-			delta_attachments, modseq);
+			delta_counts, modseq);
 
     r = conversation_save(cstate, cid, conv);
 
