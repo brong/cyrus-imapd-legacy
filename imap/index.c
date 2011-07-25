@@ -964,7 +964,7 @@ int index_store(struct index_state *state, char *sequence,
     seq = _parse_sequence(state, sequence, storeargs->usinguid);
 
     for (i = 0; i < flags->count ; i++) {
-	r = mailbox_user_flag(mailbox, flags->data[i], &userflag);
+	r = mailbox_user_flag(mailbox, flags->data[i], &userflag, 1);
 	if (r) goto out;
 	storeargs->user_flags[userflag/32] |= 1<<(userflag&31);
     }

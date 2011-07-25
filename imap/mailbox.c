@@ -1277,7 +1277,7 @@ int mailbox_set_specialuse(struct mailbox *mailbox, const char *specialuse)
 
 /* find or create a user flag - dirty header if change needed */
 int mailbox_user_flag(struct mailbox *mailbox, const char *flag,
-		      int *flagnum)
+		      int *flagnum, int create)
 {
     int userflag;
     int emptyflag = -1;
@@ -1293,6 +1293,9 @@ int mailbox_user_flag(struct mailbox *mailbox, const char *flag,
     }
 
     if (userflag == MAX_USER_FLAGS) {
+	if (!create)
+	    return IMAP_MAILBOX_NONEXISTENT;
+
 	if (emptyflag == -1) 
 	    return IMAP_USERFLAG_EXHAUSTED;
 
