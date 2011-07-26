@@ -311,3 +311,13 @@ int strarray_find(const strarray_t *sa, const char *match, int starting)
 	    return i;
     return -1;
 }
+
+int strarray_casefind(const strarray_t *sa, const char *match, int starting)
+{
+    int i;
+
+    for (i = starting ; i < sa->count ; i++)
+	if (!strcasecmp(match, sa->data[i]))
+	    return i;
+    return -1;
+}
