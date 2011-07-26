@@ -1297,7 +1297,7 @@ int mailbox_user_flag(struct mailbox *mailbox, const char *flag,
 
     if (userflag == MAX_USER_FLAGS) {
 	if (!create)
-	    return IMAP_MAILBOX_NONEXISTENT;
+	    return IMAP_NOTFOUND;
 
 	if (emptyflag == -1) 
 	    return IMAP_USERFLAG_EXHAUSTED;
