@@ -95,7 +95,7 @@ struct conversation {
     uint32_t	    exists;
     uint32_t	    unseen;
     uint32_t	    prev_unseen;
-    uint32_t	    counts[MAX_CONVERSATION_FLAGS];
+    uint32_t	    *counts;
     conv_folder_t   *folders;
     conv_sender_t   *senders;
     int		    dirty;

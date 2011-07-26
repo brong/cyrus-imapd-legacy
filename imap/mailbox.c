@@ -2133,7 +2133,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     conversation_t *conv = NULL;
     int delta_exists = 0;
     int delta_unseen = 0;
-    int delta_counts[MAX_CONVERSATION_FLAGS];
+    int *delta_counts = NULL;
     int i;
     modseq_t modseq = 0;
     conversation_id_t cid = NULLCONVERSATION;
@@ -2172,12 +2172,8 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     if (!conv)
 	conv = conversation_new();
 
-    /* fixed counts 'r' us, boohoo */
-    if (config_counted_flags->count > MAX_CONVERSATION_FLAGS)
-	fatal("TOO MANY COUNTED FLAGS", EC_SOFTWARE);
-
-    for (i = 0; i < config_counted_flags->count; i++)
-	delta_counts[i] = 0;
+    if (config_counted_flags)
+	delta_counts = xzmalloc(sizeof(int) * config_counted_flags->count);
 
     /* calculate the changes */
     if (old) {
@@ -2187,10 +2183,12 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    /* drafts are never unseen */
 	    if (!(old->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen--;
-	    for (i = 0; i < config_counted_flags->count; i++) {
-		const char *flag = strarray_nth(config_counted_flags, i);
-		if (mailbox_record_hasflag(mailbox, old, flag))
-		    delta_counts[i]--;
+	    if (config_counted_flags) {
+		for (i = 0; i < config_counted_flags->count; i++) {
+		    const char *flag = strarray_nth(config_counted_flags, i);
+		    if (mailbox_record_hasflag(mailbox, old, flag))
+			delta_counts[i]--;
+		}
 	    }
 	}
 	modseq = MAX(modseq, old->modseq);
@@ -2202,10 +2200,12 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    /* drafts are never unseen */
 	    if (!(new->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen++;
-	    for (i = 0; i < config_counted_flags->count; i++) {
-		const char *flag = strarray_nth(config_counted_flags, i);
-		if (mailbox_record_hasflag(mailbox, new, flag))
-		    delta_counts[i]++;
+	    if (config_counted_flags) {
+		for (i = 0; i < config_counted_flags->count; i++) {
+		    const char *flag = strarray_nth(config_counted_flags, i);
+		    if (mailbox_record_hasflag(mailbox, new, flag))
+			delta_counts[i]++;
+		}
 	    }
 	}
 	modseq = MAX(modseq, new->modseq);

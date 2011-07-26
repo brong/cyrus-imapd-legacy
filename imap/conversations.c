@@ -455,10 +455,12 @@ int _conversation_save(struct conversations_state *state,
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
     dlist_setnum32(dl, "EXISTS", conv->exists);
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
-    n = dlist_newlist(dl, "COUNTS");
-    for (i = 0; i < config_counted_flags->count; i++) {
-	const char *flag = strarray_nth(config_counted_flags, i);
-	dlist_setnum32(n, flag, conv->counts[i]);
+    if (config_counted_flags) {
+	n = dlist_newlist(dl, "COUNTS");
+	for (i = 0; i < config_counted_flags->count; i++) {
+	    const char *flag = strarray_nth(config_counted_flags, i);
+	    dlist_setnum32(n, flag, conv->counts[i]);
+	}
     }
 
     n = dlist_newlist(dl, "FOLDER");
@@ -671,15 +673,17 @@ int _conversation_load(const char *data, int datalen,
     n = dlist_getchild(dl, "UNSEEN");
     if (n)
 	conv->unseen = dlist_num(n);
-    n = dlist_getchild(dl, "COUNTS");
-    nn = n ? n->head : NULL;
-    for (i = 0; i < config_counted_flags->count; i++) {
-	if (nn) {
-	    conv->counts[i] = dlist_num(nn);
-	    nn = nn->next;
+    if (config_counted_flags) {
+	n = dlist_getchild(dl, "COUNTS");
+	nn = n ? n->head : NULL;
+	for (i = 0; i < config_counted_flags->count; i++) {
+	    if (nn) {
+		conv->counts[i] = dlist_num(nn);
+		nn = nn->next;
+	    }
+	    else
+		conv->counts[i] = 0;
 	}
-	else
-	    conv->counts[i] = 0;
     }
 
     n = dlist_getchild(dl, "FOLDER");
@@ -853,10 +857,12 @@ void conversation_update(conversation_t *conv, const char *mboxname,
 	_apply_delta(&conv->unseen, delta_unseen);
 	conv->dirty = 1;
     }
-    for (i = 0; i < config_counted_flags->count; i++) {
-	if (delta_counts[i]) {
-	    _apply_delta(&conv->counts[i], delta_counts[i]);
-	    conv->dirty = 1;
+    if (config_counted_flags) {
+	for (i = 0; i < config_counted_flags->count; i++) {
+	    if (delta_counts[i]) {
+		_apply_delta(&conv->counts[i], delta_counts[i]);
+		conv->dirty = 1;
+	    }
 	}
     }
     if (modseq > conv->modseq) {
@@ -874,6 +880,8 @@ conversation_t *conversation_new(void)
     conversation_t *conv;
 
     conv = xzmalloc(sizeof(conversation_t));
+    if (config_counted_flags)
+	conv->counts = xzmalloc(sizeof(uint32_t) * config_counted_flags->count);
     conv->dirty = 1;
 
     return conv;
