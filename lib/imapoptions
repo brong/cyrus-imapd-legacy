@@ -305,7 +305,10 @@ Blank lines and lines beginning with ``#'' are ignored.
 /* The cyrusdb backend to use for the per-user conversations database. */
 
 { "conversations_counted_flags", NULL, STRING }
-/* list of flags for which per-conversation counts will be kept */
+/* space-separated list of flags for which per-conversation counts
+   will be kept.  Note that you need to reconstruct the conversations
+   database with ctl_conversationsdb if you change this option on a
+   running server, or the counts will be wrong.  */
 
 { "conversations_expire_days", 90, INT }
 /* How long the conversations database keeps the message tracking
