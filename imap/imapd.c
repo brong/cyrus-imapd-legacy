@@ -4594,8 +4594,8 @@ static void do_one_xconvmeta(conversation_id_t cid,
 		for (tmp = fl->head; tmp; tmp = tmp->next) {
 		    const char *lookup = dlist_cstring(tmp);
 		    uint32_t val = 0;
-		    for (i = 0; i < config_counted_flags.count; i++) {
-			const char *flag = strarray_nth(&config_counted_flags, i);
+		    for (i = 0; i < config_counted_flags->count; i++) {
+			const char *flag = strarray_nth(config_counted_flags, i);
 			if (!strcasecmp(lookup, flag))
 			    val = conv->counts[i];
 		    }

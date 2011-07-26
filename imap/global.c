@@ -110,7 +110,7 @@ char session_id_buf[MAX_SESSIONID_SIZE];
 int session_id_time = 0;
 int session_id_count = 0;
 
-strarray_t config_counted_flags = STRARRAY_INITIALIZER;
+strarray_t *config_counted_flags = NULL;
 
 /* Called before a cyrus application starts (but after command line parameters
  * are read) */
@@ -193,13 +193,8 @@ int cyrus_init(const char *alt_config, const char *ident, unsigned flags)
 
     /* add the counted flags */
     if (config_getstring(IMAPOPT_CONVERSATIONS_COUNTED_FLAGS)) {
-	const char *base = config_getstring(IMAPOPT_CONVERSATIONS_COUNTED_FLAGS);
-	const char *next;
-	while ((next = strchr(base, ' '))) {
-	    strarray_appendm(&config_counted_flags, xstrndup(base, next-base));
-	    base = next + 1;
-	}
-	strarray_append(&config_counted_flags, base);
+	const char *opt = config_getstring(IMAPOPT_CONVERSATIONS_COUNTED_FLAGS);
+	config_counted_flags = strarray_split(opt, " ");
     }
 
     if (!cyrus_init_nodb) {

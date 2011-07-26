@@ -2173,10 +2173,10 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	conv = conversation_new();
 
     /* fixed counts 'r' us, boohoo */
-    if (config_counted_flags.count > MAX_CONVERSATION_FLAGS)
+    if (config_counted_flags->count > MAX_CONVERSATION_FLAGS)
 	fatal("TOO MANY COUNTED FLAGS", EC_SOFTWARE);
 
-    for (i = 0; i < config_counted_flags.count; i++)
+    for (i = 0; i < config_counted_flags->count; i++)
 	delta_counts[i] = 0;
 
     /* calculate the changes */
@@ -2187,8 +2187,8 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    /* drafts are never unseen */
 	    if (!(old->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen--;
-	    for (i = 0; i < config_counted_flags.count; i++) {
-		const char *flag = strarray_nth(&config_counted_flags, i);
+	    for (i = 0; i < config_counted_flags->count; i++) {
+		const char *flag = strarray_nth(config_counted_flags, i);
 		if (mailbox_record_hasflag(mailbox, old, flag))
 		    delta_counts[i]--;
 	    }
@@ -2202,8 +2202,8 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	    /* drafts are never unseen */
 	    if (!(new->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen++;
-	    for (i = 0; i < config_counted_flags.count; i++) {
-		const char *flag = strarray_nth(&config_counted_flags, i);
+	    for (i = 0; i < config_counted_flags->count; i++) {
+		const char *flag = strarray_nth(config_counted_flags, i);
 		if (mailbox_record_hasflag(mailbox, new, flag))
 		    delta_counts[i]++;
 	    }
