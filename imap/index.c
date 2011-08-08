@@ -60,6 +60,7 @@
 #include "append.h"
 #include "assert.h"
 #include "charset.h"
+#include "dlist.h"
 #include "exitcodes.h"
 #include "hash.h"
 #include "imap/imap_err.h"
@@ -90,8 +91,6 @@ static void index_refresh(struct index_state *state);
 static void index_tellexists(struct index_state *state);
 static int index_lock(struct index_state *state);
 static void index_unlock(struct index_state *state);
-
-static void index_checkflags(struct index_state *state, int dirty);
 
 int index_writeseen(struct index_state *state);
 void index_fetchmsg(struct index_state *state,
@@ -155,8 +154,6 @@ static void index_get_ids(MsgData *msgdata,
 			  char *envtokens[], const char *headers, unsigned size);
 static MsgData *index_msgdata_load(struct index_state *state, unsigned *msgno_list, int n,
 				   struct sortcrit *sortcrit);
-static struct seqset *_index_vanished(struct index_state *state,
-				      struct vanished_params *params);
 
 static void *index_sort_getnext(MsgData *node);
 static void index_sort_setnext(MsgData *node, MsgData *next);
@@ -253,7 +250,7 @@ int index_open(const char *name, struct index_init *init,
 
     /* have to get the vanished list while we're still locked */
     if (init)
-	init->vanishedlist = _index_vanished(state, &init->vanished);
+	init->vanishedlist = index_vanished(state, &init->vanished);
 
     index_unlock(state);
 
@@ -595,7 +592,7 @@ void index_select(struct index_state *state, struct index_init *init)
     index_tellexists(state);
 
     /* always print flags */
-    index_checkflags(state, 1);
+    index_checkflags(state, 1, 1);
 
     if (state->firstnotseen)
 	prot_printf(state->out, "* OK [UNSEEN %u] Ok\r\n", 
@@ -707,8 +704,8 @@ int index_check(struct index_state *state, int usinguid, int printuid)
 /*
  * Perform UID FETCH (VANISHED) on a sequence.
  */
-static struct seqset *_index_vanished(struct index_state *state,
-				      struct vanished_params *params)
+struct seqset *index_vanished(struct index_state *state,
+			      struct vanished_params *params)
 {
     struct mailbox *mailbox = state->mailbox;
     struct index_record record;
@@ -950,12 +947,12 @@ int index_fetch(struct index_state *state,
 	v.match_seq = fetchargs->match_seq;
 	v.match_uid = fetchargs->match_uid;
 	/* XXX - return error unless usinguid? */
-	vanishedlist = _index_vanished(state, &v);
+	vanishedlist = index_vanished(state, &v);
     }
 
     index_unlock(state);
 
-    index_checkflags(state, 0);
+    index_checkflags(state, 1, 0);
 
     if (vanishedlist && vanishedlist->len) {
 	char *vanished = seqset_cstring(vanishedlist);
@@ -2436,7 +2433,7 @@ static void index_listflags(struct index_state *state)
     prot_printf(state->out, ")] Ok\r\n");
 }
 
-static void index_checkflags(struct index_state *state, int dirty)
+void index_checkflags(struct index_state *state, int print, int dirty)
 {
     struct mailbox *mailbox = state->mailbox;
     unsigned i;
@@ -2462,7 +2459,7 @@ static void index_checkflags(struct index_state *state, int dirty)
 	dirty = 1;
     }
 
-    if (dirty)
+    if (dirty && print)
 	index_listflags(state);
 }
 
@@ -2529,7 +2526,7 @@ void index_tellchanges(struct index_state *state, int canexpunge,
 
     if (state->oldexists != state->exists) index_tellexists(state);
 
-    index_checkflags(state, 0);
+    index_checkflags(state, 1, 0);
 
     /* print any changed message flags */
     for (msgno = 1; msgno <= state->exists; msgno++) {
@@ -2697,6 +2694,13 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     char respbuf[100];
     int r = 0;
     struct index_map *im = &state->map[msgno-1];
+
+    /* Check against the CID list filter */
+    if (fetchargs->cidhash) {
+	const char *key = conversation_id_encode(im->record.cid);
+	if (!hash_lookup(key, fetchargs->cidhash))
+	    return 0;
+    }
 
     /* Check the modseq against changedsince */
     if (fetchargs->changedsince &&

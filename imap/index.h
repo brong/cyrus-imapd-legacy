@@ -228,6 +228,7 @@ extern int find_thread_algorithm(char *arg);
 
 extern int index_open(const char *name, struct index_init *init,
 		      struct index_state **stateptr);
+extern void index_checkflags(struct index_state *state, int print, int dirty);
 extern void index_select(struct index_state *state, struct index_init *init);
 extern int index_status(struct index_state *state, struct statusdata *sdata);
 extern void index_close(struct index_state **stateptr);
@@ -237,6 +238,8 @@ extern void index_tellchanges(struct index_state *state, int canexpunge,
 extern unsigned index_getuid(struct index_state *state, uint32_t msgno);
 extern modseq_t index_highestmodseq(struct index_state *state);
 extern int index_check(struct index_state *state, int usinguid, int printuid);
+extern struct seqset *index_vanished(struct index_state *state,
+				    struct vanished_params *params);
 extern int index_urlfetch(struct index_state *state, uint32_t msgno,
 			  unsigned params, const char *section,
 			  unsigned long start_octet, unsigned long octet_count,
