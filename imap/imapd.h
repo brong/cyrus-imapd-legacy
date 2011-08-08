@@ -51,6 +51,7 @@
 #include "mailbox.h"
 #include "prot.h"
 #include "strarray.h"
+#include "conversations.h"
 
 /* Userid client has logged in as */
 extern char *imapd_userid;
@@ -106,6 +107,7 @@ struct fetchargs {
     strarray_t attribs;
     int isadmin;
     struct auth_state *authstate;
+    hash_table *cidhash;          /* for XCONVFETCH */
 };
 
 /* Bitmasks for fetchitems */

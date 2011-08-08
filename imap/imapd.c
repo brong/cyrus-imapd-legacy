@@ -353,6 +353,10 @@ static int parse_fetch_args(const char *tag, const char *cmd,
 			    struct fetchargs *fa);
 void cmd_fetch(char *tag, char *sequence, int usinguid);
 void cmd_xconvmeta(const char *tag);
+void cmd_xconvfetch(const char *tag);
+static int do_xconvfetch(struct dlist *cidlist,
+			 modseq_t ifchangedsince,
+			 struct fetchargs *fetchargs);
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
 void cmd_sort(char *tag, int usinguid);
@@ -2046,7 +2050,12 @@ void cmdloop(void)
 	    break;
 
 	case 'X':
-	    if (!strcmp(cmd.s, "Xfer")) {
+	    if (!strcmp(cmd.s, "Xconvfetch")) {
+		cmd_xconvfetch(tag.s);
+
+// 		snmp_increment(XCONVFETCH_COUNT, 1);
+	    }
+	    else if (!strcmp(cmd.s, "Xfer")) {
 		int havepartition = 0;
 		
 		/* Mailbox */
@@ -4474,7 +4483,8 @@ badannotation:
     if (fa->fetchitems & FETCH_MODSEQ) {
 	if (!(imapd_client_capa & CAPA_CONDSTORE)) {
 	    imapd_client_capa |= CAPA_CONDSTORE;
-	    prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
+	    if (imapd_index)
+		prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 			index_highestmodseq(imapd_index));
 	}
     }
@@ -4734,6 +4744,196 @@ void cmd_xconvmeta(const char *tag)
     dlist_free(&itemlist);
     dlist_free(&cidlist);
     conversations_commit(&state);
+}
+
+/*
+ * Parse and perform a XCONVFETCH command.
+ */
+void cmd_xconvfetch(const char *tag)
+{
+    int c = ' ';
+    struct fetchargs fetchargs;
+    int r;
+    clock_t start = clock();
+    modseq_t ifchangedsince = 0;
+    char mytime[100];
+    struct dlist *cidlist = NULL;
+    struct dlist *item;
+
+    if (backend_current) {
+	/* remote mailbox */
+	prot_printf(backend_current->out, "%s XCONVFETCH ", tag);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
+	return;
+    }
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
+	eatline(imapd_in, c);
+	return;
+    }
+
+    /* local mailbox */
+    memset(&fetchargs, 0, sizeof(struct fetchargs));
+
+    c = dlist_parse_asatomlist(&cidlist, 0, imapd_in);
+    if (c != ' ')
+	goto syntax_error;
+
+    /* check CIDs */
+    for (item = cidlist->head; item; item = item->next) {
+	if (!dlist_ishex64(item)) {
+	    prot_printf(imapd_out, "%s BAD Invalid CID\r\n", tag);
+	    eatline(imapd_in, c);
+	    goto freeargs;
+	}
+    }
+
+    c = getmodseq(imapd_in, &ifchangedsince);
+    if (c != ' ')
+	goto syntax_error;
+
+    r = parse_fetch_args(tag, "Xconvfetch", 0, &fetchargs);
+    if (r)
+	goto freeargs;
+    fetchargs.fetchitems |= (FETCH_UIDVALIDITY|FETCH_FOLDER);
+    fetchargs.namespace = &imapd_namespace;
+    fetchargs.userid = imapd_userid;
+
+    r = do_xconvfetch(cidlist, ifchangedsince, &fetchargs);
+
+    snprintf(mytime, sizeof(mytime), "%2.3f",
+	     (clock() - start) / (double) CLOCKS_PER_SEC);
+
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s (%s sec)\r\n", tag,
+		    error_message(r), mytime);
+    } else {
+	prot_printf(imapd_out, "%s OK Completed (%s sec)\r\n",
+		    tag, mytime);
+    }
+
+freeargs:
+    dlist_free(&cidlist);
+    fetchargs_fini(&fetchargs);
+    return;
+
+syntax_error:
+    prot_printf(imapd_out, "%s BAD Syntax error\r\n", tag);
+    eatline(imapd_in, c);
+    dlist_free(&cidlist);
+    fetchargs_fini(&fetchargs);
+}
+
+static int xconvfetch_lookup(struct conversations_state *statep,
+			     conversation_id_t cid,
+			     modseq_t ifchangedsince,
+			     hash_table *wanted_cids,
+			     strarray_t *folder_list)
+{
+    const char *key = conversation_id_encode(cid);
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    int r;
+
+    r = conversation_load(statep, cid, &conv);
+    if (r) return r;
+
+    if (!conv)
+	goto out;
+
+    if (!conv->exists)
+	goto out;
+
+    /* output the metadata for this conversation */
+    {
+	struct dlist *dl = dlist_newlist(NULL, "");
+	dlist_setatom(dl, "", "MODSEQ");
+	do_one_xconvmeta(statep, cid, conv, dl);
+	dlist_free(&dl);
+    }
+
+    if (ifchangedsince >= conv->modseq)
+	goto out;
+
+    hash_insert(key, (void *)1, wanted_cids);
+
+    for (folder = conv->folders; folder; folder = folder->next) {
+	/* no contents */
+	if (!folder->exists)
+	    continue;
+
+	/* finally, something worth looking at */
+	strarray_add(folder_list, folder->mboxname);
+    }
+
+out:
+    conversation_free(conv);
+    return 0;
+}
+
+static int do_xconvfetch(struct dlist *cidlist,
+			 modseq_t ifchangedsince,
+			 struct fetchargs *fetchargs)
+{
+    struct conversations_state *state = NULL;
+    int r = 0;
+    struct index_state *index_state = NULL;
+    struct dlist *dl;
+    hash_table wanted_cids = HASH_TABLE_INITIALIZER;
+    strarray_t folder_list = STRARRAY_INITIALIZER;
+    struct index_init init;
+    int i;
+
+    r = conversations_open_user(imapd_userid, &state);
+    if (r) goto out;
+
+    construct_hash_table(&wanted_cids, 1024, 0);
+
+    for (dl = cidlist->head; dl; dl = dl->next) {
+	r = xconvfetch_lookup(state, dlist_num(dl), ifchangedsince,
+			      &wanted_cids, &folder_list);
+	if (r) goto out;
+    }
+
+    /* unchanged, woot */
+    if (!folder_list.count)
+	goto out;
+
+    fetchargs->cidhash = &wanted_cids;
+
+    memset(&init, 0, sizeof(struct index_init));
+    init.userid = imapd_userid;
+    init.authstate = imapd_authstate;
+    init.out = imapd_out;
+
+    for (i = 0; i < folder_list.count; i++) {
+	const char *mboxname = folder_list.data[i];
+
+	r = index_open(mboxname, &init, &index_state);
+	if (r == IMAP_MAILBOX_NONEXISTENT)
+	    continue;
+	if (r)
+	    goto out;
+
+	index_checkflags(index_state, 0, 0);
+
+	index_fetchresponses(index_state, NULL, /*usinguid*/1,
+			     fetchargs, NULL);
+
+	index_close(&index_state);
+    }
+
+    r = 0;
+
+out:
+    index_close(&index_state);
+    conversations_commit(&state);
+    free_hash_table(&wanted_cids, NULL);
+    strarray_fini(&folder_list);
+    return r;
 }
 
 #undef PARSE_PARTIAL /* cleanup */
