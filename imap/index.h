@@ -122,6 +122,7 @@ struct index_state {
     struct protstream *out;
     int qresync;
     struct auth_state *authstate;
+    int want_expunged;
 };
 
 struct copyargs {
@@ -158,6 +159,10 @@ typedef struct msgdata {
     strarray_t annot;		/* array of annotation attribute values
 				   (stored in order of sortcrit) */
     struct msgdata *next;
+
+    unsigned int was_old_exemplar:1;
+    unsigned int is_new_exemplar:1;
+    unsigned int is_changed:1;
 } MsgData;
 
 typedef struct thread {
@@ -208,6 +213,9 @@ extern int index_run_annotator(struct index_state *state,
 			       struct namespace *namespace, int isadmin);
 extern int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs, int usinguid);
+extern int index_convsort(struct index_state *state, struct sortcrit *sortcrit,
+		      struct searchargs *searchargs,
+		      const struct windowargs * windowargs);
 extern int index_thread(struct index_state *state, int algorithm,
 			struct searchargs *searchargs, int usinguid);
 extern int index_search(struct index_state *state,
