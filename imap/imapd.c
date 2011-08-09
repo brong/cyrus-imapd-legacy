@@ -363,6 +363,7 @@ static int do_xconvfetch(struct dlist *cidlist,
 void cmd_store(char *tag, char *sequence, int usinguid);
 void cmd_search(char *tag, int usinguid);
 void cmd_sort(char *tag, int usinguid);
+void cmd_xconvsort(char *tag);
 void cmd_thread(char *tag, int usinguid);
 void cmd_copy(char *tag, char *sequence, char *name, int usinguid, int ismove);
 void cmd_expunge(char *tag, char *sequence);
@@ -446,6 +447,8 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 int getsearchdate(time_t *start, time_t *end);
 int getsortcriteria(char *tag, struct sortcrit **sortcrit);
 static char *sortcrit_as_string(const struct sortcrit *sortcrit);
+static int parse_windowargs(const char *tag, struct windowargs **);
+static void free_windowargs(struct windowargs *wa);
 int getdatetime(time_t *date);
 
 void appendfieldlist(struct fieldlist **l, char *section,
@@ -2081,6 +2084,12 @@ void cmdloop(void)
 		cmd_xconvfetch(tag.s);
 
 // 		snmp_increment(XCONVFETCH_COUNT, 1);
+	    }
+	    else if (!strcmp(cmd.s, "Xconvsort")) {
+		if (c != ' ') goto missingargs;
+		cmd_xconvsort(tag.s);
+
+// 		snmp_increment(XCONVSORT_COUNT, 1);
 	    }
 	    else if (!strcmp(cmd.s, "Xfer")) {
 		int havepartition = 0;
@@ -5364,6 +5373,156 @@ error:
     eatline(imapd_in, (c == EOF ? ' ' : c));
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
+}
+
+/*
+ * Perform a XCONVSORT command
+ */
+void cmd_xconvsort(char *tag)
+{
+    int c;
+    struct sortcrit *sortcrit = NULL;
+    static struct buf mailboxname;
+    static struct buf arg;
+    int charset = 0;
+    struct searchargs *searchargs = NULL;
+    struct windowargs *windowargs = NULL;
+    struct index_init init;
+    struct index_state *oldstate = NULL;
+    struct conversations_state *cstate = NULL;
+    clock_t start = clock();
+    char internalname[MAX_MAILBOX_NAME];
+    char mytime[100];
+    int n;
+    int r;
+
+    if (backend_current) {
+	/* remote mailbox */
+	const char *cmd = "Xconvsort";
+
+	prot_printf(backend_current->out, "%s %s ", tag, cmd);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
+	return;
+    }
+
+    oldstate = imapd_index;
+    imapd_index = NULL;
+
+    /* local mailbox */
+    c = getastring(imapd_in, imapd_out, &mailboxname);
+    if (c == EOF) {
+	prot_printf(imapd_out, "%s BAD Missing mailbox name in XconvSort\r\n",
+		    tag);
+	goto error;
+    }
+
+    c = getsortcriteria(tag, &sortcrit);
+    if (c == EOF) goto error;
+
+    /* get charset */
+    if (c != ' ') {
+	prot_printf(imapd_out, "%s BAD Missing charset in XConvSort\r\n",
+		    tag);
+	goto error;
+    }
+
+    c = getword(imapd_in, &arg);
+    if (c == '(' && !arg.len) {
+	c = parse_windowargs(tag, &windowargs);
+	if (c != ')')
+	    goto error;
+	c = prot_getc(imapd_in);
+	if (c != ' ') {
+	    prot_printf(imapd_out, "%s BAD Missing search criteria in Sort\r\n",
+			tag);
+	    goto error;
+	}
+	c = getword(imapd_in, &arg);
+    }
+    if (c != ' ') {
+	prot_printf(imapd_out, "%s BAD Missing search criteria in Sort\r\n",
+		    tag);
+	goto error;
+    }
+    lcase(arg.s);
+    charset = charset_lookupname(arg.s);
+
+    if (charset == -1) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag,
+	       error_message(IMAP_UNRECOGNIZED_CHARSET));
+	goto error;
+    }
+
+    (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
+					   imapd_userid, internalname);
+
+    /* open the conversations state first - we don't care if it fails,
+     * because that probably just means it's already open */
+    conversations_open_mbox(internalname, &cstate);
+
+    /* need to force a re-read from scratch into a new
+     * index - even if this mailbox is selected - because
+     * we might ask for deleted messages */
+
+    memset(&init, 0, sizeof(struct index_init));
+    init.userid = imapd_userid;
+    init.authstate = imapd_authstate;
+    init.out = imapd_out;
+    if (windowargs->changedsince)
+	init.want_expunged = 1;
+
+    r = index_open(internalname, &init, &imapd_index);
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag,
+		    error_message(r));
+	goto error;
+    }
+
+    /* need index loaded to even parse searchargs! */
+    searchargs = (struct searchargs *)xzmalloc(sizeof(struct searchargs));
+
+    c = getsearchprogram(tag, searchargs, &charset, 0);
+    if (c == EOF) goto error;
+
+    if (c == '\r') c = prot_getc(imapd_in);
+    if (c != '\n') {
+	prot_printf(imapd_out, 
+		    "%s BAD Unexpected extra arguments to Xconvsort\r\n", tag);
+	goto error;
+    }
+
+    n = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
+
+    index_close(&imapd_index);
+    imapd_index = oldstate;
+
+    snprintf(mytime, sizeof(mytime), "%2.3f",
+	     (clock() - start) / (double) CLOCKS_PER_SEC);
+    if (CONFIG_TIMING_VERBOSE) {
+	char *s = sortcrit_as_string(sortcrit);
+	syslog(LOG_DEBUG, "XCONVSORT (%s) processing time: %d msg in %s sec",
+	       s, n, mytime);
+	free(s);
+    }
+    prot_printf(imapd_out, "%s OK %s (%d msgs in %s secs)\r\n", tag,
+		error_message(IMAP_OK_COMPLETED), n, mytime);
+
+    conversations_abort(&cstate);
+    freesortcrit(sortcrit);
+    freesearchargs(searchargs);
+    free_windowargs(windowargs);
+    return;
+
+error:
+    eatline(imapd_in, (c == EOF ? ' ' : c));
+    conversations_abort(&cstate);
+    freesortcrit(sortcrit);
+    freesearchargs(searchargs);
+    free_windowargs(windowargs);
+    index_close(&imapd_index);
+    imapd_index = oldstate;
 }
 
 /*
@@ -10687,6 +10846,75 @@ static char *sortcrit_as_string(const struct sortcrit *sortcrit)
 	}
     }
     return buf_release(&b);
+}
+
+static int parse_windowargs(const char *tag, struct windowargs **wa)
+{
+    struct windowargs windowargs;
+    struct buf arg = BUF_INITIALIZER;
+    int c;
+
+    memset(&windowargs, 0, sizeof(windowargs));
+
+    for (;;)
+    {
+	c = getword(imapd_in, &arg);
+	if (!arg.len) {
+	    if (c == ')')
+		break;
+	    goto syntax_error;
+	}
+
+	if (!strcasecmp(arg.s, "CONVERSATIONS"))
+	    windowargs.conversations = 1;
+	else if (!strcasecmp(arg.s, "LIMIT"))
+	    c = getuint32(imapd_in, &windowargs.limit);
+	else if (!strcasecmp(arg.s, "POSITION"))
+	    c = getuint32(imapd_in, &windowargs.position);
+	else if (!strcasecmp(arg.s, "ANCHOR"))
+	    c = getuint32(imapd_in, &windowargs.anchor);
+	else if (!strcasecmp(arg.s, "OFFSET"))
+	    c = getsint32(imapd_in, &windowargs.offset);
+	else if (!strcasecmp(arg.s, "CHANGEDSINCE")) {
+	    windowargs.changedsince = 1;
+	    if (c != ' ')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	    if (c != '(')
+		goto syntax_error;
+	    c = getmodseq(imapd_in, &windowargs.modseq);
+	    if (c != ' ')
+		goto syntax_error;
+	    c = getuint32(imapd_in, &windowargs.uidnext);
+	    if (c != ')')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	} else if (!strcasecmp(arg.s, "UNTIL"))
+	    windowargs.until = 1;
+	else
+	    goto syntax_error;
+
+	if (c == ')')
+	    break;
+	if (c != ' ')
+	    goto syntax_error;
+    }
+
+    *wa = xmemdup(&windowargs, sizeof(windowargs));
+    buf_free(&arg);
+    return c;
+
+syntax_error:
+    prot_printf(imapd_out, "%s BAD Syntax error in window arguments\r\n", tag);
+    buf_free(&arg);
+    return EOF;
+}
+
+static void free_windowargs(struct windowargs *wa)
+{
+    if (!wa)
+	return;
+    free(wa);
 }
 
 /*
