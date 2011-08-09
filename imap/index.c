@@ -60,6 +60,7 @@
 #include "append.h"
 #include "assert.h"
 #include "charset.h"
+#include "conversations.h"
 #include "dlist.h"
 #include "exitcodes.h"
 #include "hash.h"
@@ -153,7 +154,8 @@ static char *_index_extract_subject(char *s, int *is_refwd);
 static void index_get_ids(MsgData *msgdata,
 			  char *envtokens[], const char *headers, unsigned size);
 static MsgData *index_msgdata_load(struct index_state *state, unsigned *msgno_list, int n,
-				   struct sortcrit *sortcrit);
+				   struct sortcrit *sortcrit,
+				   unsigned int anchor, int *found_anchor);
 
 static void *index_sort_getnext(MsgData *node);
 static void index_sort_setnext(MsgData *node, MsgData *next);
@@ -239,6 +241,7 @@ int index_open(const char *name, struct index_init *init,
 
 	state->out = init->out;
 	state->qresync = init->qresync;
+	state->want_expunged = init->want_expunged;
     }
     else {
 	r = mailbox_open_iwl(name, &state->mailbox);
@@ -473,7 +476,11 @@ void index_refresh(struct index_state *state)
     uint32_t need_records;
     struct seqset *seenlist;
 
-    if (state->num_records) {
+    if (state->want_expunged) {
+	/* could need the lot! */
+	need_records = mailbox->i.num_records;
+    }
+    else if (state->num_records) {
 	need_records = mailbox->i.num_records -
 		       state->num_records + state->exists;
     }
@@ -498,7 +505,8 @@ void index_refresh(struct index_state *state)
 	    continue; /* bogus read... should probably be fatal */
 
 	/* ignore expunged messages */
-	if (im->record.system_flags & FLAG_EXPUNGED) {
+	if (!state->want_expunged &&
+	    (im->record.system_flags & FLAG_EXPUNGED)) {
 	    /* http://www.rfc-editor.org/errata_search.php?rfc=5162
 	     * Errata ID: 1809 - if there are expunged records we
 	     * aren't telling about, need to make the highestmodseq
@@ -531,7 +539,8 @@ void index_refresh(struct index_state *state)
 	im = &state->map[msgno-1];
 	if (mailbox_read_index_record(mailbox, recno, &im->record))
 	    continue; /* bogus read... should probably be fatal */
-	if (im->record.system_flags & FLAG_EXPUNGED)
+	if (!state->want_expunged &&
+	    (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	/* make sure we don't overflow the memory we mapped */
@@ -1288,8 +1297,8 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	msgno = (*msgno_list)[listindex];
 	im = &state->map[msgno-1];
 
-	/* expunged messages never match */
-	if (im->record.system_flags & FLAG_EXPUNGED)
+	/* expunged messages hardly ever match */
+	if (!state->want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	if (index_search_evaluate(state, searchargs, msgno, NULL)) {
@@ -1321,8 +1330,8 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	msgno = (*msgno_list)[listindex-1];
 	im = &state->map[msgno-1];
 
-	/* expunged messages never match */
-	if (im->record.system_flags & FLAG_EXPUNGED)
+	/* expunged messages hardly ever match */
+	if (!state->want_expunged && (im->record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
 	if (index_search_evaluate(state, searchargs, msgno, NULL)) {
@@ -1524,7 +1533,8 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 
     if (nmsg) {
 	/* Create/load the msgdata array */
-	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit);
+	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
+					      0, NULL);
 	free(msgno_list);
 
 	/* Sort the messages based on the given criteria */
@@ -1554,6 +1564,343 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 	prot_printf(state->out, " (MODSEQ " MODSEQ_FMT ")", highestmodseq);
 
     prot_printf(state->out, "\r\n");
+
+    return nmsg;
+}
+
+struct added
+{
+    unsigned int uid;
+    unsigned int pos;
+};
+
+/*
+ * Performs a XCONVSORT command
+ */
+int index_convsort(struct index_state *state,
+		   struct sortcrit *sortcrit,
+		   struct searchargs *searchargs,
+		   const struct windowargs *windowargs)
+{
+    unsigned *msgno_list;
+    MsgData *msgdata = NULL, *freeme = NULL;
+    MsgData *msg;
+    MsgData *chaff = NULL;
+    MsgData *exemplars = NULL, **exemplars_tailp = &exemplars;
+    int nexemplars = 0;
+    int nmsg = 0;
+    modseq_t highestmodseq = 0;
+    modseq_t xconvmodseq = 0;
+    unsigned int i;
+    int modseq = 0;
+    hash_table seen_cids = HASH_TABLE_INITIALIZER;
+    hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
+    int32_t pos = 0;
+    static const struct windowargs default_windowargs;    /* all zeroes */
+    int found_anchor = 0;
+    uint32_t anchor_pos = 0;
+    uint32_t first_pos = 0;
+    int32_t window_first = 0, window_last = 0;
+    unsigned int ninwindow = 0;
+    unsigned int *results = NULL;
+    unsigned int nresults = 0;		/* uids */
+    unsigned int maxresults = 0;
+    struct added *added = NULL;
+    unsigned int nadded = 0;
+    unsigned int *removed = NULL;	/* uids */
+    unsigned int nremoved = 0;
+    unsigned int maxremoved = 0;
+    unsigned int numresults = 0;
+    struct index_record **changed = NULL;
+    unsigned int nchanged = 0;
+    struct conversations_state *cstate = NULL;
+
+    if (!windowargs)
+	windowargs = &default_windowargs;
+
+    if (searchargs->modseq) modseq = 1;
+    else if (windowargs->changedsince) modseq = 1;
+    else {
+	for (i = 0; sortcrit[i].key != SORT_SEQUENCE; i++) {
+	    if (sortcrit[i].key == SORT_MODSEQ) {
+		modseq = 1;
+		break;
+	    }
+	}
+    }
+
+    /* always grab xconvmodseq, so we report a growing
+     * highestmodseq to all callers */
+    cstate = conversations_get_mbox(state->mailbox->name);
+    if (!cstate) return 0;
+
+    if (windowargs->conversations) {
+	conversation_getstatus(cstate, state->mailbox->name,
+			       &xconvmodseq, &numresults, 0);
+
+	/* XXX - counts for a search - might need to cache somehow? */
+	if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
+	    goto skip;
+    } else {
+	numresults = state->exists;
+	if (windowargs->changedsince && state->highestmodseq <= windowargs->modseq)
+	    goto skip;
+    }
+
+    construct_hash_table(&seen_cids, 1024, 0);
+    construct_hash_table(&old_seen_cids, 1024, 0);
+
+    /* Search for messages based on the given criteria */
+    nmsg = _index_search(&msgno_list, state, searchargs,
+			 modseq ? &highestmodseq : NULL);
+    if (nmsg) {
+	/* Create/load the msgdata array */
+	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
+					      windowargs->anchor, &found_anchor);
+	free(msgno_list);
+
+	/* Sort the messages based on the given criteria */
+	msgdata = lsort(msgdata,
+			(void * (*)(void*)) index_sort_getnext,
+			(void (*)(void*,void*)) index_sort_setnext,
+			(int (*)(void*,void*,void*)) index_sort_compare,
+			sortcrit);
+
+
+	/* Discover exemplars */
+	while ((msg = msgdata)) {
+	    struct index_record *record = &state->map[msg->msgno-1].record;
+	    int was_old_exemplar = 0;
+	    int is_new_exemplar = 0;
+	    int is_deleted = 0;
+	    int is_new = 0;
+	    int was_deleted = 0;
+	    int is_changed = 0;
+
+	    if (windowargs->changedsince) {
+		is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
+		is_new = (record->uid >= windowargs->uidnext);
+		is_changed = (record->modseq > windowargs->modseq);
+		was_deleted = is_deleted && !is_changed;
+	    } else {
+		assert(!(record->system_flags & FLAG_EXPUNGED));
+	    }
+
+	    /* figure out whether this message is an exemplar in
+	     * the new and/or old results */
+	    if (windowargs->conversations) {
+		/* in conversations mode => only the first message seen
+		 * with each unique CID is an exemplar */
+		const char *key = conversation_id_encode(record->cid);
+
+		if (windowargs->changedsince &&
+		    !is_new &&
+		    !was_deleted &&
+		    !hash_lookup(key, &old_seen_cids)) {
+		    hash_insert(key, (void *)1, &old_seen_cids);
+		    was_old_exemplar = 1;
+		}
+
+		if (!is_deleted &&
+		    !hash_lookup(key, &seen_cids)) {
+		    hash_insert(key, (void *)1, &seen_cids);
+		    is_new_exemplar = 1;
+		}
+	    }
+	    else
+	    {
+		/* not in conversations mode => all messages are exemplars */
+		was_old_exemplar = !was_deleted && !is_new;
+		is_new_exemplar = !is_deleted;
+	    }
+
+	    if (is_new_exemplar)
+		pos++;
+
+	    if (!anchor_pos &&
+		(was_old_exemplar || !windowargs->changedsince) &&
+		windowargs->anchor == record->uid) {
+		/* we've found the anchor's position, rejoice! */
+		anchor_pos = pos;
+	    }
+
+	    /* stash these, we'll need them later */
+	    msg->was_old_exemplar = was_old_exemplar;
+	    msg->is_new_exemplar = is_new_exemplar;
+	    msg->is_changed = is_changed;
+
+	    /* detach from msgdata list */
+	    msgdata = msg->next;
+	    msg->next = NULL;
+
+	    if (was_old_exemplar || is_new_exemplar) {
+		/* append to the exemplars list, where order matters */
+		*exemplars_tailp = msg;
+		exemplars_tailp = &msg->next;
+		nexemplars++;
+	    } else {
+		/* prepend to the chaff list, which is for freeing only */
+		msg->next = chaff;
+		chaff = msg;
+	    }
+	}
+
+	/* After the first pass we now have enough information
+	 * to work out exactly where the window lies */
+	if (windowargs->until) {
+	    if (anchor_pos)
+		window_last = anchor_pos + windowargs->offset;
+	    else if (windowargs->position)
+		window_last = windowargs->position;
+	} else {
+	    if (anchor_pos)
+		window_first = anchor_pos + windowargs->offset;
+	    else if (windowargs->position)
+		window_first = windowargs->position;
+	}
+
+	/* Build the results[], added[], removed[], changed[] arrays */
+
+	maxresults = nexemplars;
+	if (windowargs->limit)
+	    maxresults = MIN(windowargs->limit, maxresults);
+	if (!windowargs->changedsince) {
+	    results = xcalloc(maxresults, sizeof(unsigned int));
+	} else {
+	    maxremoved = nexemplars;
+	    added = xcalloc(maxresults, sizeof(struct added));
+	    removed = xcalloc(maxremoved, sizeof(unsigned int));
+	    changed = xcalloc(maxresults, sizeof(struct index_record*));
+	}
+
+	pos = 0;
+	for (msg = exemplars ; msg ; msg = msg->next) {
+	    struct index_record *record = &state->map[msg->msgno-1].record;
+
+	    if (msg->is_new_exemplar)
+		pos++;
+	    if (window_first && pos < window_first)
+		continue;
+	    if (window_last && pos > window_last)
+		break;
+
+	    if (msg->is_new_exemplar &&
+		windowargs->limit &&
+		++ninwindow > windowargs->limit)
+		break;
+	    if (!first_pos)
+		first_pos = pos;
+
+	    if (!windowargs->changedsince) {
+		if (msg->is_new_exemplar) {
+		    assert(nresults < maxresults);
+		    results[nresults++] = record->uid;
+		}
+	    } else {
+		/* we opened conversations above */
+		if (msg->was_old_exemplar && !msg->is_new_exemplar) {
+		    assert(nremoved < maxresults);
+		    removed[nremoved++] = record->uid;
+		}
+		else if (msg->is_new_exemplar && !msg->was_old_exemplar) {
+		    assert(nadded < maxresults);
+		    added[nadded].uid = record->uid;
+		    added[nadded].pos = pos;
+		    nadded++;
+		}
+		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
+		    if (windowargs->conversations) {
+			conversation_t *convdata = NULL;
+			conversation_load(cstate, record->cid, &convdata);
+			if (convdata->modseq > windowargs->modseq) {
+			    assert(nchanged < maxresults);
+			    changed[nchanged++] = record;
+			}
+			conversation_free(convdata);
+		    } else {
+			if (msg->is_changed) {
+			    assert(nchanged < maxresults);
+			    changed[nchanged++] = record;
+			}
+		    }
+		}
+	    }
+	}
+    }
+
+    /* Print the resulting lists */
+
+    /* Yes, we could use a seqset here, but apparently the most common
+     * sort order seen in the field is reverse date, which is basically
+     * the worst case for seqset.  So we don't bother */
+    if (nresults) {
+	assert(!windowargs->changedsince);
+	prot_printf(state->out, "* SORT");  /* uids */
+	for (i = 0 ; i < nresults ; i++)
+	    prot_printf(state->out, " %u", results[i]);
+	prot_printf(state->out, "\r\n");
+    }
+
+    if (nadded) {
+	assert(windowargs->changedsince);
+	prot_printf(state->out, "* ADDED"); /* (uid pos) tuples */
+	for (i = 0 ; i < nadded ; i++)
+	    prot_printf(state->out, " (%u %u)",
+			added[i].uid, added[i].pos);
+	prot_printf(state->out, "\r\n");
+    }
+
+    if (nremoved) {
+	assert(windowargs->changedsince);
+	prot_printf(state->out, "* REMOVED");	/* uids */
+	for (i = 0 ; i < nremoved ; i++)
+	    prot_printf(state->out, " %u", removed[i]);
+	prot_printf(state->out, "\r\n");
+    }
+
+    if (nchanged) {
+	assert(windowargs->changedsince);
+	prot_printf(state->out, "* CHANGED");	/* cids or uids */
+	for (i = 0 ; i < nchanged ; i++) {
+	    if (windowargs->conversations)
+		prot_printf(state->out, " %s",
+			conversation_id_encode(changed[i]->cid));
+	    else
+		prot_printf(state->out, " %u", changed[i]->uid);
+	}
+	prot_printf(state->out, "\r\n");
+    }
+
+skip:
+    if (first_pos)
+	prot_printf(state->out, "* OK [POSITION %u]\r\n", first_pos);
+
+    prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
+		MAX(xconvmodseq, state->mailbox->i.highestmodseq));
+    prot_printf(state->out, "* OK [UIDVALIDITY %u]\r\n",
+		state->mailbox->i.uidvalidity);
+    prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
+		state->mailbox->i.last_uid + 1);
+    prot_printf(state->out, "* OK [NUMRESULTS %u]\r\n",
+		numresults);
+
+    /* free all our temporary data */
+    assert(!msgdata);
+    /* gnarly - splice together the exemplars and chaff so
+     * we can free them in a single pass */
+    *exemplars_tailp = chaff;
+    while (exemplars) {
+	/* free contents of the current node */
+	index_msgdata_free(exemplars);
+	exemplars = exemplars->next;
+    }
+    free(freeme);
+    free(results);
+    free(added);
+    free(removed);
+    free(changed);
+    free_hash_table(&seen_cids, NULL);
+    free_hash_table(&old_seen_cids, NULL);
 
     return nmsg;
 }
@@ -3966,7 +4313,8 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
  */
 static MsgData *index_msgdata_load(struct index_state *state,
 				   unsigned *msgno_list, int n,
-				   struct sortcrit *sortcrit)
+				   struct sortcrit *sortcrit,
+				   unsigned int anchor, int *found_anchor)
 {
     MsgData *md, *cur;
     int i, j;
@@ -3982,11 +4330,16 @@ static MsgData *index_msgdata_load(struct index_state *state,
     /* create an array of MsgData to use as nodes of linked list */
     md = (MsgData *) xzmalloc(n * sizeof(MsgData));
 
+    if (found_anchor)
+	*found_anchor = 0;
+
     for (i = 0, cur = md; i < n; i++, cur = cur->next) {
 	/* set msgno */
 	cur->msgno = msgno_list[i];
 	im = &state->map[cur->msgno-1];
 	cur->uid = im->record.uid;
+	if (found_anchor && im->record.uid == anchor)
+	    *found_anchor = 1;
 
 	/* set pointer to next node */
 	cur->next = (i+1 < n ? cur+1 : NULL);
@@ -4543,7 +4896,8 @@ static void index_thread_orderedsubj(struct index_state *state,
     Thread *head, *newnode, *cur, *parent, *last;
 
     /* Create/load the msgdata array */
-    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit);
+    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg,
+					  sortcrit, 0, NULL);
 
     /* Sort messages by subject and date */
     msgdata = lsort(msgdata,
@@ -5221,7 +5575,8 @@ static void _index_thread_ref(struct index_state *state, unsigned *msgno_list, i
     struct rootset rootset;
 
     /* Create/load the msgdata array */
-    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, loadcrit);
+    freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg,
+					  loadcrit, 0, NULL);
 
     /* calculate the sum of the number of references for all messages */
     for (md = msgdata, tref = 0; md; md = md->next)

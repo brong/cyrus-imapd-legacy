@@ -280,6 +280,33 @@ enum {
 /* Sort key modifier flag bits */
 #define SORT_REVERSE		(1<<0)
 
+/* Windowing arguments for the XCONVSORT command */
+struct windowargs {
+    int conversations;		/* whether to limit the results by
+				   conversation id */
+    uint32_t limit;		/* limit on how many messages to return,
+				 * 0 means unlimited. */
+    uint32_t position;		/* 1-based index into results of first
+				 * message to return.  0 means not
+				 * specified which is the same as 1. */
+    uint32_t anchor;		/* UID of a message used to locate the
+				 * start of the window; 0 means not
+				 * specified.  If the anchor is found,
+				 * the first message reported will be
+				 * the largest of 1 and the anchor minus
+				 * @offset.  If not specified or not
+				 * found, @position will be used instead. */
+    int32_t offset;
+    int until;			/* if 1, @anchor/@offset or @position
+				 * marks the *end* of the window, if 0
+				 * the start */
+    int changedsince;		/* if 1, show messages a) added since @uidnext,
+				 * b) removed since @modseq, or c) modified
+				 * since @modseq */
+    modseq_t modseq;
+    uint32_t uidnext;
+};
+
 /* Bitmask for status queries */
 enum {
     STATUS_MESSAGES =	        (1<<0),
