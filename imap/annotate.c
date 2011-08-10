@@ -2185,7 +2185,7 @@ static int write_entry(const char *mboxname,
 	do {
 	    r = DB->store(d->db, key, keylen, data.s, data.len, tid(d));
 	} while (r == CYRUSDB_AGAIN);
-	sync_log_annotation(mboxname);
+	sync_log_mailbox(mboxname);
 	buf_free(&data);
     }
 
@@ -2371,7 +2371,7 @@ static int store_cb(const char *name, int matchlen,
     if (r)
 	goto cleanup;
 
-    sync_log_annotation(int_mboxname);
+    sync_log_mailbox(int_mboxname);
 
     sdata->count++;
 
