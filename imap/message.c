@@ -751,6 +751,9 @@ static int message_parse_headers(struct msg *msg, struct body *body,
 		}
 		message_parse_string(value, &body->received_date);
 		break;
+	    case RFC822_X_ME_MESSAGE_ID:
+		message_parse_string(value, &body->x_me_message_id);
+		break;
 	    default:
 		break;
 	    } /* switch() */
@@ -2297,6 +2300,7 @@ void message_free_body(struct body *body)
     if (body->bcc) parseaddr_free(body->bcc);
     if (body->in_reply_to) free(body->in_reply_to);
     if (body->message_id) free(body->message_id);
+    if (body->x_me_message_id) free(body->x_me_message_id);
     if (body->references) free(body->references);
     if (body->received_date) free(body->received_date);
 
@@ -2487,7 +2491,7 @@ int message_update_conversations(struct conversations_state *state,
 			         struct index_record *record,
 			         const struct body *body)
 {
-    char *hdrs[3];
+    char *hdrs[4];
     /* TODO: need an expanding array class here */
     struct {
 	char *msgid;
@@ -2513,7 +2517,8 @@ int message_update_conversations(struct conversations_state *state,
     hdrs[0] = body->references;
     hdrs[1] = body->in_reply_to;
     hdrs[2] = body->message_id;
-    for (i = 0 ; i < 3 ; i++) {
+    hdrs[3] = body->x_me_message_id;
+    for (i = 0 ; i < 4 ; i++) {
 continue2:
 	while ((msgid = find_msgid(hdrs[i], &hdrs[i])) != NULL) {
 
