@@ -1888,7 +1888,7 @@ static int set_up(void)
     r = mailbox_create(MBOXNAME1_INT, PARTITION, ACL,
 		       /*uniqueid*/NULL, /*specialuse*/NULL,
 		       /*options*/0, /*uidvalidity*/0,
-		       &mailbox);
+		       /*highestmodseq*/0, &mailbox);
     if (r)
 	return r;
     mailbox_close(&mailbox);
@@ -1905,7 +1905,7 @@ static int set_up(void)
     r = mailbox_create(MBOXNAME2_INT, PARTITION, ACL,
 		       /*uniqueid*/NULL, /*specialuse*/NULL,
 		       /*options*/0, /*uidvalidity*/0,
-		       &mailbox);
+		       /*highestmodseq*/0, &mailbox);
     if (r)
 	return r;
     mailbox_close(&mailbox);
