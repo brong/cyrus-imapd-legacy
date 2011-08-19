@@ -90,7 +90,6 @@ static void index_refresh(struct index_state *state);
 static void index_tellexists(struct index_state *state);
 static int index_lock(struct index_state *state);
 static void index_unlock(struct index_state *state);
-// extern struct namespace imapd_namespace;
 
 static void index_checkflags(struct index_state *state, int dirty);
 
@@ -2795,6 +2794,23 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	    buf_printf(&buf, CONV_FMT, im->record.cid);
 	prot_printf(state->out, "%cCID %s", sepchar, buf_cstring(&buf));
 	buf_free(&buf);
+	sepchar = ' ';
+    }
+    if ((fetchitems & FETCH_FOLDER)) {
+	struct namespace *ns = fetchargs->namespace;
+	char mboxname[MAX_MAILBOX_PATH+1];
+	r = ns->mboxname_toexternal(ns, state->mailbox->name,
+				    fetchargs->userid, mboxname);
+	if (!r) {
+	    prot_printf(state->out, "%cFOLDER ", sepchar);
+	    prot_printastring(state->out, mboxname);
+	    sepchar = ' ';
+	}
+	r = 0;
+    }
+    if ((fetchitems & FETCH_UIDVALIDITY)) {
+	prot_printf(state->out, "%cUIDVALIDITY %u", sepchar,
+		    state->mailbox->i.uidvalidity);
 	sepchar = ' ';
     }
     if (fetchitems & FETCH_ENVELOPE) {
