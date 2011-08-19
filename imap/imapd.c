@@ -4252,6 +4252,9 @@ badannotation:
 	    else if (!strcmp(fetchatt.s, "FLAGS")) {
 		fa->fetchitems |= FETCH_FLAGS;
 	    }
+	    else if (!strcmp(fetchatt.s, "FOLDER")) {
+		fa->fetchitems |= FETCH_FOLDER;
+	    }
 	    else goto badatt;
 	    break;
 
@@ -4350,6 +4353,9 @@ badannotation:
 	case 'U':
 	    if (!strcmp(fetchatt.s, "UID")) {
 		fa->fetchitems |= FETCH_UID;
+	    }
+	    else if (!strcmp(fetchatt.s, "UIDVALIDITY")) {
+		fa->fetchitems |= FETCH_UIDVALIDITY;
 	    }
 	    else goto badatt;
 	    break;
@@ -4454,9 +4460,11 @@ badannotation:
 	}
     }
 
-    if (fa->fetchitems & FETCH_ANNOTATION) {
+    if (fa->fetchitems & (FETCH_ANNOTATION|FETCH_FOLDER)) {
 	fa->namespace = &imapd_namespace;
 	fa->userid = imapd_userid;
+    }
+    if (fa->fetchitems & FETCH_ANNOTATION) {
 	fa->isadmin = imapd_userisadmin || imapd_userisproxyadmin;
 	fa->authstate = imapd_authstate;
     }
