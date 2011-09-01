@@ -1577,6 +1577,23 @@ static void annotation_get_pop3showafter(annotate_state_t *state,
     buf_free(&value);
 }
 
+static void annotation_get_usermodseq(annotate_state_t *state,
+				      struct annotate_entry_list *entry)
+{
+    struct buf value = BUF_INITIALIZER;
+    modseq_t modseq;
+
+    assert(state);
+    assert(state->userid);
+
+    modseq = mboxname_readmodseq(mboxname_user_inbox(state->userid));
+
+    buf_printf(&value, "%llu", modseq);
+
+    output_entryatt(state, entry->name, state->userid, &value);
+    buf_free(&value);
+}
+
 static void annotation_get_specialuse(annotate_state_t *state,
 				      struct annotate_entry_list *entry)
 {
@@ -1951,6 +1968,17 @@ static const annotate_entrydesc_t server_builtin_entries[] =
 	annotation_get_fromfile,
 	annotation_set_tofile,
 	(void *)"motd"
+    },{
+	/* The "usemodseq" was added with conversations support, to allow
+	 * a single value to show any changes to anything about a user */
+	"/vendor/cmu/cyrus-imapd/usermodseq",
+	ATTRIB_TYPE_UINT,
+	BACKEND_ONLY,
+	ATTRIB_VALUE_PRIV,
+	0,
+	annotation_get_usermodseq,
+	/*set*/NULL,
+	NULL
     },{
 	"/vendor/cmu/cyrus-imapd/expire",
 	ATTRIB_TYPE_UINT,
