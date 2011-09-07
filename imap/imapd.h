@@ -203,9 +203,14 @@ enum {
     SEARCH_RECENT_SET =         (1<<0),
     SEARCH_RECENT_UNSET	=       (1<<1),
     SEARCH_SEEN_SET =           (1<<2),
-    SEARCH_SEEN_UNSET =	        (1<<3)
-/*    SEARCH_UNCACHEDHEADER =	(1<<4) -- obsolete */
+    SEARCH_SEEN_UNSET =	        (1<<3),
+    SEARCH_CONVSEEN_SET =       (1<<4),
+    SEARCH_CONVSEEN_UNSET =     (1<<5)
 };
+
+#define SEARCH_MUTABLEFLAGS (SEARCH_RECENT_SET|SEARCH_RECENT_UNSET|\
+			     SEARCH_SEEN_SET|SEARCH_SEEN_UNSET|\
+			     SEARCH_CONVSEEN_SET|SEARCH_CONVSEEN_UNSET)
 
 /* Bitmasks for search return options */
 enum {
@@ -217,7 +222,7 @@ enum {
 
 /* Things that may be searched for */
 struct searchargs {
-    int flags;
+    bit32 flags;
     unsigned smaller, larger;
     time_t before, after;
     time_t sentbefore, sentafter;
@@ -239,6 +244,8 @@ struct searchargs {
     struct searchsub *sublist;
     modseq_t modseq;
     struct searchannot *annotations;
+    struct strlist *convflags;
+    modseq_t convmodseq;
 
     bit32 cache_atleast;
 
@@ -256,6 +263,9 @@ struct sortcrit {
 	    char *entry;
 	    char *userid;
 	} annot;
+	struct {
+	    char *name;
+	} flag;
     } args;
 };
 
@@ -273,7 +283,11 @@ enum {
     SORT_TO,
     SORT_ANNOTATION,
     SORT_MODSEQ,
-    SORT_UID
+    SORT_UID,
+    SORT_HASFLAG,
+    SORT_CONVMODSEQ,
+    SORT_CONVEXISTS,
+    SORT_HASCONVFLAG
     /* values > 255 are reserved for internal use */
 };
 
