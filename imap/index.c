@@ -1574,6 +1574,98 @@ struct added
     unsigned int pos;
 };
 
+static int is_mutable_sort(struct sortcrit *sortcrit)
+{
+    int i;
+
+    if (!sortcrit) return 0;
+
+    for (i = 0; sortcrit[i].key; i++) {
+	switch (sortcrit[i].key) {
+	    /* these are the mutable fields */
+	    case SORT_ANNOTATION:
+	    case SORT_MODSEQ:
+	    case SORT_HASFLAG:
+	    case SORT_CONVMODSEQ:
+	    case SORT_CONVEXISTS:
+	    case SORT_HASCONVFLAG:
+		return 1;
+	    default:
+		break;
+	}
+    }
+
+    return 0;
+}
+
+static int is_mutable_search(struct searchargs *searchargs)
+{
+    int i;
+    struct searchsub *sub;
+
+    if (!searchargs) return 0;
+
+    /* flags are mutable */
+    if (searchargs->system_flags_set)
+	return 1;
+    if (searchargs->system_flags_unset)
+	return 1;
+    for (i = 0; i < MAX_USER_FLAGS/32; i++) {
+	if (searchargs->user_flags_set[i])
+	    return 1;
+	if (searchargs->user_flags_unset[i])
+	    return 1;
+    }
+    if (searchargs->convflags)
+	return 1;
+
+    /* searches by per-user fields are mutable */
+    if (searchargs->flags & SEARCH_MUTABLEFLAGS)
+	return 1;
+
+    /* modseq is mutable */
+    if (searchargs->modseq)
+	return 1;
+    if (searchargs->convmodseq)
+	return 1;
+
+    /* annotations are mutable */
+    if (searchargs->annotations)
+	return 1;
+
+    /* if any sub expression is mutable, this is mutable */
+    for (sub = searchargs->sublist; sub; sub = sub->next) {
+	if (is_mutable_search(sub->sub1))
+	    return 1;
+	if (is_mutable_search(sub->sub2))
+	    return 1;
+    }
+
+    /* NOTE: older than 'N' days will be a mutable search of course,
+     * but that fact isn't available down here - we only know the
+     * date range itself, and that isn't mutable.  So if you need
+     * immutable results, you'll need to maintain a fixed date range
+     * up in the higher level */
+
+    return 0;
+}
+
+/* This function will return a TRUE value if anything in the
+ * sort or search criteria returns a MUTABLE ordering, i.e.
+ * the user can take actions which will change the order in
+ * which the results are returned.  For example, the base
+ * case of UID sort and all messages is NOT mutable */
+static int is_mutable_ordering(struct sortcrit *sortcrit,
+			       struct searchargs *searchargs)
+{
+    if (is_mutable_sort(sortcrit))
+	return 1;
+    if (is_mutable_search(searchargs))
+	return 1;
+    return 0;
+}
+
+
 /*
  * Performs a XCONVSORT command
  */
@@ -1589,10 +1681,8 @@ int index_convsort(struct index_state *state,
     MsgData *exemplars = NULL, **exemplars_tailp = &exemplars;
     int nexemplars = 0;
     int nmsg = 0;
-    modseq_t highestmodseq = 0;
     modseq_t xconvmodseq = 0;
     unsigned int i;
-    int modseq = 0;
     hash_table seen_cids = HASH_TABLE_INITIALIZER;
     hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
     int32_t pos = 0;
@@ -1614,20 +1704,10 @@ int index_convsort(struct index_state *state,
     struct index_record **changed = NULL;
     unsigned int nchanged = 0;
     struct conversations_state *cstate = NULL;
+    int is_mutable = is_mutable_ordering(sortcrit, searchargs);
 
     if (!windowargs)
 	windowargs = &default_windowargs;
-
-    if (searchargs->modseq) modseq = 1;
-    else if (windowargs->changedsince) modseq = 1;
-    else {
-	for (i = 0; sortcrit[i].key != SORT_SEQUENCE; i++) {
-	    if (sortcrit[i].key == SORT_MODSEQ) {
-		modseq = 1;
-		break;
-	    }
-	}
-    }
 
     /* always grab xconvmodseq, so we report a growing
      * highestmodseq to all callers */
@@ -1650,12 +1730,14 @@ int index_convsort(struct index_state *state,
     construct_hash_table(&seen_cids, 1024, 0);
     construct_hash_table(&old_seen_cids, 1024, 0);
 
-    /* Search for messages based on the given criteria */
-    nmsg = _index_search(&msgno_list, state, searchargs,
-			 modseq ? &highestmodseq : NULL);
-    if (nmsg) {
+    if (state->exists) {
+	/* initial list - load data for ALL messages always */
+	msgno_list = xmalloc(sizeof(unsigned) * state->exists);
+	for (i = 0; i < state->exists; i++)
+	    msgno_list[i] = i + 1;
+
 	/* Create/load the msgdata array */
-	freeme = msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit,
+	freeme = msgdata = index_msgdata_load(state, msgno_list, state->exists, sortcrit,
 					      windowargs->anchor, &found_anchor);
 	free(msgno_list);
 
@@ -1666,7 +1748,6 @@ int index_convsort(struct index_state *state,
 			(int (*)(void*,void*,void*)) index_sort_compare,
 			sortcrit);
 
-
 	/* Discover exemplars */
 	while ((msg = msgdata)) {
 	    struct index_record *record = &state->map[msg->msgno-1].record;
@@ -1676,6 +1757,7 @@ int index_convsort(struct index_state *state,
 	    int is_new = 0;
 	    int was_deleted = 0;
 	    int is_changed = 0;
+	    int in_filter = 0;
 
 	    if (windowargs->changedsince) {
 		is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
@@ -1715,6 +1797,9 @@ int index_convsort(struct index_state *state,
 	    }
 
 	    if (is_new_exemplar)
+		in_filter = index_search_evaluate(state, searchargs, msg->msgno, NULL);
+
+	    if (in_filter)
 		pos++;
 
 	    if (!anchor_pos &&
@@ -1728,6 +1813,7 @@ int index_convsort(struct index_state *state,
 	    msg->was_old_exemplar = was_old_exemplar;
 	    msg->is_new_exemplar = is_new_exemplar;
 	    msg->is_changed = is_changed;
+	    msg->in_filter = in_filter;
 
 	    /* detach from msgdata list */
 	    msgdata = msg->next;
@@ -1744,6 +1830,10 @@ int index_convsort(struct index_state *state,
 		chaff = msg;
 	    }
 	}
+
+	/* atually, "pos" happens to contain the actual count of messages in
+	 * the filter right here!  Rejoyce */
+	numresults = pos;
 
 	/* After the first pass we now have enough information
 	 * to work out exactly where the window lies */
@@ -1777,14 +1867,19 @@ int index_convsort(struct index_state *state,
 	for (msg = exemplars ; msg ; msg = msg->next) {
 	    struct index_record *record = &state->map[msg->msgno-1].record;
 
-	    if (msg->is_new_exemplar)
+	    if (msg->is_new_exemplar && msg->in_filter)
 		pos++;
-	    if (window_first && pos < window_first)
-		continue;
-	    if (window_last && pos > window_last)
-		break;
 
-	    if (msg->is_new_exemplar &&
+	    /* delta updates on a mutable state could be outside the range we're
+	     * looking at, so we need to check outside */
+	    if (!is_mutable || !windowargs->changedsince) {
+		if (window_first && pos < window_first)
+		    continue;
+		if (window_last && pos > window_last)
+		    break;
+	    }
+
+	    if (msg->is_new_exemplar && msg->in_filter &&
 		windowargs->limit &&
 		++ninwindow > windowargs->limit)
 		break;
@@ -1792,7 +1887,7 @@ int index_convsort(struct index_state *state,
 		first_pos = pos;
 
 	    if (!windowargs->changedsince) {
-		if (msg->is_new_exemplar) {
+		if (msg->is_new_exemplar && msg->in_filter) {
 		    assert(nresults < maxresults);
 		    results[nresults++] = record->uid;
 		}
@@ -1804,23 +1899,40 @@ int index_convsort(struct index_state *state,
 		}
 		else if (msg->is_new_exemplar && !msg->was_old_exemplar) {
 		    assert(nadded < maxresults);
-		    added[nadded].uid = record->uid;
-		    added[nadded].pos = pos;
-		    nadded++;
+		    if (msg->in_filter) {
+			added[nadded].uid = record->uid;
+			added[nadded].pos = pos;
+			nadded++;
+		    }
 		}
 		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
+		    int is_changed = 0;
 		    if (windowargs->conversations) {
 			conversation_t *convdata = NULL;
 			conversation_load(cstate, record->cid, &convdata);
-			if (convdata->modseq > windowargs->modseq) {
-			    assert(nchanged < maxresults);
-			    changed[nchanged++] = record;
-			}
+			/* XXX - track this from the msgdata_load ? */
+			if (convdata->modseq > windowargs->modseq)
+			    is_changed = 1;
 			conversation_free(convdata);
-		    } else {
-			if (msg->is_changed) {
+		    } else if (msg->is_changed) {
+			is_changed = 1;
+		    }
+
+		    if (is_changed)  {
+			/* if it's mutable, we always need to mention the delete */
+			if (is_mutable) {
+			    assert(nremoved < maxresults);
+			    removed[nremoved++] = record->uid;
+			}
+			if (msg->in_filter) {
 			    assert(nchanged < maxresults);
 			    changed[nchanged++] = record;
+			    if (is_mutable) {
+				assert(nadded < maxresults);
+				added[nadded].uid = record->uid;
+				added[nadded].pos = pos;
+				nadded++;
+			    }
 			}
 		    }
 		}
@@ -3791,6 +3903,7 @@ static int index_search_evaluate(struct index_state *state,
     struct seqset *seq;
     struct mailbox *mailbox = state->mailbox;
     struct index_map *im = &state->map[msgno-1];
+    conversation_t *conv = NULL;
     struct searchannot *sa;
     struct mapfile localmap = MAPFILE_INITIALIZER;
     int retval = 0;
@@ -3965,9 +4078,39 @@ static int index_search_evaluate(struct index_state *state,
 	}
     }
 
+    if (searchargs->convmodseq || searchargs->convflags ||
+	searchargs->flags & (SEARCH_CONVSEEN_SET | SEARCH_CONVSEEN_UNSET)) {
+	struct conversations_state *cstate = conversations_get_mbox(state->mailbox->name);
+	if (!cstate) goto zero;
+	if (conversation_load(cstate, im->record.cid, &conv))
+	    goto zero;
+	if (!conv) conv = conversation_new(cstate);
+
+	/* got a conversation, let's check it */
+	if (searchargs->convmodseq && conv->modseq < searchargs->convmodseq)
+	    goto zero;
+
+	if ((searchargs->flags & SEARCH_CONVSEEN_SET) && conv->unseen)
+	    goto zero;
+
+	if ((searchargs->flags & SEARCH_CONVSEEN_UNSET) && !conv->unseen)
+	    goto zero;
+
+	for (l = searchargs->convflags; l; l = l->next) {
+	    int idx = strarray_find_case(cstate->counted_flags, l->s, 0);
+	    if (idx < 0)
+		goto zero;
+	    if (!conv->counts[idx])
+		goto zero;
+	}
+    }
+
     retval = 1;
 
 zero:
+
+    /* free conversation data */
+    conversation_free(conv);
 
     /* unmap if we mapped it */
     if (localmap.size) {
@@ -4324,6 +4467,8 @@ static MsgData *index_msgdata_load(struct index_state *state,
     int label;
     struct mailbox *mailbox = state->mailbox;
     struct index_map *im;
+    struct conversations_state *cstate = NULL;
+    conversation_t *conv = NULL;
 
     if (!n) return NULL;
 
@@ -4346,6 +4491,7 @@ static MsgData *index_msgdata_load(struct index_state *state,
 
 	did_cache = did_env = did_conv = 0;
 	tmpenv = NULL;
+	conv = NULL; /* XXX: use a hash to avoid re-reading? */
 
 	for (j = 0; sortcrit[j].key; j++) {
 	    label = sortcrit[j].key;
@@ -4379,6 +4525,14 @@ static MsgData *index_msgdata_load(struct index_state *state,
 				      VECTOR_SIZE(envtokens));
 
 		did_env++;
+	    }
+
+	    if ((label == SORT_HASCONVFLAG || label == SORT_CONVMODSEQ ||
+		label == SORT_CONVEXISTS) && !conv) {
+		if (!cstate) cstate = conversations_get_mbox(state->mailbox->name);
+		assert(cstate);
+		if (conversation_load(cstate, im->record.cid, &conv))
+		    conv = conversation_new(cstate);
 	    }
 
 	    switch (label) {
@@ -4435,10 +4589,31 @@ static MsgData *index_msgdata_load(struct index_state *state,
 		cur->displayto = get_displayname(
 				 cacheitem_base(&im->record, CACHE_TO));
 		break;
+	    case SORT_HASFLAG: {
+		const char *name = sortcrit[j].args.flag.name;
+		if (mailbox_record_hasflag(mailbox, &im->record, name))
+		    cur->hasflag |= (1<<j);
+		break;
+	    }
+	    case SORT_HASCONVFLAG: {
+		const char *name = sortcrit[j].args.flag.name;
+		int idx = strarray_find_case(cstate->counted_flags, name, 0);
+		/* flag exists in the conversation at all */
+		if (idx >= 0 && conv->counts[idx] > 0 && j < 31)
+		    cur->hasconvflag |= (1<<j);
+		break;
+	    }
+	    case SORT_CONVEXISTS:
+		cur->convexists = conv->exists;
+		break;
+	    case SORT_CONVMODSEQ:
+		cur->convmodseq = conv->modseq;
+		break;
 	    }
 	}
 
 	free(tmpenv);
+	conversation_free(conv);
     }
 
     return md;
@@ -4801,6 +4976,22 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	case SORT_UID:
 	    ret = numcmp(md1->uid, md2->uid);
 	    break;
+	case SORT_CONVMODSEQ:
+	    ret = numcmp(md1->convmodseq, md2->convmodseq);
+	    break;
+	case SORT_CONVEXISTS:
+	    ret = numcmp(md1->convexists, md2->convexists);
+	    break;
+	case SORT_HASFLAG:
+	    if (i < 31)
+		ret = numcmp(md1->hasflag & (1<<i),
+			     md2->hasflag & (1<<i));
+	    break;
+	case SORT_HASCONVFLAG:
+	    if (i < 31)
+		ret = numcmp(md1->hasconvflag & (1<<i),
+			     md2->hasconvflag & (1<<i));
+	    break;
 	}
     } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
 
@@ -4812,16 +5003,15 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
  */
 static void index_msgdata_free(MsgData *md)
 {
-#define FREE(x)	if (x) free(x)
     if (!md)
 	return;
-    FREE(md->cc);
-    FREE(md->from);
-    FREE(md->to);
-    FREE(md->displayfrom);
-    FREE(md->displayto);
-    FREE(md->xsubj);
-    FREE(md->msgid);
+    free(md->cc);
+    free(md->from);
+    free(md->to);
+    free(md->displayfrom);
+    free(md->displayto);
+    free(md->xsubj);
+    free(md->msgid);
     strarray_fini(&md->ref);
     strarray_fini(&md->annot);
 }
