@@ -9259,6 +9259,30 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 	    if (str) appendstrlistpat(&searchargs->cc, str);
 	    else searchargs->flags = (SEARCH_RECENT_SET|SEARCH_RECENT_UNSET);
 	}
+	else if (!strcmp(criteria.s, "convflag")) {
+	    if (c != ' ') goto missingarg;
+	    c = getword(imapd_in, &arg);
+	    if (!imparse_isatom(arg.s)) goto badflag;
+	    lcase(arg.s);
+	    appendstrlist(&searchargs->convflags, arg.s);
+	}
+	else if (!strcmp(criteria.s, "convread")) {
+	    searchargs->flags |= SEARCH_CONVSEEN_SET;
+	}
+	else if (!strcmp(criteria.s, "convunread")) {
+	    searchargs->flags |= SEARCH_CONVSEEN_UNSET;
+	}
+	else if (!strcmp(criteria.s, "convseen")) {
+	    searchargs->flags |= SEARCH_CONVSEEN_SET;
+	}
+	else if (!strcmp(criteria.s, "convunseen")) {
+	    searchargs->flags |= SEARCH_CONVSEEN_UNSET;
+	}
+	else if (!strcmp(criteria.s, "convmodseq")) {
+	    if (c != ' ') goto missingarg;
+	    c = getmodseq(imapd_in, &searchargs->convmodseq);
+	    if (c == EOF) goto badnumber;
+	}
 	else if ((*searchstatep & GETSEARCH_CHARSET)
 	      && !strcmp(criteria.s, "charset")) {
 	    if (c != ' ') goto missingarg;		
@@ -10777,6 +10801,24 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    (*sortcrit)[n].key = SORT_MODSEQ;
 	else if (!strcmp(criteria.s, "uid"))
 	    (*sortcrit)[n].key = SORT_UID;
+	else if (!strcmp(criteria.s, "hasflag")) {
+	    (*sortcrit)[n].key = SORT_HASFLAG;
+	    if (c != ' ') goto missingarg;
+	    c = getastring(imapd_in, imapd_out, &criteria);
+	    if (c == EOF) goto missingarg;
+	    (*sortcrit)[n].args.flag.name = xstrdup(criteria.s);
+	}
+	else if (!strcmp(criteria.s, "convmodseq"))
+	    (*sortcrit)[n].key = SORT_CONVMODSEQ;
+	else if (!strcmp(criteria.s, "convexists"))
+	    (*sortcrit)[n].key = SORT_CONVEXISTS;
+	else if (!strcmp(criteria.s, "hasconvflag")) {
+	    (*sortcrit)[n].key = SORT_HASCONVFLAG;
+	    if (c != ' ') goto missingarg;
+	    c = getastring(imapd_in, imapd_out, &criteria);
+	    if (c == EOF) goto missingarg;
+	    (*sortcrit)[n].args.flag.name = xstrdup(criteria.s);
+	}
 	else {
 	    prot_printf(imapd_out, "%s BAD Invalid Sort criterion %s\r\n",
 			tag, criteria.s);

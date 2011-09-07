@@ -158,11 +158,16 @@ typedef struct msgdata {
     int is_refwd;		/* is message a reply or forward? */
     strarray_t annot;		/* array of annotation attribute values
 				   (stored in order of sortcrit) */
+    modseq_t convmodseq;	/* modseq of conversation */
+    uint32_t convexists;	/* exists count of conversation */
+    bit32 hasflag;		/* hasflag values (up to 32 of them) */
+    bit32 hasconvflag;		/* hasconvflag values (up to 32 of them) */
     struct msgdata *next;
 
     unsigned int was_old_exemplar:1;
     unsigned int is_new_exemplar:1;
     unsigned int is_changed:1;
+    unsigned int in_filter:1;
 } MsgData;
 
 typedef struct thread {
