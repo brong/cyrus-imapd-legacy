@@ -124,6 +124,10 @@ static int mailbox_index_repack(struct mailbox *mailbox);
 static int mailbox_read_index_header(struct mailbox *mailbox);
 static int mailbox_lock_index_internal(struct mailbox *mailbox,
 				       int locktype);
+static int mailbox_post_action(const char *name, const struct buf *);
+static void mailbox_execute_actions_file(struct mailbox *mailbox,
+				         FILE *fp, const char *fname);
+static int mailbox_execute_actions(struct mailbox *mailbox);
 
 static struct mailboxlist *create_listitem(const char *name)
 {
@@ -968,8 +972,19 @@ static int mailbox_open_advanced(const char *name,
     }
 
     /* oops, a race, it got deleted meanwhile.  That's OK */
-    if (mailbox->i.options & OPT_MAILBOX_DELETED)
+    if (mailbox->i.options & OPT_MAILBOX_DELETED) {
 	r = IMAP_MAILBOX_NONEXISTENT;
+	goto done;
+    }
+
+    if (index_locktype == LOCK_EXCLUSIVE) {
+	r = mailbox_execute_actions(mailbox);
+	if (r) {
+	    syslog(LOG_ERR, "Failed to perform delayed open "
+			    "actions on mailbox %s", mailbox->name);
+	    goto done;
+	}
+    }
 
 done:
     if (r) mailbox_close(&mailbox);
@@ -4358,4 +4373,225 @@ int mailbox_get_annotate_state(struct mailbox *mailbox,
     r = annotate_state_set_message(mailbox->annot_state, mailbox, uid);
     *statep = (r ? NULL : mailbox->annot_state);
     return r;
+}
+
+/*
+ * Atomically append an action record to the actions file for the named
+ * mailbox.  Does not require the mailbox or index locks.  Does very
+ * briefly lock the actions file using fcntl locks.  Handles the actions
+ * file being renamed to actionsx (i.e. losing the race against a
+ * process doing a mailbox open).
+ * Returns: 0 on success or IMAP error code.
+ */
+static int mailbox_post_action(const char *name,
+			       const struct buf *action)
+{
+    char *fname;
+    int fd = -1;
+    int r = 0;
+    struct mboxlist_entry *mbentry = NULL;
+    const char *failmode;
+    int flags;
+
+    /* Ensure the action contains a newline */
+    if (action->len == 0 || action->s[action->len-1] != '\n')
+	return IMAP_INVALID_IDENTIFIER;
+
+    r = mboxlist_lookup(name, &mbentry, NULL);
+    if (r)
+	return r;
+
+    fname = mboxname_metapath(mbentry->partition, name, META_ACTIONS, 0);
+    if (!fname) {
+	r = IMAP_MAILBOX_BADNAME;
+	goto out;
+    }
+
+    for (;;) {
+	fd = open(fname, O_RDWR|O_CREAT, 0600);
+	if (fd < 0) {
+	    r = IMAP_SYS_ERROR;
+	    goto out;
+	}
+
+	failmode = NULL;
+	r = lock_reopen(fd, fname, NULL, &failmode);
+	if (r < 0 && (!failmode || strcmp(failmode, "opening"))) {
+	    r = IMAP_IOERROR;
+	    goto out;
+	}
+	if (r == 0)
+	    break;
+
+	/* lost the race against rename, retry opening */
+	close(fd);
+    }
+
+    /* We might have a new fd from the one we started with, created by
+     * lock_reopen(), whose flags won't include O_APPEND.  So add
+     * O_APPEND as a 2nd step. */
+    flags = fcntl(fd, F_GETFL, &flags);
+    if (flags < 0) {
+	r = IMAP_IOERROR;
+	goto out_unlock;
+    }
+    r = fcntl(fd, F_SETFL, flags|O_APPEND);
+    if (r < 0) {
+	r = IMAP_IOERROR;
+	goto out_unlock;
+    }
+
+    /* Finally, do the append */
+    r = write(fd, action->s, action->len);
+    if (r < 0 || r < (int)action->len) {
+	r = IMAP_IOERROR;
+	goto out_unlock;
+    }
+
+out_unlock:
+    lock_unlock(fd);
+out:
+    close(fd);
+    mboxlist_entry_free(&mbentry);
+    return 0;
+}
+
+int mailbox_post_nop_action(const char *name, unsigned int tag)
+{
+    struct buf action = BUF_INITIALIZER;
+    int r;
+
+    buf_printf(&action, "NOP %u\n", tag);
+    r = mailbox_post_action(name, &action);
+    buf_free(&action);
+    return r;
+}
+
+/* This is for testing only */
+unsigned int mailbox_nop_action_count = 0;
+unsigned int mailbox_nop_action_tag = 0;
+
+static void mailbox_action_nop(struct mailbox *mailbox __attribute__((unused)),
+			       const strarray_t *action,
+			       const char *fname __attribute__((unused)),
+			       unsigned int lineno __attribute__((unused)))
+{
+    mailbox_nop_action_count++;
+    mailbox_nop_action_tag = (action->count > 1 ?
+			    strtoul(action->data[1], NULL, 0) : 0);
+}
+
+static void mailbox_execute_actions_file(struct mailbox *mailbox,
+				         FILE *fp, const char *fname)
+{
+    char buf[1024];
+    unsigned int lineno = 0;	/* used for error reporting */
+    strarray_t *action;
+
+    while (fgets(buf, sizeof(buf), fp)) {
+	action = strarray_split(buf, NULL);
+	lineno++;
+
+	if (action->count < 1) {
+	    syslog(LOG_ERR, "Unexpected empty line, line %u file %s",
+			    lineno, fname);
+	    strarray_free(action);
+	    continue;
+	}
+
+	if (!strcmp(action->data[0], "NOP")) {
+	    mailbox_action_nop(mailbox, action, fname, lineno);
+	} else {
+	    syslog(LOG_ERR, "Unknown record type \"%s\", line %u file %s",
+			    action->data[0], lineno, fname);
+	}
+
+	strarray_free(action);
+    }
+}
+
+static int mailbox_execute_actions(struct mailbox *mailbox)
+{
+    char *actions_filename = NULL;
+    char *actionsx_filename = NULL;
+    int fd = -1;
+    int r = 0;
+
+    actionsx_filename = mailbox_meta_fname(mailbox, META_ACTIONSX);
+    if (!actionsx_filename) {
+	r = IMAP_MAILBOX_BADNAME;
+	goto out;
+    }
+    actionsx_filename = xstrdup(actionsx_filename);
+
+    actions_filename = mailbox_meta_fname(mailbox, META_ACTIONS);
+    if (!actions_filename) {
+	r = IMAP_MAILBOX_BADNAME;
+	goto out;
+    }
+    actions_filename = xstrdup(actions_filename);
+
+    for (;;) {
+	fd = open(actionsx_filename, O_RDWR, 0);
+	if (fd < 0) {
+	    if (errno != ENOENT) {
+		syslog(LOG_ERR, "Unable to open %s: %m", actionsx_filename);
+		r = IMAP_SYS_ERROR;
+		goto out;
+	    }
+	} else {
+	    FILE *fp = fdopen(fd, "r");
+	    if (!fp) {
+		syslog(LOG_ERR, "Unable to open %s: %m", actionsx_filename);
+		r = IMAP_SYS_ERROR;
+		close(fd);
+		goto out;
+	    }
+	    mailbox_execute_actions_file(mailbox, fp, actionsx_filename);
+	    fclose(fp);
+	    unlink(actionsx_filename);
+	}
+
+	fd = open(actions_filename, O_RDWR, 0);
+	if (fd < 0) {
+	    if (errno == ENOENT)
+		break;
+	    syslog(LOG_ERR, "Failed opening %s for locking: %m",
+			    actions_filename);
+	    r = IMAP_SYS_ERROR;
+	    goto out;
+	}
+
+	r = lock_blocking(fd);
+	if (r < 0) {
+	    syslog(LOG_ERR, "Failed locking %s: %m",
+			    actions_filename);
+	    r = IMAP_SYS_ERROR;
+	    goto out_unlock;
+	}
+
+	r = rename(actions_filename, actionsx_filename);
+	if (r < 0) {
+	    if (errno == ENOENT)
+		break;
+	    syslog(LOG_ERR, "Failed renaming %s to %s: %m",
+			    actions_filename, actionsx_filename);
+	    r = IMAP_SYS_ERROR;
+	    goto out_unlock;
+	}
+
+	lock_unlock(fd);
+	close(fd);
+    }
+
+out:
+    free(actions_filename);
+    free(actionsx_filename);
+    return r;
+
+out_unlock:
+    lock_unlock(fd);
+    if (fd >= 0)
+	close(fd);
+    goto out;
 }
