@@ -301,6 +301,10 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
     r = sync_getflags(fl, mailbox, record);
     if (r) return r;
 
+    /* OK if it doesn't have one */
+    record->cid = NULLCONVERSATION;
+    dlist_gethex64(kr, "CID", &record->cid);
+
     /* the ANNOTATIONS list is optional too */
     if (salp && dlist_getlist(kr, "ANNOTATIONS", &fl))
 	decode_annotations(fl, salp);
@@ -477,7 +481,8 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 time_t recenttime,
 					 time_t pop3_last_login,
 					 const char *specialuse,
-					 time_t pop3_show_after)
+					 time_t pop3_show_after,
+					 modseq_t xconvmodseq)
 {
     struct sync_folder *result = xzmalloc(sizeof(struct sync_folder));
 
@@ -504,6 +509,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->pop3_last_login = pop3_last_login;
     result->specialuse = xstrdupnull(specialuse);
     result->pop3_show_after = pop3_show_after;
+    result->xconvmodseq = xconvmodseq;
 
     result->mark     = 0;
     result->reserve  = 0;
@@ -1407,6 +1413,7 @@ int sync_mailbox(struct mailbox *mailbox,
 		 int printrecords)
 {
     int r = 0;
+    modseq_t xconvmodseq = 0;
     char sync_crc[128];
 
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
@@ -1430,6 +1437,11 @@ int sync_mailbox(struct mailbox *mailbox,
 	dlist_setatom(kl, "QUOTAROOT", mailbox->quotaroot);
     if (mailbox->specialuse)
 	dlist_setatom(kl, "SPECIALUSE", mailbox->specialuse);
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (!r && xconvmodseq)
+	    dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
+    }
 
     if (printrecords) {
 	struct index_record record;
@@ -1487,6 +1499,8 @@ int sync_mailbox(struct mailbox *mailbox,
 	    dlist_setdate(il, "INTERNALDATE", record.internaldate);
 	    dlist_setnum32(il, "SIZE", record.size);
 	    dlist_setatom(il, "GUID", message_guid_encode(&record.guid));
+
+	    dlist_sethex64(il, "CID", record.cid); 
 
 	    r = read_annotations(mailbox, &record, &annots);
 	    if (r) goto done;
@@ -1573,12 +1587,42 @@ int sync_parse_response(const char *cmd, struct protstream *in,
     return IMAP_PROTOCOL_ERROR;
 }
 
+int sync_rename_cid(struct mailbox *mailbox,
+		    struct index_record *remote,
+		    struct index_record *local)
+{
+    int r;
+
+    if (local->cid == remote->cid)
+	return 0; /* nothing to do */
+
+    /* copy the cid */
+    local->cid = remote->cid;
+
+    /* apply the new value to all message ids */
+    if (local->cid && mailbox_has_conversations(mailbox)) {
+	struct conversations_state *cstate;
+	cstate = conversations_get_mbox(mailbox->name);
+	assert(cstate);
+	/* load in cache to find message ids */
+	r = mailbox_cacherecord(mailbox, local);
+	if (r) return r;
+	/* update the conversations db */
+	r = message_update_conversations(cstate, local, NULL, 1);
+	if (r) return r;
+    }
+
+    return 0;
+}
+
 int sync_append_copyfile(struct mailbox *mailbox,
 			 struct index_record *record,
 			 const struct sync_annot_list *annots)
 {
     const char *fname, *destname;
     struct message_guid tmp_guid;
+    conversation_id_t cid = record->cid;
+    struct body *body = NULL;
     int r;
 
     message_guid_copy(&tmp_guid, &record->guid);
@@ -1591,7 +1635,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
-    r = message_parse(fname, record);
+    r = message_parse2(fname, record, &body);
     if (r) {
 	/* deal with unlinked master records */
 	if (record->system_flags & FLAG_EXPUNGED) {
@@ -1601,6 +1645,18 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	syslog(LOG_ERR, "IOERROR: failed to parse %s", fname);
 	return r;
     }
+
+    record->cid = cid;	/* use the CID given us */
+    if (mailbox_has_conversations(mailbox)) {
+	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	r = message_update_conversations(cstate, record, body, /*isreplica*/1);
+	/* check r later... */
+    }
+    message_free_body(body);
+    free(body);
+    body = NULL;
+    /* ... after we have freed the body */
+    if (r) return r;
 
     if (!message_guid_equal(&tmp_guid, &record->guid)) {
 	syslog(LOG_ERR, "IOERROR: guid mismatch on parse %s (%s)",
@@ -1849,6 +1905,7 @@ out:
 
 #define SYNC_CRC_BASIC		(1<<0)
 #define SYNC_CRC_ANNOTATIONS	(1<<1)
+#define SYNC_CRC_CID		(1<<2)
 
 struct sync_crc_algorithm {
     const char *name;
@@ -1864,8 +1921,10 @@ struct sync_crc_algorithm {
 static bit32 sync_crc32;
 static struct buf sync_crc32_buf;
 
-static int sync_crc32_setup(int cflags __attribute__((unused)))
+static int sync_crc32_setup(int cflags)
 {
+    if (!(cflags & SYNC_CRC_BASIC))
+	return IMAP_INVALID_IDENTIFIER;
     return 0;
 }
 
@@ -1968,6 +2027,9 @@ static const char *sync_record_representation(
     buf_printf(&sync_crc32_buf, "%u %llu %lu (%s) %lu %s",
 	       record->uid, record->modseq, record->last_updated, flags,
 	       record->internaldate, message_guid_encode(&record->guid));
+
+    if (cflags & SYNC_CRC_CID)
+	buf_printf(&sync_crc32_buf, " %llu", record->cid);
 
     free(flags);
 
@@ -2137,6 +2199,8 @@ static int covers_from_string(const char *str, int strict)
 	    flags |= SYNC_CRC_BASIC;
 	else if (!strcasecmp(p, "ANNOTATIONS"))
 	    flags |= SYNC_CRC_ANNOTATIONS;
+	else if (!strcasecmp(p, "CID"))
+	    flags |= SYNC_CRC_CID;
 	else if (strict) {
 	    flags = IMAP_INVALID_IDENTIFIER;
 	    goto done;
@@ -2157,12 +2221,16 @@ static const char *covers_to_string(int flags)
 	strcat(buf, " BASIC");
     if ((flags & SYNC_CRC_ANNOTATIONS))
 	strcat(buf, " ANNOTATIONS");
+    if ((flags & SYNC_CRC_CID))
+	strcat(buf, " CID");
     return (buf[0] ? buf+1 : NULL);
 }
 
 const char *sync_crc_list_covers(void)
 {
     int cflags = SYNC_CRC_BASIC | SYNC_CRC_ANNOTATIONS;
+    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+	cflags |= SYNC_CRC_CID;
     return covers_to_string(cflags);
 }
 

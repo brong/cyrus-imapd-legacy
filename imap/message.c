@@ -59,6 +59,7 @@
 #include <assert.h>
 
 #include "crc32.h"
+#include "dlist.h"
 #include "exitcodes.h"
 #include "imap/imap_err.h"
 #include "prot.h"
@@ -411,6 +412,74 @@ EXPORTED int message_parse_mapped(const char *msg_base, unsigned long msg_len,
     return 0;
 }
 
+/*
+ * Prune the header section in buf to include only those headers
+ * listed in headers or (if headers_not is non-empty) those headers
+ * not in headers_not.
+ */
+void message_pruneheader(char *buf, const strarray_t *headers,
+			 const strarray_t *headers_not)
+{
+    char *p, *colon, *nextheader;
+    int goodheader;
+    char *endlastgood = buf;
+    char **l;
+    int count = 0;
+    int maxlines = config_getint(IMAPOPT_MAXHEADERLINES);
+
+    p = buf;
+    while (*p && *p != '\r') {
+	colon = strchr(p, ':');
+	if (colon && headers_not && headers_not->count) {
+	    goodheader = 1;
+	    for (l = headers_not->data ; *l ; l++) {
+		if ((size_t) (colon - p) == strlen(*l) &&
+		    !strncasecmp(p, *l, colon - p)) {
+		    goodheader = 0;
+		    break;
+		}
+	    }
+	} else {
+	    goodheader = 0;
+	}
+	if (colon && headers && headers->count) {
+	    for (l = headers->data ; *l ; l++) {
+		if ((size_t) (colon - p) == strlen(*l) &&
+		    !strncasecmp(p, *l, colon - p)) {
+		    goodheader = 1;
+		    break;
+		}
+	    }
+	}
+
+	nextheader = p;
+	do {
+	    nextheader = strchr(nextheader, '\n');
+	    if (nextheader) nextheader++;
+	    else nextheader = p + strlen(p);
+	} while (*nextheader == ' ' || *nextheader == '\t');
+
+	if (goodheader) {
+	    if (endlastgood != p) {
+		/* memmove and not strcpy since this is all within a
+		 * single buffer */
+		memmove(endlastgood, p, strlen(p) + 1);
+		nextheader -= p - endlastgood;
+	    }
+	    endlastgood = nextheader;
+	}
+	p = nextheader;
+
+	/* stop giant headers causing massive loops */
+	if (maxlines) {
+	    count++;
+	    if (count > maxlines) break;
+	}
+    }
+
+    *endlastgood = '\0';
+}
+
 static void message_find_part(struct body *body, const char *section,
 			      const char **content_types,
 			      const char *msg_base, unsigned long msg_len,
@@ -749,6 +818,9 @@ static int message_parse_headers(struct msg *msg, struct body *body,
 		    body->received_date = 0;
 		}
 		message_parse_string(value, &body->received_date);
+		break;
+	    case RFC822_X_ME_MESSAGE_ID:
+		message_parse_string(value, &body->x_me_message_id);
 		break;
 	    default:
 		break;
@@ -2296,6 +2368,7 @@ EXPORTED void message_free_body(struct body *body)
     if (body->bcc) parseaddr_free(body->bcc);
     if (body->in_reply_to) free(body->in_reply_to);
     if (body->message_id) free(body->message_id);
+    if (body->x_me_message_id) free(body->x_me_message_id);
     if (body->references) free(body->references);
     if (body->received_date) free(body->received_date);
 
@@ -2446,5 +2519,309 @@ HIDDEN void message_parse_env_address(char *str, struct address *addr)
     addr->mailbox = parse_nstring(&str);
     str++; /* skip SP */
     addr->domain = parse_nstring(&str);
+}
+
+
+static void de_nstring_buf(struct buf *src, struct buf *dst)
+{
+    char *p, *q;
+
+    if (src->s && src->len == 3 && !memcmp(src->s, "NIL", 3)) {
+	buf_free(dst);
+	return;
+    }
+    q = src->s;
+    p = parse_nstring(&q);
+    buf_setmap(dst, p, q-p);
+    buf_cstring(dst);
+}
+
+static void message_get_subject(struct index_record *record, struct buf *buf)
+{
+    struct buf tmp = BUF_INITIALIZER;
+    buf_copy(&tmp, cacheitem_buf(record, CACHE_SUBJECT));
+    de_nstring_buf(&tmp, buf);
+    buf_free(&tmp);
+}
+
+/*
+ * Generate a conversation id from the given message.
+ * The conversation id is defined as the first 64b of
+ * the SHA1 of the message, except that an all-zero
+ * conversation id is not valid.
+ */
+static conversation_id_t generate_conversation_id(
+			    const struct index_record *record,
+			    const struct body *body)
+{
+    const struct message_guid *guid;
+    conversation_id_t cid = 0;
+    size_t i;
+
+    if (body)
+	guid = &body->guid;
+    else
+	guid = &record->guid;
+
+    assert(guid->status == GUID_NONNULL);
+
+    for (i = 0 ; i < sizeof(cid) ; i++) {
+	cid <<= 8;
+	cid |= guid->value[i];
+    }
+
+    /*
+     * We carefully avoid returning NULLCONVERSATION as
+     * a new cid, as that would confuse matters no end.
+     */
+    if (cid == NULLCONVERSATION)
+	cid = 1;
+
+    return cid;
+}
+
+/*
+ * In RFC2822, the In-Reply-To field is explicitly required to contain
+ * only message-ids, whitespace and commas.  The old RFC822 was less
+ * well specified and allowed all sorts of stuff.  We used to be equally
+ * liberal here in parsing the field.  Sadly some versions of the NMH
+ * mailer will generate In-Reply-To containing email addresses which we
+ * cannot tell from message-ids, leading to massively confused
+ * threading.  So we have to be slightly stricter.
+ */
+static int is_valid_rfc2822_inreplyto(const char *p)
+{
+    if (!p)
+	return 1;
+
+    /* skip any whitespace */
+    while (*p && (isspace(*p) || *p == ','))
+	p++;
+
+    return (!*p || *p == '<');
+}
+
+/*
+ * Update the conversations database for the given
+ * mailbox, to account for the given message.
+ * @body may be NULL, in which case we get everything
+ * we need out of the cache item in @record.
+ */
+int message_update_conversations(struct conversations_state *state,
+			         struct index_record *record,
+			         const struct body *body, int isreplica)
+{
+    char *hdrs[4];
+    char *c_refs = NULL, *c_env = NULL, *c_me_msgid = NULL;
+    struct buf msubject = BUF_INITIALIZER;
+    struct buf csubject = BUF_INITIALIZER;
+    /* TODO: need an expanding array class here */
+    struct {
+	char *msgid;
+	conversation_id_t cid;
+    } *found = NULL;
+    int nfound = 0;
+#define ALLOCINCREMENT 16
+    conversation_id_t cid;
+    int created = 0;
+    conversation_id_t newcid = record->cid;
+    int i;
+    int j;
+    int r = 0;
+    char *msgid = NULL;
+
+    /*
+     * Gather all the msgids mentioned in the message, starting with
+     * the oldest message in the References: header, then any mesgids
+     * mentioned in the In-Reply-To: header, and finally the message's
+     * own Message-Id:.  In general this will result in duplicates (a
+     * correct References: header will contain as its last entry the
+     * msgid in In-Reply-To:), so we weed those out before proceeding
+     * to the database.
+     */
+    if (body) {
+	/* goody, we have everything we need in the struct body */
+	hdrs[0] = body->references;
+	hdrs[1] = body->in_reply_to;
+	hdrs[2] = body->message_id;
+	hdrs[3] = body->x_me_message_id;
+	if (body->subject) {
+	    char *subject = charset_parse_mimeheader(body->subject);
+	    buf_appendcstr(&msubject, subject);
+	    free(subject);
+	}
+    }
+    else if (cache_size(record)) {
+	/* we have cache loaded, get what we need there */
+	strarray_t want = STRARRAY_INITIALIZER;
+	char *envtokens[NUMENVTOKENS];
+
+	/* get References from cached headers */
+	c_refs = xstrndup(cacheitem_base(record, CACHE_HEADERS),
+			  cacheitem_size(record, CACHE_HEADERS));
+	strarray_append(&want, "references");
+	message_pruneheader(c_refs, &want, 0);
+	hdrs[0] = c_refs;
+
+	/* get In-Reply-To, Message-ID out of the envelope
+	 *
+	 * get a working copy; strip outer ()'s
+	 * +1 -> skip the leading paren
+	 * -2 -> don't include the size of the outer parens
+	 */
+	c_env = xstrndup(cacheitem_base(record, CACHE_ENVELOPE) + 1,
+			 cacheitem_size(record, CACHE_ENVELOPE) - 2);
+	parse_cached_envelope(c_env, envtokens, NUMENVTOKENS);
+	hdrs[1] = envtokens[ENV_INREPLYTO];
+	hdrs[2] = envtokens[ENV_MSGID];
+
+	/* get X-ME-Message-ID from cached headers */
+	c_me_msgid = xstrndup(cacheitem_base(record, CACHE_HEADERS),
+			      cacheitem_size(record, CACHE_HEADERS));
+	strarray_set(&want, 0, "x-me-message-id");
+	message_pruneheader(c_me_msgid, &want, 0);
+	hdrs[3] = c_me_msgid;
+
+	strarray_fini(&want);
+
+	message_get_subject(record, &msubject);
+
+	/* work around stupid message_guid API */
+	message_guid_isnull(&record->guid);
+    }
+    else {
+	/* nope, now we're screwed */
+	return IMAP_INTERNAL;
+    }
+
+    if (!is_valid_rfc2822_inreplyto(hdrs[1]))
+	hdrs[1] = NULL;
+
+    /* Note that a NULL subject, e.g. due to a missing Subject: header
+     * field in the original message, is normalised to "" not NULL */
+    conversation_normalise_subject(&msubject);
+
+    for (i = 0 ; i < 4 ; i++) {
+continue2:
+	while ((msgid = find_msgid(hdrs[i], &hdrs[i])) != NULL) {
+
+	    /*
+	     * The issue of case sensitivity of msgids is curious.
+	     * RFC2822 seems to imply they're case-insensitive,
+	     * without explicitly stating so.  So here we punt
+	     * on that being the case.
+	     *
+	     * Note that the THREAD command elsewhere in Cyrus
+	     * assumes otherwise.
+	     */
+	    msgid = lcase(msgid);
+
+	    /* check for duplicates.  O(N^2), yuck */
+	    for (j = 0 ; j < nfound ; j++) {
+		if (!strcmp(msgid, found[j].msgid)) {
+		    free(msgid);
+		    goto continue2;
+		}
+	    }
+
+	    /* Lookup the conversations database to work out which
+	     * conversation id that message belongs to. */
+	    r = conversations_get_msgid(state, msgid, &cid);
+	    if (r) goto out;
+
+	    /* [IRIS-1576] if X-ME-Message-ID says the messages are
+	     * linked, ignore any difference in Subject: header fields.  */
+	    if (i != 3) {
+		/* Check to see if the conversation has an incompatible
+		 * subject.  We treat a missing S-record as compatible
+		 * with anything for backwards compatibility with older
+		 * conversations DBs. */
+		r = conversations_get_subject(state, cid, &csubject);
+		if (r) goto out;
+		if (csubject.s != NULL && buf_cmp(&msubject, &csubject)) {
+		    buf_free(&csubject);
+		    free(msgid);
+		    continue;
+		}
+		buf_free(&csubject);
+	    }
+
+	    /* it's unique and compatible, add it */
+
+	    if (nfound % ALLOCINCREMENT == 0) {
+		found = xrealloc(found,
+			    (nfound+ALLOCINCREMENT) * sizeof(*found));
+	    }
+
+	    found[nfound].msgid = msgid;
+	    found[nfound].cid = cid;
+	    nfound++;
+	}
+    }
+
+    /*
+     * Work out the new CID this message will belong to.
+     * The @isreplica flag forces us to use the CID passed
+     * in the record, which came from the master.
+     */
+    if (!isreplica) {
+	/* Use the MAX of any CIDs found - as NULLCONVERSATION is
+	 * numerically zero this will be the only non-NULL CID or
+	 * the MAX of two or more non-NULL CIDs */
+	for (i = 0 ; i < nfound ; i++)
+	    newcid = (newcid > found[i].cid ? newcid : found[i].cid);
+	if (newcid == NULLCONVERSATION) {
+	    newcid = generate_conversation_id(record, body);
+	    created = 1;
+	}
+
+	/*
+	 * Detect and handle CID renames.  Note that we don't rename on
+	 * a replica, because the master will do the rename and push the
+	 * changes anyway, and they would be likely to clash if we do
+	 * both ends.
+	 */
+	for (i = 0 ; i < nfound ; i++) {
+	    r = conversations_rename_cid(state, found[i].cid, newcid);
+	    if (r)
+		goto out;
+	}
+    }
+
+    /*
+     * Update the database to add records for all the message-ids
+     * not already mentioned.  Note that we take care to avoid
+     * setting those which are already set, because that would be
+     * wasteful and it would also change the record's timestamp,
+     * which would stuff up pruning of the database.
+     */
+    for (i = 0 ; i < nfound ; i++) {
+	if (found[i].cid == newcid)
+	    continue;
+	r = conversations_set_msgid(state, found[i].msgid, newcid);
+	if (r)
+	    goto out;
+    }
+
+    /* We just created a new conversation, so update it's subject */
+    if (isreplica || created) {
+	r = conversations_set_subject(state, newcid, &msubject);
+	if (r)
+	    goto out;
+    }
+
+    record->cid = newcid;
+
+out:
+    free(msgid);
+    for (i = 0 ; i < nfound ; i++)
+	free(found[i].msgid);
+    free(found);
+    free(c_refs);
+    free(c_env);
+    free(c_me_msgid);
+    buf_free(&msubject);
+    buf_free(&csubject);
+    return r;
 }
 

@@ -78,6 +78,7 @@
 #include "annotate.h"
 #include "message_guid.h"
 #include "strarray.h"
+#include "conversations.h"
 
 struct stagemsg {
     char fname[1024];
@@ -917,6 +918,14 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
+	if (!r && mailbox_has_conversations(mailbox)) {
+	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    if (cstate)
+		r = message_update_conversations(cstate, &record, *body,
+						 /*isreplica*/0);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
+	}
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -1235,7 +1244,19 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 	record.content_lines = copymsg[msg].content_lines;
 	record.cache_version = copymsg[msg].cache_version;
 	record.cache_crc = copymsg[msg].cache_crc;
+	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
+
+	if (record.cid == NULLCONVERSATION &&
+	    mailbox_has_conversations(as->mailbox)) {
+	    struct conversations_state *cstate = conversations_get_mbox(as->mailbox->name);
+	    if (cstate)
+		r = message_update_conversations(cstate, &record,
+						 NULL, /*isreplica*/0);
+	    else
+		r = IMAP_CONVERSATIONS_NOT_OPEN;
+	    if (r) goto out;
+	}
 
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);

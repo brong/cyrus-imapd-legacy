@@ -104,6 +104,7 @@ struct body {
     struct address *bcc;
     char *in_reply_to;
     char *message_id;
+    char *x_me_message_id;
     char *references;
     char *received_date;
 
@@ -157,6 +158,8 @@ extern int message_parse_binary_file P((FILE *infile, struct body **body));
 extern int message_parse_file P((FILE *infile,
 				 const char **msg_base, size_t *msg_len,
 				 struct body **body));
+extern void message_pruneheader(char *buf, const strarray_t *headers,
+				const strarray_t *headers_not);
 extern void message_fetch_part P((struct message_content *msg,
 				  const char **content_types,
 				  struct bodypart ***parts));
@@ -175,5 +178,8 @@ extern void message_free_body P((struct body *body));
 extern void message_parse_env_address(char *str, struct address *addr);
 
 extern char *parse_nstring(char **str);
+
+extern int message_update_conversations(struct conversations_state *,
+			         struct index_record *, const struct body *, int);
 
 #endif /* INCLUDED_MESSAGE_H */

@@ -1284,6 +1284,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		rrecord.user_flags[i] = mrecord.user_flags[i];
 
+	    r = sync_rename_cid(mailbox, &mrecord, &rrecord);
+	    if (r) {
+		syslog(LOG_ERR, "Failed to rename cid %s %u: %s",
+		       mailbox->name, recno, error_message(r));
+		goto out;
+	    }
+
 	    r = read_annotations(mailbox, &rrecord, &rannots);
 	    if (r) {
 		syslog(LOG_ERR, "Failed to read local annotations %s %u: %s",
@@ -1364,6 +1371,7 @@ static int do_mailbox(struct dlist *kin)
 
     /* optional fields */
     const char *specialuse = NULL;
+    modseq_t xconvmodseq = 0;
 
     struct mailbox *mailbox = NULL;
     struct dlist *kr;
@@ -1407,6 +1415,7 @@ static int do_mailbox(struct dlist *kin)
     dlist_getlist(kin, "ANNOTATIONS", &ka);
     dlist_getatom(kin, "SPECIALUSE", &specialuse);
     dlist_getdate(kin, "POP3_SHOW_AFTER", &pop3_show_after);
+    dlist_getnum64(kin, "XCONVMODSEQ", &xconvmodseq);
 
     options = sync_parse_options(options_str);
  
@@ -1463,6 +1472,31 @@ static int do_mailbox(struct dlist *kin)
 	goto done;
     }
 
+    /* NOTE - this is optional */
+    if (mailbox_has_conversations(mailbox) && xconvmodseq) {
+	modseq_t ourxconvmodseq = 0;
+
+	r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
+	if (r) {
+	    syslog(LOG_ERR, "Failed to read xconvmodseq for %s: %s",
+		   mboxname, error_message(r));
+	    goto done;
+	}
+
+	/* skip out now, it's going to mismatch for sure! */
+	if (xconvmodseq < ourxconvmodseq) {
+	    syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
+		   mboxname, xconvmodseq, ourxconvmodseq);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
+    }
+
+    r = mailbox_compare_update(mailbox, kr, 0);
+    if (r) goto done;
+
+    /* now we're committed to writing something no matter what happens! */
+
     /* always take the ACL from the master, it's not versioned */
     if (strcmp(mailbox->acl, acl)) {
 	mailbox_set_acl(mailbox, acl, 0);
@@ -1470,10 +1504,8 @@ static int do_mailbox(struct dlist *kin)
 	if (r) goto done;
     }
 
-    r = mailbox_compare_update(mailbox, kr, 0);
-    if (r) goto done;
-
-    /* now we're committed to writing something no matter what happens! */
+    /* take all mailbox (not message) annotations - aka metadata,
+     * they're not versioned either */
     if (ka) {
 	struct sync_annot_list *mannots = NULL;
 	struct sync_annot_list *rannots = NULL;
@@ -1540,6 +1572,10 @@ static int do_mailbox(struct dlist *kin)
 	strcmp(specialuse, mailbox->specialuse)) {
 	r = mboxlist_setspecialuse(mailbox, specialuse);
 	if (r) goto done;
+    }
+
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
     }
 
 done:
