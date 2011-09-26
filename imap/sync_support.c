@@ -265,6 +265,10 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
     r = sync_getflags(fl, mailbox, record);
     if (r) return r;
 
+    /* OK if it doesn't have one */
+    record->cid = NULLCONVERSATION;
+    dlist_gethex64(kr, "CID", &record->cid);
+
     /* the ANNOTATIONS list is optional too */
     if (salp && dlist_getlist(kr, "ANNOTATIONS", &fl))
 	decode_annotations(fl, salp);
@@ -442,7 +446,8 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 time_t pop3_last_login,
 					 const char *specialuse,
 					 time_t pop3_show_after,
-					 struct sync_annot_list *annots)
+					 struct sync_annot_list *annots,
+					 modseq_t xconvmodseq)
 {
     struct sync_folder *result = xzmalloc(sizeof(struct sync_folder));
 
@@ -470,6 +475,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->specialuse = xstrdupnull(specialuse);
     result->pop3_show_after = pop3_show_after;
     result->annots = annots; /* NOTE: not a copy! */
+    result->xconvmodseq = xconvmodseq;
 
     result->mark     = 0;
     result->reserve  = 0;
@@ -1372,6 +1378,7 @@ int sync_mailbox(struct mailbox *mailbox,
 		 struct dlist *kl, struct dlist *kupload,
 		 int printrecords)
 {
+    modseq_t xconvmodseq = 0;
     int r = 0;
 
     dlist_setatom(kl, "UNIQUEID", mailbox->uniqueid);
@@ -1392,6 +1399,11 @@ int sync_mailbox(struct mailbox *mailbox,
 	dlist_setatom(kl, "QUOTAROOT", mailbox->quotaroot);
     if (mailbox->specialuse)
 	dlist_setatom(kl, "SPECIALUSE", mailbox->specialuse);
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (!r && xconvmodseq)
+	    dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
+    }
 
     if (printrecords) {
 	struct index_record record;
@@ -1449,6 +1461,8 @@ int sync_mailbox(struct mailbox *mailbox,
 	    dlist_setdate(il, "INTERNALDATE", record.internaldate);
 	    dlist_setnum32(il, "SIZE", record.size);
 	    dlist_setatom(il, "GUID", message_guid_encode(&record.guid));
+
+	    dlist_sethex64(il, "CID", record.cid);
 
 	    r = read_annotations(mailbox, &record, &annots);
 	    if (r) goto done;

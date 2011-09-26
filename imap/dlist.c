@@ -395,7 +395,7 @@ void dlist_makefile(struct dlist *dl,
 	dl->type = DL_NIL;
 }
 
-void dlist_makemap(struct dlist *dl, const char *val, size_t len)
+EXPORTED void dlist_makemap(struct dlist *dl, const char *val, size_t len)
 {
     if (!dl) return;
     _dlist_clean(dl);
@@ -428,7 +428,7 @@ EXPORTED struct dlist *dlist_newlist(struct dlist *parent, const char *name)
     return dl;
 }
 
-struct dlist *dlist_newpklist(struct dlist *parent, const char *name)
+EXPORTED struct dlist *dlist_newpklist(struct dlist *parent, const char *name)
 {
     struct dlist *dl = dlist_child(parent, name);
     dl->type = DL_ATOMLIST;
@@ -471,7 +471,7 @@ EXPORTED struct dlist *dlist_setdate(struct dlist *parent, const char *name, tim
     return dl;
 }
 
-struct dlist *dlist_sethex64(struct dlist *parent, const char *name, bit64 val)
+EXPORTED struct dlist *dlist_sethex64(struct dlist *parent, const char *name, bit64 val)
 {
     struct dlist *dl = dlist_child(parent, name);
     dlist_makehex64(dl, val);
@@ -762,7 +762,7 @@ fail:
     return EOF;
 }
 
-char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
+EXPORTED char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
 			    struct protstream *in)
 {
     char c = dlist_parse(dlp, parsekey, in);
@@ -799,7 +799,7 @@ EXPORTED int dlist_parsemap(struct dlist **dlp, int parsekey,
     return 0;
 }
 
-HIDDEN struct dlist *dlist_getchild(struct dlist *dl, const char *name)
+EXPORTED struct dlist *dlist_getchild(struct dlist *dl, const char *name)
 {
     struct dlist *i;
 
@@ -1063,7 +1063,7 @@ EXPORTED int dlist_tofile(struct dlist *dl,
     return 1;
 }
 
-int dlist_isatomlist(const struct dlist *dl)
+EXPORTED int dlist_isatomlist(const struct dlist *dl)
 {
     if (!dl) return 0;
     return (dl->type == DL_ATOMLIST);
@@ -1097,7 +1097,7 @@ int dlist_isnum(struct dlist *dl)
 
 /* XXX - these ones aren't const, because they can change
  * things... */
-int dlist_ishex64(struct dlist *dl)
+EXPORTED int dlist_ishex64(struct dlist *dl)
 {
     bit64 tmp;
 
@@ -1132,7 +1132,7 @@ EXPORTED bit64 dlist_num(struct dlist *dl)
 }
 
 /* XXX - this stuff is all shitty, rationalise later */
-HIDDEN const char *dlist_cstring(struct dlist *dl)
+EXPORTED const char *dlist_cstring(struct dlist *dl)
 {
     static char zerochar = '\0';
 
@@ -1169,7 +1169,7 @@ EXPORTED int dlist_getdate(struct dlist *parent, const char *name, time_t *valp)
     return dlist_todate(child, valp);
 }
 
-int dlist_gethex64(struct dlist *parent, const char *name, bit64 *valp)
+EXPORTED int dlist_gethex64(struct dlist *parent, const char *name, bit64 *valp)
 {
     struct dlist *child = dlist_getchild(parent, name);
     return dlist_tohex64(child, valp);
