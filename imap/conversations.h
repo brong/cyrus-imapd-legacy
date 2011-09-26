@@ -80,6 +80,7 @@ struct conv_folder {
     conv_folder_t   *next;
     char	    *mboxname;
     modseq_t	    modseq;
+    uint32_t	    num_records;
     uint32_t	    exists;
     uint32_t	    prev_exists;
 };
@@ -94,6 +95,7 @@ struct conv_sender {
 
 struct conversation {
     modseq_t	    modseq;
+    uint32_t	    num_records;
     uint32_t	    exists;
     uint32_t	    unseen;
     uint32_t	    prev_unseen;
@@ -152,6 +154,7 @@ extern int conversation_load(struct conversations_state *state,
 extern void conversation_update(struct conversations_state *state,
 			        conversation_t *conv,
 			        const char *mboxname,
+			        int delta_num_records,
 			        int delta_exists,
 			        int delta_unseen,
 			        int *delta_counts,
