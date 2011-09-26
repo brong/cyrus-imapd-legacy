@@ -490,8 +490,12 @@ int _conversation_save(struct conversations_state *state,
 	}
     }
 
+    if (!conv->num_records)
+	goto done;
+
     dl = dlist_newkvlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
+    dlist_setnum32(dl, "NUMRECORDS", conv->num_records);
     dlist_setnum32(dl, "EXISTS", conv->exists);
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
     if (state->counted_flags) {
@@ -504,14 +508,18 @@ int _conversation_save(struct conversations_state *state,
 
     n = dlist_newlist(dl, "FOLDER");
     for (folder = conv->folders ; folder ; folder = folder->next) {
+	if (!folder->num_records)
+	    continue;
 	nn = dlist_newkvlist(n, "FOLDER");
 	dlist_setatom(nn, "MBOXNAME", folder->mboxname);
 	dlist_setnum64(nn, "MODSEQ", folder->modseq);
+	dlist_setnum32(nn, "NUMRECORDS", folder->num_records);
 	dlist_setnum32(nn, "EXISTS", folder->exists);
     }
 
     n = dlist_newlist(dl, "SENDER");
     for (sender = conv->senders ; sender ; sender = sender->next) {
+	/* there's no refcounting of senders, they last forever */
 	nn = dlist_newkvlist(n, "SENDER");
 	/* envelope form */
 	if (sender->name) dlist_setatom(nn, "NAME", sender->name);
@@ -707,6 +715,9 @@ int _conversation_load(struct conversations_state *state,
     n = dlist_getchild(dl, "MODSEQ");
     if (n)
 	conv->modseq = dlist_num(n);
+    n = dlist_getchild(dl, "NUMRECORDS");
+    if (n)
+	conv->num_records = dlist_num(n);
     n = dlist_getchild(dl, "EXISTS");
     if (n)
 	conv->exists = dlist_num(n);
@@ -736,6 +747,9 @@ int _conversation_load(struct conversations_state *state,
 	nn = dlist_getchild(n, "MODSEQ");
 	if (nn)
 	    folder->modseq = dlist_num(nn);
+	nn = dlist_getchild(n, "NUMRECORDS");
+	if (nn)
+	    folder->num_records = dlist_num(nn);
 	nn = dlist_getchild(n, "EXISTS");
 	if (nn)
 	    folder->exists = dlist_num(nn);
@@ -881,6 +895,7 @@ static void _apply_delta(uint32_t *valp, int delta)
 
 void conversation_update(struct conversations_state *state,
 			 conversation_t *conv, const char *mboxname,
+			 int delta_num_records,
 			 int delta_exists, int delta_unseen,
 			 int *delta_counts, modseq_t modseq)
 {
@@ -889,6 +904,11 @@ void conversation_update(struct conversations_state *state,
 
     folder = conversation_add_folder(conv, mboxname);
 
+    if (delta_num_records) {
+	_apply_delta(&conv->num_records, delta_num_records);
+	_apply_delta(&folder->num_records, delta_num_records);
+	conv->dirty = 1;
+    }
     if (delta_exists) {
 	_apply_delta(&conv->exists, delta_exists);
 	_apply_delta(&folder->exists, delta_exists);
