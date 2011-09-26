@@ -321,7 +321,7 @@ static int do_recalc(const char *inboxname)
 static int usage(const char *name)
     __attribute__((noreturn));
 
-static void do_user(const char *userid)
+static int do_user(const char *userid)
 {
     const char *inboxname;
     char *fname;
@@ -332,13 +332,13 @@ static void do_user(const char *userid)
 	fprintf(stderr, "Unable to get conversations database "
 			"filename for userid \"%s\"\n",
 			userid);
-	return;
+	return EC_USAGE;
     }
 
     inboxname = mboxname_user_inbox(userid);
     if (inboxname == NULL) {
 	fprintf(stderr, "Invalid userid %s", userid);
-	return;
+	return EC_USAGE;
     }
 
     switch (mode)
@@ -373,6 +373,8 @@ static void do_user(const char *userid)
     }
 
     free(fname);
+
+    return r;
 }
 
 static int do_mailbox(char *name,
