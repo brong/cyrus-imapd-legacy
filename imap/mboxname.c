@@ -1360,6 +1360,16 @@ char *mboxname_metapath(const char *partition, const char *mboxname,
 	metaflag = IMAP_ENUM_METAPARTITION_FILES_ANNOTATIONS;
 	filename = FNAME_ANNOTATIONS;
 	break;
+    case META_ACTIONS:
+	snprintf(confkey, 256, "metadir-index-%s", partition);
+	metaflag = IMAP_ENUM_METAPARTITION_FILES_INDEX;
+	filename = FNAME_ACTIONS;
+	break;
+    case META_ACTIONSX:
+	snprintf(confkey, 256, "metadir-index-%s", partition);
+	metaflag = IMAP_ENUM_METAPARTITION_FILES_INDEX;
+	filename = FNAME_ACTIONSX;
+	break;
     case 0:
 	break;
     default:
