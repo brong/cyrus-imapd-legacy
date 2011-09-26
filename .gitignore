@@ -35,6 +35,7 @@ coverage.xml
 cscope.out
 depcomp
 imap/arbitron
+imap/ctl_conversationsdb
 imap/chk_cyrus
 imap/ctl_cyrusdb
 imap/ctl_deliver
