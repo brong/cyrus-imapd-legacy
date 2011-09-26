@@ -2247,6 +2247,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 {
     int r = 0;
     conversation_t *conv = NULL;
+    int delta_num_records = 0;
     int delta_exists = 0;
     int delta_unseen = 0;
     int *delta_counts = NULL;
@@ -2307,6 +2308,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 		}
 	    }
 	}
+	delta_num_records--;
 	modseq = MAX(modseq, old->modseq);
     }
     if (new) {
@@ -2324,6 +2326,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 		}
 	    }
 	}
+	delta_num_records++;
 	modseq = MAX(modseq, new->modseq);
     }
 
@@ -2354,6 +2357,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     }
 
     conversation_update(cstate, conv, mailbox->name,
+			delta_num_records,
 			delta_exists, delta_unseen,
 			delta_counts, modseq);
 
@@ -2842,6 +2846,10 @@ static int mailbox_index_repack(struct mailbox *mailbox)
 	    /* track the modseq for QRESYNC purposes */
 	    if (record.modseq > repack->i.deletedmodseq)
 		repack->i.deletedmodseq = record.modseq;
+
+	    /* remove from the conversations tracking counts */
+	    r = mailbox_update_conversations(mailbox, &record, NULL);
+	    if (r) goto fail;
 
 	    continue;
 	}
