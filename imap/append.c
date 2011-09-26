@@ -78,6 +78,7 @@
 #include "annotate.h"
 #include "message_guid.h"
 #include "strarray.h"
+#include "conversations.h"
 
 struct stagemsg {
     char fname[1024];
@@ -963,6 +964,7 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	fsync(fileno(destfile));
 	fclose(destfile);
     }
+
     if (!r && config_getstring(IMAPOPT_ANNOTATION_CALLOUT)) {
 	if (flags)
 	    newflags = strarray_dup(flags);
@@ -997,16 +999,15 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	    }
 	}
     }
-    if (r)
-	goto out;
 
     /* Handle flags the user wants to set in the message */
-    if (flags) {
+    if (!r && flags) {
 	r = append_apply_flags(as, mboxevent, &record, flags);
 	if (r) goto out;
     }
+
     /* Write out index file entry */
-    r = mailbox_append_index_record(mailbox, &record);
+    if (!r) r = mailbox_append_index_record(mailbox, &record);
 
 out:
     if (newflags)
@@ -1306,6 +1307,7 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 	record.content_lines = copymsg[msg].content_lines;
 	record.cache_version = copymsg[msg].cache_version;
 	record.cache_crc = copymsg[msg].cache_crc;
+	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
 
 	/* Write out index file entry */
