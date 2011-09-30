@@ -71,7 +71,8 @@ enum cyrusdb_dbflags {
 
 enum cyrusdb_openflags {
     CYRUSDB_CREATE   = 0x01,	/* Create the database if not existant */
-    CYRUSDB_MBOXSORT = 0x02	/* Use mailbox sort order ('.' sorts 1st) */
+    CYRUSDB_MBOXSORT = 0x02,	/* Use mailbox sort order ('.' sorts 1st) */
+    CYRUSDB_ZLIB     = 0x04	/* Compress records */
 };
 
 typedef int foreach_p(void *rock,
@@ -148,7 +149,7 @@ struct cyrusdb_backend {
 		     struct txn **mytid);
     int (*fetchnext)(struct db *mydb, 
 		 const char *key, size_t keylen,
-		 const char *foundkey, size_t foundkeylen,
+		 const char **foundkey, size_t *foundkeylen,
 		 const char **data, size_t *datalen,
 		 struct txn **mytid);
 
@@ -214,6 +215,9 @@ extern struct cyrusdb_backend cyrusdb_berkeley_hash;
 extern struct cyrusdb_backend cyrusdb_berkeley_hash_nosync;
 extern struct cyrusdb_backend cyrusdb_flat;
 extern struct cyrusdb_backend cyrusdb_skiplist;
+extern struct cyrusdb_backend cyrusdb_skiplist2;
+extern struct cyrusdb_backend cyrusdb_skiplist2z;
+extern struct cyrusdb_backend cyrusdb_skiplist1;
 extern struct cyrusdb_backend cyrusdb_quotalegacy;
 extern struct cyrusdb_backend cyrusdb_sql;
 
