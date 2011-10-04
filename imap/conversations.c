@@ -536,13 +536,13 @@ int _conversation_save(struct conversations_state *state,
     if (!conv->num_records)
 	goto done;
 
-    dl = dlist_newkvlist(NULL, NULL);
+    dl = dlist_newlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
     dlist_setnum32(dl, "NUMRECORDS", conv->num_records);
     dlist_setnum32(dl, "EXISTS", conv->exists);
     dlist_setnum32(dl, "UNSEEN", conv->unseen);
+    n = dlist_newlist(dl, "COUNTS");
     if (state->counted_flags) {
-	n = dlist_newlist(dl, "COUNTS");
 	for (i = 0; i < state->counted_flags->count; i++) {
 	    const char *flag = strarray_nth(state->counted_flags, i);
 	    dlist_setnum32(n, flag, conv->counts[i]);
@@ -553,7 +553,7 @@ int _conversation_save(struct conversations_state *state,
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	if (!folder->num_records)
 	    continue;
-	nn = dlist_newkvlist(n, "FOLDER");
+	nn = dlist_newlist(n, "FOLDER");
 	dlist_setnum32(nn, "FOLDERNUM", folder_number(state, folder->mboxname));
 	dlist_setnum64(nn, "MODSEQ", folder->modseq);
 	dlist_setnum32(nn, "NUMRECORDS", folder->num_records);
@@ -563,10 +563,10 @@ int _conversation_save(struct conversations_state *state,
     n = dlist_newlist(dl, "SENDER");
     for (sender = conv->senders ; sender ; sender = sender->next) {
 	/* there's no refcounting of senders, they last forever */
-	nn = dlist_newkvlist(n, "SENDER");
+	nn = dlist_newlist(n, "SENDER");
 	/* envelope form */
-	if (sender->name) dlist_setatom(nn, "NAME", sender->name);
-	if (sender->route) dlist_setatom(nn, "ROUTE", sender->route);
+	dlist_setatom(nn, "NAME", sender->name);
+	dlist_setatom(nn, "ROUTE", sender->route);
 	dlist_setatom(nn, "MAILBOX", sender->mailbox);
 	dlist_setatom(nn, "DOMAIN", sender->domain);
     }
@@ -660,21 +660,15 @@ int conversation_getstatus(struct conversations_state *state,
     r = dlist_parsemap(&dl, 0, rest, restlen);
     if (r) goto done;
 
-    if (modseqp) {
-	n = dlist_getchild(dl, "MODSEQ");
-	if (n)
-	    *modseqp = dlist_num(n);
-    }
-    if (existsp) {
-	n = dlist_getchild(dl, "EXISTS");
-	if (n)
-	    *existsp = dlist_num(n);
-    }
-    if (unseenp) {
-	n = dlist_getchild(dl, "UNSEEN");
-	if (n)
-	    *unseenp = dlist_num(n);
-    }
+    n = dlist_getchildn(dl, 0);
+    if (modseqp && n)
+	*modseqp = dlist_num(n);
+    n = dlist_getchildn(dl, 1);
+    if (existsp && n)
+	*existsp = dlist_num(n);
+    n = dlist_getchildn(dl, 2);
+    if (unseenp && n)
+	*unseenp = dlist_num(n);
 
  done:
     if (r)
@@ -698,7 +692,7 @@ int conversation_setstatus(struct conversations_state *state,
     int r = IMAP_IOERROR;
     int version = CONVERSATIONS_VERSION;
 
-    dl = dlist_newkvlist(NULL, NULL);
+    dl = dlist_newlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", modseq);
     dlist_setnum32(dl, "EXISTS", exists);
     dlist_setnum32(dl, "UNSEEN", unseen);
@@ -755,20 +749,20 @@ int _conversation_load(struct conversations_state *state,
 
     conv = conversation_new(state);
 
-    n = dlist_getchild(dl, "MODSEQ");
+    n = dlist_getchildn(dl, 0);
     if (n)
 	conv->modseq = dlist_num(n);
-    n = dlist_getchild(dl, "NUMRECORDS");
+    n = dlist_getchildn(dl, 1);
     if (n)
 	conv->num_records = dlist_num(n);
-    n = dlist_getchild(dl, "EXISTS");
+    n = dlist_getchildn(dl, 2);
     if (n)
 	conv->exists = dlist_num(n);
-    n = dlist_getchild(dl, "UNSEEN");
+    n = dlist_getchildn(dl, 3);
     if (n)
 	conv->unseen = dlist_num(n);
+    n = dlist_getchildn(dl, 4);
     if (state->counted_flags) {
-	n = dlist_getchild(dl, "COUNTS");
 	nn = n ? n->head : NULL;
 	for (i = 0; i < state->counted_flags->count; i++) {
 	    if (nn) {
@@ -780,35 +774,35 @@ int _conversation_load(struct conversations_state *state,
 	}
     }
 
-    n = dlist_getchild(dl, "FOLDER");
+    n = dlist_getchildn(dl, 5);
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
-	char *mboxname;
-	nn = dlist_getchild(n, "FOLDERNUM");
+	const char *mboxname;
+	nn = dlist_getchildn(n, 0);
 	if (!nn)
 	    continue;
 	mboxname = strarray_nth(state->folder_names, dlist_num(nn));
 	folder = conversation_add_folder(conv, mboxname);
 
-	nn = dlist_getchild(n, "MODSEQ");
+	nn = dlist_getchildn(n, 1);
 	if (nn)
 	    folder->modseq = dlist_num(nn);
-	nn = dlist_getchild(n, "NUMRECORDS");
+	nn = dlist_getchildn(n, 2);
 	if (nn)
 	    folder->num_records = dlist_num(nn);
-	nn = dlist_getchild(n, "EXISTS");
+	nn = dlist_getchildn(n, 3);
 	if (nn)
 	    folder->exists = dlist_num(nn);
 
 	folder->prev_exists = folder->exists;
     }
 
-    n = dlist_getchild(dl, "SENDER");
+    n = dlist_getchildn(dl, 6);
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
 	struct dlist *nn2, *nn3, *nn4;
-	nn = dlist_getchild(n, "NAME");
-	nn2 = dlist_getchild(n, "ROUTE");
-	nn3 = dlist_getchild(n, "MAILBOX");
-	nn4 = dlist_getchild(n, "DOMAIN");
+	nn = dlist_getchildn(n, 0);
+	nn2 = dlist_getchildn(n, 1);
+	nn3 = dlist_getchildn(n, 2);
+	nn4 = dlist_getchildn(n, 3);
 	if (nn3 && nn4)
 	    conversation_add_sender(conv, nn ? nn->sval : NULL,
 				    nn2 ? nn2->sval : NULL,
