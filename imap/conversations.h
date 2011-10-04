@@ -60,6 +60,7 @@ struct conversations_state {
     struct db *db;
     struct txn *txn;
     strarray_t *counted_flags;
+    strarray_t *folder_names;
     char *path;
 };
 
