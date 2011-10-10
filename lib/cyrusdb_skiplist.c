@@ -949,7 +949,7 @@ static int compare(const char *s1, int l1, const char *s2, int l2)
    if it doesn't exist.
    if previous is set, finds the last node < key */
 static const char *find_node(struct db *db, 
-			     const char *key, int keylen,
+			     const char *key, size_t keylen,
 			     unsigned *updateoffsets)
 {
     const char *ptr = db->map_base + DUMMY_OFFSET(db);
@@ -978,8 +978,8 @@ static const char *find_node(struct db *db,
 }
 
 static int myfetch(struct db *db,
-		   const char *key, int keylen,
-		   const char **data, int *datalen,
+		   const char *key, size_t keylen,
+		   const char **data, size_t *datalen,
 		   struct txn **tidptr)
 {
     const char *ptr;
@@ -1033,15 +1033,15 @@ static int myfetch(struct db *db,
 }
 
 static int fetch(struct db *mydb,
-		 const char *key, int keylen,
-		 const char **data, int *datalen,
+		 const char *key, size_t keylen,
+		 const char **data, size_t *datalen,
 		 struct txn **tidptr)
 {
     return myfetch(mydb, key, keylen, data, datalen, tidptr);
 }
 static int fetchlock(struct db *db,
-		     const char *key, int keylen,
-		     const char **data, int *datalen,
+		     const char *key, size_t keylen,
+		     const char **data, size_t *datalen,
 		     struct txn **tidptr)
 {
     return myfetch(db, key, keylen, data, datalen, tidptr);
@@ -1051,7 +1051,7 @@ static int fetchlock(struct db *db,
    if there is a txn, 'cb' must make use of it.
 */
 static int myforeach(struct db *db,
-		     const char *prefix, int prefixlen,
+		     const char *prefix, size_t prefixlen,
 		     foreach_p *goodp,
 		     foreach_cb *cb, void *rock,
 		     struct txn **tidptr)
@@ -1064,7 +1064,6 @@ static int myforeach(struct db *db,
     int need_unlock = 0;
 
     assert(db != NULL);
-    assert(prefixlen >= 0);
 
     /* Hacky workaround:
      *
@@ -1183,8 +1182,8 @@ static unsigned int randlvl(struct db *db)
 }
 
 static int mystore(struct db *db, 
-		   const char *key, int keylen,
-		   const char *data, int datalen,
+		   const char *key, size_t keylen,
+		   const char *data, size_t datalen,
 		   struct txn **tidptr, int overwrite)
 {
     const char *ptr;
@@ -1338,23 +1337,23 @@ static int mystore(struct db *db,
 }
 
 static int create(struct db *db, 
-		  const char *key, int keylen,
-		  const char *data, int datalen,
+		  const char *key, size_t keylen,
+		  const char *data, size_t datalen,
 		  struct txn **tid)
 {
     return mystore(db, key, keylen, data, datalen, tid, 0);
 }
 
 static int store(struct db *db, 
-		 const char *key, int keylen,
-		 const char *data, int datalen,
+		 const char *key, size_t keylen,
+		 const char *data, size_t datalen,
 		 struct txn **tid)
 {
     return mystore(db, key, keylen, data, datalen, tid, 1);
 }
 
 static int mydelete(struct db *db, 
-		    const char *key, int keylen,
+		    const char *key, size_t keylen,
 		    struct txn **tidptr, int force __attribute__((unused)))
 {
     const char *ptr;

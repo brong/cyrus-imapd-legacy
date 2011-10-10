@@ -112,8 +112,8 @@ void usage(void);
 void reportquota(void);
 static int buildquotalist(char *domain, char **roots, int nroots);
 static int fixquotas(char *domain, char **roots, int nroots);
-static int fixquota_mailbox(void *rock, const char *name, int namelen,
-			    const char *val, int vallen);
+static int fixquota_mailbox(void *rock, const char *name, size_t namelen,
+			    const char *val, size_t vallen);
 static int fixquota_fixroot(struct mailbox *mailbox, const char *root);
 static int fixquota_finish(int thisquota);
 static int (*compar)(const char *s1, const char *s2);
@@ -340,9 +340,9 @@ static int findroot(const char *name, int *thisquota)
  * Account for mailbox 'name' when fixing the quota roots
  */
 static int fixquota_mailbox(void *rock __attribute__((unused)),
-			    const char *name, int namelen,
+			    const char *name, size_t namelen,
 			    const char *val __attribute__((unused)),
-			    int vallen __attribute__((unused)))
+			    size_t vallen __attribute__((unused)))
 {
     int r = 0;
     struct mailbox *mailbox = NULL;

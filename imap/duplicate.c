@@ -122,12 +122,12 @@ int duplicate_init(const char *fname, int myflags __attribute__((unused)))
 time_t duplicate_check(duplicate_key_t *dkey)
 {
     char buf[1024];
-    int idlen = strlen(dkey->id);
-    int tolen = strlen(dkey->to);
-    int datelen = strlen(dkey->date); 
+    size_t idlen = strlen(dkey->id);
+    size_t tolen = strlen(dkey->to);
+    size_t datelen = strlen(dkey->date); 
     int r;
     const char *data = NULL;
-    int len = 0;
+    size_t len = 0;
     time_t mark = 0;
 
     if (!duplicate_dbopen) return 0;
@@ -219,9 +219,9 @@ struct findrock {
 
 static int find_p(void *rock __attribute__((unused)),
 		  const char *id,
-		  int idlen __attribute__((unused)),
+		  size_t idlen __attribute__((unused)),
 		  const char *data __attribute__((unused)),
-		  int datalen __attribute__((unused)))
+		  size_t datalen __attribute__((unused)))
 {
     const char *rcpt;
 
@@ -231,8 +231,8 @@ static int find_p(void *rock __attribute__((unused)),
 }
 
 static int find_cb(void *rock, const char *id,
-		   int idlen __attribute__((unused)),
-		   const char *data, int datalen)
+		   size_t idlen __attribute__((unused)),
+		   const char *data, size_t datalen)
 {
     struct findrock *frock = (struct findrock *) rock;
     const char *rcpt;
@@ -279,8 +279,8 @@ struct prunerock {
 };
 
 static int prune_p(void *rock,
-		   const char *id, int idlen __attribute__((unused)),
-		   const char *data, int datalen __attribute__((unused)))
+		   const char *id, size_t idlen __attribute__((unused)),
+		   const char *data, size_t datalen __attribute__((unused)))
 {
     struct prunerock *prock = (struct prunerock *) rock;
     const char *rcpt;
@@ -301,9 +301,9 @@ static int prune_p(void *rock,
     return (mark < (expmark ? *expmark : prock->expmark));
 }
 
-static int prune_cb(void *rock, const char *id, int idlen,
+static int prune_cb(void *rock, const char *id, size_t idlen,
 		    const char *data __attribute__((unused)),
-		    int datalen __attribute__((unused)))
+		    size_t datalen __attribute__((unused)))
 {
     struct prunerock *prock = (struct prunerock *) rock;
     int r;
@@ -346,8 +346,8 @@ struct dumprock {
 };
 
 static int dump_cb(void *rock,
-		   const char *key, int keylen __attribute__((unused)),
-		   const char *data, int datalen)
+		   const char *key, size_t keylen __attribute__((unused)),
+		   const char *data, size_t datalen)
 {
     struct dumprock *drock = (struct dumprock *) rock;
     time_t mark;
