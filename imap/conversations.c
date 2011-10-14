@@ -269,6 +269,8 @@ void _conv_remove (struct conversations_state **statep)
 	    free(cur->s.path);
 	    if (cur->s.counted_flags)
 		strarray_free(cur->s.counted_flags);
+	    if (cur->s.folder_names)
+		strarray_free(cur->s.folder_names);
 	    free(cur);
 	    *statep = NULL;
 	    return;
@@ -467,6 +469,7 @@ static int folder_number(struct conversations_state *state,
 		      buf.s, buf.len, &state->txn);
 
 	buf_free(&buf);
+	dlist_free(&dl);
 	if (r) abort();
     }
 
