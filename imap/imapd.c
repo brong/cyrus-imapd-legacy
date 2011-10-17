@@ -7785,6 +7785,7 @@ static int parse_statusitems(unsigned *statusitemsp, const char **errstr)
     static struct buf arg;
     unsigned statusitems = 0;
     int c;
+    int hasconv = config_getswitch(IMAPOPT_CONVERSATIONS);
 
     c = prot_getc(imapd_in);
     if (c != '(') return EOF;
@@ -7811,13 +7812,13 @@ static int parse_statusitems(unsigned *statusitemsp, const char **errstr)
 	else if (!strcmp(arg.s, "highestmodseq")) {
 	    statusitems |= STATUS_HIGHESTMODSEQ;
 	}
-	else if (!strcmp(arg.s, "xconvexists")) {
+	else if (hasconv && !strcmp(arg.s, "xconvexists")) {
 	    statusitems |= STATUS_XCONVEXISTS;
 	}
-	else if (!strcmp(arg.s, "xconvunseen")) {
+	else if (hasconv && !strcmp(arg.s, "xconvunseen")) {
 	    statusitems |= STATUS_XCONVUNSEEN;
 	}
-	else if (!strcmp(arg.s, "xconvmodseq")) {
+	else if (hasconv && !strcmp(arg.s, "xconvmodseq")) {
 	    statusitems |= STATUS_XCONVMODSEQ;
 	}
 	else {
@@ -7889,6 +7890,7 @@ static int print_statusline(const char *extname, unsigned statusitems,
 	prot_printf(imapd_out, "%cXCONVMODSEQ " MODSEQ_FMT, sepchar, sd->xconvmodseq);
 	sepchar = ' ';
     }
+
     prot_printf(imapd_out, ")\r\n");
 
     return 0;
