@@ -80,6 +80,7 @@
 #include "strhash.h"
 #include "stristr.h"
 #include "util.h"
+#include "ptrarray.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
@@ -1566,12 +1567,6 @@ int index_sort(struct index_state *state, struct sortcrit *sortcrit,
     return nmsg;
 }
 
-struct added
-{
-    unsigned int uid;
-    unsigned int pos;
-};
-
 static int is_mutable_sort(struct sortcrit *sortcrit)
 {
     int i;
@@ -1663,6 +1658,146 @@ static int is_mutable_ordering(struct sortcrit *sortcrit,
     return 0;
 }
 
+/*
+ * Analyse @searchargs to discover how countable the results are
+ * going to be.  By "countable" we mean "predictable from stored
+ * state, without searching every message".  Currently that means
+ *
+ * in message mode:
+ *    - total number of messages
+ *    - number unseen messages
+ *    - number seen messages (by inference)
+ *    - number recent messages
+ *    - number unrecent messages (by inference)
+ * in conversation mode:
+ *    - total number of conversations
+ *    - number of conversations with unseen messages
+ *    - number of conversations with no unseen messages (by inference)
+ *
+ * Returns a mask of SEARCH_* constants (e.g. SEARCH_SEEN_SET)
+ * describing which countable attributes are specified by @searchargs.
+ * The special value SEARCH_UNCOUNTED means that at least one uncounted
+ * attribute was found.  Mask values with more than one bit set are
+ * effectively uncountable.  A mask value of zero means that the search
+ * program is empty, which is countable.
+ */
+
+#define SEARCH_UNCOUNTED	(1<<30)
+static unsigned int search_countability(const struct searchargs *searchargs)
+{
+    int i;
+    unsigned int mask = 0;
+    const struct searchsub *sub;
+
+    if (!searchargs)
+	return 0;
+
+    /*
+     * TODO: for SEARCH_SEEN_SET, SEARCH_SEEN_UNSET this is only correct
+     * if the user is looking at his own mailbox.
+     */
+    mask |= (searchargs->flags & SEARCH_COUNTEDFLAGS);
+    if ((searchargs->flags & ~SEARCH_COUNTEDFLAGS))
+	mask |= SEARCH_UNCOUNTED;
+
+    /* time and size based searches are not counted */
+    if (searchargs->smaller || searchargs->larger)
+	mask |= SEARCH_UNCOUNTED;
+    if (searchargs->before || searchargs->after)
+	mask |= SEARCH_UNCOUNTED;
+    if (searchargs->sentbefore || searchargs->sentafter)
+	mask |= SEARCH_UNCOUNTED;
+
+    /* flags are not counted */
+    if (searchargs->system_flags_set)
+	mask |= SEARCH_UNCOUNTED;
+    if (searchargs->system_flags_unset)
+	mask |= SEARCH_UNCOUNTED;
+    for (i = 0; i < MAX_USER_FLAGS/32; i++) {
+	if (searchargs->user_flags_set[i])
+	    mask |= SEARCH_UNCOUNTED;
+	if (searchargs->user_flags_unset[i])
+	    mask |= SEARCH_UNCOUNTED;
+    }
+    if (searchargs->convflags)
+	mask |= SEARCH_UNCOUNTED;
+
+    /* sequences are not counted, because the sequence might
+     * run off the end of the mailbox or might include expunged
+     * messages */
+    if (searchargs->sequence || searchargs->uidsequence)
+	mask |= SEARCH_UNCOUNTED;
+
+    /* searches on body or headers are not counted */
+    if (searchargs->from ||
+        searchargs->to ||
+        searchargs->cc ||
+        searchargs->bcc ||
+        searchargs->subject ||
+        searchargs->messageid ||
+        searchargs->body ||
+        searchargs->text ||
+        searchargs->header_name ||
+        searchargs->header)
+	mask |= SEARCH_UNCOUNTED;
+
+    /* classify sub expressions too */
+    for (sub = searchargs->sublist; sub; sub = sub->next) {
+	mask |= search_countability(sub->sub1);
+	mask |= search_countability(sub->sub2);
+    }
+
+    /* modseq is not counted */
+    if (searchargs->modseq)
+	mask |= SEARCH_UNCOUNTED;
+    if (searchargs->convmodseq)
+	mask |= SEARCH_UNCOUNTED;
+
+    /* annotations are not counted */
+    if (searchargs->annotations)
+	mask |= SEARCH_UNCOUNTED;
+
+    return mask;
+}
+
+#define UNPREDICTABLE	    (-1)
+static int search_predict_total(struct index_state *state,
+				struct conversations_state *cstate,
+			        const struct searchargs *searchargs,
+				int conversations,
+				modseq_t *xconvmodseqp)
+{
+    uint32_t convexists = 0;
+    uint32_t convunseen = 0;
+
+    /* always grab xconvmodseq, so we report a growing
+     * highestmodseq to all callers */
+    if (conversations)
+	conversation_getstatus(cstate, state->mailbox->name,
+			       xconvmodseqp, &convexists, &convunseen);
+
+    switch (search_countability(searchargs)) {
+    case 0:
+	return (conversations ? convexists : state->exists);
+    case SEARCH_RECENT_SET:
+	return state->numrecent;
+    case SEARCH_RECENT_UNSET:
+	assert(state->exists >= state->numrecent);
+	return state->exists - state->numrecent;
+    case SEARCH_SEEN_SET:
+	assert(state->exists >= state->numunseen);
+	return state->exists - state->numunseen;
+    case SEARCH_SEEN_UNSET:
+	return state->numunseen;
+    case SEARCH_CONVSEEN_SET:
+	assert(convexists >= convunseen);
+	return convexists - convunseen;
+    case SEARCH_CONVSEEN_UNSET:
+	return convunseen;
+    default:
+	return UNPREDICTABLE;
+    }
+}
 
 /*
  * Performs a XCONVSORT command
@@ -1672,347 +1807,371 @@ int index_convsort(struct index_state *state,
 		   struct searchargs *searchargs,
 		   const struct windowargs *windowargs)
 {
-    unsigned *msgno_list;
-    MsgData *msgdata = NULL, *freeme = NULL;
+    MsgData *msgdata = NULL;
     MsgData *msg;
-    MsgData *chaff = NULL;
-    MsgData *exemplars = NULL, **exemplars_tailp = &exemplars;
-    int nexemplars = 0;
-    int nmsg = 0;
     modseq_t xconvmodseq = 0;
-    unsigned int i;
+    int i;
     hash_table seen_cids = HASH_TABLE_INITIALIZER;
-    hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
-    int32_t pos = 0;
-    static const struct windowargs default_windowargs;    /* all zeroes */
+    uint32_t pos = 0;
     int found_anchor = 0;
     uint32_t anchor_pos = 0;
     uint32_t first_pos = 0;
-    int32_t window_first = 0, window_last = 0;
     unsigned int ninwindow = 0;
-    unsigned int *results = NULL;
-    unsigned int nresults = 0;		/* uids */
-    unsigned int maxresults = 0;
-    struct added *added = NULL;
-    unsigned int nadded = 0;
-    unsigned int *removed = NULL;	/* uids */
-    unsigned int nremoved = 0;
-    unsigned int maxremoved = 0;
-    unsigned int numresults = 0;
-    struct index_record **changed = NULL;
-    unsigned int nchanged = 0;
+    ptrarray_t results = PTRARRAY_INITIALIZER;
+    int total = 0;
+    int r = 0;
     struct conversations_state *cstate = NULL;
-    int is_mutable = is_mutable_ordering(sortcrit, searchargs);
 
-    if (!windowargs)
-	windowargs = &default_windowargs;
+    assert(windowargs);
+    assert(!windowargs->changedsince);
+    assert(!windowargs->upto);
 
-    /* always grab xconvmodseq, so we report a growing
-     * highestmodseq to all callers */
     cstate = conversations_get_mbox(state->mailbox->name);
-    if (!cstate) return 0;
+    if (!cstate)
+	return IMAP_INTERNAL;
 
-    if (windowargs->conversations) {
-	conversation_getstatus(cstate, state->mailbox->name,
-			       &xconvmodseq, &numresults, 0);
-
-	/* XXX - counts for a search - might need to cache somehow? */
-	if (windowargs->changedsince && xconvmodseq <= windowargs->modseq)
-	    goto skip;
-    } else {
-	numresults = state->exists;
-	if (windowargs->changedsince && state->highestmodseq <= windowargs->modseq)
-	    goto skip;
-    }
+    total = search_predict_total(state, cstate, searchargs,
+				windowargs->conversations,
+				&xconvmodseq);
+    if (!total)
+	goto out;
 
     construct_hash_table(&seen_cids, 1024, 0);
-    construct_hash_table(&old_seen_cids, 1024, 0);
 
-    if (state->exists) {
-	/* initial list - load data for ALL messages always */
-	msgno_list = xmalloc(sizeof(unsigned) * state->exists);
-	for (i = 0; i < state->exists; i++)
-	    msgno_list[i] = i + 1;
-
-	/* Create/load the msgdata array */
-	freeme = msgdata = index_msgdata_load(state, msgno_list, state->exists, sortcrit,
-					      windowargs->anchor, &found_anchor);
-	free(msgno_list);
-
-	/* Sort the messages based on the given criteria */
-	msgdata = lsort(msgdata,
-			(void * (*)(void*)) index_sort_getnext,
-			(void (*)(void*,void*)) index_sort_setnext,
-			(int (*)(void*,void*,void*)) index_sort_compare,
-			sortcrit);
-
-	/* Discover exemplars */
-	while ((msg = msgdata)) {
-	    struct index_record *record = &state->map[msg->msgno-1].record;
-	    int was_old_exemplar = 0;
-	    int is_new_exemplar = 0;
-	    int is_deleted = 0;
-	    int is_new = 0;
-	    int was_deleted = 0;
-	    int is_changed = 0;
-	    int in_filter = 0;
-
-	    if (windowargs->changedsince) {
-		is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
-		is_new = (record->uid >= windowargs->uidnext);
-		is_changed = (record->modseq > windowargs->modseq);
-		was_deleted = is_deleted && !is_changed;
-	    } else {
-		assert(!(record->system_flags & FLAG_EXPUNGED));
-	    }
-
-	    /* figure out whether this message is an exemplar in
-	     * the new and/or old results */
-	    if (windowargs->conversations) {
-		/* in conversations mode => only the first message seen
-		 * with each unique CID is an exemplar */
-		const char *key = conversation_id_encode(record->cid);
-
-		if (windowargs->changedsince &&
-		    !is_new &&
-		    !was_deleted &&
-		    !hash_lookup(key, &old_seen_cids)) {
-		    hash_insert(key, (void *)1, &old_seen_cids);
-		    was_old_exemplar = 1;
-		}
-
-		if (!is_deleted &&
-		    !hash_lookup(key, &seen_cids)) {
-		    hash_insert(key, (void *)1, &seen_cids);
-		    is_new_exemplar = 1;
-		}
-	    }
-	    else
-	    {
-		/* not in conversations mode => all messages are exemplars */
-		was_old_exemplar = !was_deleted && !is_new;
-		is_new_exemplar = !is_deleted;
-	    }
-
-	    if (is_new_exemplar)
-		in_filter = index_search_evaluate(state, searchargs, msg->msgno, NULL);
-
-	    if (in_filter)
-		pos++;
-
-	    if (!anchor_pos &&
-		(was_old_exemplar || !windowargs->changedsince) &&
-		windowargs->anchor == record->uid) {
-		/* we've found the anchor's position, rejoice! */
-		anchor_pos = pos;
-	    }
-
-	    /* stash these, we'll need them later */
-	    msg->was_old_exemplar = was_old_exemplar;
-	    msg->is_new_exemplar = is_new_exemplar;
-	    msg->is_changed = is_changed;
-	    msg->in_filter = in_filter;
-
-	    /* detach from msgdata list */
-	    msgdata = msg->next;
-	    msg->next = NULL;
-
-	    if (was_old_exemplar || is_new_exemplar) {
-		/* append to the exemplars list, where order matters */
-		*exemplars_tailp = msg;
-		exemplars_tailp = &msg->next;
-		nexemplars++;
-	    } else {
-		/* prepend to the chaff list, which is for freeing only */
-		msg->next = chaff;
-		chaff = msg;
-	    }
-	}
-
-	/* atually, "pos" happens to contain the actual count of messages in
-	 * the filter right here!  Rejoyce */
-	numresults = pos;
-
-	/* After the first pass we now have enough information
-	 * to work out exactly where the window lies */
-	if (windowargs->until) {
-	    if (anchor_pos)
-		window_last = anchor_pos + windowargs->offset;
-	    else if (windowargs->position)
-		window_last = windowargs->position;
-	} else {
-	    if (anchor_pos)
-		window_first = anchor_pos + windowargs->offset;
-	    else if (windowargs->position)
-		window_first = windowargs->position;
-	}
-
-	/* Build the results[], added[], removed[], changed[] arrays */
-
-	maxresults = nexemplars;
-	if (windowargs->limit)
-	    maxresults = MIN(windowargs->limit, maxresults);
-	if (!windowargs->changedsince) {
-	    results = xcalloc(maxresults, sizeof(unsigned int));
-	} else {
-	    maxremoved = nexemplars;
-	    added = xcalloc(maxresults, sizeof(struct added));
-	    removed = xcalloc(maxremoved, sizeof(unsigned int));
-	    changed = xcalloc(maxresults, sizeof(struct index_record*));
-	}
-
-	pos = 0;
-	for (msg = exemplars ; msg ; msg = msg->next) {
-	    struct index_record *record = &state->map[msg->msgno-1].record;
-
-	    if (msg->is_new_exemplar && msg->in_filter)
-		pos++;
-
-	    /* delta updates on a mutable state could be outside the range we're
-	     * looking at, so we need to check outside */
-	    if (!is_mutable || !windowargs->changedsince) {
-		if (window_first && pos < window_first)
-		    continue;
-		if (window_last && pos > window_last)
-		    break;
-	    }
-
-	    if (msg->is_new_exemplar && msg->in_filter &&
-		windowargs->limit &&
-		++ninwindow > windowargs->limit)
-		break;
-	    if (!first_pos)
-		first_pos = pos;
-
-	    if (!windowargs->changedsince) {
-		if (msg->is_new_exemplar && msg->in_filter) {
-		    assert(nresults < maxresults);
-		    results[nresults++] = record->uid;
-		}
-	    } else {
-		/* we opened conversations above */
-		if (msg->was_old_exemplar && !msg->is_new_exemplar) {
-		    assert(nremoved < maxresults);
-		    removed[nremoved++] = record->uid;
-		}
-		else if (msg->is_new_exemplar && !msg->was_old_exemplar) {
-		    assert(nadded < maxresults);
-		    if (msg->in_filter) {
-			added[nadded].uid = record->uid;
-			added[nadded].pos = pos;
-			nadded++;
-		    }
-		}
-		else if (msg->was_old_exemplar && msg->is_new_exemplar) {
-		    int is_changed = 0;
-		    if (windowargs->conversations) {
-			conversation_t *convdata = NULL;
-			conversation_load(cstate, record->cid, &convdata);
-			/* XXX - track this from the msgdata_load ? */
-			if (convdata->modseq > windowargs->modseq)
-			    is_changed = 1;
-			conversation_free(convdata);
-		    } else if (msg->is_changed) {
-			is_changed = 1;
-		    }
-
-		    if (is_changed)  {
-			/* if it's mutable, we always need to mention the delete */
-			if (is_mutable) {
-			    assert(nremoved < maxresults);
-			    removed[nremoved++] = record->uid;
-			}
-			if (msg->in_filter) {
-			    assert(nchanged < maxresults);
-			    changed[nchanged++] = record;
-			    if (is_mutable) {
-				assert(nadded < maxresults);
-				added[nadded].uid = record->uid;
-				added[nadded].pos = pos;
-				nadded++;
-			    }
-			}
-		    }
-		}
-	    }
-	}
+    /* Create/load the msgdata array.
+     * load data for ALL messages always */
+    msgdata = index_msgdata_load(state, NULL, state->exists, sortcrit,
+			         windowargs->anchor, &found_anchor);
+    if (windowargs->anchor && !found_anchor) {
+	r = IMAP_ANCHOR_NOT_FOUND;
+	goto out;
     }
 
-    /* Print the resulting lists */
+    /* Sort the messages based on the given criteria */
+    msg = lsort(msgdata,
+		    (void * (*)(void*)) index_sort_getnext,
+		    (void (*)(void*,void*)) index_sort_setnext,
+		    (int (*)(void*,void*,void*)) index_sort_compare,
+		    sortcrit);
+
+    /* One pass through the message list */
+    for ( ; msg ; msg = msg->next) {
+	struct index_record *record = &state->map[msg->msgno-1].record;
+
+	assert(!(record->system_flags & FLAG_EXPUNGED));
+
+	/* run the search program against all messages */
+	if (!index_search_evaluate(state, searchargs, msg->msgno, NULL))
+	    continue;
+
+	/* figure out whether this message is an exemplar */
+	if (windowargs->conversations) {
+	    /* in conversations mode => only the first message seen
+	     * with each unique CID is an exemplar */
+	    const char *cid = conversation_id_encode(record->cid);
+
+	    if (hash_lookup(cid, &seen_cids))
+		continue;
+	    hash_insert(cid, (void *)1, &seen_cids);
+	}
+	/* else not in conversations mode => all messages are exemplars */
+
+	pos++;
+
+	if (!anchor_pos &&
+	    windowargs->anchor == record->uid) {
+	    /* we've found the anchor's position, rejoice! */
+	    anchor_pos = pos;
+	}
+
+	if (windowargs->anchor) {
+	    if (!anchor_pos)
+		continue;
+	    if (pos < anchor_pos + windowargs->offset)
+		continue;
+	}
+	else if (windowargs->position) {
+	    if (pos < windowargs->position)
+		continue;
+	}
+	if (windowargs->limit &&
+	    ++ninwindow > windowargs->limit) {
+	    if (total == UNPREDICTABLE) {
+		/* the total was not predictable, so we need to keep
+		 * going over the whole list to count it */
+		continue;
+	    }
+	    break;
+	}
+
+	if (!first_pos)
+	    first_pos = pos;
+	ptrarray_push(&results, record);
+    }
+
+    if (total == UNPREDICTABLE) {
+	/* the total was not predictable prima facie */
+	total = pos;
+    }
+
+    if (windowargs->anchor && !anchor_pos) {
+	/* the anchor was present but not an exemplar */
+	assert(results.count == 0);
+	r = IMAP_ANCHOR_NOT_FOUND;
+	goto out;
+    }
+
+    /* Print the resulting list */
 
     /* Yes, we could use a seqset here, but apparently the most common
      * sort order seen in the field is reverse date, which is basically
      * the worst case for seqset.  So we don't bother */
-    if (nresults) {
-	assert(!windowargs->changedsince);
+    if (results.count) {
 	prot_printf(state->out, "* SORT");  /* uids */
-	for (i = 0 ; i < nresults ; i++)
-	    prot_printf(state->out, " %u", results[i]);
-	prot_printf(state->out, "\r\n");
-    }
-
-    if (nadded) {
-	assert(windowargs->changedsince);
-	prot_printf(state->out, "* ADDED"); /* (uid pos) tuples */
-	for (i = 0 ; i < nadded ; i++)
-	    prot_printf(state->out, " (%u %u)",
-			added[i].uid, added[i].pos);
-	prot_printf(state->out, "\r\n");
-    }
-
-    if (nremoved) {
-	assert(windowargs->changedsince);
-	prot_printf(state->out, "* REMOVED");	/* uids */
-	for (i = 0 ; i < nremoved ; i++)
-	    prot_printf(state->out, " %u", removed[i]);
-	prot_printf(state->out, "\r\n");
-    }
-
-    if (nchanged) {
-	assert(windowargs->changedsince);
-	prot_printf(state->out, "* CHANGED");	/* cids or uids */
-	for (i = 0 ; i < nchanged ; i++) {
-	    if (windowargs->conversations)
-		prot_printf(state->out, " %s",
-			conversation_id_encode(changed[i]->cid));
-	    else
-		prot_printf(state->out, " %u", changed[i]->uid);
+	for (i = 0 ; i < results.count ; i++) {
+	    struct index_record *record = results.data[i];
+	    prot_printf(state->out, " %u", record->uid);
 	}
 	prot_printf(state->out, "\r\n");
     }
 
-skip:
-    if (first_pos)
-	prot_printf(state->out, "* OK [POSITION %u]\r\n", first_pos);
+out:
+    if (!r) {
+	if (first_pos)
+	    prot_printf(state->out, "* OK [POSITION %u]\r\n", first_pos);
 
-    prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
-		MAX(xconvmodseq, state->mailbox->i.highestmodseq));
-    prot_printf(state->out, "* OK [UIDVALIDITY %u]\r\n",
-		state->mailbox->i.uidvalidity);
-    prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
-		state->mailbox->i.last_uid + 1);
-    prot_printf(state->out, "* OK [NUMRESULTS %u]\r\n",
-		numresults);
+	prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
+		    MAX(xconvmodseq, state->mailbox->i.highestmodseq));
+	prot_printf(state->out, "* OK [UIDVALIDITY %u]\r\n",
+		    state->mailbox->i.uidvalidity);
+	prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
+		    state->mailbox->i.last_uid + 1);
+	prot_printf(state->out, "* OK [TOTAL %u]\r\n",
+		    total);
+    }
 
     /* free all our temporary data */
-    assert(!msgdata);
-    /* gnarly - splice together the exemplars and chaff so
-     * we can free them in a single pass */
-    *exemplars_tailp = chaff;
-    while (exemplars) {
-	/* free contents of the current node */
-	index_msgdata_free(exemplars);
-	exemplars = exemplars->next;
+    for (msg = msgdata ; msg ; msg = msg->next)
+	index_msgdata_free(msg);
+    free(msgdata);
+    ptrarray_fini(&results);
+    free_hash_table(&seen_cids, NULL);
+
+    return r;
+}
+
+static modseq_t get_modseq_of(struct index_record *record,
+			      struct conversations_state *cstate)
+{
+    modseq_t modseq = 0;
+
+    if (cstate) {
+	conversation_t *convdata = NULL;
+	conversation_load(cstate, record->cid, &convdata);
+	/* TODO: error handling dammit */
+	modseq = convdata->modseq;
+	conversation_free(convdata);
+    } else {
+	modseq = record->modseq;
     }
-    free(freeme);
-    free(results);
-    free(added);
-    free(removed);
-    free(changed);
+    return modseq;
+}
+
+/*
+ * Performs a XCONVUPDATES command
+ */
+int index_convupdates(struct index_state *state,
+		      struct sortcrit *sortcrit,
+		      struct searchargs *searchargs,
+		      const struct windowargs *windowargs)
+{
+    MsgData *msgdata = NULL;
+    MsgData *msg;
+    modseq_t xconvmodseq = 0;
+    int i;
+    hash_table seen_cids = HASH_TABLE_INITIALIZER;
+    hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
+    int32_t pos = 0;
+    uint32_t upto_pos = 0;
+    ptrarray_t added = PTRARRAY_INITIALIZER;
+    ptrarray_t removed = PTRARRAY_INITIALIZER;
+    ptrarray_t changed = PTRARRAY_INITIALIZER;
+    int total = 0;
+    struct conversations_state *cstate = NULL;
+    int search_is_mutable = is_mutable_ordering(sortcrit, searchargs);
+    int r = 0;
+
+    assert(windowargs);
+    assert(windowargs->changedsince);
+    assert(windowargs->offset == 0);
+    assert(!windowargs->position);
+
+    cstate = conversations_get_mbox(state->mailbox->name);
+    if (!cstate)
+	return IMAP_INTERNAL;
+
+    total = search_predict_total(state, cstate, searchargs,
+				windowargs->conversations,
+				&xconvmodseq);
+    if (!total)
+	goto out;
+
+    construct_hash_table(&seen_cids, 1024, 0);
+    construct_hash_table(&old_seen_cids, 1024, 0);
+
+    /* Create/load the msgdata array
+     * initial list - load data for ALL messages always */
+    msgdata = index_msgdata_load(state, NULL, state->exists, sortcrit, 0, NULL);
+
+    /* Sort the messages based on the given criteria */
+    msg = lsort(msgdata,
+		    (void * (*)(void*)) index_sort_getnext,
+		    (void (*)(void*,void*)) index_sort_setnext,
+		    (int (*)(void*,void*,void*)) index_sort_compare,
+		    sortcrit);
+
+    /* Discover exemplars */
+    for ( ; msg ; msg = msg->next) {
+	struct index_record *record = &state->map[msg->msgno-1].record;
+	int was_old_exemplar = 0;
+	int is_new_exemplar = 0;
+	int is_deleted = 0;
+	int is_new = 0;
+	int was_deleted = 0;
+	int is_changed = 0;
+	int in_search = 0;
+	const char *cid = conversation_id_encode(record->cid);
+
+	in_search = index_search_evaluate(state, searchargs, msg->msgno, NULL);
+	is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
+	is_new = (record->uid >= windowargs->uidnext);
+	is_changed = (record->modseq > windowargs->modseq);
+	was_deleted = is_deleted && !is_changed;
+
+	/* is this message a current exemplar? */
+	if (!is_deleted &&
+	    in_search &&
+	    (!windowargs->conversations || !hash_lookup(cid, &seen_cids))) {
+	    is_new_exemplar = 1;
+	    pos++;
+	    if (windowargs->conversations)
+		hash_insert(cid, (void *)1, &seen_cids);
+	}
+
+	/* optimisation for when the total is
+	 * not known but we've hit 'upto' */
+	if (upto_pos)
+	    continue;
+
+	/* was this message an old exemplar, or in the case of mutable
+	 * searches, possible an old exemplar? */
+	if (!is_new &&
+	    !was_deleted &&
+	    (in_search || search_is_mutable) &&
+	    (!windowargs->conversations || !hash_lookup(cid, &old_seen_cids))) {
+	    was_old_exemplar = 1;
+	    if (windowargs->conversations)
+		hash_insert(cid, (void *)1, &old_seen_cids);
+	}
+
+	if (was_old_exemplar && !is_new_exemplar) {
+	    ptrarray_push(&removed, record);
+	} else if (!was_old_exemplar && is_new_exemplar) {
+	    msg->msgno = pos;   /* hacky: reuse ->msgno for pos */
+	    ptrarray_push(&added, msg);
+	} else if (was_old_exemplar && is_new_exemplar) {
+	    modseq_t modseq = get_modseq_of(record,
+				windowargs->conversations ? cstate : NULL);
+	    if (modseq > windowargs->modseq) {
+		ptrarray_push(&changed, record);
+		if (search_is_mutable) {
+		    /* is the search is mutable, we're in a whole world of
+		     * uncertainty about the client's state, so we just
+		     * report the exemplar in all three lists and let the
+		     * client sort it out. */
+		    ptrarray_push(&removed, record);
+		    msg->msgno = pos;   /* hacky: reuse ->msgno for pos */
+		    ptrarray_push(&added, msg);
+		}
+	    }
+	}
+
+	/* if this is the last message the client cares about ('upto')
+	 * then we can break early...unless its a mutable search or
+	 * we need to keep going to calculate an accurate total */
+	if (!search_is_mutable &&
+	    !upto_pos &&
+	    msg->uid == windowargs->anchor) {
+	    if (total != UNPREDICTABLE)
+		break;
+	    upto_pos = pos;
+	}
+    }
+
+    /* unlike 'anchor', the case of not finding 'upto' is not an error */
+
+    if (total == UNPREDICTABLE) {
+	/* the total was not predictable prima facie */
+	total = pos;
+    }
+
+    /* Print the resulting lists */
+
+    if (added.count) {
+	prot_printf(state->out, "* ADDED"); /* (uid pos) tuples */
+	for (i = 0 ; i < added.count ; i++) {
+	    msg = added.data[i];
+	    prot_printf(state->out, " (%u %u)",
+			msg->uid, msg->msgno);
+	}
+	prot_printf(state->out, "\r\n");
+    }
+
+    if (removed.count) {
+	prot_printf(state->out, "* REMOVED");	/* uids */
+	for (i = 0 ; i < removed.count ; i++) {
+	    struct index_record *record = removed.data[i];
+	    prot_printf(state->out, " %u", record->uid);
+	}
+	prot_printf(state->out, "\r\n");
+    }
+
+    if (changed.count) {
+	prot_printf(state->out, "* CHANGED");	/* cids or uids */
+	for (i = 0 ; i < changed.count ; i++) {
+	    struct index_record *record = changed.data[i];
+	    if (windowargs->conversations)
+		prot_printf(state->out, " %s",
+			conversation_id_encode(record->cid));
+	    else
+		prot_printf(state->out, " %u", record->uid);
+	}
+	prot_printf(state->out, "\r\n");
+    }
+
+out:
+    if (!r) {
+	prot_printf(state->out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]\r\n",
+		    MAX(xconvmodseq, state->mailbox->i.highestmodseq));
+	prot_printf(state->out, "* OK [UIDVALIDITY %u]\r\n",
+		    state->mailbox->i.uidvalidity);
+	prot_printf(state->out, "* OK [UIDNEXT %u]\r\n",
+		    state->mailbox->i.last_uid + 1);
+	prot_printf(state->out, "* OK [TOTAL %u]\r\n",
+		    total);
+    }
+
+    /* free all our temporary data */
+    for (msg = msgdata ; msg ; msg = msg->next)
+	index_msgdata_free(msg);
+    free(msgdata);
+    ptrarray_fini(&added);
+    ptrarray_fini(&removed);
+    ptrarray_fini(&changed);
     free_hash_table(&seen_cids, NULL);
     free_hash_table(&old_seen_cids, NULL);
 
-    return nmsg;
+    return r;
 }
 
 /*
@@ -4410,7 +4569,7 @@ static MsgData *index_msgdata_load(struct index_state *state,
 
     for (i = 0, cur = md; i < n; i++, cur = cur->next) {
 	/* set msgno */
-	cur->msgno = msgno_list[i];
+	cur->msgno = (msgno_list ? msgno_list[i] : (unsigned)(i+1));
 	im = &state->map[cur->msgno-1];
 	cur->uid = im->record.uid;
 	if (found_anchor && im->record.uid == anchor)
