@@ -5355,7 +5355,7 @@ void cmd_xconvsort(char *tag)
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
-	eatline(imapd_in, c);
+	eatline(imapd_in, ' ');
 	return;
     }
 
@@ -10743,6 +10743,7 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
     int c;
     static struct buf criteria;
     int nsort, n;
+    int hasconv = config_getswitch(IMAPOPT_CONVERSATIONS);
 
     *sortcrit = NULL;
 
@@ -10817,11 +10818,11 @@ int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    if (c == EOF) goto missingarg;
 	    (*sortcrit)[n].args.flag.name = xstrdup(criteria.s);
 	}
-	else if (!strcmp(criteria.s, "convmodseq"))
+	else if (hasconv && !strcmp(criteria.s, "convmodseq"))
 	    (*sortcrit)[n].key = SORT_CONVMODSEQ;
-	else if (!strcmp(criteria.s, "convexists"))
+	else if (hasconv && !strcmp(criteria.s, "convexists"))
 	    (*sortcrit)[n].key = SORT_CONVEXISTS;
-	else if (!strcmp(criteria.s, "hasconvflag")) {
+	else if (hasconv && !strcmp(criteria.s, "hasconvflag")) {
 	    (*sortcrit)[n].key = SORT_HASCONVFLAG;
 	    if (c != ' ') goto missingarg;
 	    c = getastring(imapd_in, imapd_out, &criteria);
