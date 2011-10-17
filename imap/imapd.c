@@ -9189,6 +9189,7 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
     unsigned size;
     time_t start, end, now = time(0);
     int keep_charset = 0;
+    int hasconv = config_getswitch(IMAPOPT_CONVERSATIONS);
 
     c = getword(imapd_in, &criteria);
     lcase(criteria.s);
@@ -9267,26 +9268,26 @@ int getsearchcriteria(char *tag, struct searchargs *searchargs,
 	    if (str) appendstrlistpat(&searchargs->cc, str);
 	    else searchargs->flags = (SEARCH_RECENT_SET|SEARCH_RECENT_UNSET);
 	}
-	else if (!strcmp(criteria.s, "convflag")) {
+	else if (hasconv && !strcmp(criteria.s, "convflag")) {
 	    if (c != ' ') goto missingarg;
 	    c = getword(imapd_in, &arg);
 	    if (!imparse_isatom(arg.s)) goto badflag;
 	    lcase(arg.s);
 	    appendstrlist(&searchargs->convflags, arg.s);
 	}
-	else if (!strcmp(criteria.s, "convread")) {
+	else if (hasconv && !strcmp(criteria.s, "convread")) {
 	    searchargs->flags |= SEARCH_CONVSEEN_SET;
 	}
-	else if (!strcmp(criteria.s, "convunread")) {
+	else if (hasconv && !strcmp(criteria.s, "convunread")) {
 	    searchargs->flags |= SEARCH_CONVSEEN_UNSET;
 	}
-	else if (!strcmp(criteria.s, "convseen")) {
+	else if (hasconv && !strcmp(criteria.s, "convseen")) {
 	    searchargs->flags |= SEARCH_CONVSEEN_SET;
 	}
-	else if (!strcmp(criteria.s, "convunseen")) {
+	else if (hasconv && !strcmp(criteria.s, "convunseen")) {
 	    searchargs->flags |= SEARCH_CONVSEEN_UNSET;
 	}
-	else if (!strcmp(criteria.s, "convmodseq")) {
+	else if (hasconv && !strcmp(criteria.s, "convmodseq")) {
 	    if (c != ' ') goto missingarg;
 	    c = getmodseq(imapd_in, &searchargs->convmodseq);
 	    if (c == EOF) goto badnumber;
