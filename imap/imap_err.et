@@ -229,6 +229,9 @@ ec IMAP_CONVERSATIONS_ALREADY_OPEN,
 ec IMAP_CONVERSATIONS_NOT_OPEN,
    "Conversation DB is not opened"
 
+ec IMAP_ANCHOR_NOT_FOUND,
+   "Anchor not found"
+
 # Following used for internationalization of untagged BYE response
 
 ec IMAP_BYE_LOGOUT,

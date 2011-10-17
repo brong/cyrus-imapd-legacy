@@ -211,6 +211,10 @@ enum {
 #define SEARCH_MUTABLEFLAGS (SEARCH_RECENT_SET|SEARCH_RECENT_UNSET|\
 			     SEARCH_SEEN_SET|SEARCH_SEEN_UNSET|\
 			     SEARCH_CONVSEEN_SET|SEARCH_CONVSEEN_UNSET)
+#define SEARCH_COUNTEDFLAGS (SEARCH_RECENT_SET|SEARCH_RECENT_UNSET|\
+			     SEARCH_SEEN_SET|SEARCH_SEEN_UNSET|\
+			     SEARCH_CONVSEEN_SET|SEARCH_CONVSEEN_UNSET)
+
 
 /* Bitmasks for search return options */
 enum {
@@ -302,23 +306,25 @@ struct windowargs {
 				 * 0 means unlimited. */
     uint32_t position;		/* 1-based index into results of first
 				 * message to return.  0 means not
-				 * specified which is the same as 1. */
+				 * specified which is the same as 1.
+				 * Mutually exclusive with @anchor */
     uint32_t anchor;		/* UID of a message used to locate the
 				 * start of the window; 0 means not
 				 * specified.  If the anchor is found,
 				 * the first message reported will be
 				 * the largest of 1 and the anchor minus
-				 * @offset.  If not specified or not
-				 * found, @position will be used instead. */
-    int32_t offset;
-    int until;			/* if 1, @anchor/@offset or @position
-				 * marks the *end* of the window, if 0
-				 * the start */
+				 * @offset.  If specified but not found,
+				 * an error will be returned.  Mutually
+				 * exclusive with @position.*/
+    uint32_t offset;
     int changedsince;		/* if 1, show messages a) added since @uidnext,
 				 * b) removed since @modseq, or c) modified
 				 * since @modseq */
     modseq_t modseq;
     uint32_t uidnext;
+    uint32_t upto;		/* UID of a message used to terminate an
+				 * XCONVUPDATES early, 0 means not
+				 * specified.  */
 };
 
 /* Bitmask for status queries */
