@@ -163,11 +163,6 @@ typedef struct msgdata {
     bit32 hasflag;		/* hasflag values (up to 32 of them) */
     bit32 hasconvflag;		/* hasconvflag values (up to 32 of them) */
     struct msgdata *next;
-
-    unsigned int was_old_exemplar:1;
-    unsigned int is_new_exemplar:1;
-    unsigned int is_changed:1;
-    unsigned int in_filter:1;
 } MsgData;
 
 typedef struct thread {
@@ -219,6 +214,9 @@ extern int index_run_annotator(struct index_state *state,
 extern int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs, int usinguid);
 extern int index_convsort(struct index_state *state, struct sortcrit *sortcrit,
+		      struct searchargs *searchargs,
+		      const struct windowargs * windowargs);
+extern int index_convupdates(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
 		      const struct windowargs * windowargs);
 extern int index_thread(struct index_state *state, int algorithm,
