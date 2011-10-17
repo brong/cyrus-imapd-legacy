@@ -5353,6 +5353,12 @@ void cmd_xconvsort(char *tag)
 	return;
     }
 
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
+	eatline(imapd_in, c);
+	return;
+    }
+
     oldstate = imapd_index;
     imapd_index = NULL;
 
