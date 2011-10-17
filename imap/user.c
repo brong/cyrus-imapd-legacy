@@ -208,25 +208,25 @@ int user_deletedata(const char *userid, int wipe_user)
     /* delete sieve scripts */
     user_deletesieve(userid);
 
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	/* delete conversations file */
-	fname = conversations_getuserpath(userid);
-	(void) unlink(fname);
-	free(fname);
+    /* NOTE: even if conversations aren't enabled, we want to clean up */
 
-	/* delete highestmodseq file */
-	fname = user_hash_meta(userid, "modseq");
-	(void) unlink(fname);
-	free(fname);
+    /* delete conversations file */
+    fname = conversations_getuserpath(userid);
+    (void) unlink(fname);
+    free(fname);
 
-	/* XXX: one could make an argument for keeping the UIDVALIDITY
-	 * file forever, so that UIDVALIDITY never gets reused. */
+    /* delete highestmodseq file */
+    fname = user_hash_meta(userid, "modseq");
+    (void) unlink(fname);
+    free(fname);
 
-	/* delete uidvalidity file */
-	fname = user_hash_meta(userid, "uidvalidity");
-	(void) unlink(fname);
-	free(fname);
-    }
+    /* XXX: one could make an argument for keeping the UIDVALIDITY
+     * file forever, so that UIDVALIDITY never gets reused. */
+
+    /* delete uidvalidity file */
+    fname = user_hash_meta(userid, "uidvalidity");
+    (void) unlink(fname);
+    free(fname);
 
     return 0;
 }
