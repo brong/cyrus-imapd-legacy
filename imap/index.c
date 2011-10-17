@@ -1814,7 +1814,7 @@ int index_convsort(struct index_state *state,
 		   struct searchargs *searchargs,
 		   const struct windowargs *windowargs)
 {
-    MsgData *msgdata = NULL;
+    MsgData *msgdata = NULL, *firstmsg = NULL;
     MsgData *msg;
     modseq_t xconvmodseq = 0;
     int i;
@@ -1855,14 +1855,14 @@ int index_convsort(struct index_state *state,
     }
 
     /* Sort the messages based on the given criteria */
-    msg = lsort(msgdata,
+    firstmsg = lsort(msgdata,
 		    (void * (*)(void*)) index_sort_getnext,
 		    (void (*)(void*,void*)) index_sort_setnext,
 		    (int (*)(void*,void*,void*)) index_sort_compare,
 		    sortcrit);
 
     /* One pass through the message list */
-    for ( ; msg ; msg = msg->next) {
+    for (msg = firstmsg ; msg ; msg = msg->next) {
 	struct index_record *record = &state->map[msg->msgno-1].record;
 
 	assert(!(record->system_flags & FLAG_EXPUNGED));
@@ -1958,7 +1958,7 @@ out:
     }
 
     /* free all our temporary data */
-    for (msg = msgdata ; msg ; msg = msg->next)
+    for (msg = firstmsg ; msg ; msg = msg->next)
 	index_msgdata_free(msg);
     free(msgdata);
     ptrarray_fini(&results);
@@ -1992,7 +1992,7 @@ int index_convupdates(struct index_state *state,
 		      struct searchargs *searchargs,
 		      const struct windowargs *windowargs)
 {
-    MsgData *msgdata = NULL;
+    MsgData *msgdata = NULL, *firstmsg = NULL;
     MsgData *msg;
     modseq_t xconvmodseq = 0;
     int i;
@@ -2031,14 +2031,14 @@ int index_convupdates(struct index_state *state,
     msgdata = index_msgdata_load(state, NULL, state->exists, sortcrit, 0, NULL);
 
     /* Sort the messages based on the given criteria */
-    msg = lsort(msgdata,
+    firstmsg = lsort(msgdata,
 		    (void * (*)(void*)) index_sort_getnext,
 		    (void (*)(void*,void*)) index_sort_setnext,
 		    (int (*)(void*,void*,void*)) index_sort_compare,
 		    sortcrit);
 
     /* Discover exemplars */
-    for ( ; msg ; msg = msg->next) {
+    for (msg = firstmsg ; msg ; msg = msg->next) {
 	struct index_record *record = &state->map[msg->msgno-1].record;
 	int was_old_exemplar = 0;
 	int is_new_exemplar = 0;
@@ -2169,7 +2169,7 @@ out:
     }
 
     /* free all our temporary data */
-    for (msg = msgdata ; msg ; msg = msg->next)
+    for (msg = firstmsg ; msg ; msg = msg->next)
 	index_msgdata_free(msg);
     free(msgdata);
     ptrarray_fini(&added);
