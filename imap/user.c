@@ -437,6 +437,7 @@ int user_renameconversations(char *olduser, char *newuser)
     char *oldpath = NULL;
     char *newpath = NULL;
     int r = 0;
+    int flags = COPYFILE_MKDIR | COPYFILE_RENAME;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
@@ -447,12 +448,7 @@ int user_renameconversations(char *olduser, char *newuser)
     if (!strcmp(oldpath, newpath))
 	goto done;
 
-    if (cyrus_mkdir(newpath, 0755)) {
-	r = IMAP_IOERROR;
-	goto done;
-    }
-
-    if (rename(oldpath, newpath)) {
+    if (cyrus_copyfile(oldpath, newpath, flags)) {
 	r = IMAP_IOERROR;
 	goto done;
     }
