@@ -1782,13 +1782,7 @@ static int search_predict_total(struct index_state *state,
     switch (search_countability(searchargs)) {
     case 0:
 	return (conversations ? convexists : state->exists);
-    case SEARCH_RECENT_SET:
-    case SEARCH_RECENT_UNSET|SEARCH_NOT:
-	return state->numrecent;
-    case SEARCH_RECENT_UNSET:
-    case SEARCH_RECENT_SET|SEARCH_NOT:
-	assert(state->exists >= state->numrecent);
-	return state->exists - state->numrecent;
+    /* we don't try to optimise searches on \Recent */
     case SEARCH_SEEN_SET:
     case SEARCH_SEEN_UNSET|SEARCH_NOT:
 	assert(state->exists >= state->numunseen);
