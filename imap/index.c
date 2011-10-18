@@ -1682,6 +1682,7 @@ static int is_mutable_ordering(struct sortcrit *sortcrit,
  * program is empty, which is countable.
  */
 
+#define SEARCH_NOT		(1<<29)
 #define SEARCH_UNCOUNTED	(1<<30)
 static unsigned int search_countability(const struct searchargs *searchargs)
 {
@@ -1745,6 +1746,8 @@ static unsigned int search_countability(const struct searchargs *searchargs)
     for (sub = searchargs->sublist; sub; sub = sub->next) {
 	mask |= search_countability(sub->sub1);
 	mask |= search_countability(sub->sub2);
+	if (!sub->sub2)
+	    mask ^= SEARCH_NOT;
     }
 
     /* modseq is not counted */
@@ -1780,19 +1783,25 @@ static int search_predict_total(struct index_state *state,
     case 0:
 	return (conversations ? convexists : state->exists);
     case SEARCH_RECENT_SET:
+    case SEARCH_RECENT_UNSET|SEARCH_NOT:
 	return state->numrecent;
     case SEARCH_RECENT_UNSET:
+    case SEARCH_RECENT_SET|SEARCH_NOT:
 	assert(state->exists >= state->numrecent);
 	return state->exists - state->numrecent;
     case SEARCH_SEEN_SET:
+    case SEARCH_SEEN_UNSET|SEARCH_NOT:
 	assert(state->exists >= state->numunseen);
 	return state->exists - state->numunseen;
     case SEARCH_SEEN_UNSET:
+    case SEARCH_SEEN_SET|SEARCH_NOT:
 	return state->numunseen;
     case SEARCH_CONVSEEN_SET:
+    case SEARCH_CONVSEEN_UNSET|SEARCH_NOT:
 	assert(convexists >= convunseen);
 	return convexists - convunseen;
     case SEARCH_CONVSEEN_UNSET:
+    case SEARCH_CONVSEEN_SET|SEARCH_NOT:
 	return convunseen;
     default:
 	return UNPREDICTABLE;
