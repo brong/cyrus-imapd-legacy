@@ -420,17 +420,21 @@ static int starttxn_or_refetch(struct db *db, struct txn **mytid)
     return 0;
 }
 
-static int myfetch(struct db *db, 
+static int myfetch(struct db *db,
 		   const char *key, size_t keylen,
+		   const char **retkey, size_t *retkeylen,
 		   const char **data, size_t *datalen,
-		   struct txn **mytid)
+		   struct txn **mytid, int fetchnext)
 {
     int r = 0;
     int offset;
     unsigned long len;
+    const char *database;
+    int datasize;
     struct buf keybuf = BUF_INITIALIZER;
 
     assert(db);
+    if (datalen) assert(data);
 
     if (data) *data = NULL;
     if (datalen) *datalen = 0;
@@ -441,13 +445,34 @@ static int myfetch(struct db *db,
     encode(key, keylen, &keybuf);
 
     offset = bsearch_mem_mbox(keybuf.s, db->base, db->size, 0, &len);
+    database = db->base + offset + keybuf.len + 1;
+    /* subtract one for \t, and one for the \n */
+    datasize = len - keybuf.len - 2;
+
+    if (fetchnext) {
+	/* find the "next record" */
+	offset += len;
+	len = 0;
+	if (offset < (int)db->size) {
+	    const char *p = memchr(db->base+offset, '\t', db->size);
+	    const char *q = memchr(db->base+offset, '\n', db->size);
+	    if (p && q) {
+		/* find the current key */
+		keylen = p - db->base - offset;
+		decode(db->base+offset, keylen, &keybuf);
+		if (retkey) *retkey = keybuf.s;
+		if (retkeylen) *retkeylen = keybuf.len;
+		/* and grab the value */
+		database = p + 1;
+		datasize = q - database;
+		len = q - db->base - offset + 1;
+	    }
+	}
+    }
 
     if (len) {
-	if (data) {
-	    decode(db->base + offset + keybuf.len + 1,
-		   /* subtract one for \t, and one for the \n */
-		   len - keybuf.len - 2,
-		   &db->data);
+	if (data || datalen) {
+	    decode(database, datasize, &db->data);
 	    if (data) *data = DATA(db);
 	    if (datalen) *datalen = DATALEN(db);
 	}
@@ -459,20 +484,36 @@ static int myfetch(struct db *db,
     return r;
 }
 
-static int fetch(struct db *mydb, 
+static int fetch(struct db *mydb,
 		 const char *key, size_t keylen,
 		 const char **data, size_t *datalen,
 		 struct txn **mytid)
 {
-    return myfetch(mydb, key, keylen, data, datalen, mytid);
+    assert(key);
+    assert(keylen);
+    return myfetch(mydb, key, keylen, NULL, NULL,
+		   data, datalen, mytid, 0);
 }
 
-static int fetchlock(struct db *db, 
+static int fetchlock(struct db *mydb,
 		     const char *key, size_t keylen,
 		     const char **data, size_t *datalen,
 		     struct txn **mytid)
 {
-    return myfetch(db, key, keylen, data, datalen, mytid);
+    assert(key);
+    assert(keylen);
+    return myfetch(mydb, key, keylen, NULL, NULL,
+		   data, datalen, mytid, 0);
+}
+
+static int fetchnext(struct db *mydb,
+		     const char *key, size_t keylen,
+		     const char **retkey, size_t *retkeylen,
+		     const char **data, size_t *datalen,
+		     struct txn **mytid)
+{
+    return myfetch(mydb, key, keylen, retkey, retkeylen,
+		   data, datalen, mytid, 1);
 }
 
 static int getentry(struct db *db, const char *p,
@@ -867,7 +908,7 @@ struct cyrusdb_backend cyrusdb_flat =
 
     &fetch,
     &fetchlock,
-    NULL,
+    &fetchnext,
 
     &foreach,
     &create,
