@@ -484,6 +484,7 @@ int _conversation_save(struct conversations_state *state,
     struct buf buf = BUF_INITIALIZER;
     const conv_folder_t *folder;
     const conv_sender_t *sender;
+    char *keycopy = xstrndup(key, keylen);
     int version = CONVERSATIONS_VERSION;
     int i;
     int r = 0;
@@ -579,12 +580,13 @@ int _conversation_save(struct conversations_state *state,
     dlist_free(&dl);
 
     r = DB->store(state->db,
-		  key, keylen,
+		  keycopy, keylen,
 		  buf.s, buf.len,
 		  &state->txn);
 
 done:
 
+    free(keycopy);
     buf_free(&buf);
     if (!r)
 	conv->dirty = 0;
