@@ -233,7 +233,8 @@ static int build_cid_cb(const char *mboxname,
 	/* parse the file - XXX: should abstract this bit */
 	fname = mailbox_message_fname(mailbox, record.uid);
 
-	r = message_update_conversations_file(cstate, &record, fname);
+	r = message_update_conversations_file(cstate, &record, fname,
+					      /*isreplica*/0);
 	if (r) goto done;
 
 	r = mailbox_rewrite_index_record(mailbox, &record);
