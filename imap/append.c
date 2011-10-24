@@ -935,7 +935,8 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 	    if (cstate)
-		r = message_update_conversations(cstate, &record, *body);
+		r = message_update_conversations(cstate, &record, *body,
+						 /*isreplica*/0);
 	    else
 		r = IMAP_CONVERSATIONS_NOT_OPEN;
 	}
@@ -1254,7 +1255,8 @@ int append_copy(struct mailbox *mailbox,
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 	    if (cstate)
-		r = message_update_conversations_file(cstate, &record, destfname);
+		r = message_update_conversations_file(cstate, &record, destfname,
+						      /*isreplica*/0);
 	    else
 		r = IMAP_CONVERSATIONS_NOT_OPEN;
 	    if (r) goto out;
