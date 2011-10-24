@@ -101,9 +101,8 @@ binary-arch: build
 
 	# set up source package
 	# no need to actually install the built object files!  It's just the source we want
-	make clean
 	mkdir -p debian/$basename-build/usr/src/$basename-build/cyrus
-	find . -maxdepth 1 -mindepth 1 -not -name debian -print0 | \\
+	find . -maxdepth 1 -mindepth 1 -not -name debian -not -name .git -print0 | \\
 		xargs -0 -r -i cp -a {} debian/$basename-build/usr/src/$basename-build/cyrus/
 	
 	dh_compress
