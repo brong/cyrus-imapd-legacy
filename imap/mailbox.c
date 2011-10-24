@@ -4724,8 +4724,6 @@ static void mailbox_action_cid_rename(struct mailbox *mailbox,
     conversation_id_t from_cid, to_cid;
     uint32_t recno, num_records;
     struct index_record record;
-    struct index_record new_record;
-    char msgfile[MAX_MAILBOX_PATH], newmsgfile[MAX_MAILBOX_PATH];
     int r;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
@@ -4761,42 +4759,16 @@ static void mailbox_action_cid_rename(struct mailbox *mailbox,
 	    continue;
 
 	/*
-	 * [IRIS-293] handle CID renaming by re-inserting a new message
-	 * and expunging the old one.  Thus the UID->CID mapping remains
-	 * constant, i.e. the CID is an immutable property of a message.
-	 * This is expected to aid caching in conversation-aware clients.
-	 */
+	 * Just rename the CID in place - injecting a copy at the end
+	 * messes with clients that just use UID ordering, like Apple's
+	 * IOS email client */
 
-	/* clone the record */
-	new_record = record;
-	/* old record will be expunged */
-	record.system_flags |= (FLAG_EXPUNGED|FLAG_UNLINKED);
-	/* new record has new CID and UID */
-	new_record.cid = to_cid;
-	new_record.uid = mailbox->i.last_uid+1;
-
-	/* hardlink the old message file to the new name */
-	strncpy(msgfile, mailbox_message_fname(mailbox, record.uid),
-		MAX_MAILBOX_PATH);
-	strncpy(newmsgfile, mailbox_message_fname(mailbox, new_record.uid),
-		MAX_MAILBOX_PATH);
-	r = mailbox_copyfile(msgfile, newmsgfile, 0);
-
-	/* append the new record */
-	if (!r)
-	    r = mailbox_append_index_record(mailbox, &new_record);
-
-	/* rewrite the old record */
-	if (!r)
-	    r = mailbox_rewrite_index_record(mailbox, &record);
-
-	/* finally, remove the old message file */
-	if (!r && unlink(msgfile) < 0)
-	    r = IMAP_IOERROR;
+	record.cid = to_cid;
+	r = mailbox_rewrite_index_record(mailbox, &record);
 
 	if (r) {
 	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
-			    "reinserting record %u, mailbox %s: %s",
+			    "rewriting record %u, mailbox %s: %s",
 			    recno, mailbox->name, error_message(r));
 	    return;
 	}
