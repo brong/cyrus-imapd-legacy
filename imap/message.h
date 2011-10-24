@@ -178,8 +178,8 @@ extern void message_parse_env_address(char *str, struct address *addr);
 extern char *parse_nstring(char **str);
 
 extern int message_update_conversations(struct conversations_state *,
-			         struct index_record *, const struct body *);
+			         struct index_record *, const struct body *, int);
 extern int message_update_conversations_file(struct conversations_state *,
-				      struct index_record *, const char *);
+				      struct index_record *, const char *, int);
 
 #endif /* INCLUDED_MESSAGE_H */

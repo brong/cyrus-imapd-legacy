@@ -2489,7 +2489,7 @@ static conversation_id_t generate_conversation_id(const struct body *body)
  */
 int message_update_conversations(struct conversations_state *state,
 			         struct index_record *record,
-			         const struct body *body)
+			         const struct body *body, int isreplica)
 {
     char *hdrs[4];
     /* TODO: need an expanding array class here */
@@ -2582,7 +2582,10 @@ continue2:
 	if (found[i].cid == newcid)
 	    continue;
 
-	if (found[i].cid != NULLCONVERSATION) {
+	/* we don't rename on a replica, because the master will
+	 * do the rename and push the changes anyway, and they
+	 * would be likely to clash if we do both ends */
+	if (found[i].cid != NULLCONVERSATION || !isreplica) {
 	    /* CIDs clashed */
 	    r = mailbox_rename_cid(state, found[i].cid, newcid);
 	    if (r)
@@ -2605,7 +2608,7 @@ out:
 
 int message_update_conversations_file(struct conversations_state *state,
 				      struct index_record *record,
-				      const char *fname)
+				      const char *fname, int isreplica)
 {
     struct body *body = NULL;
     FILE *fp;
@@ -2620,7 +2623,7 @@ int message_update_conversations_file(struct conversations_state *state,
     if (r)
 	return r;
 
-    r = message_update_conversations(state, record, body);
+    r = message_update_conversations(state, record, body, isreplica);
 
     message_free_body(body);
 
