@@ -4604,9 +4604,9 @@ static int mailbox_post_action(const char *name,
     char *fname;
     int fd = -1;
     int r = 0;
+    int n;
     struct mboxlist_entry *mbentry = NULL;
     const char *failmode;
-    int flags;
 
     /* Ensure the action contains a newline */
     if (action->len == 0 || action->s[action->len-1] != '\n')
@@ -4642,33 +4642,29 @@ static int mailbox_post_action(const char *name,
 	close(fd);
     }
 
-    /* We might have a new fd from the one we started with, created by
-     * lock_reopen(), whose flags won't include O_APPEND.  So add
-     * O_APPEND as a 2nd step. */
-    flags = fcntl(fd, F_GETFL, &flags);
-    if (flags < 0) {
-	r = IMAP_IOERROR;
-	goto out_unlock;
-    }
-    r = fcntl(fd, F_SETFL, flags|O_APPEND);
-    if (r < 0) {
+    /* seek to the end of the file */
+    n = lseek(fd, 0L, SEEK_END);
+    if (n < 0) {
 	r = IMAP_IOERROR;
 	goto out_unlock;
     }
 
     /* Finally, do the append */
-    r = write(fd, action->s, action->len);
-    if (r < 0 || r < (int)action->len) {
+    n = retry_write(fd, action->s, action->len);
+    if (n != (int)action->len) {
 	r = IMAP_IOERROR;
 	goto out_unlock;
     }
 
+    sync_log_mailbox(name);
+
 out_unlock:
     lock_unlock(fd);
+
 out:
     close(fd);
     mboxlist_entry_free(&mbentry);
-    return 0;
+    return r;
 }
 
 int mailbox_rename_cid(struct conversations_state *state,
