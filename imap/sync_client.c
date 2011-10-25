@@ -967,10 +967,10 @@ static void log_record(const char *name, struct mailbox *mailbox,
 		       struct index_record *record)
 {
     syslog(LOG_NOTICE, "SYNCNOTICE: %s uid:%u modseq:" MODSEQ_FMT " "
-	  "last_updated:%lu internaldate:%lu flags:(%s)",
+	  "last_updated:%lu internaldate:%lu flags:(%s) cid:%08llx",
 	   name, record->uid, record->modseq,
 	   record->last_updated, record->internaldate,
-	   make_flags(mailbox, record));
+	   make_flags(mailbox, record), record->cid);
 }
 
 static void log_mismatch(const char *reason, struct mailbox *mailbox,
@@ -993,7 +993,6 @@ static int compare_one_record(struct mailbox *mailbox,
     int diff = 0;
     int i;
     int r;
-    conversation_id_t cid;
 
     /* are there any differences? */
     if (mp->modseq != rp->modseq)
@@ -1082,15 +1081,18 @@ static int compare_one_record(struct mailbox *mailbox,
 		}
 	    }
 
-	    r = sync_choose_cid(mp, rp, &cid);
-	    if ((r & SYNC_CHOOSE_CLASH)) {
-		struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
-		if ((r & SYNC_CHOOSE_REPLICA))
-		    mailbox_rename_cid(cstate, mp->cid, rp->cid);
-		else
-		    mailbox_rename_cid(cstate, rp->cid, mp->cid);
+	    if (mp->cid < rp->cid) {
+		log_mismatch("higher cid on replica", mailbox, mp, rp);
+
+		if (kaction && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+		    struct conversations_state *cstate =
+			conversations_get_mbox(mailbox->name);
+		    r = mailbox_rename_cid(cstate, mp->cid, rp->cid);
+		    if (r) return r;
+		}
+
+		mp->cid = rp->cid;
 	    }
-	    mp->cid = cid;
 	}
 
 	/* are we making changes yet? */
