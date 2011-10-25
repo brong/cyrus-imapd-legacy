@@ -1579,6 +1579,25 @@ int sync_parse_response(const char *cmd, struct protstream *in,
     return IMAP_PROTOCOL_ERROR;
 }
 
+int sync_rename_cid(struct mailbox *mailbox,
+		    struct index_record *remote,
+		    struct index_record *local)
+{
+    int r;
+
+    if (local->cid == remote->cid)
+	return 0; /* nothing to do */
+
+    if (local->cid && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	r = conversations_rename_cid(cstate, local->cid, remote->cid);
+	if (r) return r;
+    }
+
+    local->cid = remote->cid;
+    return 0;
+}
+
 int sync_append_copyfile(struct mailbox *mailbox,
 			 struct index_record *record,
 			 const struct sync_annot_list *annots)
@@ -1648,61 +1667,6 @@ int sync_append_copyfile(struct mailbox *mailbox,
  just_write:
     return mailbox_append_index_record(mailbox, record);
 }
-
-/*
- * Choose a CID from either the master's or the replica's idea of what
- * the CID is.  In the common and easy case the replica will have a null
- * CID and the master a non-null CID.  The tricky case is where both
- * sides have different non-null CIDs; this can happen in a
- * master-master replication setup where delivery has occurred racily at
- * both ends.
- *
- * If @cidp is not NULL, write the chosen CID there.
- *
- * Returns: a bitmask of three possible bits:
- *
- * @SYNC_CHOOSE_MASTER - if the master's CID was chosen and the
- *			 replica's CID was different
- * @SYNC_CHOOSE_REPLICA - if the replica's CID was chosen and the
- *			  master's CID was different
- * @SYNC_CHOOSE_CLASH - the side which lost had a non-NULL CID and
- *			will now need to deal with the CID changing
- */
-int sync_choose_cid(const struct index_record *mp,
-		    const struct index_record *rp,
-		    conversation_id_t *cidp)
-{
-    int r = 0;
-    conversation_id_t cid;
-
-    /*
-     * We need to choose the MAX of the replica's and the master's
-     * CIDs, regardless of which one is newer according to modseq.
-     * This ensures that
-     *
-     * a) if either are NULL the other will win, and
-     *
-     * b) if neither are NULL a predictable choice will be made.
-     */
-    if (mp->cid < rp->cid) {
-	r |= SYNC_CHOOSE_REPLICA;
-	cid = rp->cid;
-	if (mp->cid != NULLCONVERSATION)
-	    r |= SYNC_CHOOSE_CLASH;
-    } else if (mp->cid > rp->cid) {
-	r |= SYNC_CHOOSE_MASTER;
-	cid = mp->cid;
-	if (rp->cid != NULLCONVERSATION)
-	    r |= SYNC_CHOOSE_CLASH;
-    } else {
-	cid = mp->cid;
-    }
-
-    if (cidp)
-	*cidp = cid;
-    return r;
-}
-
 
 /* ====================================================================== */
 
