@@ -1469,6 +1469,10 @@ static int update_mailbox_once(struct sync_folder *local,
     r = sync_mailbox(mailbox, remote, part_list, kl, kupload, 1);
     if (r) goto done;
 
+    /* drop the annotations DB now */
+    annotate_putdb(&user_annot_db);
+    annotatemore_abort();
+
     /* upload any messages required */
     if (kupload->head) {
 	/* keep the mailbox locked for shorter time! Unlock the index now
