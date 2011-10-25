@@ -2585,7 +2585,7 @@ continue2:
 	/* we don't rename on a replica, because the master will
 	 * do the rename and push the changes anyway, and they
 	 * would be likely to clash if we do both ends */
-	if (found[i].cid != NULLCONVERSATION || !isreplica) {
+	if (found[i].cid != NULLCONVERSATION && !isreplica) {
 	    /* CIDs clashed */
 	    r = mailbox_rename_cid(state, found[i].cid, newcid);
 	    if (r)
