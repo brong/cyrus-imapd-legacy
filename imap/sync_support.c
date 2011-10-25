@@ -489,7 +489,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->last_uid = last_uid;
     result->highestmodseq = highestmodseq;
     result->options = options;
-    result->sync_crc = xstrdup(crc);
+    result->sync_crc = (crc) ? xstrdup(crc) : NULL;
     result->recentuid = recentuid;
     result->recenttime = recenttime;
     result->pop3_last_login = pop3_last_login;
@@ -1417,9 +1417,6 @@ int sync_mailbox(struct mailbox *mailbox,
     char sync_crc[128];
     annotate_db_t *user_annot_db = NULL;
 
-    r = annotate_getdb(mailbox->name, &user_annot_db);
-    if (r) goto done;
-
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
     if (r) goto done;
 
@@ -1519,8 +1516,6 @@ int sync_mailbox(struct mailbox *mailbox,
     }
 
 done:
-    annotate_putdb(&user_annot_db);
-
     return r;
 }
 
@@ -2265,9 +2260,6 @@ int sync_crc_calc(struct mailbox *mailbox, char *buf, int maxlen)
 
     sync_crc_algorithm->begin();
 
-    /* we can't check error code here, there's no way to abort! */
-    annotate_getdb(mailbox->name, &user_annot_db);
-
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	/* we can't send bogus records, just skip them! */
 	if (mailbox_read_index_record(mailbox, recno, &record))
@@ -2293,8 +2285,6 @@ int sync_crc_calc(struct mailbox *mailbox, char *buf, int maxlen)
 	    sync_annot_list_free(&annots);
 	}
     }
-
-    annotate_putdb(&user_annot_db);
 
     return sync_crc_algorithm->end(buf, maxlen);
 }

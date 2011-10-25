@@ -218,7 +218,6 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
     struct sync_folder *rfolder;
     struct sync_msgid_list *part_list;
     struct mailbox *mailbox = NULL;
-    char sync_crc[128];
     int r = 0;
 
     /* Find messages we want to upload that are available on server */
@@ -248,20 +247,12 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 
 	/* mailbox is open from here, no exiting without closing it! */
 
-	r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
-	if (r) {
-	    syslog(LOG_ERR, "Failed to calculate CRC %s: %s",
-		   mbox->name, error_message(r));
-	    mailbox_close(&mailbox);
-	    goto bail;
-	}
-
 	part_list = sync_reserve_partlist(reserve_guids, mailbox->part);
 
 	sync_folder_list_add(master_folders, mailbox->uniqueid, mailbox->name, 
 			     mailbox->part, mailbox->acl, mailbox->i.options,
 			     mailbox->i.uidvalidity, mailbox->i.last_uid,
-			     mailbox->i.highestmodseq, sync_crc,
+			     mailbox->i.highestmodseq, NULL,
 			     mailbox->i.recentuid, mailbox->i.recenttime,
 			     mailbox->i.pop3_last_login, mailbox->specialuse);
 
@@ -777,15 +768,9 @@ static int copy_local(struct mailbox *mailbox, unsigned long uid)
 	    if (r) return r;
 
 	    /* Copy across any per-message annotations */
-	    r = annotatemore_begin();
-	    if (r) return r;
 	    r = annotate_msg_copy(mailbox, oldrecord.uid,
 				  mailbox, newrecord.uid,
 				  NULL);
-	    if (r)
-		annotatemore_abort();
-	    else
-		r = annotatemore_commit();
 	    if (r) return r;
 
 	    /* and expunge the old record */
@@ -1295,9 +1280,8 @@ static int mailbox_full_update(const char *mboxname)
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r) goto done;
 
-    /* grab a lock on the annotations too, so we don't open them
-     * many times */
-    r = annotate_getdb(mailbox->name, &user_annot_db);
+    r = annotatemore_begin();
+    if (!r) r = annotate_getdb(mailbox->name, &user_annot_db);
     if (r) goto done;
 
     /* if local UIDVALIDITY is lower, copy from remote, otherwise
@@ -1364,6 +1348,11 @@ static int mailbox_full_update(const char *mboxname)
     /* we still need to do the EXPUNGEs */
  cleanup:
 
+    /* commit annotations changes first */
+    annotate_putdb(&user_annot_db);
+    r = annotatemore_commit();
+    if (r) goto done;
+
     /* close the mailbox before sending any expunges
      * to avoid deadlocks */
     mailbox_close(&mailbox);
@@ -1380,8 +1369,11 @@ static int mailbox_full_update(const char *mboxname)
     }
 
 done:
+    /* if we got here, time to get out */
     annotate_putdb(&user_annot_db);
+    annotatemore_abort();
     mailbox_close(&mailbox);
+
     dlist_free(&kin);
     dlist_free(&kaction);
     dlist_free(&kexpunge);
@@ -1429,6 +1421,7 @@ static int update_mailbox_once(struct sync_folder *local,
     int r = 0;
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     struct dlist *kupload = dlist_newlist(NULL, "MESSAGE");
+    annotate_db_t *user_annot_db = NULL;
 
     r = mailbox_open_irl(local->name, &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
@@ -1438,6 +1431,10 @@ static int update_mailbox_once(struct sync_folder *local,
     }
     else if (r)
 	goto done;
+
+    r = annotatemore_begin();
+    if (!r) r = annotate_getdb(mailbox->name, &user_annot_db);
+    if (r) goto done;
 
     /* definitely bad if these don't match! */
     if (strcmp(mailbox->uniqueid, local->uniqueid) ||
@@ -1505,7 +1502,12 @@ static int update_mailbox_once(struct sync_folder *local,
     r = sync_parse_response("MAILBOX", sync_in, NULL);
 
 done:
-    if (mailbox) mailbox_close(&mailbox);
+    annotate_putdb(&user_annot_db);
+    /* we didn't write anything */
+    annotatemore_abort();
+
+    mailbox_close(&mailbox);
+
     dlist_free(&kupload);
     dlist_free(&kl);
     return r;
