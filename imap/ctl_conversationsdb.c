@@ -207,7 +207,6 @@ static int build_cid_cb(const char *mboxname,
 		        void *rock __attribute__((unused)))
 {
     struct mailbox *mailbox = NULL;
-    const char *fname = NULL;
     struct index_record record;
     uint32_t recno;
     int r;
@@ -230,11 +229,10 @@ static int build_cid_cb(const char *mboxname,
 	if (record.system_flags & FLAG_EXPUNGED)
 	    continue;
 
-	/* parse the file - XXX: should abstract this bit */
-	fname = mailbox_message_fname(mailbox, record.uid);
+	r = mailbox_cacherecord(mailbox, &record);
+	if (r) goto done;
 
-	r = message_update_conversations_file(cstate, &record, fname,
-					      /*isreplica*/0);
+	r = message_update_conversations(cstate, &record, NULL, /*isreplica*/0);
 	if (r) goto done;
 
 	r = mailbox_rewrite_index_record(mailbox, &record);
