@@ -226,12 +226,21 @@ static int myinit(const char *dbdir, int myflags)
     char sfile[1024];
     int fd, r = 0;
     uint32_t net32_time;
-    
+
     snprintf(sfile, sizeof(sfile), "%s/skipstamp", dbdir);
 
     if (myflags & CYRUSDB_RECOVER) {
+	struct stat sbuf;
+	char cleanfile[1024];
+
+	snprintf(cleanfile, sizeof(cleanfile), "%s/skipcleanshutdown", dbdir);
+
 	/* set the recovery timestamp; all databases earlier than this
 	   time need recovery run when opened */
+	if (stat(cleanfile, &sbuf) == 0) {
+	    unlink(cleanfile);
+	    goto normal;
+	}
 
 	global_recovery = time(NULL);
 	fd = open(sfile, O_RDWR | O_CREAT, 0644);
@@ -248,6 +257,7 @@ static int myinit(const char *dbdir, int myflags)
 	    return CYRUSDB_IOERROR;
 	}
     } else {
+normal:
 	/* read the global recovery timestamp */
 
 	fd = open(sfile, O_RDONLY, 0644);
