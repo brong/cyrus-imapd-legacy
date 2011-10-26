@@ -1249,7 +1249,7 @@ int append_copy(struct mailbox *mailbox,
 
 	if (record.cid == NULLCONVERSATION &&
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	    struct conversations_state *cstate = conversations_get_mbox(as->mailbox->name);
 	    if (cstate)
 		r = message_update_conversations_file(cstate, &record, destfname,
 						      /*isreplica*/0);
