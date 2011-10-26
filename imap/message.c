@@ -2529,16 +2529,24 @@ void message_parse_env_address(char *str, struct address *addr)
  * the SHA1 of the message, except that an all-zero
  * conversation id is not valid.
  */
-static conversation_id_t generate_conversation_id(const struct body *body)
+static conversation_id_t generate_conversation_id(
+			    const struct index_record *record,
+			    const struct body *body)
 {
+    const struct message_guid *guid;
     conversation_id_t cid = 0;
     size_t i;
 
-    assert(body->guid.status == GUID_NONNULL);
+    if (body)
+	guid = &body->guid;
+    else
+	guid = &record->guid;
+
+    assert(guid->status == GUID_NONNULL);
 
     for (i = 0 ; i < sizeof(cid) ; i++) {
 	cid <<= 8;
-	cid |= body->guid.value[i];
+	cid |= guid->value[i];
     }
 
     /*
@@ -2554,12 +2562,15 @@ static conversation_id_t generate_conversation_id(const struct body *body)
 /*
  * Update the conversations database for the given
  * mailbox, to account for the given new message.
+ * @body may be NULL, in which case we get everything
+ * we need out of the cache item in @record.
  */
 int message_update_conversations(struct conversations_state *state,
 			         struct index_record *record,
 			         const struct body *body, int isreplica)
 {
     char *hdrs[4];
+    char *c_refs = NULL, *c_env = NULL, *c_me_msgid = NULL;
     /* TODO: need an expanding array class here */
     struct {
 	char *msgid;
@@ -2582,10 +2593,54 @@ int message_update_conversations(struct conversations_state *state,
      * msgid in In-Reply-To:), so we weed those out before proceeding
      * to the database.
      */
-    hdrs[0] = body->references;
-    hdrs[1] = body->in_reply_to;
-    hdrs[2] = body->message_id;
-    hdrs[3] = body->x_me_message_id;
+    if (body) {
+	/* goody, we have everything we need in the struct body */
+	hdrs[0] = body->references;
+	hdrs[1] = body->in_reply_to;
+	hdrs[2] = body->message_id;
+	hdrs[3] = body->x_me_message_id;
+    }
+    else if (cache_size(record)) {
+	/* we have cache loaded, get what we need there */
+	strarray_t want = STRARRAY_INITIALIZER;
+	char *envtokens[NUMENVTOKENS];
+
+	/* get References from cached headers */
+	c_refs = xstrndup(cacheitem_base(record, CACHE_HEADERS),
+			  cacheitem_size(record, CACHE_HEADERS));
+	strarray_append(&want, "references");
+	message_pruneheader(c_refs, &want, 0);
+	hdrs[0] = c_refs;
+
+	/* get In-Reply-To, Message-ID out of the envelope
+	 *
+	 * get a working copy; strip outer ()'s
+	 * +1 -> skip the leading paren
+	 * -2 -> don't include the size of the outer parens
+	 */
+	c_env = xstrndup(cacheitem_base(record, CACHE_ENVELOPE) + 1,
+			 cacheitem_size(record, CACHE_ENVELOPE) - 2);
+	parse_cached_envelope(c_env, envtokens, NUMENVTOKENS);
+	hdrs[1] = envtokens[ENV_INREPLYTO];
+	hdrs[2] = envtokens[ENV_MSGID];
+
+	/* get X-ME-Message-ID from cached headers */
+	c_me_msgid = xstrndup(cacheitem_base(record, CACHE_HEADERS),
+			      cacheitem_size(record, CACHE_HEADERS));
+	strarray_set(&want, 0, "x-me-message-id");
+	message_pruneheader(c_me_msgid, &want, 0);
+	hdrs[3] = c_me_msgid;
+
+	strarray_fini(&want);
+
+	/* work around stupid message_guid API */
+	message_guid_isnull(&record->guid);
+    }
+    else {
+	/* nope, now we're screwed */
+	return IMAP_INTERNAL;
+    }
+
     for (i = 0 ; i < 4 ; i++) {
 continue2:
 	while ((msgid = find_msgid(hdrs[i], &hdrs[i])) != NULL) {
@@ -2637,7 +2692,7 @@ continue2:
     }
 
     if (newcid == NULLCONVERSATION)
-	newcid = generate_conversation_id(body);
+	newcid = generate_conversation_id(record, body);
 
     /*
      * Update the database to add records for all the message-ids
@@ -2671,6 +2726,9 @@ out:
     for (i = 0 ; i < nfound ; i++)
 	free(found[i].msgid);
     free(found);
+    free(c_refs);
+    free(c_env);
+    free(c_me_msgid);
     return r;
 }
 
