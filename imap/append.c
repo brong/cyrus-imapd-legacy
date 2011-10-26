@@ -1251,8 +1251,8 @@ int append_copy(struct mailbox *mailbox,
 	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    struct conversations_state *cstate = conversations_get_mbox(as->mailbox->name);
 	    if (cstate)
-		r = message_update_conversations_file(cstate, &record, destfname,
-						      /*isreplica*/0);
+		r = message_update_conversations(cstate, &record,
+						 NULL, /*isreplica*/0);
 	    else
 		r = IMAP_CONVERSATIONS_NOT_OPEN;
 	    if (r) goto out;

@@ -2732,27 +2732,3 @@ out:
     return r;
 }
 
-int message_update_conversations_file(struct conversations_state *state,
-				      struct index_record *record,
-				      const char *fname, int isreplica)
-{
-    struct body *body = NULL;
-    FILE *fp;
-    int r;
-
-    fp = fopen(fname, "r");
-    if (fp == NULL)
-	return IMAP_IOERROR;
-
-    r = message_parse_file(fp, NULL, NULL, &body);
-    fclose(fp);
-    if (r)
-	return r;
-
-    r = message_update_conversations(state, record, body, isreplica);
-
-    message_free_body(body);
-
-    return r;
-}
-
