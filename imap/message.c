@@ -412,6 +412,74 @@ int message_parse_mapped(const char *msg_base, unsigned long msg_len,
     return 0;
 }
 
+/*
+ * Prune the header section in buf to include only those headers
+ * listed in headers or (if headers_not is non-empty) those headers
+ * not in headers_not.
+ */
+void message_pruneheader(char *buf, const strarray_t *headers,
+			 const strarray_t *headers_not)
+{
+    char *p, *colon, *nextheader;
+    int goodheader;
+    char *endlastgood = buf;
+    char **l;
+    int count = 0;
+    int maxlines = config_getint(IMAPOPT_MAXHEADERLINES);
+
+    p = buf;
+    while (*p && *p != '\r') {
+	colon = strchr(p, ':');
+	if (colon && headers_not && headers_not->count) {
+	    goodheader = 1;
+	    for (l = headers_not->data ; *l ; l++) {
+		if ((size_t) (colon - p) == strlen(*l) &&
+		    !strncasecmp(p, *l, colon - p)) {
+		    goodheader = 0;
+		    break;
+		}
+	    }
+	} else {
+	    goodheader = 0;
+	}
+	if (colon && headers && headers->count) {
+	    for (l = headers->data ; *l ; l++) {
+		if ((size_t) (colon - p) == strlen(*l) &&
+		    !strncasecmp(p, *l, colon - p)) {
+		    goodheader = 1;
+		    break;
+		}
+	    }
+	}
+
+	nextheader = p;
+	do {
+	    nextheader = strchr(nextheader, '\n');
+	    if (nextheader) nextheader++;
+	    else nextheader = p + strlen(p);
+	} while (*nextheader == ' ' || *nextheader == '\t');
+
+	if (goodheader) {
+	    if (endlastgood != p) {
+		/* memmove and not strcpy since this is all within a
+		 * single buffer */
+		memmove(endlastgood, p, strlen(p) + 1);
+		nextheader -= p - endlastgood;
+	    }
+	    endlastgood = nextheader;
+	}
+	p = nextheader;
+
+	/* stop giant headers causing massive loops */
+	if (maxlines) {
+	    count++;
+	    if (count > maxlines) break;
+	}
+    }
+
+    *endlastgood = '\0';
+}
+
 static void message_find_part(struct body *body, const char *section,
 			      const char **content_types,
 			      const char *msg_base, unsigned long msg_len,
