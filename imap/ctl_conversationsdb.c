@@ -384,6 +384,9 @@ static int do_mailbox(char *name,
     char *mboxname = xstrndup(name, namelen);
     const char *userid = mboxname_to_userid(mboxname);
 
+    if (mboxname_isdeletedmailbox(mboxname, NULL))
+	goto done;
+
     if (userid && strcmp(userid, prev_userid)) {
 	printf("%s\n", userid);
 	do_user(userid);
@@ -391,6 +394,7 @@ static int do_mailbox(char *name,
 	prev_userid = xstrdup(userid);
     }
 
+done:
     free(mboxname);
 
     return 0;
