@@ -110,8 +110,6 @@ static void index_fetchfsection(struct index_state *state,
 				unsigned start_octet, unsigned octet_count);
 static char *index_readheader(const char *msg_base, unsigned long msg_size,
 			      unsigned offset, unsigned size);
-static void index_pruneheader(char *buf, const strarray_t *headers,
-			      const strarray_t *headers_not);
 static void index_fetchheader(struct index_state *state,
 			      const char *msg_base, unsigned long msg_size,
 			      unsigned size,
@@ -2602,10 +2600,10 @@ static void index_fetchfsection(struct index_state *state,
 			   CACHE_ITEM_BIT32(cachestr+CACHE_ITEM_SIZE_SKIP));
 
     if (fields_not) {
-	index_pruneheader(buf, 0, fsection->fields);
+	message_pruneheader(buf, 0, fsection->fields);
     }
     else {
-	index_pruneheader(buf, fsection->fields, 0);
+	message_pruneheader(buf, fsection->fields, 0);
     }
     size = strlen(buf);
 
@@ -2684,74 +2682,6 @@ static char *index_readheader(const char *msg_base, unsigned long msg_size,
 }
 
 /*
- * Prune the header section in buf to include only those headers
- * listed in headers or (if headers_not is non-empty) those headers
- * not in headers_not.
- */
-static void index_pruneheader(char *buf, const strarray_t *headers,
-			      const strarray_t *headers_not)
-{
-    char *p, *colon, *nextheader;
-    int goodheader;
-    char *endlastgood = buf;
-    char **l;
-    int count = 0;
-    int maxlines = config_getint(IMAPOPT_MAXHEADERLINES);
-
-    p = buf;
-    while (*p && *p != '\r') {
-	colon = strchr(p, ':');
-	if (colon && headers_not && headers_not->count) {
-	    goodheader = 1;
-	    for (l = headers_not->data ; *l ; l++) {
-		if ((size_t) (colon - p) == strlen(*l) &&
-		    !strncasecmp(p, *l, colon - p)) {
-		    goodheader = 0;
-		    break;
-		}
-	    }
-	} else {
-	    goodheader = 0;
-	}
-	if (colon && headers && headers->count) {
-	    for (l = headers->data ; *l ; l++) {
-		if ((size_t) (colon - p) == strlen(*l) &&
-		    !strncasecmp(p, *l, colon - p)) {
-		    goodheader = 1;
-		    break;
-		}
-	    }
-	}
-
-	nextheader = p;
-	do {
-	    nextheader = strchr(nextheader, '\n');
-	    if (nextheader) nextheader++;
-	    else nextheader = p + strlen(p);
-	} while (*nextheader == ' ' || *nextheader == '\t');
-
-	if (goodheader) {
-	    if (endlastgood != p) {
-		/* memmove and not strcpy since this is all within a
-		 * single buffer */
-		memmove(endlastgood, p, strlen(p) + 1);
-		nextheader -= p - endlastgood;
-	    }
-	    endlastgood = nextheader;
-	}
-	p = nextheader;
-
-	/* stop giant headers causing massive loops */
-	if (maxlines) {
-	    count++;
-	    if (count > maxlines) break;
-	}
-    }
-
-    *endlastgood = '\0';
-}
-
-/*
  * Handle a FETCH RFC822.HEADER.LINES or RFC822.HEADER.LINES.NOT
  * that can't use the cacheheaders in cyrus.cache
  */
@@ -2772,7 +2702,7 @@ static void index_fetchheader(struct index_state *state,
 
     buf = index_readheader(msg_base, msg_size, 0, size);
 
-    index_pruneheader(buf, headers, headers_not);
+    message_pruneheader(buf, headers, headers_not);
 
     size = strlen(buf);
     prot_printf(state->out, "{%u}\r\n%s\r\n", size+2, buf);
@@ -2809,7 +2739,7 @@ index_fetchcacheheader(struct index_state *state, struct index_record *record,
     memcpy(buf, cacheitem_base(record, CACHE_HEADERS), size);
     buf[size] = '\0';
 
-    index_pruneheader(buf, headers, 0);
+    message_pruneheader(buf, headers, 0);
     size = strlen(buf);
 
     /* partial fetch: adjust 'size' */
@@ -4198,7 +4128,7 @@ static int index_searchheader(char *name,
     strarray_append(&header, name);
 
     p = index_readheader(msgfile->base, msgfile->size, 0, size);
-    index_pruneheader(p, &header, 0);
+    message_pruneheader(p, &header, 0);
     strarray_fini(&header);
 
     if (!*p) return 0;		/* Header not present, fail */
@@ -4237,7 +4167,7 @@ static int index_searchcacheheader(struct index_state *state, uint32_t msgno,
     buf[size] = '\0';
 
     strarray_append(&header, name);
-    index_pruneheader(buf, &header, 0);
+    message_pruneheader(buf, &header, 0);
     strarray_fini(&header);
 
     if (!*buf) return 0;	/* Header not present, fail */
@@ -4874,7 +4804,7 @@ void index_get_ids(MsgData *msgdata, char *envtokens[], const char *headers,
 
     /* grab the References header */
     strarray_append(&refhdr, "references");
-    index_pruneheader(buf.s, &refhdr, 0);
+    message_pruneheader(buf.s, &refhdr, 0);
     strarray_fini(&refhdr);
 
     if (buf.s) {
@@ -5991,7 +5921,7 @@ extern struct nntp_overview *index_overview(struct index_state *state,
 
     /* massage references */
     strarray_append(&refhdr, "references");
-    index_pruneheader(hdr, &refhdr, 0);
+    message_pruneheader(hdr, &refhdr, 0);
     strarray_fini(&refhdr);
 
     if (*hdr) {
@@ -6045,7 +5975,7 @@ extern char *index_getheader(struct index_state *state, uint32_t msgno,
     }
 
     strarray_append(&headers, hdr);
-    index_pruneheader(buf, &headers, NULL);
+    message_pruneheader(buf, &headers, NULL);
     strarray_fini(&headers);
 
     if (*buf) {

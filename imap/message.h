@@ -158,6 +158,8 @@ extern int message_parse_binary_file P((FILE *infile, struct body **body));
 extern int message_parse_file P((FILE *infile,
 				 const char **msg_base, size_t *msg_len,
 				 struct body **body));
+extern void message_pruneheader(char *buf, const strarray_t *headers,
+				const strarray_t *headers_not);
 extern void message_fetch_part P((struct message_content *msg,
 				  const char **content_types,
 				  struct bodypart ***parts));
