@@ -60,6 +60,7 @@
 #include "mailbox.h"
 #include "mboxlist.h"
 #include "message.h"
+#include "sync_log.h"
 #include "sysexits.h"
 #include "util.h"
 #include "xmalloc.h"
@@ -477,6 +478,8 @@ int main(int argc, char **argv)
     mboxlist_init(0);
     mboxlist_open(NULL);
 
+    sync_log_init();
+
     if (recursive) {
 	char *buf = xmalloc(strlen(userid) + 2);
 	prev_userid = xstrdup("");
@@ -496,6 +499,8 @@ int main(int argc, char **argv)
     }
     else
 	do_user(userid);
+
+    sync_log_done();
 
     mboxlist_close();
     mboxlist_done();
