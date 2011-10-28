@@ -3292,11 +3292,6 @@ int mailbox_delete(struct mailbox **mailboxptr)
     struct mailbox *mailbox = *mailboxptr;
     struct conversations_state *cstate = NULL;
 
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	cstate = conversations_get_mbox(mailbox->name);
-	assert(cstate);
-    }
-
     /* mark the quota removed */
     mailbox_quota_dirty(mailbox);
 
@@ -3312,8 +3307,11 @@ int mailbox_delete(struct mailbox **mailboxptr)
     seen_delete_mailbox(NULL, mailbox);
 
     /* remove conversations records */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS))
+    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	cstate = conversations_get_mbox(mailbox->name);
+	assert(cstate);
 	conversations_rename_folder(cstate, mailbox->name, NULL);
+    }
 
     /* clean up annotations */
     r = annotate_delete_mailbox(mailbox);
