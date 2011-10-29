@@ -226,8 +226,8 @@ static int build_cid_cb(const char *mboxname,
 	if (record.cid != NULLCONVERSATION)
 	    continue;
 
-	/* we don't care about expunged messages */
-	if (record.system_flags & FLAG_EXPUNGED)
+	/* no file, can't calculate */
+	if (record.system_flags & FLAG_UNLINKED)
 	    continue;
 
 	r = mailbox_cacherecord(mailbox, &record);
