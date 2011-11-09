@@ -148,6 +148,9 @@ extern int conversation_save(struct conversations_state *state,
 extern int conversation_load(struct conversations_state *state,
 			     conversation_id_t cid,
 			     conversation_t **convp);
+extern int conversation_get_modseq(struct conversations_state *state,
+				   conversation_id_t cid,
+				   modseq_t *modseqp);
 /* Update the internal data about a conversation, enforcing
  * consistency rules (e.g. the conversation's modseq is the
  * maximum of all the per-folder modseqs).  Sets conv->dirty

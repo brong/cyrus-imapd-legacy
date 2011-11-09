@@ -1969,11 +1969,8 @@ static modseq_t get_modseq_of(struct index_record *record,
     modseq_t modseq = 0;
 
     if (cstate) {
-	conversation_t *convdata = NULL;
-	conversation_load(cstate, record->cid, &convdata);
+	conversation_get_modseq(cstate, record->cid, &modseq);
 	/* TODO: error handling dammit */
-	modseq = convdata->modseq;
-	conversation_free(convdata);
     } else {
 	modseq = record->modseq;
     }
