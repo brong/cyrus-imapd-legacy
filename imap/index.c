@@ -1846,7 +1846,7 @@ int index_convsort(struct index_state *state,
     if (!total)
 	goto out;
 
-    construct_hash_table(&seen_cids, 1024, 0);
+    construct_hash_table(&seen_cids, state->exists/4, 0);
 
     /* Create/load the msgdata array.
      * load data for ALL messages always */
@@ -2023,8 +2023,8 @@ int index_convupdates(struct index_state *state,
     if (!total)
 	goto out;
 
-    construct_hash_table(&seen_cids, 1024, 0);
-    construct_hash_table(&old_seen_cids, 1024, 0);
+    construct_hash_table(&seen_cids, state->exists/4, 0);
+    construct_hash_table(&old_seen_cids, state->exists/4, 0);
 
     /* Create/load the msgdata array
      * initial list - load data for ALL messages always */
