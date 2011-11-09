@@ -718,9 +718,9 @@ int conversation_setstatus(struct conversations_state *state,
     return r;
 }
 
-int _conversation_load(struct conversations_state *state,
-		       const char *data, int datalen,
-		       conversation_t **convp)
+static int _conversation_load(struct conversations_state *state,
+			      const char *data, int datalen,
+			      conversation_t **convp)
 {
     const char *rest;
     int i;
@@ -850,6 +850,65 @@ int conversation_load(struct conversations_state *state,
 	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
 	       CONV_FMT, cid);
 	*convp = NULL;
+    }
+
+    return 0;
+}
+
+/* Parse just enough of the B record to retrieve the modseq.
+ * Fortunately the modseq is the first field after the record version
+ * number, given the way that _conversation_save() and dlist works.  See
+ * _conversation_load() for the full shebang. */
+static int _conversation_load_modseq(const char *data, int datalen,
+				     modseq_t *modseqp)
+{
+    const char *p = data;
+    const char *end = data + datalen;
+    bit64 version = ~0ULL;
+    int r;
+
+    r = parsenum(p, &p, (end-p), &version);
+    if (r || version != CONVERSATIONS_VERSION)
+	return IMAP_INTERNAL;
+
+    if ((end - p) < 4 || p[0] != ' ' || p[1] != '(')
+	return IMAP_INTERNAL;
+    p += 2; /* skip space and left parenthesis */
+
+    r = parsenum(p, &p, (end-p), modseqp);
+    if ((end - p) < 1 || *p != ' ')
+	return IMAP_INTERNAL;
+
+    return 0;
+}
+
+int conversation_get_modseq(struct conversations_state *state,
+			    conversation_id_t cid,
+			    modseq_t *modseqp)
+{
+    const char *data;
+    int datalen;
+    char bkey[CONVERSATION_ID_STRMAX+2];
+    int r;
+
+    snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
+    r = DB->fetch(state->db,
+		  bkey, strlen(bkey),
+		  &data, &datalen,
+		  &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND) {
+	*modseqp = NULLCONVERSATION;
+	return 0;
+    } else if (r != CYRUSDB_OK) {
+	return r;
+    }
+
+    r = _conversation_load_modseq(data, datalen, modseqp);
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: conversation_get_modseq: invalid conversation "
+	       CONV_FMT, cid);
+	*modseqp = NULLCONVERSATION;
     }
 
     return 0;
