@@ -64,7 +64,8 @@
 #include "dlist.h"
 #include "exitcodes.h"
 #include "hash.h"
-#include "imap/imap_err.h"
+#include "hashu64.h"
+#include "imap_err.h"
 #include "global.h"
 #include "times.h"
 #include "imapd.h"
@@ -1809,7 +1810,7 @@ int index_convsort(struct index_state *state,
     unsigned int mi;
     modseq_t xconvmodseq = 0;
     int i;
-    hash_table seen_cids = HASH_TABLE_INITIALIZER;
+    hashu64_table seen_cids = HASHU64_TABLE_INITIALIZER;
     uint32_t pos = 0;
     int found_anchor = 0;
     uint32_t anchor_pos = 0;
@@ -1834,7 +1835,7 @@ int index_convsort(struct index_state *state,
     if (!total)
 	goto out;
 
-    construct_hash_table(&seen_cids, state->exists/4, 0);
+    construct_hashu64_table(&seen_cids, state->exists/4, 0);
 
     /* Create/load the msgdata array.
      * load data for ALL messages always */
@@ -1864,11 +1865,9 @@ int index_convsort(struct index_state *state,
 	if (windowargs->conversations) {
 	    /* in conversations mode => only the first message seen
 	     * with each unique CID is an exemplar */
-	    const char *cid = conversation_id_encode(record->cid);
-
-	    if (hash_lookup(cid, &seen_cids))
+	    if (hashu64_lookup(record->cid, &seen_cids))
 		continue;
-	    hash_insert(cid, (void *)1, &seen_cids);
+	    hashu64_insert(record->cid, (void *)1, &seen_cids);
 	}
 	/* else not in conversations mode => all messages are exemplars */
 
@@ -1949,7 +1948,7 @@ out:
     /* free all our temporary data */
     index_msgdata_free(msgdata, state->exists);
     ptrarray_fini(&results);
-    free_hash_table(&seen_cids, NULL);
+    free_hashu64_table(&seen_cids, NULL);
 
     return r;
 }
@@ -1980,8 +1979,8 @@ int index_convupdates(struct index_state *state,
     modseq_t xconvmodseq = 0;
     unsigned int mi;
     int i;
-    hash_table seen_cids = HASH_TABLE_INITIALIZER;
-    hash_table old_seen_cids = HASH_TABLE_INITIALIZER;
+    hashu64_table seen_cids = HASHU64_TABLE_INITIALIZER;
+    hashu64_table old_seen_cids = HASHU64_TABLE_INITIALIZER;
     int32_t pos = 0;
     uint32_t upto_pos = 0;
     ptrarray_t added = PTRARRAY_INITIALIZER;
@@ -2007,8 +2006,8 @@ int index_convupdates(struct index_state *state,
     if (!total)
 	goto out;
 
-    construct_hash_table(&seen_cids, state->exists/4, 0);
-    construct_hash_table(&old_seen_cids, state->exists/4, 0);
+    construct_hashu64_table(&seen_cids, state->exists/4, 0);
+    construct_hashu64_table(&old_seen_cids, state->exists/4, 0);
 
     /* Create/load the msgdata array
      * initial list - load data for ALL messages always */
@@ -2029,7 +2028,6 @@ int index_convupdates(struct index_state *state,
 	int was_deleted = 0;
 	int is_changed = 0;
 	int in_search = 0;
-	const char *cid = conversation_id_encode(record->cid);
 
 	in_search = index_search_evaluate(state, searchargs, msg->msgno, NULL);
 	is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
@@ -2040,11 +2038,11 @@ int index_convupdates(struct index_state *state,
 	/* is this message a current exemplar? */
 	if (!is_deleted &&
 	    in_search &&
-	    (!windowargs->conversations || !hash_lookup(cid, &seen_cids))) {
+	    (!windowargs->conversations || !hashu64_lookup(record->cid, &seen_cids))) {
 	    is_new_exemplar = 1;
 	    pos++;
 	    if (windowargs->conversations)
-		hash_insert(cid, (void *)1, &seen_cids);
+		hashu64_insert(record->cid, (void *)1, &seen_cids);
 	}
 
 	/* optimisation for when the total is
@@ -2057,10 +2055,10 @@ int index_convupdates(struct index_state *state,
 	if (!is_new &&
 	    !was_deleted &&
 	    (in_search || search_is_mutable) &&
-	    (!windowargs->conversations || !hash_lookup(cid, &old_seen_cids))) {
+	    (!windowargs->conversations || !hashu64_lookup(record->cid, &old_seen_cids))) {
 	    was_old_exemplar = 1;
 	    if (windowargs->conversations)
-		hash_insert(cid, (void *)1, &old_seen_cids);
+		hashu64_insert(record->cid, (void *)1, &old_seen_cids);
 	}
 
 	if (was_old_exemplar && !is_new_exemplar) {
@@ -2155,8 +2153,8 @@ out:
     ptrarray_fini(&added);
     ptrarray_fini(&removed);
     ptrarray_fini(&changed);
-    free_hash_table(&seen_cids, NULL);
-    free_hash_table(&old_seen_cids, NULL);
+    free_hashu64_table(&seen_cids, NULL);
+    free_hashu64_table(&old_seen_cids, NULL);
 
     return r;
 }
