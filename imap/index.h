@@ -162,7 +162,6 @@ typedef struct msgdata {
     uint32_t convexists;	/* exists count of conversation */
     bit32 hasflag;		/* hasflag values (up to 32 of them) */
     bit32 hasconvflag;		/* hasconvflag values (up to 32 of them) */
-    struct msgdata *next;
 } MsgData;
 
 typedef struct thread {
@@ -179,7 +178,8 @@ struct rootset {
 
 struct thread_algorithm {
     const char *alg_name;
-    void (*threader)(struct index_state *state, unsigned *msgno_list, int nmsg, int usinguid);
+    void (*threader)(struct index_state *state, unsigned *msgno_list,
+		     unsigned int nmsg, int usinguid);
 };
 
 struct nntp_overview {
