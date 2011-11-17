@@ -231,6 +231,8 @@ struct mailbox {
     /* conversations */
     struct conversations_state *local_cstate;
 
+    struct timeval starttime;
+
     /* change management */
     int modseq_dirty;
     int header_dirty;

@@ -1669,6 +1669,7 @@ restart:
     }
 
     mailbox->index_locktype = locktype;
+    gettimeofday(&mailbox->starttime, 0);
 
     fname = mailbox_meta_fname(mailbox, META_HEADER);
     r = stat(fname, &sbuf);
@@ -1778,8 +1779,12 @@ restart:
  */
 void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 {
+    struct timeval endtime;
+    double timediff;
+    int r;
+
     /* naughty - you can't unlock a dirty mailbox! */
-    int r = mailbox_commit(mailbox);
+    r = mailbox_commit(mailbox);
     if (r) {
 	syslog(LOG_ERR, "IOERROR: failed to commit mailbox %s, "
 	       "probably need to reconstruct",
@@ -1806,6 +1811,12 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	    syslog(LOG_ERR, "IOERROR: unlocking index of %s: %m", 
 		mailbox->name);
 	mailbox->index_locktype = 0;
+    }
+    gettimeofday(&endtime, 0);
+    timediff = timesub(&mailbox->starttime, &endtime);
+    if (timediff > 1.0) {
+	syslog(LOG_NOTICE, "mailbox: longlock %s for %0.1f seconds",
+	       mailbox->name, timediff);
     }
 
     if (mailbox->local_cstate) {
