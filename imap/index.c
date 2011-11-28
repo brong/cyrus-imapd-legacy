@@ -2015,7 +2015,10 @@ int index_convupdates(struct index_state *state,
     total = search_predict_total(state, cstate, searchargs,
 				windowargs->conversations,
 				&xconvmodseq);
-    if (!total)
+    /* If there are no current and no expunged messages, we won't
+     * have any results at all and can short circuit the main loop;
+     * note that is a righter criterion than for XCONVSORT. */
+    if (!total && !state->exists)
 	goto out;
 
     construct_hashu64_table(&seen_cids, state->exists/4+4, 0);
@@ -5084,6 +5087,8 @@ static void index_msgdata_free(MsgData **msgdata, unsigned int n)
 {
     unsigned int i;
 
+    if (!msgdata)
+	return;
     for (i = 0 ; i < n ; i++) {
 	MsgData *md = msgdata[i];
 
