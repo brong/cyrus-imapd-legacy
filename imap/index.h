@@ -123,6 +123,7 @@ struct index_state {
     int qresync;
     struct auth_state *authstate;
     int want_expunged;
+    unsigned num_expunged;
 };
 
 struct copyargs {
