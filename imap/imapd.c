@@ -2060,12 +2060,14 @@ void cmdloop(void)
 	    }
 	    else if (!strcmp(cmd.s, "Xconvsort")) {
 		if (c != ' ') goto missingargs;
+		if (!imapd_index && !backend_current) goto nomailbox;
 		cmd_xconvsort(tag.s, 0);
 
 // 		snmp_increment(XCONVSORT_COUNT, 1);
 	    }
 	    else if (!strcmp(cmd.s, "Xconvupdates")) {
 		if (c != ' ') goto missingargs;
+		if (!imapd_index && !backend_current) goto nomailbox;
 		cmd_xconvsort(tag.s, 1);
 
 // 		snmp_increment(XCONVUPDATES_COUNT, 1);
@@ -5334,17 +5336,14 @@ void cmd_xconvsort(char *tag, int updates)
 {
     int c;
     struct sortcrit *sortcrit = NULL;
-    static struct buf mailboxname;
     static struct buf arg;
     int charset = 0;
     struct searchargs *searchargs = NULL;
     struct windowargs *windowargs = NULL;
     struct index_init init;
     struct index_state *oldstate = NULL;
-    int index_is_ours = 0;
     struct conversations_state *cstate = NULL;
     clock_t start = clock();
-    char internalname[MAX_MAILBOX_NAME];
     char mytime[100];
     int r;
 
@@ -5358,19 +5357,12 @@ void cmd_xconvsort(char *tag, int updates)
 	}
 	return;
     }
+    assert(imapd_index);
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	prot_printf(imapd_out, "%s BAD Unrecognized command\r\n", tag);
 	eatline(imapd_in, ' ');
 	return;
-    }
-
-    /* local mailbox */
-    c = getastring(imapd_in, imapd_out, &mailboxname);
-    if (c == EOF) {
-	prot_printf(imapd_out, "%s BAD Missing mailbox name in XconvSort\r\n",
-		    tag);
-	goto error;
     }
 
     c = getsortcriteria(tag, &sortcrit);
@@ -5396,19 +5388,14 @@ void cmd_xconvsort(char *tag, int updates)
 	goto error;
     }
 
-    (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, mailboxname.s,
-					   imapd_userid, internalname);
-
     /* open the conversations state first - we don't care if it fails,
      * because that probably just means it's already open */
-    conversations_open_mbox(internalname, &cstate);
+    conversations_open_mbox(imapd_index->mailbox->name, &cstate);
 
-    if (updates || strcmp(internalname, imapd_index->mailbox->name)) {
+    if (updates) {
 	/* in XCONVUPDATES, need to force a re-read from scratch into
-	 * a new index - even if this mailbox is selected - because
-	 * we ask for deleted messages */
+	 * a new index, because we ask for deleted messages */
 
-	index_is_ours = 1;
 	oldstate = imapd_index;
 	imapd_index = NULL;
 
@@ -5416,9 +5403,9 @@ void cmd_xconvsort(char *tag, int updates)
 	init.userid = imapd_userid;
 	init.authstate = imapd_authstate;
 	init.out = imapd_out;
-	init.want_expunged = updates;
+	init.want_expunged = 1;
 
-	r = index_open(internalname, &init, &imapd_index);
+	r = index_open(oldstate->mailbox->name, &init, &imapd_index);
 	if (r) {
 	    prot_printf(imapd_out, "%s NO %s\r\n", tag,
 			error_message(r));
@@ -5444,7 +5431,7 @@ void cmd_xconvsort(char *tag, int updates)
     else
 	r = index_convsort(imapd_index, sortcrit, searchargs, windowargs);
 
-    if (index_is_ours) {
+    if (oldstate) {
 	index_close(&imapd_index);
 	imapd_index = oldstate;
     }
@@ -5466,6 +5453,7 @@ void cmd_xconvsort(char *tag, int updates)
     prot_printf(imapd_out, "%s OK %s (in %s secs)\r\n", tag,
 		error_message(IMAP_OK_COMPLETED), mytime);
 
+out:
     conversations_abort(&cstate);
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
@@ -5474,14 +5462,7 @@ void cmd_xconvsort(char *tag, int updates)
 
 error:
     eatline(imapd_in, (c == EOF ? ' ' : c));
-    conversations_abort(&cstate);
-    freesortcrit(sortcrit);
-    freesearchargs(searchargs);
-    free_windowargs(windowargs);
-    if (index_is_ours) {
-	index_close(&imapd_index);
-	imapd_index = oldstate;
-    }
+    goto out;
 }
 
 /*
