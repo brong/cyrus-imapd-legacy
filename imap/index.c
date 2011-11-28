@@ -303,6 +303,9 @@ int index_expunge(struct index_state *state, char *sequence,
 	if (im->isrecent)
 	    state->numrecent--;
 
+	if (state->want_expunged)
+	    state->num_expunged++;
+
 	/* set the flags */
 	im->record.system_flags |= FLAG_DELETED | FLAG_EXPUNGED;
 	numexpunged++;
@@ -500,6 +503,8 @@ void index_refresh(struct index_state *state)
 
     seenlist = _readseen(state, &recentuid);
 
+    state->num_expunged = 0;
+
     /* already known records - flag updates */
     for (msgno = 1; msgno <= state->exists; msgno++) {
 	im = &state->map[msgno-1];
@@ -507,15 +512,18 @@ void index_refresh(struct index_state *state)
 	    continue; /* bogus read... should probably be fatal */
 
 	/* ignore expunged messages */
-	if (!state->want_expunged &&
-	    (im->record.system_flags & FLAG_EXPUNGED)) {
-	    /* http://www.rfc-editor.org/errata_search.php?rfc=5162
-	     * Errata ID: 1809 - if there are expunged records we
-	     * aren't telling about, need to make the highestmodseq
-	     * be one lower so the client can safely resync */
-	    if (!delayed_modseq || im->record.modseq < delayed_modseq)
-		delayed_modseq = im->record.modseq - 1;
-	    continue;
+
+	if (im->record.system_flags & FLAG_EXPUNGED) {
+	    if (!state->want_expunged) {
+		/* http://www.rfc-editor.org/errata_search.php?rfc=5162
+		 * Errata ID: 1809 - if there are expunged records we
+		 * aren't telling about, need to make the highestmodseq
+		 * be one lower so the client can safely resync */
+		if (!delayed_modseq || im->record.modseq < delayed_modseq)
+		    delayed_modseq = im->record.modseq - 1;
+		continue;
+	    }
+	    state->num_expunged++;
 	}
 
 	/* re-calculate seen flags */
@@ -541,9 +549,11 @@ void index_refresh(struct index_state *state)
 	im = &state->map[msgno-1];
 	if (mailbox_read_index_record(mailbox, recno, &im->record))
 	    continue; /* bogus read... should probably be fatal */
-	if (!state->want_expunged &&
-	    (im->record.system_flags & FLAG_EXPUNGED))
-	    continue;
+	if (im->record.system_flags & FLAG_EXPUNGED) {
+	    if (!state->want_expunged)
+		continue;
+	    state->num_expunged++;
+	}
 
 	/* make sure we don't overflow the memory we mapped */
 	if (msgno >= state->mapsize) {
@@ -1777,7 +1787,9 @@ static int search_predict_total(struct index_state *state,
 
     switch (search_countability(searchargs)) {
     case 0:
-	return (conversations ? convexists : state->exists);
+	return (conversations ?
+		    convexists :
+		    state->exists - state->num_expunged);
     /* we don't try to optimise searches on \Recent */
     case SEARCH_SEEN_SET:
     case SEARCH_SEEN_UNSET|SEARCH_NOT:
