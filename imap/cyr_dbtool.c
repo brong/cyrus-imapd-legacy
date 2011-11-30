@@ -173,6 +173,7 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "* set <key> <value>\n");
 	fprintf(stderr, "* delete <key>\n");
 	fprintf(stderr, "* dump - internal format dump\n");
+	fprintf(stderr, "* consistent - check consistency\n");
 	fprintf(stderr, "You may omit key or key/value and specify one per line on stdin\n");
 	fprintf(stderr, "keys are terminated by tab or newline, values are terminated by newline\n");
 	exit(-1);
@@ -250,6 +251,12 @@ int main(int argc, char *argv[])
 	if ((argc - optind) > 3)
 	    level = atoi(argv[optind+3]);
 	DB_OLD->dump(odb, level);
+    } else if (!strcmp(action, "consistent")) {
+	if (DB_OLD->consistent(odb)) {
+	    printf("No, not consistent\n");
+	} else {
+	    printf("Yes, consistent\n");
+	}
     } else {
         printf("Unknown action %s\n", action);
     }
