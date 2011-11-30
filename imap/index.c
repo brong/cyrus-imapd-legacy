@@ -4622,6 +4622,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 		assert(cstate);
 		if (conversation_load(cstate, im->record.cid, &conv))
 		    continue;
+		if (!conv) conv = conversation_new(cstate);
 		did_conv++;
 	    }
 
