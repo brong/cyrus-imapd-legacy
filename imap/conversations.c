@@ -156,7 +156,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
 {
     struct conversations_open *open = NULL;
     const char *val = NULL;
-    int vallen = 0;
+    size_t vallen = 0;
     int r = 0;
 
     if (!fname)
@@ -316,7 +316,7 @@ int conversations_commit(struct conversations_state **statep)
     return r;
 }
 
-static int check_msgid(const char *msgid, int len, int *lenp)
+static int check_msgid(const char *msgid, size_t len, size_t *lenp)
 {
     if (msgid == NULL)
 	return IMAP_INVALID_IDENTIFIER;
@@ -329,11 +329,12 @@ static int check_msgid(const char *msgid, int len, int *lenp)
 
     if (lenp)
 	*lenp = len;
+
     return 0;
 }
 
 static int _conversations_set_key(struct conversations_state *state,
-				  const char *key, int keylen,
+				  const char *key, size_t keylen,
 				  conversation_id_t cid, time_t stamp)
 {
     int r;
@@ -363,7 +364,7 @@ int conversations_set_msgid(struct conversations_state *state,
 			  const char *msgid,
 			  conversation_id_t cid)
 {
-    int keylen;
+    size_t keylen;
     int r;
 
     r = check_msgid(msgid, 0, &keylen);
@@ -422,8 +423,8 @@ int conversations_get_msgid(struct conversations_state *state,
 		          const char *msgid,
 		          conversation_id_t *cidp)
 {
-    int keylen;
-    int datalen = 0;
+    size_t keylen;
+    size_t datalen = 0;
     const char *data;
     int r;
 
@@ -624,8 +625,8 @@ int conversation_getstatus(struct conversations_state *state,
     struct dlist *n;
     const char *data;
     const char *rest;
-    int datalen;
-    int restlen;
+    size_t datalen;
+    size_t restlen;
     bit64 version;
     int r = IMAP_IOERROR;
 
@@ -827,7 +828,7 @@ int conversation_load(struct conversations_state *state,
 		      conversation_t **convp)
 {
     const char *data;
-    int datalen;
+    size_t datalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
     int r;
 
@@ -1027,8 +1028,8 @@ struct prune_rock {
 };
 
 static int prunecb(void *rock,
-		   const char *key, int keylen,
-		   const char *data, int datalen)
+		   const char *key, size_t keylen,
+		   const char *data, size_t datalen)
 {
     struct prune_rock *prock = (struct prune_rock *)rock;
     conversation_id_t cid;
@@ -1112,8 +1113,8 @@ struct frename_rock {
 };
 
 static int do_one_rename(void *rock,
-		         const char *key, int keylen,
-		         const char *data, int datalen)
+		         const char *key, size_t keylen,
+		         const char *data, size_t datalen)
 {
     struct rename_rock *rrock = (struct rename_rock *)rock;
     conversation_id_t cid;
@@ -1160,8 +1161,8 @@ int conversations_rename_cid(struct conversations_state *state,
 }
 
 static int do_folder_rename(void *rock,
-			    const char *key, int keylen,
-			    const char *data, int datalen)
+			    const char *key, size_t keylen,
+			    const char *data, size_t datalen)
 {
     struct frename_rock *frock = (struct frename_rock *)rock;
     conversation_t *conv = NULL;
@@ -1209,7 +1210,7 @@ static int folder_key_rename(struct conversations_state *state,
 			     const char *to_name)
 {
     const char *val;
-    int vallen;
+    size_t vallen;
     char *oldkey = strconcat("F", from_name, (void *)NULL);
     char *newkey = NULL;
     int r = 0;
@@ -1262,9 +1263,9 @@ int conversations_rename_folder(struct conversations_state *state,
 
 static int delete_cb(void *rock,
 		     const char *key,
-		     int keylen,
+		     size_t keylen,
 		     const char *val __attribute__((unused)),
-		     int vallen __attribute__((unused)))
+		     size_t vallen __attribute__((unused)))
 {
     struct conversations_state *state = (struct conversations_state *)rock;
     return DB->delete(state->db, key, keylen, &state->txn, 1);
