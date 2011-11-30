@@ -174,6 +174,7 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "* delete <key>\n");
 	fprintf(stderr, "* dump - internal format dump\n");
 	fprintf(stderr, "* consistent - check consistency\n");
+	fprintf(stderr, "* damage - start a commit then die during\n");
 	fprintf(stderr, "You may omit key or key/value and specify one per line on stdin\n");
 	fprintf(stderr, "keys are terminated by tab or newline, values are terminated by newline\n");
 	exit(-1);
@@ -257,6 +258,9 @@ int main(int argc, char *argv[])
 	} else {
 	    printf("Yes, consistent\n");
 	}
+    } else if (!strcmp(action, "damage")) {
+	DB_OLD->store(odb, "INVALID", 7, "CRASHME", 7, &tid);
+	assert(!tid);
     } else {
         printf("Unknown action %s\n", action);
     }
