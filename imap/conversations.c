@@ -374,11 +374,11 @@ int conversations_set_msgid(struct conversations_state *state,
     return _conversations_set_key(state, msgid, keylen, cid, time(NULL));
 }
 
-static int _conversations_parse(const char *data, int datalen,
+static int _conversations_parse(const char *data, size_t datalen,
 				conversation_id_t *cidp, time_t *stampp)
 { 
     const char *rest;
-    int restlen;
+    size_t restlen;
     int r;
     bit64 tval;
     bit64 version;
@@ -411,7 +411,7 @@ static int _conversations_parse(const char *data, int datalen,
     if (r) return IMAP_MAILBOX_BADFORMAT;
 
     /* should have parsed to the end of the string */
-    if (rest - data != datalen)
+    if (rest - data != (int)datalen)
 	return IMAP_MAILBOX_BADFORMAT;
 
     if (stampp) *stampp = tval;
@@ -887,7 +887,7 @@ int conversation_get_modseq(struct conversations_state *state,
 			    modseq_t *modseqp)
 {
     const char *data;
-    int datalen;
+    size_t datalen;
     char bkey[CONVERSATION_ID_STRMAX+2];
     int r;
 
