@@ -3427,6 +3427,7 @@ int mailbox_copy_files(struct mailbox *mailbox, const char *newpart,
 int mailbox_rename_copy(struct mailbox *oldmailbox, 
 			const char *newname,
 			const char *newpartition,
+			unsigned uidvalidity,
 			const char *userid, int ignorequota,
 			struct mailbox **newmailboxptr)
 {
@@ -3457,7 +3458,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     r = mailbox_create(newname, newpartition,
 		       oldmailbox->acl, (userid ? NULL : oldmailbox->uniqueid),
 		       oldmailbox->specialuse, oldmailbox->i.options,
-		       0, oldmailbox->i.highestmodseq, &newmailbox);
+		       uidvalidity, oldmailbox->i.highestmodseq, &newmailbox);
 
     if (r) return r;
 

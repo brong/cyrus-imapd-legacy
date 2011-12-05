@@ -553,8 +553,9 @@ struct sync_rename_list *sync_rename_list_create(void)
 }
 
 struct sync_rename *sync_rename_list_add(struct sync_rename_list *l,
-					      const char *uniqueid, const char *oldname,
-					      const char *newname, const char *partition)
+					 const char *uniqueid, const char *oldname,
+					 const char *newname, const char *partition,
+					 unsigned uidvalidity)
 {
     struct sync_rename *result
         = xzmalloc(sizeof(struct sync_rename));
@@ -571,6 +572,7 @@ struct sync_rename *sync_rename_list_add(struct sync_rename_list *l,
     result->oldname = xstrdup(oldname);
     result->newname = xstrdup(newname);
     result->part = xstrdup(partition);
+    result->uidvalidity = uidvalidity;
     result->done = 0;
 
     return result;
