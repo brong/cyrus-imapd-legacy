@@ -137,6 +137,8 @@ static struct mailboxlist *create_listitem(const char *name)
     item->l = NULL;
     zeromailbox(item->m);
     item->m.name = xstrdup(name);
+    /* ensure we never print insane times */
+    gettimeofday(&item->m.starttime, 0);
 
     return item;
 }
