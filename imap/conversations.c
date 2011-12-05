@@ -898,7 +898,7 @@ int conversation_get_modseq(struct conversations_state *state,
 		  &state->txn);
 
     if (r == CYRUSDB_NOTFOUND) {
-	*modseqp = NULLCONVERSATION;
+	*modseqp = 0;
 	return 0;
     } else if (r != CYRUSDB_OK) {
 	return r;
@@ -908,7 +908,7 @@ int conversation_get_modseq(struct conversations_state *state,
     if (r) {
 	syslog(LOG_ERR, "IOERROR: conversation_get_modseq: invalid conversation "
 	       CONV_FMT, cid);
-	*modseqp = NULLCONVERSATION;
+	*modseqp = 0;
     }
 
     return 0;
