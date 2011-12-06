@@ -1563,6 +1563,25 @@ int sync_parse_response(const char *cmd, struct protstream *in,
     return IMAP_PROTOCOL_ERROR;
 }
 
+int sync_rename_cid(struct mailbox *mailbox,
+		    struct index_record *remote,
+		    struct index_record *local)
+{
+    int r;
+
+    if (local->cid == remote->cid)
+	return 0; /* nothing to do */
+
+    if (local->cid && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	r = conversations_rename_cid(cstate, local->cid, remote->cid);
+	if (r) return r;
+    }
+
+    local->cid = remote->cid;
+    return 0;
+}
+
 int sync_append_copyfile(struct mailbox *mailbox,
 			 struct index_record *record,
 			 const struct sync_annot_list *annots)
