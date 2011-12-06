@@ -1439,12 +1439,16 @@ static int do_mailbox(struct dlist *kin)
 	decode_annotations(ka, &mannots);
 
 	r = read_annotations(mailbox, NULL, &rannots);
+	if (!r) r = apply_annotations(mailbox, NULL, rannots, mannots, 0);
+
+	sync_annot_list_free(&mannots);
+	sync_annot_list_free(&rannots);
+
 	if (r) {
-	    sync_annot_list_free(&mannots);
+	    syslog(LOG_ERR, "syncerror: annotations failed to apply to %s",
+		   mailbox->name);
 	    goto done;
 	}
-
-	r = apply_annotations(mailbox, NULL, rannots, mannots, 0);
     }
 
     r = mailbox_compare_update(mailbox, kr, 1);
