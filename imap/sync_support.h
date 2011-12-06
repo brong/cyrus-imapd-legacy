@@ -441,10 +441,6 @@ const char *sync_crc_list_covers(void);
 int sync_crc_setup(const char *, const char *, int);
 int sync_crc_calc(struct mailbox *, char *, int);
 
-int sync_rename_cid(struct mailbox *mailbox,
-                    struct index_record *mrecord,
-                    struct index_record *rrecord);
-
 
 /* ====================================================================== */
 
