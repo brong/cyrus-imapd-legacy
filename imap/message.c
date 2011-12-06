@@ -2560,6 +2560,27 @@ static conversation_id_t generate_conversation_id(
 }
 
 /*
+ * In RFC2822, the In-Reply-To field is explicitly required to contain
+ * only message-ids, whitespace and commas.  The old RFC822 was less
+ * well specified and allowed all sorts of stuff.  We used to be equally
+ * liberal here in parsing the field.  Sadly some versions of the NMH
+ * mailer will generate In-Reply-To containing email addresses which we
+ * cannot tell from message-ids, leading to massively confused
+ * threading.  So we have to be slightly stricter.
+ */
+static int is_valid_rfc2822_inreplyto(const char *p)
+{
+    if (!p)
+	return 1;
+
+    /* skip any whitespace */
+    while (*p && (isspace(*p) || *p == ','))
+	p++;
+
+    return (!*p || *p == '<');
+}
+
+/*
  * Update the conversations database for the given
  * mailbox, to account for the given new message.
  * @body may be NULL, in which case we get everything
@@ -2640,6 +2661,9 @@ int message_update_conversations(struct conversations_state *state,
 	/* nope, now we're screwed */
 	return IMAP_INTERNAL;
     }
+
+    if (!is_valid_rfc2822_inreplyto(hdrs[1]))
+	hdrs[1] = NULL;
 
     for (i = 0 ; i < 4 ; i++) {
 continue2:
