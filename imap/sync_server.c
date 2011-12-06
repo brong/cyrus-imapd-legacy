@@ -1226,7 +1226,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    /* skip out on the first pass */
 	    if (!doupdate) continue;
 
-	    rrecord.cid = mrecord.cid;
 	    rrecord.modseq = mrecord.modseq;
 	    rrecord.last_updated = mrecord.last_updated;
 	    rrecord.internaldate = mrecord.internaldate;
@@ -1245,6 +1244,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    r = apply_annotations(mailbox, &rrecord, rannots, mannots, 0);
 	    if (r) {
 		syslog(LOG_ERR, "Failed to write merged annotations %s %u: %s",
+		       mailbox->name, recno, error_message(r));
+		goto out;
+	    }
+
+	    r = sync_rename_cid(mailbox, &mrecord, &rrecord);
+	    if (r) {
+		syslog(LOG_ERR, "Failed to rename cid %s %u: %s",
 		       mailbox->name, recno, error_message(r));
 		goto out;
 	    }
