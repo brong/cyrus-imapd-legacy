@@ -79,13 +79,230 @@ struct cyrusdb_backend *cyrusdb_backends[] = {
     &cyrusdb_twoskip,
     NULL };
 
+#define DEFAULT_BACKEND &cyrusdb_twoskip
+
+struct cyrusdb_backend *virtual_backends;
+
+/* now THIS is skanky */
+struct db {
+    struct db *realdb;
+    struct cyrusdb_backend *realbackend;
+};
+
+static int db_open(struct cyrusdb_backend *backend, const char *fname, int flags, struct db **ret)
+{
+    const char *realname;
+    struct db *db = xzmalloc(sizeof(struct db));
+    int r;
+
+    if (!backend) backend = DEFAULT_BACKEND;
+    db->realbackend = backend;
+
+    /* This whole thing is a fricking critical section.  We don't have the API
+     * in place for a safe rename of a locked database, so the choices are
+     * basically:
+     * a) convert each DB layer to support locked database renames while still
+     *    in the transaction.  Best, but lots of work.
+     * b) rename and hope... unreliable
+     * c) global lock around this block of code.  Safest and least efficient.
+     */
+
+    /* check if it opens normally.  Horray */
+    r = (db->realbackend->open)(fname, flags, &db->realdb);
+    if (r == CYRUSDB_NOTFOUND) goto done; /* no open flags */
+    if (!r) goto done;
+
+    /* magic time - we need to work out if the file was created by a different
+     * backend and convert if possible */
+
+    realname = cyrusdb_detect(fname);
+    if (!realname) {
+	syslog(LOG_ERR, "DBERROR: failed to detect DB type for %s (backend %s) (r was %d)",
+	       fname, backend->name, r);
+	goto done;
+    }
+
+    /* different type */
+    if (strcmp(realname, backend->name)) {
+	struct cyrusdb_backend *realbe = cyrusdb_fromname(realname);
+	r = cyrusdb_convert(fname, fname, realbe, backend);
+	if (r) {
+	    syslog(LOG_ERR, "DBERROR: failed to convert DB %s to %s, trying %s",
+		   fname, backend->name, realname);
+	    db->realbackend = realbe;
+	}
+	else {
+	    syslog(LOG_NOTICE, "cyrusdb: converted %s from %s to %s",
+		   fname, realname, backend->name);
+	}
+    }
+    
+    r = (db->realbackend->open)(fname, flags, &db->realdb);
+
+done:
+
+    if (!r) *ret = db;
+
+    return r;
+}
+
+typedef int db_open_t(const char *fname, int flags, struct db **ret);
+
+#ifdef HAVE_BDB
+static int db_open_berkeley (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_berkeley, fname, flags, ret); }
+static int db_open_berkeley_nosync (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_berkeley_nosync, fname, flags, ret); }
+static int db_open_berkeley_hash (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_berkeley_hash, fname, flags, ret); }
+static int db_open_berkeley_hash_nosync (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_berkeley_hash_nosync, fname, flags, ret); }
+#endif
+static int db_open_flat (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_flat, fname, flags, ret); }
+static int db_open_skiplist (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_skiplist, fname, flags, ret); }
+static int db_open_quotalegacy (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_quotalegacy, fname, flags, ret); }
+#if defined HAVE_MYSQL || defined HAVE_PGSQL || defined HAVE_SQLITE
+static int db_open_sql (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_sql, fname, flags, ret); }
+#endif
+static int db_open_twoskip (const char *fname, int flags, struct db **ret)
+{ return db_open(&cyrusdb_twoskip, fname, flags, ret); }
+
+db_open_t *db_open_list[] = {
+#ifdef HAVE_BDB
+    &db_open_berkeley,
+    &db_open_berkeley_nosync,
+    &db_open_berkeley_hash,
+    &db_open_berkeley_hash_nosync,
+#endif
+    &db_open_flat,
+    &db_open_skiplist,
+    &db_open_quotalegacy,
+#if defined HAVE_MYSQL || defined HAVE_PGSQL || defined HAVE_SQLITE
+    &db_open_sql,
+#endif
+    &db_open_twoskip,
+    NULL };
+
+static int db_close(struct db *db)
+{
+    return (db->realbackend->close)(db->realdb);
+}
+
+static int db_fetch(struct db *db,
+		    const char *key, size_t keylen,
+		    const char **data, size_t *datalen,
+		    struct txn **mytid)
+{
+    return (db->realbackend->fetch)(db->realdb, key, keylen,
+				    data, datalen, mytid);
+}
+
+static int db_fetchlock(struct db *db,
+			const char *key, size_t keylen,
+			const char **data, size_t *datalen,
+			struct txn **mytid)
+{
+    return (db->realbackend->fetchlock)(db->realdb, key, keylen,
+				        data, datalen, mytid);
+}
+
+static int db_foreach(struct db *db,
+		      const char *prefix, size_t prefixlen,
+		      foreach_p *p,
+		      foreach_cb *cb, void *rock,
+		      struct txn **tid)
+{
+    return (db->realbackend->foreach)(db->realdb, prefix, prefixlen,
+				      p, cb, rock, tid);
+}
+
+static int db_create(struct db *db,
+		     const char *key, size_t keylen,
+		     const char *data, size_t datalen,
+		     struct txn **tid)
+{
+    return (db->realbackend->create)(db->realdb, key, keylen, data, datalen, tid);
+}
+
+static int db_store(struct db *db,
+		    const char *key, size_t keylen,
+		    const char *data, size_t datalen,
+		    struct txn **tid)
+{
+    return (db->realbackend->store)(db->realdb, key, keylen, data, datalen, tid);
+}
+
+static int db_delete(struct db *db,
+		     const char *key, size_t keylen,
+		     struct txn **tid, int force)
+{
+    return (db->realbackend->delete)(db->realdb, key, keylen, tid, force);
+}
+
+static int db_commit(struct db *db, struct txn *tid)
+{
+    return (db->realbackend->commit)(db->realdb, tid);
+}
+
+static int db_abort(struct db *db, struct txn *tid)
+{
+    return (db->realbackend->abort)(db->realdb, tid);
+}
+
+static int db_dump(struct db *db, int detail)
+{
+    return (db->realbackend->dump)(db->realdb, detail);
+}
+
+static int db_consistent(struct db *db)
+{
+    return (db->realbackend->consistent)(db->realdb);
+}
+
+void _init_virtual(void)
+{
+    int i;
+    int nbackends;
+
+    if (virtual_backends) return;
+
+    for(i=0; cyrusdb_backends[i]; i++)
+	nbackends++;
+
+    /* allocate some virtual backends */
+    virtual_backends = xzmalloc((nbackends+1) * sizeof(struct cyrusdb_backend));
+    for(i=0; cyrusdb_backends[i]; i++) {
+	virtual_backends[i].name = cyrusdb_backends[i]->name;
+	virtual_backends[i].sync = cyrusdb_backends[i]->sync;
+	virtual_backends[i].archive = cyrusdb_backends[i]->archive;
+	virtual_backends[i].open = db_open_list[i];
+	virtual_backends[i].close = db_close;
+	virtual_backends[i].fetch = db_fetch;
+	virtual_backends[i].fetchlock = db_fetchlock;
+	virtual_backends[i].fetchnext = NULL;
+	virtual_backends[i].foreach = db_foreach;
+	virtual_backends[i].create = db_create;
+	virtual_backends[i].store = db_store;
+	virtual_backends[i].delete = db_delete;
+	virtual_backends[i].commit = db_commit;
+	virtual_backends[i].abort = db_abort;
+	virtual_backends[i].dump = db_dump;
+	virtual_backends[i].consistent = db_consistent;
+    }
+}
+
 void cyrusdb_init(void)
 {
     int i, r;
     char dbdir[1024];
     const char *confdir = libcyrus_config_getstring(CYRUSOPT_CONFIG_DIR);
     int initflags = libcyrus_config_getint(CYRUSOPT_DB_INIT_FLAGS);
-    
+    int nbackends = 0;
+
     strcpy(dbdir, confdir);
     strcat(dbdir, FNAME_DBDIR);
 
@@ -95,7 +312,10 @@ void cyrusdb_init(void)
 	    syslog(LOG_ERR, "DBERROR: init() on %s",
 		   cyrusdb_backends[i]->name);
 	}
+	nbackends++;
     }
+
+    _init_virtual();
 }
 
 void cyrusdb_done(void)
@@ -325,9 +545,11 @@ struct cyrusdb_backend *cyrusdb_fromname(const char *name)
     int i;
     struct cyrusdb_backend *db = NULL;
 
+    _init_virtual();
+
     for (i = 0; cyrusdb_backends[i]; i++) {
 	if (!strcmp(cyrusdb_backends[i]->name, name)) {
-	    db = cyrusdb_backends[i]; break;
+	    db = &virtual_backends[i]; break;
 	}
     }
     if (!db) {
