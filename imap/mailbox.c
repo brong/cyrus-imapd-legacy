@@ -3454,6 +3454,10 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 	return IMAP_MAILBOX_BADNAME;
     }
 
+    /* create uidvalidity if not explicitly requested */
+    if (!uidvalidity)
+	uidvalidity = mboxname_nextuidvalidity(newname, oldmailbox->i.uidvalidity);
+
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
 		       oldmailbox->acl, (userid ? NULL : oldmailbox->uniqueid),
@@ -3489,9 +3493,6 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     /* read in the flags */
     r = mailbox_read_header(newmailbox, NULL);
     if (r) goto fail;
-
-    /* update uidvalidity */
-    newmailbox->i.uidvalidity = mboxname_nextuidvalidity(newname, time(0));
 
     /* INBOX rename - change uniqueid */
     if (userid) mailbox_make_uniqueid(newmailbox);
