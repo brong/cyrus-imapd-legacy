@@ -78,6 +78,9 @@
  *   - smaller initial keylen and vallen, but they can
  *     can be extended up to 64 bits as well.
  *   - no timestamps stored in the file.
+ *   - XXX - may behave strangely with large files on
+ *     32 bit architectures, particularly if size_t is
+ *     not 64 bit.
  *
  *  b)
  *   - "dirty flag" is always set in the header and
@@ -96,10 +99,13 @@
  *     we're crash-safe.
  *
  *  c)
- *   - a crc32 is stored for every byte in the file.
- *     It's checked for all header and pointer accesses,
- *     and for key and value on every value read.
- *     XXX - actually, it's not checked for value reads yet.
+ *   - every byte in the file is covered by one of the
+ *     crc32 values stored throughout.
+ *   - header CRC is checked on every header read (open/lock)
+ *   - record head CRCs are checked on every record read,
+ *     including skiplist traverse.
+ *   - record tail CRCs (key/value) are check on every exact
+ *     key match result, during traverse for read or write.
  *
  *  d)
  *   - there are no special commit, inorder, etc records.
@@ -114,7 +120,7 @@
  * FORMAT:
  *
  * HEADER: 64 bytes
- *  magic: 20 bytes: "4 bytes same as skiplist" "twoskip file\0\0\0\0" 
+ *  magic: 20 bytes: "4 bytes same as skiplist" "twoskip file\0\0\0\0"
  *  version: 4 bytes
  *  generation: 8 bytes
  *  num_records: 8 bytes
@@ -131,24 +137,18 @@
  *  <optionally: 64 bit keylen if keylen == UINT16_MAX>
  *  <optionally: 64 bit vallen if vallen == UINT32_MAX>
  *  ptrs: 8 bytes * (level+1)
- *  head_crc32: 4 bytes
- *  tail_crc32: 4 bytes
+ *  crc32_head: 4 bytes
+ *  crc32_tail: 4 bytes
  *  key: (keylen bytes)
  *  val: (vallen bytes)
  *  padding: enough zeros to round up to an 8 byte multiple
- *
- * Strictly, though the code doesn't currently use the same
- * path for both of them, they ARE the same thing.  8 bytes
- * of header information, "level + 1" x 8 bytes of pointers,
- * 8 bytes of crc32s and roundup("keylen + vallen", 8) bytes
- * of tail.  Just that the tail is null for a DELETE
  *
  * defined types, in skiplist language are:
  * '=' -> DUMMY
  * '+' -> ADD/INORDER
  * '-' -> DELETE (kind of)
  * but note that delete records behave differently - they're
- * part of the pointer heirarchy, so that back offsets will
+ * part of the pointer hierarchy, so that back offsets will
  * always point somewhere past the 'end' until commit.
  *
  * The DUMMY is always MAXLEVEL level, with zero keylen and vallen
@@ -159,7 +159,7 @@
 
 /* OPERATION:
  *
- * Finding a record works very much like sliplist, but we have
+ * Finding a record works very much like skiplist, but we have
  * a datastructure, 'struct skiploc', to help find it.  There
  * is one of these embedded directly in the 'struct db', and
  * it's the only one we ever use.
@@ -183,8 +183,8 @@
  * 1) before writing anything else, the header is updated with the
  *    DIRTY flag set, and then fdatasync is run.
  * 2) after all changes, fdatasync is run again.
- * 3) finally, the header is updated with a new current_size, and
- *    fdatasync is run for a third time.
+ * 3) finally, the header is updated with a new current_size and
+ *    the DIRTY flag clear, then fdatasync is run for a third time.
  *
  * ADDING A NEW RECORD:
  * a new record is created with forward locations pointing to the
@@ -228,6 +228,37 @@
  * when reading, the highest value is used - except during
  * recovery when it's the highest value less than current_size,
  * since any "future" offsets are bogus.
+ *
+ * This means that there is always at least one offset which
+ * points to the "next" record as if the current transaction
+ * had never occured - allowing recovery to find all alive
+ * records without scanning and updating the rest of the file.
+ * This guarantee exists regardless of any ordering of writes
+ * within the transaction, any page could be inconsistent and
+ * the result is still a clean recovery.
+ *
+ * CHECKPOINT:
+ * Over time, a twoskip database accumulates cruft - replaced
+ * records and delete records.  Records out of order, slowing
+ * down sequential access.  When the calculated "repack size"
+ * is sufficiently smaller than the current size (see the
+ * TUNING constants below) then the file is checkpointed.
+ * A checkpoint is achieved by creating a new file, and
+ * copying all the current records, in order, into it, then
+ * renaming the new file over the old.  The "generation"
+ * counter in the header is incremented to tell other users
+ * that offsets into the file are no longer valid.  This is
+ * more reliable than just using the inode, because inodes
+ * can be reused.
+ *
+ * LOCATION OPTIMISATION:
+ * If the generation is unchanged AND the size of the file
+ * is unchanged, then all offsets stored in the skiploc are
+ * still valid.  This is used to optimise finding the current
+ * key, advancing to the "next" key, and also to optimise
+ * regular fetches that happen to hit either the current key,
+ * the gap immediately after, or the next key.  All other
+ * locations cause a full relocate.
  */
 
 
@@ -235,8 +266,8 @@
 
 /* don't bother rewriting if the database has less than this much "new" data */
 #define MINREWRITE 16834
-/* don't bother rewriting if more than this percentage dirty */
-#define REWRITE_PERCENT 20
+/* don't bother rewriting if less than this ratio is dirty (20%) */
+#define REWRITE_RATIO 0.2
 /* number of skiplist levels - 31 gives us binary search to 2^32 records.
  * limited to 255 by file format, but skiplist had 20, and that was enough
  * for most real uses.  31 is heaps. */
@@ -377,8 +408,14 @@ enum {
     OFFSET_CRC32 = 60,
 };
 
-/* plus 4 zero bytes */
 #define HEADER_SIZE 64
+#define MAXRECORDHEAD ((MAXLEVEL + 5)*8)
+
+/* mount a scratch monkey */
+union skipwritebuf {
+    uint64_t align;
+    char s[MAXRECORDHEAD];
+} scratchspace;
 
 static struct db_list *open_twoskip = NULL;
 
@@ -433,60 +470,6 @@ static const char *_fname(struct db *db)
     return mappedfile_fname(db->mf);
 }
 
-/* find the next record at a given level, encapsulating the
- * level 0 magic */
-static size_t _getloc(struct db *db, struct skiprecord *record,
-		      uint8_t level)
-{
-    const char *base;
-    size_t offset;
-
-    if (level)
-	return record->nextloc[level + 1];
-
-    /* if one is past, must be the other */
-    if (record->nextloc[0] >= db->end)
-	offset = record->nextloc[1];
-    else if (record->nextloc[1] >= db->end)
-	offset = record->nextloc[0];
-
-    /* highest remaining */
-    else if (record->nextloc[0] > record->nextloc[1])
-	offset = record->nextloc[0];
-    else
-	offset = record->nextloc[1];
-
-    base = _base(db);
-    /* skip past any delete pointer */
-    if (offset && base[offset] == '-')
-	offset = ntohll(*((uint64_t *)(base+offset+8)));
-
-    return offset;
-}
-
-/* set the next record at a given level, encapsulating the
- * level 0 magic */
-static void _setloc(struct db *db, struct skiprecord *record,
-		    uint8_t level, size_t offset)
-{
-    if (level) {
-	record->nextloc[level+1] = offset;
-	return;
-    }
-
-    /* level zero is special */
-    /* already this transaction, update this one */
-    if (record->nextloc[0] >= db->header.current_size)
-	record->nextloc[0] = offset;
-    else if (record->nextloc[1] >= db->header.current_size)
-	record->nextloc[1] = offset;
-    /* otherwise, update older one */
-    else if (record->nextloc[1] > record->nextloc[0])
-	record->nextloc[0] = offset;
-    else
-	record->nextloc[1] = offset;
-}
-
 /************** HEADER ****************/
 
 /* given an open, mapped db, read in the header information */
@@ -499,6 +482,7 @@ static int read_header(struct db *db)
     if (_size(db) < HEADER_SIZE) {
 	syslog(LOG_ERR,
 	       "twoskip: file not large enough for header: %s", _fname(db));
+	return CYRUSDB_IOERROR;
     }
 
     if (memcmp(_base(db), HEADER_MAGIC, HEADER_MAGIC_SIZE)) {
@@ -546,11 +530,11 @@ static int read_header(struct db *db)
 /* given an open, mapped, locked db, write the header information */
 static int write_header(struct db *db)
 {
-    char buf[HEADER_SIZE];
-    size_t offset = 0;
+    char *buf = scratchspace.s;
+    int n;
 
     /* format one buffer */
-    memcpy(buf + 0, HEADER_MAGIC, HEADER_MAGIC_SIZE);
+    memcpy(buf, HEADER_MAGIC, HEADER_MAGIC_SIZE);
     *((uint32_t *)(buf + OFFSET_VERSION)) = htonl(db->header.version);
     *((uint64_t *)(buf + OFFSET_GENERATION)) = htonll(db->header.generation);
     *((uint64_t *)(buf + OFFSET_NUM_RECORDS)) = htonll(db->header.num_records);
@@ -560,7 +544,10 @@ static int write_header(struct db *db)
     *((uint32_t *)(buf + OFFSET_CRC32)) = htonl(crc32_map(buf, OFFSET_CRC32));
 
     /* write it out */
-    return mappedfile_write(db->mf, &offset, buf, HEADER_SIZE);
+    n = mappedfile_pwrite(db->mf, buf, HEADER_SIZE, 0);
+    if (n < 0) return CYRUSDB_IOERROR;
+
+    return 0;
 }
 
 /* simple wrapper to write with an fsync */
@@ -572,6 +559,21 @@ static int commit_header(struct db *db)
 }
 
 /******************** RECORD *********************/
+
+static int check_tailcrc(struct db *db, struct skiprecord *record)
+{
+    uint32_t crc;
+
+    crc = crc32_map(_base(db) + record->keyoffset,
+		    roundup(record->keylen + record->vallen, 8));
+    if (crc != record->crc32_tail) {
+	syslog(LOG_ERR, "DBERROR: invalid tail crc %s at %llX",
+	       _fname(db), (LLU)record->offset);
+	return CYRUSDB_IOERROR;
+    }
+
+    return 0;
+}
 
 /* read a single skiprecord at the given offset */
 static int read_record(struct db *db, size_t offset,
@@ -651,64 +653,65 @@ badsize:
 
 /* prepare the header part of the record (everything except the key, value
  * and padding).  Used for both writes and rewrites. */
-#define MAXRECORDHEAD ((MAXLEVEL + 5)*8)
-static char *prepare_record(struct skiprecord *record, size_t *sizep)
+static void prepare_record(struct skiprecord *record, char *buf, size_t *sizep)
 {
-    static char writebuf[MAXRECORDHEAD];
     int len = 8;
     int i;
 
-    writebuf[0] = record->type;
-    writebuf[1] = record->level;
+    assert(record->level <= MAXLEVEL);
+
+    buf[0] = record->type;
+    buf[1] = record->level;
     if (record->keylen < UINT16_MAX) {
-	*((uint16_t *)(writebuf+2)) = htons(record->keylen);
+	*((uint16_t *)(buf+2)) = htons(record->keylen);
     }
     else {
-	*((uint16_t *)(writebuf+2)) = htons(UINT16_MAX);
-	*((uint64_t *)(writebuf+len)) = htonll(record->keylen);
+	*((uint16_t *)(buf+2)) = htons(UINT16_MAX);
+	*((uint64_t *)(buf+len)) = htonll(record->keylen);
 	len += 8;
     }
 
     if (record->vallen < UINT32_MAX) {
-	*((uint32_t *)(writebuf+4)) = htonl(record->vallen);
+	*((uint32_t *)(buf+4)) = htonl(record->vallen);
     }
     else {
-	*((uint32_t *)(writebuf+4)) = htonl(UINT32_MAX);
-	*((uint64_t *)(writebuf+len)) = htonll(record->vallen);
+	*((uint32_t *)(buf+4)) = htonl(UINT32_MAX);
+	*((uint64_t *)(buf+len)) = htonll(record->vallen);
 	len += 8;
     }
 
     /* got pointers? */
     for (i = 0; i <= record->level; i++) {
-	*((uint64_t *)(writebuf+len)) = htonll(record->nextloc[i]);
+	*((uint64_t *)(buf+len)) = htonll(record->nextloc[i]);
 	len += 8;
     }
 
     /* NOTE: crc32_tail does not change */
-    record->crc32_head = crc32_map(writebuf, len);
-    *((uint32_t *)(writebuf+len)) = htonl(record->crc32_head);
-    *((uint32_t *)(writebuf+len+4)) = htonl(record->crc32_tail);
+    record->crc32_head = crc32_map(buf, len);
+    *((uint32_t *)(buf+len)) = htonl(record->crc32_head);
+    *((uint32_t *)(buf+len+4)) = htonl(record->crc32_tail);
     len += 8;
 
     *sizep = len;
-
-    return writebuf;
 }
 
 /* only changing the record head, so only rewrite that much */
 static int rewrite_record(struct db *db, struct skiprecord *record)
 {
-    const char *buf;
+    char *buf = scratchspace.s;
     size_t len;
-    size_t offset = record->offset;
+    int n;
 
     /* we must already be in a transaction before updating records */
     assert(db->header.flags & DIRTY);
-    assert(offset);
+    assert(record->offset);
 
-    buf = prepare_record(record, &len);
+    prepare_record(record, buf, &len);
 
-    return mappedfile_write(db->mf, &offset, buf, len);
+    n = mappedfile_pwrite(db->mf, buf, len, record->offset);
+    if (n < 0) return CYRUSDB_IOERROR;
+
+    return 0;
 }
 
 /* you can only write records at the end */
@@ -716,14 +719,15 @@ static int write_record(struct db *db, struct skiprecord *record,
 			const char *key, const char *val)
 {
     char zeros[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int r;
     uint64_t len;
-    size_t offset = db->end;
     struct iovec io[4];
+    int n;
 
     assert(!record->offset);
 
     /* we'll put the HEAD on later */
+    io[0].iov_base = scratchspace.s;
+    io[0].iov_len = 0;
 
     io[1].iov_base = (char *)key;
     io[1].iov_len = record->keylen;
@@ -740,20 +744,20 @@ static int write_record(struct db *db, struct skiprecord *record,
     record->crc32_tail = crc32_iovec(io+1, 3);
 
     /* prepare the record once we know the crc32 of the tail */
-    io[0].iov_base = prepare_record(record, &io[0].iov_len);
+    prepare_record(record, io[0].iov_base, &io[0].iov_len);
 
     /* write to the mapped file, getting the offset updated */
-    r = mappedfile_writev(db->mf, &offset, io, 4);
-    if (r) return CYRUSDB_IOERROR;
+    n = mappedfile_pwritev(db->mf, io, 4, db->end);
+    if (n < 0) return CYRUSDB_IOERROR;
 
     /* locate the record */
     record->offset = db->end;
     record->keyoffset = db->end + io[0].iov_len;
     record->valoffset = record->keyoffset + record->keylen;
-    record->len = (offset - db->end);
+    record->len = n;
 
     /* and advance the known file size */
-    db->end = offset;
+    db->end += n;
 
     return 0;
 }
@@ -779,6 +783,72 @@ static int append_record(struct db *db, struct skiprecord *record,
 
 /************************** LOCATION MANAGEMENT ***************************/
 
+/* find the next record at a given level, encapsulating the
+ * level 0 magic */
+static int _getloc(struct db *db, struct skiprecord *record,
+		   uint8_t level, size_t *outloc)
+{
+    struct skiprecord local;
+    size_t offset;
+    int r;
+
+    if (level) {
+	*outloc = record->nextloc[level + 1];
+	return 0;
+    }
+
+    /* if one is past, must be the other */
+    if (record->nextloc[0] >= db->end)
+	offset = record->nextloc[1];
+    else if (record->nextloc[1] >= db->end)
+	offset = record->nextloc[0];
+
+    /* highest remaining */
+    else if (record->nextloc[0] > record->nextloc[1])
+	offset = record->nextloc[0];
+    else
+	offset = record->nextloc[1];
+
+    /* obviously not a delete! */
+    if (!offset) {
+	*outloc = offset;
+	return 0;
+    }
+
+    r = read_record(db, offset, &local);
+    if (r) return r;
+
+    if (local.type == '-')
+	*outloc = local.nextloc[0];
+    else
+	*outloc = offset;
+
+    return 0;
+}
+
+/* set the next record at a given level, encapsulating the
+ * level 0 magic */
+static void _setloc(struct db *db, struct skiprecord *record,
+		    uint8_t level, size_t offset)
+{
+    if (level) {
+	record->nextloc[level+1] = offset;
+	return;
+    }
+
+    /* level zero is special */
+    /* already this transaction, update this one */
+    if (record->nextloc[0] >= db->header.current_size)
+	record->nextloc[0] = offset;
+    else if (record->nextloc[1] >= db->header.current_size)
+	record->nextloc[1] = offset;
+    /* otherwise, update older one */
+    else if (record->nextloc[1] > record->nextloc[0])
+	record->nextloc[0] = offset;
+    else
+	record->nextloc[1] = offset;
+}
+
 /* finds a record, either an exact match or the record
  * immediately before */
 static int relocate(struct db *db)
@@ -803,7 +873,8 @@ static int relocate(struct db *db)
     if (!loc->keybuf.len) {
 	for (i = 0; i < loc->record.level; i++) {
 	    loc->backloc[i] = loc->record.offset;
-	    loc->forwardloc[i] = _getloc(db, &loc->record, i);
+	    r = _getloc(db, &loc->record, i, &loc->forwardloc[i]);
+	    if (r) return r;
 	}
 	return 0;
     }
@@ -811,7 +882,8 @@ static int relocate(struct db *db)
     level = loc->record.level;
     newrecord.offset = 0;
     while (level) {
-	offset = _getloc(db, &loc->record, level-1);
+	r = _getloc(db, &loc->record, level-1, &offset);
+	if (r) return r;
 
 	loc->backloc[level-1] = loc->record.offset;
 	loc->forwardloc[level-1] = offset;
@@ -836,8 +908,15 @@ static int relocate(struct db *db)
     if (cmp == 0) { /* we found it exactly */
 	loc->is_exactmatch = 1;
 	loc->record = newrecord;
-	for (i = 0; i < loc->record.level; i++)
-	    loc->forwardloc[i] = _getloc(db, &loc->record, i);
+	for (i = 0; i < loc->record.level; i++) {
+	    r = _getloc(db, &loc->record, i, &loc->forwardloc[i]);
+	    if (r) return r;
+	}
+
+	/* make sure this record is complete */
+	r = check_tailcrc(db, &loc->record);
+
+	if (r) return r;
     }
 
     return 0;
@@ -887,8 +966,15 @@ static int find_loc(struct db *db, const char *key, size_t keylen)
 	    if (cmp == 0) {
 		db->loc.is_exactmatch = 1;
 		db->loc.record = newrecord;
-		for (i = 0; i < newrecord.level; i++)
-		    loc->forwardloc[i] = _getloc(db, &newrecord, i);
+		for (i = 0; i < newrecord.level; i++) {
+		    r = _getloc(db, &newrecord, i, &loc->forwardloc[i]);
+		    if (r) return r;
+		}
+
+		/* make sure this record is complete */
+		r = check_tailcrc(db, &loc->record);
+		if (r) return r;
+
 		return 0;
 	    }
 
@@ -933,12 +1019,18 @@ static int advance_loc(struct db *db)
     if (r) return r;
 
     /* update forward pointers */
-    for (i = 0; i < loc->record.level; i++)
-	loc->forwardloc[i] = _getloc(db, &loc->record, i);
+    for (i = 0; i < loc->record.level; i++) {
+	r = _getloc(db, &loc->record, i, &loc->forwardloc[i]);
+	if (r) return r;
+    }
 
     /* keep our location */
     buf_setmap(&loc->keybuf, _key(db, &loc->record), loc->record.keylen);
     loc->is_exactmatch = 1;
+
+    /* make sure this record is complete */
+    r = check_tailcrc(db, &loc->record);
+    if (r) return r;
 
     return 0;
 }
@@ -973,7 +1065,7 @@ static int stitch(struct db *db, uint8_t maxlevel)
 
 /* overall "store" function - pass NULL val for delete.  This is
  * the place that all changes funnel through */
-static int store_record(struct db *db, const char *val, size_t vallen)
+static int store_here(struct db *db, const char *val, size_t vallen)
 {
     struct skiploc *loc = &db->loc;
     struct skiprecord newrecord;
@@ -989,31 +1081,21 @@ static int store_record(struct db *db, const char *val, size_t vallen)
 
     /* build a new record */
     memset(&newrecord, 0, sizeof(struct skiprecord));
-    if (val) {
-	newrecord.type = '+';
-	newrecord.level = randlvl(1, MAXLEVEL);
-	newrecord.keylen = loc->keybuf.len;
-	newrecord.vallen = vallen;
-	for (i = 0; i < newrecord.level; i++)
-	    newrecord.nextloc[i+1] = loc->forwardloc[i];
-	if (newrecord.level > level)
-	    level = newrecord.level;
-    }
-    else {
-	if (!loc->is_exactmatch)
-	    return CYRUSDB_NOTFOUND;
-	/* remove this record */
-	newrecord.type = '-';
-	newrecord.nextloc[0] = loc->forwardloc[0];
-    }
+    newrecord.type = '+';
+    newrecord.level = randlvl(1, MAXLEVEL);
+    newrecord.keylen = loc->keybuf.len;
+    newrecord.vallen = vallen;
+    for (i = 0; i < newrecord.level; i++)
+	newrecord.nextloc[i+1] = loc->forwardloc[i];
+    if (newrecord.level > level)
+	level = newrecord.level;
 
     /* append to the file */
     r = append_record(db, &newrecord, loc->keybuf.s, val);
     if (r) return r;
 
-    /* get the nextlevel to point here - needs to be at least one! */
-    loc->forwardloc[0] = newrecord.offset;
-    for (i = 1; i < newrecord.level; i++)
+    /* get the nextlevel to point here for all this record's levels */
+    for (i = 0; i < newrecord.level; i++)
 	loc->forwardloc[i] = newrecord.offset;
 
     /* update all backpointers */
@@ -1025,18 +1107,58 @@ static int store_record(struct db *db, const char *val, size_t vallen)
     r = read_record(db, newrecord.offset, &loc->record);
     if (r) return r;
 
-    /* and update the forwardloc back to their correct values */
-    for (i = 0; i < loc->record.level; i++)
-	loc->forwardloc[i] = _getloc(db, &loc->record, i);
+    /* and update the location to know about it */
+    loc->is_exactmatch = 1;
+    for (i = 0; i < newrecord.level; i++)
+	loc->forwardloc[i] = newrecord.nextloc[i+1];
 
-    if (val) {
-	loc->is_exactmatch = 1;
-	db->header.num_records++;
-	db->header.repack_size += loc->record.len;
-    }
-    else {
-	loc->is_exactmatch = 0;
-    }
+    /* update header to know details of new record */
+    db->header.num_records++;
+    db->header.repack_size += loc->record.len;
+
+    loc->end = db->end;
+
+    return 0;
+}
+
+/* delete a record */
+static int delete_here(struct db *db)
+{
+    struct skiploc *loc = &db->loc;
+    struct skiprecord newrecord;
+    int r;
+
+    if (!loc->is_exactmatch)
+	return CYRUSDB_NOTFOUND;
+
+    db->header.num_records--;
+    db->header.repack_size -= loc->record.len;
+
+    /* build a delete record */
+    memset(&newrecord, 0, sizeof(struct skiprecord));
+    newrecord.type = '-';
+    newrecord.nextloc[0] = loc->forwardloc[0];
+
+    /* append to the file */
+    r = append_record(db, &newrecord, NULL, NULL);
+    if (r) return r;
+
+    /* get the nextlevel to point here */
+    loc->forwardloc[0] = newrecord.offset;
+
+    /* update all backpointers right up to the old record's
+     * level, so that they all point past */
+    r = stitch(db, loc->record.level);
+    if (r) return r;
+
+    /* load in the back record just so things match up neatly,
+     * may not strictly be required */
+    r = read_record(db, loc->backloc[0], &loc->record);
+    if (r) return r;
+
+    /* update location */
+    loc->forwardloc[0] = newrecord.nextloc[0];
+    loc->is_exactmatch = 0;
 
     loc->end = db->end;
 
@@ -1045,14 +1167,36 @@ static int store_record(struct db *db, const char *val, size_t vallen)
 
 /************ DATABASE STRUCT AND TRANSACTION MANAGEMENT **************/
 
+static int db_is_consistent(struct db *db)
+{
+    if (db->header.current_size != _size(db))
+	return 0;
+
+    if (db->header.flags & DIRTY)
+	return 0;
+
+    return 1;
+}
+
+static int unlock(struct db *db)
+{
+    return mappedfile_unlock(db->mf);
+}
+
 static int write_lock(struct db *db)
 {
     int r = mappedfile_writelock(db->mf);
     if (r) return r;
 
     /* reread header */
-    if (db->is_open)
-	return read_header(db);
+    if (db->is_open) {
+	r = read_header(db);
+	if (r) return r;
+    }
+
+    /* recovery checks for consistency */
+    r = recovery(db);
+    if (r) return r;
 
     return 0;
 }
@@ -1063,8 +1207,22 @@ static int read_lock(struct db *db)
     if (r) return r;
 
     /* reread header */
-    if (db->is_open)
-	return read_header(db);
+    if (db->is_open) {
+	r = read_header(db);
+	if (r) return r;
+
+	/* we just take and keep a write lock if inconsistent,
+	 * the write lock will fix it up */
+	if (!db_is_consistent(db)) {
+	    unlock(db);
+	    r = write_lock(db);
+	    if (r) return r;
+	    /* downgrade to a read lock again, since that what
+	     * was requested */
+	    unlock(db);
+	    return read_lock(db);
+	}
+    }
 
     return 0;
 }
@@ -1080,13 +1238,6 @@ static int newtxn(struct db *db, struct txn **tidptr)
     r = write_lock(db);
     if (r) return r;
 
-    /* didn't close cleanly before? */
-    if (db->header.flags & DIRTY) {
-	/* yikes, need recovery */
-	r = recovery(db);
-	if (r) return r;
-    }
-
     /* create the transaction */
     db->txn_num++;
     db->current_txn = xmalloc(sizeof(struct txn));
@@ -1096,11 +1247,6 @@ static int newtxn(struct db *db, struct txn **tidptr)
     *tidptr = db->current_txn;
 
     return 0;
-}
-
-static int unlock(struct db *db)
-{
-    return mappedfile_unlock(db->mf);
 }
 
 static void dispose_db(struct db *db)
@@ -1180,7 +1326,12 @@ static int opendb(const char *fname, int flags, struct db **ret)
 					    : bsearch_ncompare_raw;
 
     r = mappedfile_open(&db->mf, fname, flags & CYRUSDB_CREATE);
-    if (r) goto done;
+    if (r) {
+	/* convert to CYRUSDB errors*/
+	if (r == -ENOENT) r = CYRUSDB_NOTFOUND;
+	else r = CYRUSDB_IOERROR;
+	goto done;
+    }
 
     db->is_open = 0;
 
@@ -1188,18 +1339,22 @@ static int opendb(const char *fname, int flags, struct db **ret)
     r = read_lock(db);
     if (r) goto done;
 
-    /* if the file is empty, then the header needs to be created first */
-    if (mappedfile_size(db->mf) == 0) {
+    /* if there's any issue which requires fixing, get a write lock */
+    if (0) {
+    retry_write:
 	unlock(db);
+	db->is_open = 0;
 	r = write_lock(db);
 	if (r) goto done;
     }
 
-    /* race condition.  Another process may have already got the write
-     * lock and created the header. Only go ahead if the map_size is
-     * still zero (read/write_lock updates map_size). */
+    /* if the map size is zero, it's a new file - we need to create an
+     * initial header */
     if (mappedfile_size(db->mf) == 0) {
 	struct skiprecord dummy;
+
+	if (!mappedfile_iswritelocked(db->mf))
+	    goto retry_write;
 
 	/* create the dummy! */
 	memset(&dummy, 0, sizeof(struct skiprecord));
@@ -1233,19 +1388,17 @@ static int opendb(const char *fname, int flags, struct db **ret)
     r = read_header(db);
     if (r) goto done;
 
+    if (!db_is_consistent(db)) {
+	if (!mappedfile_iswritelocked(db->mf))
+	    goto retry_write;
+
+	/* recovery will clean the flag once it's committed the fixes */
+	r = recovery(db);
+	if (r) goto done;
+    }
+
     /* unlock the DB */
     unlock(db);
-
-    if (db->header.flags & DIRTY) {
-	/* need to run recovery */
-	r = write_lock(db);
-	if (r) goto done;
-	if (db->header.flags & DIRTY) {
-	    r = recovery(db);
-	    if (r) goto done;
-	}
-	unlock(db);
-    }
 
     *ret = db;
 
@@ -1340,7 +1493,7 @@ static int myfetch(struct db *db,
     } else {
 	/* grab a r lock */
 	r = read_lock(db);
-	return r;
+	if (r) return r;
     }
 
     r = find_loc(db, key, keylen);
@@ -1363,6 +1516,7 @@ static int myfetch(struct db *db,
 	r = CYRUSDB_NOTFOUND;
     }
 
+done:
     if (!tidptr) {
 	/* release read lock */
 	int r1;
@@ -1371,7 +1525,6 @@ static int myfetch(struct db *db,
 	}
     }
 
-done:
     return r;
 }
 
@@ -1408,7 +1561,7 @@ static int myforeach(struct db *db,
     } else {
 	/* grab a r lock */
 	r = read_lock(db);
-	return r;
+	if (r) return r;
 	need_unlock = 1;
     }
 
@@ -1481,18 +1634,18 @@ static int skipwrite(struct db *db,
 
     /* could be a delete or a replace */
     if (db->loc.is_exactmatch) {
-	if (!data) return store_record(db, NULL, 0);
+	if (!data) return delete_here(db);
 	if (!force) return CYRUSDB_EXISTS;
 	/* unchanged?  Save the IO */
 	if (!db->compar(data, datalen,
 			_val(db, &db->loc.record),
 			db->loc.record.vallen))
 	    return 0;
-	return store_record(db, data, datalen);
+	return store_here(db, data, datalen);
     }
 
     /* only create if it's not a delete, obviously */
-    if (data) return store_record(db, data, datalen);
+    if (data) return store_here(db, data, datalen);
 
     /* must be a delete - are we forcing? */
     if (!force) return CYRUSDB_NOTFOUND;
@@ -1532,7 +1685,7 @@ static int mycommit(struct db *db, struct txn *tid)
 	/* consider checkpointing */
 	size_t diff = db->header.current_size - db->header.repack_size;
 	if (diff > MINREWRITE &&
-	   (diff * 100 / db->header.current_size) > REWRITE_PERCENT)
+	   ((float)diff / (float)db->header.current_size) > REWRITE_RATIO)
 	    r = mycheckpoint(db);
 	else
 	    unlock(db);
@@ -1780,8 +1933,10 @@ static int myconsistent(struct db *db, struct txn *tid)
     if (r) return r;
 
     /* set up the location pointers */
-    for (i = 0; i < MAXLEVEL; i++)
-	fwd[i] = _getloc(db, &oldrecord, i);
+    for (i = 0; i < MAXLEVEL; i++) {
+	r = _getloc(db, &oldrecord, i, &fwd[i]);
+	if (r) return r;
+    }
 
     while (fwd[0]) {
 	r = read_record(db, fwd[0], &record);
@@ -1806,7 +1961,8 @@ static int myconsistent(struct db *db, struct txn *tid)
 		return CYRUSDB_INTERNAL;
 	    }
 	    /* and advance to the new pointer */
-	    fwd[i] = _getloc(db, &record, i);
+	    r = _getloc(db, &record, i, &fwd[i]);
+	    if (r) return r;
 	}
 
 	/* keep a copy for comparison purposes */
@@ -1840,8 +1996,8 @@ static int recovery(struct db *db)
 
     assert(mappedfile_iswritelocked(db->mf));
 
-    /* no need to run recovery if we're not dirty */
-    if (!(db->header.flags & DIRTY))
+    /* no need to run recovery if we're consistent */
+    if (db_is_consistent(db))
 	return 0;
 
     /* start with the dummy */
@@ -1880,7 +2036,8 @@ static int recovery(struct db *db)
 	}
 
 	/* find the next record */
-	nextoffset = _getloc(db, &record, 0);
+	r = _getloc(db, &record, 0, &nextoffset);
+	if (r) return r;
 
 	db->header.num_records++;
     }
