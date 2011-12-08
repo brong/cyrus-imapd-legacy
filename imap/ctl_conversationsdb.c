@@ -98,10 +98,8 @@ static int do_dump(const char *fname)
 
     r = conversations_open_path(fname, &state);
     if (r) {
-	/* TODO: wouldn't it be nice if we could translate this
-	 * error code into somethine useful for humans? */
-	fprintf(stderr, "Failed to open conversations database %s: %d\n",
-		fname, r);
+	fprintf(stderr, "Failed to open conversations database %s: %s\n",
+		fname, error_message(r));
 	return -1;
     }
 
@@ -118,8 +116,6 @@ static int do_undump(const char *fname)
 
     r = conversations_open_path(fname, &state);
     if (r) {
-	/* TODO: wouldn't it be nice if we could translate this
-	 * error code into somethine useful for humans? */
 	fprintf(stderr, "Failed to open conversations database %s: %s\n",
 		fname, error_message(r));
 	return -1;
