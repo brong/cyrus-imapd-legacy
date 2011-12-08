@@ -1588,13 +1588,20 @@ int sync_rename_cid(struct mailbox *mailbox,
     if (local->cid == remote->cid)
 	return 0; /* nothing to do */
 
+    /* copy the cid */
+    local->cid = remote->cid;
+
+    /* apply the new value to all cache records */
     if (local->cid && config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
-	r = conversations_rename_cid(cstate, local->cid, remote->cid);
+	/* load in cache to find message ids */
+	r = mailbox_cacherecord(mailbox, local);
+	if (r) return r;
+	/* update the conversations */
+	r = message_update_conversations(cstate, local, NULL, 1);
 	if (r) return r;
     }
 
-    local->cid = remote->cid;
     return 0;
 }
 
