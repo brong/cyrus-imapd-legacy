@@ -424,6 +424,7 @@ static int myabort(struct db *db, struct txn *tid);
 static int mycheckpoint(struct db *db);
 static int myconsistent(struct db *db, struct txn *tid);
 static int recovery(struct db *db);
+static int recovery1(struct db *db);
 
 /************** HELPER FUNCTIONS ****************/
 
@@ -783,6 +784,21 @@ static int append_record(struct db *db, struct skiprecord *record,
 
 /************************** LOCATION MANAGEMENT ***************************/
 
+static size_t _getzero(struct db *db, struct skiprecord *record)
+{
+    /* if one is past, must be the other */
+    if (record->nextloc[0] >= db->end)
+	return record->nextloc[1];
+    else if (record->nextloc[1] >= db->end)
+	return record->nextloc[0];
+
+    /* highest remaining */
+    else if (record->nextloc[0] > record->nextloc[1])
+	return record->nextloc[0];
+    else
+	return record->nextloc[1];
+}
+
 /* find the next record at a given level, encapsulating the
  * level 0 magic */
 static int _getloc(struct db *db, struct skiprecord *record,
@@ -797,17 +813,7 @@ static int _getloc(struct db *db, struct skiprecord *record,
 	return 0;
     }
 
-    /* if one is past, must be the other */
-    if (record->nextloc[0] >= db->end)
-	offset = record->nextloc[1];
-    else if (record->nextloc[1] >= db->end)
-	offset = record->nextloc[0];
-
-    /* highest remaining */
-    else if (record->nextloc[0] > record->nextloc[1])
-	offset = record->nextloc[0];
-    else
-	offset = record->nextloc[1];
+    offset = _getzero(db, record);
 
     /* obviously not a delete! */
     if (!offset) {
@@ -1254,10 +1260,8 @@ static void dispose_db(struct db *db)
     if (!db) return;
 
     if (db->mf) {
-	if (mappedfile_islocked(db->mf)) {
-	    syslog(LOG_ERR, "twoskip: %s closed while still locked", _fname(db));
+	if (mappedfile_islocked(db->mf))
 	    unlock(db);
-	}
 	mappedfile_close(&db->mf);
     }
 
@@ -1455,6 +1459,8 @@ static int myclose(struct db *db)
 	if (prev) prev->next = ent->next;
 	else open_twoskip = ent->next;
 	free(ent);
+	if (mappedfile_islocked(db->mf))
+	    syslog(LOG_ERR, "twoskip: %s closed while still locked", _fname(db));
 	dispose_db(db);
     }
 
@@ -1707,12 +1713,10 @@ static int myabort(struct db *db, struct txn *tid)
     /* free the tid */
     free(tid);
     db->current_txn = NULL;
+    db->end = db->header.current_size;
 
-    /* no need to abort if we're not dirty */
-    if (db->header.flags & DIRTY) {
-	db->end = db->header.current_size;
-	r = recovery(db);
-    }
+    /* recovery will clean up */
+    r = recovery1(db);
 
     unlock(db);
 
@@ -1773,6 +1777,7 @@ static int copy_cb(void *rock,
 
 static int mycheckpoint(struct db *db)
 {
+    size_t old_size = db->header.current_size;
     char newfname[1024];
     time_t start = time(NULL);
     struct copy_rock cr;
@@ -1808,8 +1813,8 @@ static int mycheckpoint(struct db *db)
 	goto err;
     }
 
-    cr.db->header.current_size = cr.db->end;
-    cr.db->header.repack_size = cr.db->end;
+    /* increase the generation count */
+    cr.db->header.generation = db->header.generation + 1;
 
     r = mycommit(cr.db, cr.tid);
     if (r) goto err;
@@ -1831,9 +1836,9 @@ static int mycheckpoint(struct db *db)
     {
 	int diff = time(NULL) - start;
 	syslog(LOG_INFO,
-	       "twoskip: checkpointed %s (%llu record%s, %llu bytes) in %d second%s",
+	       "twoskip: checkpointed %s (%llu record%s, %llu => %llu bytes) in %d second%s",
 	       _fname(db), (LLU)db->header.num_records,
-	       db->header.num_records == 1 ? "" : "s",
+	       db->header.num_records == 1 ? "" : "s", (LLU)old_size,
 	       (LLU)(db->header.current_size), diff, diff == 1 ? "" : "s");
     }
 
@@ -1880,7 +1885,7 @@ static int dump(struct db *db, int detail __attribute__((unused)))
 
 	switch (record.type) {
 	case '-':
-	    printf("DELETE ptr=%llX\n", (LLU)record.nextloc[0]);
+	    printf("DELETE ptr=%08llX\n", (LLU)record.nextloc[0]);
 	    break;
 
 	case '+':
@@ -1897,6 +1902,8 @@ static int dump(struct db *db, int detail __attribute__((unused)))
 	    }
 	    printf("\n");
 	}
+
+	offset += record.len;
     }
 
     return r;
@@ -1984,12 +1991,12 @@ static int myconsistent(struct db *db, struct txn *tid)
 
 /* run recovery on this file.
  * always called with a write lock. */
-static int recovery(struct db *db)
+static int recovery1(struct db *db)
 {
-    int needfix[MAXLEVEL+1];
+    size_t prev[MAXLEVEL+1];
+    size_t next[MAXLEVEL+1];
     struct skiprecord record;
     struct skiprecord fixrecord;
-    time_t start = time(NULL);
     size_t nextoffset = 0;
     int r = 0;
     int i;
@@ -2003,9 +2010,9 @@ static int recovery(struct db *db)
     /* start with the dummy */
     nextoffset = HEADER_SIZE;
 
-    /* and nothing needs updating */
+    /* and everything points back here */
     for (i = 0; i <= MAXLEVEL; i++)
-	needfix[i] = 0;
+	next[i] = nextoffset;
 
     db->header.num_records = 0;
 
@@ -2015,38 +2022,34 @@ static int recovery(struct db *db)
 
 	/* check for old offsets needing fixing */
 	for (i = 0; i <= record.level; i++) {
-	    if (needfix[i]) {
+	    if (next[i] != record.offset) {
 		/* need to fix up the previous record to point here */
-		r = read_record(db, needfix[i], &fixrecord);
+		r = read_record(db, prev[i], &fixrecord);
 		if (r) return r;
 
 		/* XXX - optimise adjacent same records */
 		fixrecord.nextloc[i] = record.offset;
 		r = rewrite_record(db, &fixrecord);
 		if (r) return r;
-
-		needfix[i] = 0;
 	    }
-	}
-
-	/* mark up any broken pointers on this one for fixing */
-	for (i = 0; i <= record.level; i++) {
-	    if (record.nextloc[i] >= db->end)
-		needfix[i] = record.offset;
+	    prev[i] = record.offset;
+	    next[i] = record.nextloc[i];
 	}
 
 	/* find the next record */
-	r = _getloc(db, &record, 0, &nextoffset);
+	nextoffset = _getzero(db, &record);
 	if (r) return r;
 
-	db->header.num_records++;
+	/* don't count the dummy or deletes */
+	if (record.keylen)
+	    db->header.num_records++;
     }
 
     /* check for remaining offsets needing fixing */
     for (i = 0; i <= MAXLEVEL; i++) {
-	if (needfix[i]) {
+	if (next[i]) {
 	    /* need to fix up the previous record to point to the end */
-	    r = read_record(db, needfix[i], &fixrecord);
+	    r = read_record(db, prev[i], &fixrecord);
 	    if (r) return r;
 
 	    /* XXX - optimise, same as above */
@@ -2067,13 +2070,24 @@ static int recovery(struct db *db)
     r = commit_header(db);
     if (r) return r;
 
+    return 0;
+}
+
+static int recovery(struct db *db)
+{
+    time_t start = time(NULL);
+    int r;
+
+    r = recovery1(db);
+    if (r) return r;
+
     {
 	int diff = time(NULL) - start;
 	syslog(LOG_INFO,
 	       "twoskip: recovered %s (%llu record%s, %llu bytes) in %d second%s",
 	       _fname(db), (LLU)db->header.num_records,
 	       db->header.num_records == 1 ? "" : "s",
-	       (LLU)(db->header.current_size+8), diff, diff == 1 ? "" : "s");
+	       (LLU)(db->header.current_size), diff, diff == 1 ? "" : "s");
     }
 
     return 0;
