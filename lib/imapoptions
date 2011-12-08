@@ -316,7 +316,7 @@ Blank lines and lines beginning with ``#'' are ignored.
    database with ctl_conversationsdb if you change this option on a
    running server, or the counts will be wrong.  */
 
-{ "conversations_db", "skiplist", STRINGLIST("berkeley", "berkeley-nosync", "berkeley-hash", "berkeley-hash-nosync", "skiplist", "sql")}
+{ "conversations_db", "skiplist", STRINGLIST("berkeley", "berkeley-nosync", "berkeley-hash", "berkeley-hash-nosync", "skiplist", "sql", "twoskip")}
 /* The cyrusdb backend to use for the per-user conversations database. */
 
 { "conversations_expire_days", 90, INT }
