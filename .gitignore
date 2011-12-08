@@ -54,6 +54,7 @@ imap/cyrdump
 imap/deliver
 imap/fetchnews
 imap/fud
+imap/hammer_cyrusdb
 imap/idled
 imap/imap_err.c
 imap/imap_err.h
