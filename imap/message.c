@@ -2582,7 +2582,7 @@ static int is_valid_rfc2822_inreplyto(const char *p)
 
 /*
  * Update the conversations database for the given
- * mailbox, to account for the given new message.
+ * mailbox, to account for the given message.
  * @body may be NULL, in which case we get everything
  * we need out of the cache item in @record.
  */
@@ -2712,10 +2712,11 @@ continue2:
 	/* Use the MAX of any CIDs found - as NULLCONVERSATION is
 	 * numerically zero this will be the only non-NULL CID or
 	 * the MAX of two or more non-NULL CIDs */
-	newcid = (newcid > found[i].cid ? newcid : found[i].cid);
+	if (!isreplica)
+	    newcid = (newcid > found[i].cid ? newcid : found[i].cid);
     }
 
-    if (newcid == NULLCONVERSATION)
+    if (newcid == NULLCONVERSATION && !isreplica)
 	newcid = generate_conversation_id(record, body);
 
     /*
@@ -2726,7 +2727,7 @@ continue2:
      * which would stuff up pruning of the database.
      */
     for (i = 0 ; i < nfound ; i++) {
-	if (found[i].cid == newcid)
+	if (found[i].cid >= newcid)
 	    continue;
 
 	/* we don't rename on a replica, because the master will
