@@ -1254,10 +1254,8 @@ static void dispose_db(struct db *db)
     if (!db) return;
 
     if (db->mf) {
-	if (mappedfile_islocked(db->mf)) {
-	    syslog(LOG_ERR, "twoskip: %s closed while still locked", _fname(db));
+	if (mappedfile_islocked(db->mf))
 	    unlock(db);
-	}
 	mappedfile_close(&db->mf);
     }
 
@@ -1455,6 +1453,8 @@ static int myclose(struct db *db)
 	if (prev) prev->next = ent->next;
 	else open_twoskip = ent->next;
 	free(ent);
+	if (mappedfile_islocked(db->mf))
+	    syslog(LOG_ERR, "twoskip: %s closed while still locked", _fname(db));
 	dispose_db(db);
     }
 
