@@ -2709,15 +2709,37 @@ continue2:
 	r = conversations_get_msgid(state, found[i].msgid, &found[i].cid);
 	if (r)
 	    goto out;
+    }
+
+    /*
+     * Work out the new CID this message will belong to.
+     * The @isreplica flag forces us to use the CID passed
+     * in the record, which came from the master.
+     */
+    if (!isreplica) {
 	/* Use the MAX of any CIDs found - as NULLCONVERSATION is
 	 * numerically zero this will be the only non-NULL CID or
 	 * the MAX of two or more non-NULL CIDs */
-	if (!isreplica)
+	for (i = 0 ; i < nfound ; i++)
 	    newcid = (newcid > found[i].cid ? newcid : found[i].cid);
-    }
+	if (newcid == NULLCONVERSATION)
+	    newcid = generate_conversation_id(record, body);
 
-    if (newcid == NULLCONVERSATION && !isreplica)
-	newcid = generate_conversation_id(record, body);
+	/*
+	 * Detect and handle CID renames.  Note that we don't rename on
+	 * a replica, because the master will do the rename and push the
+	 * changes anyway, and they would be likely to clash if we do
+	 * both ends.
+	 */
+	for (i = 0 ; i < nfound ; i++) {
+	    if (found[i].cid != NULLCONVERSATION) {
+		/* CIDs clashed */
+		r = mailbox_rename_cid(state, found[i].cid, newcid);
+		if (r)
+		    goto out;
+	    }
+	}
+    }
 
     /*
      * Update the database to add records for all the message-ids
@@ -2729,17 +2751,6 @@ continue2:
     for (i = 0 ; i < nfound ; i++) {
 	if (found[i].cid == newcid)
 	    continue;
-
-	/* we don't rename on a replica, because the master will
-	 * do the rename and push the changes anyway, and they
-	 * would be likely to clash if we do both ends */
-	if (found[i].cid != NULLCONVERSATION && !isreplica) {
-	    /* CIDs clashed */
-	    r = mailbox_rename_cid(state, found[i].cid, newcid);
-	    if (r)
-		goto out;
-	}
-
 	r = conversations_set_msgid(state, found[i].msgid, newcid);
 	if (r)
 	    goto out;
