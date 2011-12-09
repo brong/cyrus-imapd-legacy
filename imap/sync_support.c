@@ -1636,17 +1636,17 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
+    record->cid = cid;	/* use the CID given us */
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
-	if (!r) {
-	    record->cid = cid;	/* use the CID given us */
-	    r = message_update_conversations(cstate, record, body,
-					     /*isreplica*/1);
-	}
+	r = message_update_conversations(cstate, record, body, /*isreplica*/1);
+	/* check r later... */
     }
     message_free_body(body);
     free(body);
     body = NULL;
+    /* ... after we have freed the body */
+    if (r) return r;
 
     if (!message_guid_equal(&tmp_guid, &record->guid)) {
 	syslog(LOG_ERR, "IOERROR: guid mismatch on parse %s (%s)",
