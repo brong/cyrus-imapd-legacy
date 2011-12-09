@@ -1071,6 +1071,8 @@ static int compare_one_record(struct mailbox *mailbox,
 		log_mismatch("more recent on replica", mailbox, mp, rp);
 
 		if (kaction) {
+		    r = sync_rename_cid(mailbox, rp, mp);
+		    if (r) return r;
 		    r = apply_annotations(mailbox, mp, mannots, rannots, 0);
 		    if (r) return r;
 		}
@@ -1082,18 +1084,6 @@ static int compare_one_record(struct mailbox *mailbox,
 		}
 	    }
 
-	    if (mp->cid < rp->cid) {
-		log_mismatch("higher cid on replica", mailbox, mp, rp);
-
-		if (kaction && config_getswitch(IMAPOPT_CONVERSATIONS)) {
-		    struct conversations_state *cstate =
-			conversations_get_mbox(mailbox->name);
-		    r = mailbox_rename_cid(cstate, mp->cid, rp->cid);
-		    if (r) return r;
-		}
-
-		mp->cid = rp->cid;
-	    }
 	}
 
 	/* are we making changes yet? */

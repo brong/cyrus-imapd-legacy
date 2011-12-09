@@ -1214,13 +1214,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		    r = IMAP_SYNC_CHECKSUM;
 		    goto out;
 		}
-
-		/* if the replica has a higher CID, then we need to abort and let
-		 * the full sync fix it up */
-		if (rrecord.cid > mrecord.cid) {
-		    r = IMAP_SYNC_CHECKSUM;
-		    goto out;
-		}
 	    }
 
 	    /* skip out on the first pass */
@@ -1234,6 +1227,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		rrecord.user_flags[i] = mrecord.user_flags[i];
 
+	    r = sync_rename_cid(mailbox, &mrecord, &rrecord);
+	    if (r) {
+		syslog(LOG_ERR, "Failed to rename cid %s %u: %s",
+		       mailbox->name, recno, error_message(r));
+		goto out;
+	    }
+
 	    r = read_annotations(mailbox, &rrecord, &rannots);
 	    if (r) {
 		syslog(LOG_ERR, "Failed to read local annotations %s %u: %s",
@@ -1244,13 +1244,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    r = apply_annotations(mailbox, &rrecord, rannots, mannots, 0);
 	    if (r) {
 		syslog(LOG_ERR, "Failed to write merged annotations %s %u: %s",
-		       mailbox->name, recno, error_message(r));
-		goto out;
-	    }
-
-	    r = sync_rename_cid(mailbox, &mrecord, &rrecord);
-	    if (r) {
-		syslog(LOG_ERR, "Failed to rename cid %s %u: %s",
 		       mailbox->name, recno, error_message(r));
 		goto out;
 	    }
