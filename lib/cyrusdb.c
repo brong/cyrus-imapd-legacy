@@ -95,7 +95,7 @@ static int db_open(struct cyrusdb_backend *backend, const char *fname, int flags
     struct db *db = xzmalloc(sizeof(struct db));
     int r;
 
-    if (!backend) backend = DEFAULT_BACKEND;
+    if (!backend) backend = DEFAULT_BACKEND; /* not used yet, later */
     db->realbackend = backend;
 
     /* This whole thing is a fricking critical section.  We don't have the API
@@ -119,6 +119,7 @@ static int db_open(struct cyrusdb_backend *backend, const char *fname, int flags
     if (!realname) {
 	syslog(LOG_ERR, "DBERROR: failed to detect DB type for %s (backend %s) (r was %d)",
 	       fname, backend->name, r);
+	/* r is still set */
 	goto done;
     }
 
@@ -141,7 +142,8 @@ static int db_open(struct cyrusdb_backend *backend, const char *fname, int flags
 
 done:
 
-    if (!r) *ret = db;
+    if (r) free(db);
+    else *ret = db;
 
     return r;
 }
