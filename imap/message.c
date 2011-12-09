@@ -2727,7 +2727,7 @@ continue2:
      * which would stuff up pruning of the database.
      */
     for (i = 0 ; i < nfound ; i++) {
-	if (found[i].cid >= newcid)
+	if (found[i].cid == newcid)
 	    continue;
 
 	/* we don't rename on a replica, because the master will
