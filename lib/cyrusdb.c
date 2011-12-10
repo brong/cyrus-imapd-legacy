@@ -191,7 +191,11 @@ db_open_t *db_open_list[] = {
 
 static int db_close(struct db *db)
 {
-    return (db->realbackend->close)(db->realdb);
+    int r = (db->realbackend->close)(db->realdb);
+
+    free(db);
+
+    return r;
 }
 
 static int db_fetch(struct db *db,
