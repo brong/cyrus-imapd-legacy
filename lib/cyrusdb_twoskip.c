@@ -424,7 +424,7 @@ static int myabort(struct db *db, struct txn *tid);
 static int mycheckpoint(struct db *db);
 static int myconsistent(struct db *db, struct txn *tid);
 static int recovery(struct db *db);
-static int recovery1(struct db *db);
+static int recovery1(struct db *db, int *count);
 
 /************** HELPER FUNCTIONS ****************/
 
@@ -1716,7 +1716,7 @@ static int myabort(struct db *db, struct txn *tid)
     db->end = db->header.current_size;
 
     /* recovery will clean up */
-    r = recovery1(db);
+    r = recovery1(db, NULL);
 
     unlock(db);
 
@@ -1991,13 +1991,14 @@ static int myconsistent(struct db *db, struct txn *tid)
 
 /* run recovery on this file.
  * always called with a write lock. */
-static int recovery1(struct db *db)
+static int recovery1(struct db *db, int *count)
 {
     size_t prev[MAXLEVEL+1];
     size_t next[MAXLEVEL+1];
     struct skiprecord record;
     struct skiprecord fixrecord;
     size_t nextoffset = 0;
+    int changed = 0;
     int r = 0;
     int i;
 
@@ -2021,7 +2022,7 @@ static int recovery1(struct db *db)
 	if (r) return r;
 
 	/* check for old offsets needing fixing */
-	for (i = 0; i <= record.level; i++) {
+	for (i = 2; i <= record.level; i++) {
 	    if (next[i] != record.offset) {
 		/* need to fix up the previous record to point here */
 		r = read_record(db, prev[i], &fixrecord);
@@ -2031,9 +2032,19 @@ static int recovery1(struct db *db)
 		fixrecord.nextloc[i] = record.offset;
 		r = rewrite_record(db, &fixrecord);
 		if (r) return r;
+		changed++;
 	    }
 	    prev[i] = record.offset;
 	    next[i] = record.nextloc[i];
+	}
+
+	/* check for broken level - pointers */
+	for (i = 0; i < 2; i++) {
+	    if (record.nextloc[i] >= db->header.current_size) {
+		record.nextloc[i] = 0;
+		r = rewrite_record(db, &record);
+		changed++;
+	    }
 	}
 
 	/* find the next record */
@@ -2046,7 +2057,7 @@ static int recovery1(struct db *db)
     }
 
     /* check for remaining offsets needing fixing */
-    for (i = 0; i <= MAXLEVEL; i++) {
+    for (i = 2; i <= MAXLEVEL; i++) {
 	if (next[i]) {
 	    /* need to fix up the previous record to point to the end */
 	    r = read_record(db, prev[i], &fixrecord);
@@ -2056,6 +2067,7 @@ static int recovery1(struct db *db)
 	    fixrecord.nextloc[i] = 0;
 	    r = rewrite_record(db, &fixrecord);
 	    if (r) return r;
+	    changed++;
 	}
     }
 
@@ -2070,24 +2082,28 @@ static int recovery1(struct db *db)
     r = commit_header(db);
     if (r) return r;
 
+    if (count) *count = changed;
+
     return 0;
 }
 
 static int recovery(struct db *db)
 {
     time_t start = time(NULL);
+    int count = 0;
     int r;
 
-    r = recovery1(db);
+    r = recovery1(db, &count);
     if (r) return r;
 
     {
 	int diff = time(NULL) - start;
 	syslog(LOG_INFO,
-	       "twoskip: recovered %s (%llu record%s, %llu bytes) in %d second%s",
+	       "twoskip: recovered %s (%llu record%s, %llu bytes) in %d second%s - fixed %d offset%s",
 	       _fname(db), (LLU)db->header.num_records,
 	       db->header.num_records == 1 ? "" : "s",
-	       (LLU)(db->header.current_size), diff, diff == 1 ? "" : "s");
+	       (LLU)(db->header.current_size), diff, diff == 1 ? "" : "s",
+	       count, count == 1 ? "" : "s");
     }
 
     return 0;
