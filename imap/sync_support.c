@@ -1591,13 +1591,15 @@ int sync_rename_cid(struct mailbox *mailbox,
     /* copy the cid */
     local->cid = remote->cid;
 
-    /* apply the new value to all cache records */
+    /* apply the new value to all message ids */
     if (local->cid && config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
+	struct conversations_state *cstate;
+	cstate = conversations_get_mbox(mailbox->name);
+	assert(cstate);
 	/* load in cache to find message ids */
 	r = mailbox_cacherecord(mailbox, local);
 	if (r) return r;
-	/* update the conversations */
+	/* update the conversations db */
 	r = message_update_conversations(cstate, local, NULL, 1);
 	if (r) return r;
     }
