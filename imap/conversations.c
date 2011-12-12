@@ -538,8 +538,11 @@ int _conversation_save(struct conversations_state *state,
 	}
     }
 
-    if (!conv->num_records)
+    if (!conv->num_records) {
+	/* last existing record removed - clean up the 'B' record */
+	r = DB->delete(state->db, keycopy, keylen, &state->txn, 1);
 	goto done;
+    }
 
     dl = dlist_newlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", conv->modseq);
