@@ -4677,6 +4677,12 @@ int mailbox_rename_cid(struct conversations_state *state,
     conv_folder_t *folder;
     int r = 0;
 
+    /* boring cases - nothing to change */
+    if (!from_cid)
+	goto out;
+    if (from_cid == to_cid)
+	goto out;
+
     r = conversations_rename_cid(state, from_cid, to_cid);
     if (r)
 	goto out;
