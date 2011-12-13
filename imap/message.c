@@ -2732,12 +2732,9 @@ continue2:
 	 * both ends.
 	 */
 	for (i = 0 ; i < nfound ; i++) {
-	    if (found[i].cid != NULLCONVERSATION) {
-		/* CIDs clashed */
-		r = mailbox_rename_cid(state, found[i].cid, newcid);
-		if (r)
-		    goto out;
-	    }
+	    r = mailbox_rename_cid(state, found[i].cid, newcid);
+	    if (r)
+		goto out;
 	}
     }
 
