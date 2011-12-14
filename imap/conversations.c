@@ -1274,23 +1274,24 @@ static int folder_key_rename(struct conversations_state *state,
     const char *val;
     size_t vallen;
     char *oldkey = strconcat("F", from_name, (void *)NULL);
-    char *newkey = NULL;
     int r = 0;
 
     r = cyrusdb_fetch(state->db, oldkey, strlen(oldkey),
 		  &val, &vallen, &state->txn);
     if (r) goto done;
 
-    cyrusdb_delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
-
+    /* create before deleting so val is still valid */
     if (to_name) {
-	newkey = strconcat("F", to_name, (void *)NULL);
+	char *newkey = strconcat("F", to_name, (void *)NULL);
 	r = cyrusdb_store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+	free(newkey);
+	if (r) goto done;
     }
+
+    r = cyrusdb_delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
 
  done:
     free(oldkey);
-    free(newkey);
 
     return r;
 }
