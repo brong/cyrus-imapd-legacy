@@ -130,7 +130,7 @@ static int _init_counted(struct conversations_state *state,
 	val = config_getstring(IMAPOPT_CONVERSATIONS_COUNTED_FLAGS);
 	if (!val) val = "";
 	vallen = strlen(val);
-	r = DB->store(state->db, CFKEY, strlen(CFKEY),
+	r = cyrusdb_store(state->db, CFKEY, strlen(CFKEY),
 		      val, vallen, &state->txn);
 	if (r) {
 	    syslog(LOG_ERR, "Failed to write counted_flags");
@@ -169,7 +169,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
 
     open = xzmalloc(sizeof(struct conversations_open));
 
-    r = DB->open(fname, CYRUSDB_CREATE, &open->s.db);
+    r = cyrusdb_open(DB, fname, CYRUSDB_CREATE, &open->s.db);
     if (r || open->s.db == NULL) {
 	free(open);
 	return IMAP_IOERROR;
@@ -180,7 +180,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
     open_conversations = open;
 
     /* ensure a write lock immediately, and also load the counted flags */
-    DB->fetchlock(open->s.db, CFKEY, strlen(CFKEY),
+    cyrusdb_fetchlock(open->s.db, CFKEY, strlen(CFKEY),
 		  &val, &vallen, &open->s.txn);
     _init_counted(&open->s, val, vallen);
 
@@ -188,7 +188,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
     open->s.folder_names = strarray_new();
 
     /* if there's a value, parse as a dlist */
-    if (!DB->fetch(open->s.db, FNKEY, strlen(FNKEY),
+    if (!cyrusdb_fetch(open->s.db, FNKEY, strlen(FNKEY),
 		   &val, &vallen, &open->s.txn)) {
 	struct dlist *dl = NULL;
 	struct dlist *dp;
@@ -289,8 +289,8 @@ int conversations_abort(struct conversations_state **statep)
     
     if (state->db) {
 	if (state->txn)
-	    DB->abort(state->db, state->txn);
-	DB->close(state->db);
+	    cyrusdb_abort(state->db, state->txn);
+	cyrusdb_close(state->db);
     }
 
     _conv_remove(statep);
@@ -307,8 +307,8 @@ int conversations_commit(struct conversations_state **statep)
 
     if (state->db) {
 	if (state->txn)
-	    r = DB->commit(state->db, state->txn);
-	DB->close(state->db);
+	    r = cyrusdb_commit(state->db, state->txn);
+	cyrusdb_close(state->db);
     }
 
     _conv_remove(statep);
@@ -348,7 +348,7 @@ static int _conversations_set_key(struct conversations_state *state,
 
     buf_printf(&buf, "%d " CONV_FMT " %lu", version, cid, stamp);
 
-    r = DB->store(state->db,
+    r = cyrusdb_store(state->db,
 		  key, keylen,
 		  buf.s, buf.len,
 		  &state->txn);
@@ -432,7 +432,7 @@ int conversations_get_msgid(struct conversations_state *state,
     if (r)
 	return r;
 
-    r = DB->fetch(state->db,
+    r = cyrusdb_fetch(state->db,
 		  msgid, keylen,
 		  &data, &datalen,
 		  &state->txn);
@@ -466,7 +466,7 @@ static int folder_number(struct conversations_state *state,
 	dlist_printbuf(dl, 0, &buf);
 
 	/* store must succeed */
-	r = DB->store(state->db, FNKEY, strlen(FNKEY),
+	r = cyrusdb_store(state->db, FNKEY, strlen(FNKEY),
 		      buf.s, buf.len, &state->txn);
 
 	buf_free(&buf);
@@ -540,7 +540,7 @@ int _conversation_save(struct conversations_state *state,
 
     if (!conv->num_records) {
 	/* last existing record removed - clean up the 'B' record */
-	r = DB->delete(state->db, keycopy, keylen, &state->txn, 1);
+	r = cyrusdb_delete(state->db, keycopy, keylen, &state->txn, 1);
 	goto done;
     }
 
@@ -583,7 +583,7 @@ int _conversation_save(struct conversations_state *state,
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
-    r = DB->store(state->db,
+    r = cyrusdb_store(state->db,
 		  keycopy, keylen,
 		  buf.s, buf.len,
 		  &state->txn);
@@ -640,7 +640,7 @@ int conversation_getstatus(struct conversations_state *state,
     if (!state->db)
 	goto done;
 
-    r = DB->fetch(state->db,
+    r = cyrusdb_fetch(state->db,
 		  key, strlen(key),
 		  &data, &datalen,
 		  &state->txn);
@@ -710,7 +710,7 @@ int conversation_setstatus(struct conversations_state *state,
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
-    r = DB->store(state->db,
+    r = cyrusdb_store(state->db,
 		  key, strlen(key),
 		  buf.s, buf.len,
 		  &state->txn);
@@ -836,7 +836,7 @@ int conversation_load(struct conversations_state *state,
     int r;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
-    r = DB->fetch(state->db,
+    r = cyrusdb_fetch(state->db,
 		  bkey, strlen(bkey),
 		  &data, &datalen,
 		  &state->txn);
@@ -895,7 +895,7 @@ int conversation_get_modseq(struct conversations_state *state,
     int r;
 
     snprintf(bkey, sizeof(bkey), "B" CONV_FMT, cid);
-    r = DB->fetch(state->db,
+    r = cyrusdb_fetch(state->db,
 		  bkey, strlen(bkey),
 		  &data, &datalen,
 		  &state->txn);
@@ -1111,7 +1111,7 @@ static int prunecb(void *rock,
 
     prock->ndeleted++;
 
-    return DB->delete(prock->state->db,
+    return cyrusdb_delete(prock->state->db,
 		      key, keylen,
 		      &prock->state->txn,
 		      /*force*/1);
@@ -1123,7 +1123,7 @@ int conversations_prune(struct conversations_state *state,
 {
     struct prune_rock rock = { state, thresh, 0, 0 };
 
-    DB->foreach(state->db, "<", 1, NULL, prunecb, &rock, &state->txn);
+    cyrusdb_foreach(state->db, "<", 1, NULL, prunecb, &rock, &state->txn);
 
     if (nseenp)
 	*nseenp = rock.nseen;
@@ -1212,7 +1212,7 @@ int conversations_rename_cid(struct conversations_state *state,
     rrock.from_cid = from_cid;
     rrock.to_cid = to_cid;
 
-    DB->foreach(state->db, "<", 1, NULL, do_one_rename, &rrock, &state->txn);
+    cyrusdb_foreach(state->db, "<", 1, NULL, do_one_rename, &rrock, &state->txn);
 
     syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu"
 		       " from %08llx to %08llx",
@@ -1277,15 +1277,15 @@ static int folder_key_rename(struct conversations_state *state,
     char *newkey = NULL;
     int r = 0;
 
-    r = DB->fetch(state->db, oldkey, strlen(oldkey),
+    r = cyrusdb_fetch(state->db, oldkey, strlen(oldkey),
 		  &val, &vallen, &state->txn);
     if (r) goto done;
 
-    DB->delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
+    cyrusdb_delete(state->db, oldkey, strlen(oldkey), &state->txn, 1);
 
     if (to_name) {
 	newkey = strconcat("F", to_name, (void *)NULL);
-	r = DB->store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+	r = cyrusdb_store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
     }
 
  done:
@@ -1312,7 +1312,7 @@ int conversations_rename_folder(struct conversations_state *state,
      * this would make sense - but that's not really likely, so this
      * is probably faster */
 
-    DB->foreach(state->db, "B", 1, NULL, do_folder_rename, &frock, &state->txn);
+    cyrusdb_foreach(state->db, "B", 1, NULL, do_folder_rename, &frock, &state->txn);
 
     folder_key_rename(state, from_name, to_name);
 
@@ -1330,28 +1330,28 @@ static int delete_cb(void *rock,
 		     size_t vallen __attribute__((unused)))
 {
     struct conversations_state *state = (struct conversations_state *)rock;
-    return DB->delete(state->db, key, keylen, &state->txn, 1);
+    return cyrusdb_delete(state->db, key, keylen, &state->txn, 1);
 }
 
 int conversations_wipe_counts(struct conversations_state *state)
 {
     int r = 0;
     /* wipe B counts */
-    r = DB->foreach(state->db, "B", 1, NULL, delete_cb,
+    r = cyrusdb_foreach(state->db, "B", 1, NULL, delete_cb,
 		    state, &state->txn);
     if (r) return r;
 
     /* wipe F counts */
-    r = DB->foreach(state->db, "F", 1, NULL, delete_cb,
+    r = cyrusdb_foreach(state->db, "F", 1, NULL, delete_cb,
 		    state, &state->txn);
     if (r) return r;
 
     /* wipe counted_flags */
-    r = DB->delete(state->db, CFKEY, 14, &state->txn, 1);
+    r = cyrusdb_delete(state->db, CFKEY, 14, &state->txn, 1);
     if (r) return r;
 
     /* wipe folder names */
-    r = DB->delete(state->db, FNKEY, 14, &state->txn, 1);
+    r = cyrusdb_delete(state->db, FNKEY, 14, &state->txn, 1);
     if (r) return r;
 
     return _init_counted(state, NULL, 0);
@@ -1359,17 +1359,17 @@ int conversations_wipe_counts(struct conversations_state *state)
 
 void conversations_dump(struct conversations_state *state, FILE *fp)
 {
-    cyrusdb_dump(DB, state->db, "", 0, fp, &state->txn);
+    cyrusdb_dumpfile(state->db, "", 0, fp, &state->txn);
 }
 
 int conversations_truncate(struct conversations_state *state)
 {
-    return cyrusdb_truncate(DB, state->db, &state->txn);
+    return cyrusdb_truncate(state->db, &state->txn);
 }
 
 int conversations_undump(struct conversations_state *state, FILE *fp)
 {
-    return cyrusdb_undump(DB, state->db, fp, &state->txn);
+    return cyrusdb_undumpfile(state->db, fp, &state->txn);
 }
 
 #undef DB
