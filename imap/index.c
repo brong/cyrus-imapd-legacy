@@ -1867,7 +1867,9 @@ int index_convsort(struct index_state *state,
 	MsgData *msg = msgdata[mi];
 	struct index_record *record = &state->map[msg->msgno-1].record;
 
-	assert(!(record->system_flags & FLAG_EXPUNGED));
+	/* can happen if we didn't "tellchanges" yet */
+	if (record->system_flags & FLAG_EXPUNGED)
+	    continue;
 
 	/* run the search program against all messages */
 	if (!index_search_evaluate(state, searchargs, msg->msgno, NULL))
