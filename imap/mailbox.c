@@ -1605,6 +1605,19 @@ int mailbox_read_index_record(struct mailbox *mailbox,
     return r;
 }
 
+int mailbox_lock_conversations(struct mailbox *mailbox)
+{
+    /* not needed */
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    /* already locked */
+    if (conversations_get_mbox(mailbox->name))
+	return 0;
+
+    return conversations_open_mbox(mailbox->name, &mailbox->local_cstate);
+}
+
 /*
  * bsearch() function to compare two index record buffers by UID
  */
@@ -1654,6 +1667,7 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
     assert(!mailbox->index_locktype);
 
 restart:
+    r = 0;
 
     if (locktype == LOCK_EXCLUSIVE) {
 	/* handle read-only case cleanly - we need to re-open read-write first! */
@@ -1661,6 +1675,9 @@ restart:
 	    mailbox->is_readonly = 0;
 	    r = mailbox_open_index(mailbox);
 	}
+	/* XXX - this could be handled out a layer, but we always
+	 * need to have a locked conversations DB */
+	if (!r) r = mailbox_lock_conversations(mailbox);
 	if (!r) r = lock_blocking(mailbox->index_fd);
     }
     else if (locktype == LOCK_SHARED) {
@@ -1845,11 +1862,18 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 		mailbox->name);
 	mailbox->index_locktype = 0;
     }
+
     gettimeofday(&endtime, 0);
     timediff = timesub(&mailbox->starttime, &endtime);
     if (timediff > 1.0) {
 	syslog(LOG_NOTICE, "mailbox: longlock %s for %0.1f seconds",
 	       mailbox->name, timediff);
+
+    if (mailbox->local_cstate) {
+	int r = conversations_commit(&mailbox->local_cstate);
+	if (r)
+	    syslog(LOG_ERR, "Error committing to conversations database for mailbox %s: %s",
+		   mailbox->name, error_message(r));
     }
 }
 
@@ -2025,6 +2049,8 @@ int mailbox_commit_quota(struct mailbox *mailbox)
 
     return 0;
 }
+
+
 
 /*
  * Write the index header for 'mailbox'
@@ -2204,6 +2230,128 @@ out:
     return r;
 }
 
+int mailbox_update_conversations(struct mailbox *mailbox,
+				 struct index_record *old,
+				 struct index_record *new)
+{
+    int r = 0;
+    conversation_t *conv = NULL;
+    int delta_exists = 0;
+    int delta_unseen = 0;
+    int *delta_counts = NULL;
+    int i;
+    modseq_t modseq = 0;
+    conversation_id_t cid = NULLCONVERSATION;
+    struct conversations_state *cstate = NULL;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    cstate = conversations_get_mbox(mailbox->name);
+    if (!cstate)
+	return IMAP_CONVERSATIONS_NOT_OPEN;
+
+    if (!old && !new)
+	return IMAP_INTERNAL;
+
+    if (old && new) {
+	assert(old->uid == new->uid);
+	assert(old->modseq <= new->modseq);
+	/* this flag cannot go away */
+	if ((old->system_flags & FLAG_EXPUNGED))
+	    assert((new->system_flags & FLAG_EXPUNGED));
+
+	if (old->cid != new->cid) {
+	    /* handle CID being renamed, by calling ourselves */
+	    r = mailbox_update_conversations(mailbox, old, NULL);
+	    if (!r)
+		r = mailbox_update_conversations(mailbox, NULL, new);
+	    return r;
+	}
+    }
+    cid = (new ? new->cid : old->cid);
+
+    r = conversation_load(cstate, cid, &conv);
+    if (r)
+	return r;
+    if (!conv)
+	conv = conversation_new(cstate);
+
+    if (cstate->counted_flags)
+	delta_counts = xzmalloc(sizeof(int) * cstate->counted_flags->count);
+
+    /* calculate the changes */
+    if (old) {
+	/* decrease any relevent counts */
+	if (!(old->system_flags & FLAG_EXPUNGED)) {
+	    delta_exists--;
+	    /* drafts are never unseen */
+	    if (!(old->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
+		delta_unseen--;
+	    if (cstate->counted_flags) {
+		for (i = 0; i < cstate->counted_flags->count; i++) {
+		    const char *flag = strarray_nth(cstate->counted_flags, i);
+		    if (mailbox_record_hasflag(mailbox, old, flag))
+			delta_counts[i]--;
+		}
+	    }
+	}
+	modseq = MAX(modseq, old->modseq);
+    }
+    if (new) {
+	/* add any counts */
+	if (!(new->system_flags & FLAG_EXPUNGED)) {
+	    delta_exists++;
+	    /* drafts are never unseen */
+	    if (!(new->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
+		delta_unseen++;
+	    if (cstate->counted_flags) {
+		for (i = 0; i < cstate->counted_flags->count; i++) {
+		    const char *flag = strarray_nth(cstate->counted_flags, i);
+		    if (mailbox_record_hasflag(mailbox, new, flag))
+			delta_counts[i]++;
+		}
+	    }
+	}
+	modseq = MAX(modseq, new->modseq);
+    }
+
+    /* drafts don't generate sender records so you don't spuriously get
+     * yourself just for clicking on "reply" then aborting */
+    if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
+	if (!mailbox_cacherecord(mailbox, new)) {
+	    char *env = NULL;
+	    char *envtokens[NUMENVTOKENS];
+	    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
+
+	    /* Need to find the sender */
+
+	    /* +1 -> skip the leading paren */
+	    env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
+			   cacheitem_size(new, CACHE_ENVELOPE) - 1);
+
+	    parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
+
+	    if (envtokens[ENV_FROM])
+		message_parse_env_address(envtokens[ENV_FROM], &addr);
+
+	    conversation_add_sender(conv, addr.name, addr.route,
+				    addr.mailbox, addr.domain);
+
+	    free(env);
+	}
+    }
+
+    conversation_update(cstate, conv, mailbox->name,
+			delta_exists, delta_unseen,
+			delta_counts, modseq);
+
+    r = conversation_save(cstate, cid, conv);
+
+    conversation_free(conv);
+    return r;
+}
+
 /*
  * Rewrite an index record in a mailbox - updates all
  * necessary tracking fields automatically.
@@ -2311,6 +2459,9 @@ int mailbox_rewrite_index_record(struct mailbox *mailbox,
 		session_id(), mailbox->name, mailbox->uniqueid,
 		record->uid, message_guid_encode(&record->guid));
     }
+
+    r = mailbox_update_conversations(mailbox, &oldrecord, record);
+    if (r) return r;
 
     return mailbox_refresh_index_map(mailbox);
 }
@@ -2442,6 +2593,9 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 		   session_id(), mailbox->name, mailbox->uniqueid,
 		   record->uid);
     }
+
+    r = mailbox_update_conversations(mailbox, NULL, record);
+    if (r) return r;
 
     return mailbox_refresh_index_map(mailbox);
 }
@@ -2940,6 +3094,13 @@ int mailbox_create(const char *name,
 	goto done;
     }
     mailbox->index_locktype = LOCK_EXCLUSIVE;
+    r = mailbox_lock_conversations(mailbox);
+    if (r) {
+	syslog(LOG_ERR, "IOERROR: locking conversations %s %s",
+	       mailbox->name, error_message(r));
+	r = IMAP_IOERROR;
+	goto done;
+    }
 
     fname = mailbox_meta_fname(mailbox, META_CACHE);
     if (!fname) {
@@ -2962,7 +3123,7 @@ int mailbox_create(const char *name,
     else
 	mboxname_setuidvalidity(mailbox->name, uidvalidity);
     /* and highest modseq */
-    if (!highestmodseq) 
+    if (!highestmodseq)
 	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
     else
 	mboxname_setmodseq(mailbox->name, highestmodseq);
@@ -4456,6 +4617,44 @@ out:
     return 0;
 }
 
+int mailbox_rename_cid(struct conversations_state *state,
+		       conversation_id_t from_cid,
+		       conversation_id_t to_cid)
+{
+    struct buf action = BUF_INITIALIZER;
+    conversation_t *conv = NULL;
+    conv_folder_t *folder;
+    int r = 0;
+
+    r = conversations_rename_cid(state, from_cid, to_cid);
+    if (r)
+	goto out;
+
+    /* Use the B record to notify mailboxes of a CID rename.
+     * We don't actually alter the values, because the EXPUNGE
+     * events later will decrease the EXISTS back to zero, and
+     * then it will delete itself */
+    r = conversation_load(state, from_cid, &conv);
+    if (!r && conv) {
+	for (folder = conv->folders ; folder ; folder = folder->next) {
+	    buf_reset(&action);
+	    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
+		       from_cid, to_cid);
+
+	    r = mailbox_post_action(folder->mboxname, &action);
+	    if (r)
+		syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
+		       folder->mboxname, error_message(r));
+	    r = 0;	/* ignore any error and keep going */
+	}
+	conversation_free(conv);
+    }
+
+out:
+    buf_free(&action);
+    return r;
+}
+
 int mailbox_post_nop_action(const char *name, unsigned int tag)
 {
     struct buf action = BUF_INITIALIZER;
@@ -4465,6 +4664,99 @@ int mailbox_post_nop_action(const char *name, unsigned int tag)
     r = mailbox_post_action(name, &action);
     buf_free(&action);
     return r;
+}
+
+static void mailbox_action_cid_rename(struct mailbox *mailbox,
+				      const strarray_t *action,
+				      const char *fname,
+				      unsigned int lineno)
+{
+    conversation_id_t from_cid, to_cid;
+    uint32_t recno, num_records;
+    struct index_record record;
+    struct index_record new_record;
+    char msgfile[MAX_MAILBOX_PATH], newmsgfile[MAX_MAILBOX_PATH];
+    int r;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return;
+
+    if (action->count != 3)
+	goto bad_syntax;
+
+    r = conversation_id_decode(&from_cid, action->data[1]);
+    if (!r)
+	goto bad_syntax;
+    r = conversation_id_decode(&to_cid, action->data[2]);
+    if (!r)
+	goto bad_syntax;
+
+    syslog(LOG_NOTICE, "Performing delayed CID rename: %s -> %s",
+			action->data[1], action->data[2]);
+
+    num_records = mailbox->i.num_records;
+    for (recno = 1; recno <= num_records; recno++) {
+
+	r = mailbox_read_index_record(mailbox, recno, &record);
+	if (r) {
+	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+			    "reading record %u, mailbox %s: %s",
+			    recno, mailbox->name, error_message(r));
+	    return;
+	}
+
+	if (record.system_flags & FLAG_EXPUNGED)
+	    continue;
+	if (record.cid != from_cid)
+	    continue;
+
+	/*
+	 * [IRIS-293] handle CID renaming by re-inserting a new message
+	 * and expunging the old one.  Thus the UID->CID mapping remains
+	 * constant, i.e. the CID is an immutable property of a message.
+	 * This is expected to aid caching in conversation-aware clients.
+	 */
+
+	/* clone the record */
+	new_record = record;
+	/* old record will be expunged */
+	record.system_flags |= (FLAG_EXPUNGED|FLAG_UNLINKED);
+	/* new record has new CID and UID */
+	new_record.cid = to_cid;
+	new_record.uid = mailbox->i.last_uid+1;
+
+	/* hardlink the old message file to the new name */
+	strncpy(msgfile, mailbox_message_fname(mailbox, record.uid),
+		MAX_MAILBOX_PATH);
+	strncpy(newmsgfile, mailbox_message_fname(mailbox, new_record.uid),
+		MAX_MAILBOX_PATH);
+	r = mailbox_copyfile(msgfile, newmsgfile, 0);
+
+	/* append the new record */
+	if (!r)
+	    r = mailbox_append_index_record(mailbox, &new_record);
+
+	/* rewrite the old record */
+	if (!r)
+	    r = mailbox_rewrite_index_record(mailbox, &record);
+
+	/* finally, remove the old message file */
+	if (!r && unlink(msgfile) < 0)
+	    r = IMAP_IOERROR;
+
+	if (r) {
+	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+			    "reinserting record %u, mailbox %s: %s",
+			    recno, mailbox->name, error_message(r));
+	    return;
+	}
+    }
+
+    return;
+
+bad_syntax:
+    syslog(LOG_ERR, "Bad syntax for CIDRENAME, line %u file %s",
+		    lineno, fname);
 }
 
 /* This is for testing only */
@@ -4501,6 +4793,8 @@ static void mailbox_execute_actions_file(struct mailbox *mailbox,
 
 	if (!strcmp(action->data[0], "NOP")) {
 	    mailbox_action_nop(mailbox, action, fname, lineno);
+	} else if (!strcmp(action->data[0], "CIDRENAME")) {
+	    mailbox_action_cid_rename(mailbox, action, fname, lineno);
 	} else {
 	    syslog(LOG_ERR, "Unknown record type \"%s\", line %u file %s",
 			    action->data[0], lineno, fname);

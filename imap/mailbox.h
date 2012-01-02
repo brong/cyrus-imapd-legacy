@@ -52,6 +52,7 @@
 
 #include "auth.h"
 #include "byteorder64.h"
+#include "conversations.h"
 #include "message_guid.h"
 #include "prot.h"
 #include "quota.h"
@@ -139,7 +140,7 @@ struct index_record {
     uint32_t cache_version;
     struct message_guid guid;
     modseq_t modseq;
-    bit64 cid;
+    conversation_id_t cid;
     bit32 cache_crc;
     bit32 record_crc;
 
@@ -227,6 +228,9 @@ struct mailbox {
 
     /* annotations */
     struct annotate_state *annot_state;
+
+    /* conversations */
+    struct conversations_state *local_cstate;
 
     /* change management */
     int modseq_dirty;
@@ -553,6 +557,15 @@ void mailbox_use_annot_quota(struct mailbox *mailbox, quota_t diff);
 extern int mailbox_get_annotate_state(struct mailbox *mailbox,
 				      unsigned int uid,
 				      struct annotate_state **statep);
+
+/* Rename a CID.  Note this will post delayed actions on
+ * potentially multiple mailboxes */
+extern int mailbox_rename_cid(struct conversations_state *state,
+			      conversation_id_t from_cid,
+			      conversation_id_t to_cid);
+extern int mailbox_update_conversations(struct mailbox *mailbox,
+					struct index_record *old,
+					struct index_record *new);
 
 /* used for testing */
 extern int mailbox_post_nop_action(const char *name, unsigned int tag);

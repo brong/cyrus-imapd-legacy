@@ -138,7 +138,8 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 			 struct searchargs *searchargs,
 			 modseq_t *highestmodseq);
 
-static int index_copysetup(struct index_state *state, uint32_t msgno, struct copyargs *copyargs);
+static int index_copysetup(struct index_state *state, uint32_t msgno,
+			   struct copyargs *copyargs, int is_same_user);
 static int index_storeflag(struct index_state *state, uint32_t msgno,
 			   struct storeargs *storeargs);
 static int index_store_annotation(struct index_state *state, uint32_t msgno,
@@ -1627,10 +1628,15 @@ index_copy(struct index_state *state,
     struct mailbox *mailbox = state->mailbox;
     struct mailbox *destmailbox = NULL;
     struct index_map *im;
+    int is_same_user;
 
     *copyuidp = NULL;
 
     copyargs.nummsg = 0;
+
+    is_same_user = mboxname_same_userid(mailbox->name, name);
+    if (is_same_user < 0)
+	return is_same_user;
 
     r = index_check(state, usinguid, usinguid);
     if (r) return r;
@@ -1642,7 +1648,7 @@ index_copy(struct index_state *state,
 	checkval = usinguid ? im->record.uid : msgno;
 	if (!seqset_ismember(seq, checkval))
 	    continue;
-	index_copysetup(state, msgno, &copyargs);
+	index_copysetup(state, msgno, &copyargs, is_same_user);
     }
 
     seqset_free(seq);
@@ -3854,7 +3860,7 @@ void index_getsearchtext(struct index_state *state,
  */
 #define COPYARGSGROW 30
 static int index_copysetup(struct index_state *state, uint32_t msgno,
-			   struct copyargs *copyargs)
+			   struct copyargs *copyargs, int is_same_user)
 {
     int flag = 0;
     int userflag;
@@ -3901,6 +3907,12 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
 
     /* grab seen from our state - it's different for different users */
     copyargs->copymsg[copyargs->nummsg].seen = im->isseen;
+
+    /* CIDs are per-user, so we can reuse the cid if we're copying
+     * between mailboxes owned by the same user.  Otherwise we need
+     * to zap the cid and let append_copy() recalculate it. */
+    copyargs->copymsg[copyargs->nummsg].cid =
+		    (is_same_user ? im->record.cid : NULLCONVERSATION);
 
     copyargs->nummsg++;
 

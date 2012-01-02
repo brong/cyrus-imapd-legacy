@@ -59,6 +59,7 @@
 #include <assert.h>
 
 #include "crc32.h"
+#include "dlist.h"
 #include "exitcodes.h"
 #include "imap/imap_err.h"
 #include "prot.h"
@@ -2446,5 +2447,178 @@ void message_parse_env_address(char *str, struct address *addr)
     addr->mailbox = parse_nstring(&str);
     str++; /* skip SP */
     addr->domain = parse_nstring(&str);
+}
+
+
+
+/*
+ * Generate a conversation id from the given message.
+ * The conversation id is defined as the first 64b of
+ * the SHA1 of the message, except that an all-zero
+ * conversation id is not valid.
+ */
+static conversation_id_t generate_conversation_id(const struct body *body)
+{
+    conversation_id_t cid = 0;
+    size_t i;
+
+    assert(body->guid.status == GUID_NONNULL);
+
+    for (i = 0 ; i < sizeof(cid) ; i++) {
+	cid <<= 8;
+	cid |= body->guid.value[i];
+    }
+
+    /*
+     * We carefully avoid returning NULLCONVERSATION as
+     * a new cid, as that would confuse matters no end.
+     */
+    if (cid == NULLCONVERSATION)
+	cid = 1;
+
+    return cid;
+}
+
+/*
+ * Update the conversations database for the given
+ * mailbox, to account for the given new message.
+ */
+int message_update_conversations(struct conversations_state *state,
+			         struct index_record *record,
+			         const struct body *body)
+{
+    char *hdrs[3];
+    /* TODO: need an expanding array class here */
+    struct {
+	char *msgid;
+	conversation_id_t cid;
+    } *found = NULL;
+    int nfound = 0;
+#define ALLOCINCREMENT 16
+    conversation_id_t newcid = record->cid;
+    int i;
+    int j;
+    int r = 0;
+    char *msgid;
+
+    /*
+     * Gather all the msgids mentioned in the message, starting with
+     * the oldest message in the References: header, then any mesgids
+     * mentioned in the In-Reply-To: header, and finally the message's
+     * own Message-Id:.  In general this will result in duplicates (a
+     * correct References: header will contain as its last entry the
+     * msgid in In-Reply-To:), so we weed those out before proceeding
+     * to the database.
+     */
+    hdrs[0] = body->references;
+    hdrs[1] = body->in_reply_to;
+    hdrs[2] = body->message_id;
+    for (i = 0 ; i < 3 ; i++) {
+continue2:
+	while ((msgid = find_msgid(hdrs[i], &hdrs[i])) != NULL) {
+
+	    /*
+	     * The issue of case sensitivity of msgids is curious.
+	     * RFC2822 seems to imply they're case-insensitive,
+	     * without explicitly stating so.  So here we punt
+	     * on that being the case.
+	     *
+	     * Note that the THREAD command elsewhere in Cyrus
+	     * assumes otherwise.
+	     */
+	    msgid = lcase(msgid);
+
+	    /* check for duplicates.  O(N^2), yuck */
+	    for (j = 0 ; j < nfound ; j++) {
+		if (!strcmp(msgid, found[j].msgid)) {
+		    free(msgid);
+		    goto continue2;
+		}
+	    }
+
+	    /* it's unique, add it */
+
+	    if (nfound % ALLOCINCREMENT == 0) {
+		found = xrealloc(found,
+			    (nfound+ALLOCINCREMENT) * sizeof(*found));
+	    }
+
+	    found[nfound].msgid = msgid;
+	    found[nfound].cid = NULLCONVERSATION;
+	    nfound++;
+	}
+    }
+
+    /*
+     * For each unique message-id, lookup the conversations database
+     * to work out which conversation id that message belongs to.
+     */
+    for (i = 0 ; i < nfound ; i++) {
+	r = conversations_get_msgid(state, found[i].msgid, &found[i].cid);
+	if (r)
+	    goto out;
+	/* Use the MAX of any CIDs found - as NULLCONVERSATION is
+	 * numerically zero this will be the only non-NULL CID or
+	 * the MAX of two or more non-NULL CIDs */
+	newcid = (newcid > found[i].cid ? newcid : found[i].cid);
+    }
+
+    if (newcid == NULLCONVERSATION)
+	newcid = generate_conversation_id(body);
+
+    /*
+     * Update the database to add records for all the message-ids
+     * not already mentioned.  Note that we take care to avoid
+     * setting those which are already set, because that would be
+     * wasteful and it would also change the record's timestamp,
+     * which would stuff up pruning of the database.
+     */
+    for (i = 0 ; i < nfound ; i++) {
+	if (found[i].cid == newcid)
+	    continue;
+
+	if (found[i].cid != NULLCONVERSATION) {
+	    /* CIDs clashed */
+	    r = mailbox_rename_cid(state, found[i].cid, newcid);
+	    if (r)
+		goto out;
+	}
+
+	r = conversations_set_msgid(state, found[i].msgid, newcid);
+	if (r)
+	    goto out;
+    }
+
+    record->cid = newcid;
+
+out:
+    for (i = 0 ; i < nfound ; i++)
+	free(found[i].msgid);
+    free(found);
+    return r;
+}
+
+int message_update_conversations_file(struct conversations_state *state,
+				      struct index_record *record,
+				      const char *fname)
+{
+    struct body *body = NULL;
+    FILE *fp;
+    int r;
+
+    fp = fopen(fname, "r");
+    if (fp == NULL)
+	return IMAP_IOERROR;
+
+    r = message_parse_file(fp, NULL, NULL, &body);
+    fclose(fp);
+    if (r)
+	return r;
+
+    r = message_update_conversations(state, record, body);
+
+    message_free_body(body);
+
+    return r;
 }
 
