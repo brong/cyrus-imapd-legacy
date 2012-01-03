@@ -1837,6 +1837,11 @@ int index_convsort(struct index_state *state,
     assert(!windowargs->changedsince);
     assert(!windowargs->upto);
 
+    /* make sure everything is expunged.  Will also lock the
+     * mailbox state and read any new information */
+    r = index_expunge(state, NULL, 1);
+    if (r) return r;
+
     cstate = conversations_get_mbox(state->mailbox->name);
     if (!cstate)
 	return IMAP_INTERNAL;
