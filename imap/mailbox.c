@@ -3144,11 +3144,13 @@ int mailbox_create(const char *name,
 	uidvalidity = mboxname_nextuidvalidity(name, time(0));
     else
 	mboxname_setuidvalidity(mailbox->name, uidvalidity);
+
     /* and highest modseq */
     if (!highestmodseq)
 	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
     else
 	mboxname_setmodseq(mailbox->name, highestmodseq);
+
     /* init non-zero fields */
     mailbox_index_dirty(mailbox);
     mailbox->i.minor_version = MAILBOX_MINOR_VERSION;
@@ -3516,7 +3518,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 
     /* create uidvalidity if not explicitly requested */
     if (!uidvalidity)
-	uidvalidity = mboxname_nextuidvalidity(newname, time(0));
+	uidvalidity = mboxname_nextuidvalidity(newname, oldmailbox->i.uidvalidity);
 
     /* Create new mailbox */
     r = mailbox_create(newname, newpartition,
