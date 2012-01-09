@@ -3284,6 +3284,30 @@ static int chkchildren(char *name,
     return r;
 }
 
+static int mailbox_delete_conversations(struct mailbox *mailbox)
+{
+    struct conversations_state *cstate;
+    struct index_record record;
+    uint32_t recno;
+    int r;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    cstate = conversations_get_mbox(mailbox->name);
+    if (!cstate)
+	return IMAP_CONVERSATIONS_NOT_OPEN;
+
+    for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+	r = mailbox_read_index_record(mailbox, recno, &record);
+	if (r) return r;
+	r = mailbox_update_conversations(mailbox, &record, NULL);
+	if (r) return r;
+    }
+
+    return conversations_rename_folder(cstate, mailbox->name, NULL);
+}
+
 /*
  * Delete and close the mailbox 'mailbox'.  Closes 'mailbox' whether
  * or not the deletion was successful.  Requires a locked mailbox.
@@ -3292,7 +3316,6 @@ int mailbox_delete(struct mailbox **mailboxptr)
 {
     int r = 0;
     struct mailbox *mailbox = *mailboxptr;
-    struct conversations_state *cstate = NULL;
 
     /* mark the quota removed */
     mailbox_quota_dirty(mailbox);
@@ -3308,11 +3331,11 @@ int mailbox_delete(struct mailbox **mailboxptr)
     /* remove any seen */
     seen_delete_mailbox(NULL, mailbox);
 
-    /* remove conversations records */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	cstate = conversations_get_mbox(mailbox->name);
-	assert(cstate);
-	conversations_rename_folder(cstate, mailbox->name, NULL);
+    /* remove conversations records - need to update EVERY RECORD
+     * to get the counts right */
+    if (!mboxname_isdeletedmailbox(mailbox->name, NULL)) {
+	r = mailbox_delete_conversations(mailbox);
+	if (r) return r;
     }
 
     /* clean up annotations */
@@ -3578,9 +3601,13 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     /* if new name is deleted, don't keep the numbers */
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	if (mboxname_isdeletedmailbox(newname, NULL))
-	    conversations_rename_folder(cstate, oldmailbox->name, NULL);
+	    r = mailbox_delete_conversations(oldmailbox);
 	else
-	    conversations_rename_folder(cstate, oldmailbox->name, newname);
+	    r = conversations_rename_folder(cstate, oldmailbox->name, newname);
+	/* but we can't abort, because the mailbox is committed.  Error handling
+	 * here is actually a major disaster area */
+	if (r)
+	    syslog(LOG_ERR, "IOERROR: conversations update failed %s", oldmailbox->name);
     }
 
     if (config_auditlog)
