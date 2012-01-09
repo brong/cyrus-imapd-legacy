@@ -477,9 +477,41 @@ static int folder_number(struct conversations_state *state,
     return pos;
 }
 
-int _conversation_save(struct conversations_state *state,
-		       const char *key, int keylen,
-		       conversation_t *conv)
+static int _conversation_setstatus(struct conversations_state *state,
+				   const char *mboxname,
+				   modseq_t modseq,
+				   uint32_t exists,
+				   uint32_t unseen)
+{
+    char *key = strconcat("F", mboxname, (char *)NULL);
+    struct dlist *dl = NULL;
+    struct buf buf = BUF_INITIALIZER;
+    int r = IMAP_IOERROR;
+    int version = CONVERSATIONS_VERSION;
+
+    dl = dlist_newlist(NULL, NULL);
+    dlist_setnum64(dl, "MODSEQ", modseq);
+    dlist_setnum32(dl, "EXISTS", exists);
+    dlist_setnum32(dl, "UNSEEN", unseen);
+
+    buf_printf(&buf, "%d ", version);
+    dlist_printbuf(dl, 0, &buf);
+    dlist_free(&dl);
+
+    r = cyrusdb_store(state->db,
+		  key, strlen(key),
+		  buf.s, buf.len,
+		  &state->txn);
+
+    buf_free(&buf);
+    free(key);
+
+    return r;
+}
+
+static int _conversation_save(struct conversations_state *state,
+			      const char *key, int keylen,
+			      conversation_t *conv)
 {
     struct dlist *dl, *n, *nn;
     struct buf buf = BUF_INITIALIZER;
@@ -532,8 +564,8 @@ int _conversation_save(struct conversations_state *state,
 	    if (modseq < conv->modseq) modseq = conv->modseq;
 	    exists += exists_diff;
 	    unseen += unseen_diff;
-	    r = conversation_setstatus(state, folder->mboxname,
-				       modseq, exists, unseen);
+	    r = _conversation_setstatus(state, folder->mboxname,
+				        modseq, exists, unseen);
 	    if (r) goto done;
 	}
     }
@@ -684,38 +716,6 @@ int conversation_getstatus(struct conversations_state *state,
 	syslog(LOG_ERR, "IOERROR: conversations invalid status %s", mboxname);
 
     dlist_free(&dl);
-    free(key);
-
-    return r;
-}
-
-int conversation_setstatus(struct conversations_state *state,
-			   const char *mboxname,
-			   modseq_t modseq,
-			   uint32_t exists,
-			   uint32_t unseen)
-{
-    char *key = strconcat("F", mboxname, (char *)NULL);
-    struct dlist *dl = NULL;
-    struct buf buf = BUF_INITIALIZER;
-    int r = IMAP_IOERROR;
-    int version = CONVERSATIONS_VERSION;
-
-    dl = dlist_newlist(NULL, NULL);
-    dlist_setnum64(dl, "MODSEQ", modseq);
-    dlist_setnum32(dl, "EXISTS", exists);
-    dlist_setnum32(dl, "UNSEEN", unseen);
-
-    buf_printf(&buf, "%d ", version);
-    dlist_printbuf(dl, 0, &buf);
-    dlist_free(&dl);
-
-    r = cyrusdb_store(state->db,
-		  key, strlen(key),
-		  buf.s, buf.len,
-		  &state->txn);
-
-    buf_free(&buf);
     free(key);
 
     return r;
