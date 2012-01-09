@@ -2262,6 +2262,10 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
 	return 0;
 
+    /* we never store data about deleted mailboxes */
+    if (mboxname_isdeletedmailbox(mailbox->name, NULL))
+	return 0;
+
     cstate = conversations_get_mbox(mailbox->name);
     if (!cstate)
 	return IMAP_CONVERSATIONS_NOT_OPEN;
