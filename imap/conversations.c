@@ -1233,7 +1233,11 @@ static int do_folder_rename(void *rock,
     int r = 0;
 
     _conversation_load(frock->state, data, datalen, &conv);
-    if (!conv) return 0;
+    if (!conv) { /* should be impossible, unless the DB is corrupted */
+	syslog(LOG_ERR, "IOERROR: conversation bogus value %.*s: %.*s",
+	       (int)keylen, key, (int)datalen, data);
+	return IMAP_IOERROR;
+    }
 
     frock->entries_seen++;
 
