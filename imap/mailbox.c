@@ -1868,6 +1868,7 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
     if (timediff > 1.0) {
 	syslog(LOG_NOTICE, "mailbox: longlock %s for %0.1f seconds",
 	       mailbox->name, timediff);
+    }
 
     if (mailbox->local_cstate) {
 	int r = conversations_commit(&mailbox->local_cstate);
