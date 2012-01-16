@@ -1353,8 +1353,10 @@ static int do_audit_convs(void *rock,
 	    continue;
 	}
 
-	if (folder->exists) af->exists++;
-	if (conv->unseen) af->unseen++;
+	if (folder->exists) {
+	    af->exists++;
+	    if (conv->unseen) af->unseen++;
+	}
     }
 
     if (exists != conv->exists) {
