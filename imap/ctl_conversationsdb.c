@@ -73,7 +73,7 @@
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
 static struct namespace conv_namespace;
 
-enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD, RECALC };
+enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD, RECALC, AUDIT };
 
 int verbose = 0;
 
@@ -318,6 +318,23 @@ static int do_recalc(const char *inboxname)
     return r;
 }
 
+static int do_audit(const char *inboxname)
+{
+    char buf[MAX_MAILBOX_NAME];
+    int r;
+    struct conversations_state *state = NULL;
+
+    r = conversations_open_mbox(inboxname, &state);
+    if (r) return r;
+
+    /* prints, cruddy, but hard to avoid */
+    conversations_auditdb(state);
+
+    conversations_commit(&state);
+
+    return 0;
+}
+
 static int usage(const char *name)
     __attribute__((noreturn));
 
@@ -368,6 +385,11 @@ static int do_user(const char *userid)
 	    r = EC_NOINPUT;
 	break;
 
+    case AUDIT:
+	if (do_audit(inboxname))
+	    r = EC_NOINPUT;
+	break;
+
     case UNKNOWN:
 	fatal("UNKNOWN MODE", EC_SOFTWARE);
     }
@@ -413,7 +435,7 @@ int main(int argc, char **argv)
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "durzbvRC:")) != EOF) {
+    while ((c = getopt(argc, argv, "durzAbvRC:")) != EOF) {
 	switch (c) {
 	case 'd':
 	    if (mode != UNKNOWN)
@@ -447,6 +469,12 @@ int main(int argc, char **argv)
 	    if (mode != UNKNOWN)
 		usage(argv[0]);
 	    mode = RECALC;
+	    break;
+
+	case 'A':
+	    if (mode != UNKNOWN)
+		usage(argv[0]);
+	    mode = AUDIT;
 	    break;
 
 	case 'v':
@@ -522,6 +550,7 @@ static int usage(const char *name)
     fprintf(stderr, "    -z             zero the conversations DB (make all NULLs)\n");
     fprintf(stderr, "    -b             build conversations entries for any NULL records\n");
     fprintf(stderr, "    -R             recalculate all counts\n");
+    fprintf(stderr, "    -A             audit conversations DB counts\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    -r             recursive mode: username is a prefix\n");
 
