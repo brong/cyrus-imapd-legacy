@@ -1284,8 +1284,6 @@ static int do_folder_rename(void *rock,
 
 struct audit_folder {
     char *name;
-    modseq_t orig_modseq;
-    modseq_t modseq;
     uint32_t orig_exists;
     uint32_t exists;
     uint32_t orig_unseen;
@@ -1310,7 +1308,7 @@ static int do_audit_folders(void *rock,
     af->name = xstrndup(key + 1, keylen - 1);
 
     r = _parse_status(data, datalen,
-		      &af->orig_modseq,
+		      NULL,
 		      &af->orig_exists,
 		      &af->orig_unseen);
 
@@ -1334,7 +1332,6 @@ static int do_audit_convs(void *rock,
     conversation_t *conv = NULL;
     struct audit_folder *af;
     conv_folder_t *folder;
-    modseq_t modseq = 0;
     uint32_t exists = 0;
 
     _conversation_load(arock->state, data, datalen, &conv);
@@ -1342,7 +1339,6 @@ static int do_audit_convs(void *rock,
 
     for (folder = conv->folders; folder; folder = folder->next) {
 	/* track counts for comparison */
-	if (modseq < folder->modseq) modseq = folder->modseq;
 	exists += folder->exists;
 
 	for (af = arock->folders; af; af = af->next) {
@@ -1357,12 +1353,11 @@ static int do_audit_convs(void *rock,
 	    continue;
 	}
 
-	if (af->modseq < folder->modseq) af->modseq = folder->modseq;
 	if (folder->exists) af->exists++;
 	if (conv->unseen) af->unseen++;
     }
 
-    if (modseq != conv->modseq || exists != conv->exists) {
+    if (exists != conv->exists) {
 	printf("CID MISMATCH: %.*s %.*s\n",
 	       (int)keylen, key, (int)datalen, data);
     }
@@ -1389,12 +1384,11 @@ void conversations_auditdb(struct conversations_state *state)
     cyrusdb_foreach(state->db, "B", 1, NULL, do_audit_convs, &arock, &state->txn);
 
     for (af = arock.folders; af; af = next) {
-	if (af->orig_modseq != af->modseq ||
-	    af->orig_exists != af->exists ||
+	if (af->orig_exists != af->exists ||
 	    af->orig_unseen != af->unseen) {
-	    printf("FOLDER MISMATCH: %s modseq: %llu => %llu, "
+	    printf("FOLDER MISMATCH: %s "
 		   "exists: %d => %d, unseen: %d => %d\n",
-		   af->name, af->orig_modseq, af->modseq,
+		   af->name,
 		   (int)af->orig_exists, (int)af->exists,
 		   (int)af->orig_unseen, (int)af->unseen);
 	}
