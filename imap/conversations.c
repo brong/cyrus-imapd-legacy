@@ -649,43 +649,20 @@ int conversation_save(struct conversations_state *state,
     return _conversation_save(state, bkey, strlen(bkey), conv);
 }
 
-int conversation_getstatus(struct conversations_state *state,
-			   const char *mboxname,
-			   modseq_t *modseqp,
-			   uint32_t *existsp,
-			   uint32_t *unseenp)
+int _parse_status(const char *data, size_t datalen,
+		  modseq_t *modseqp,
+		  uint32_t *existsp,
+		  uint32_t *unseenp)
 {
-    char *key = strconcat("F", mboxname, (char *)NULL);
+    bit64 version;
+    const char *rest;
+    size_t restlen;
     struct dlist *dl = NULL;
     struct dlist *n;
-    const char *data;
-    const char *rest;
-    size_t datalen;
-    size_t restlen;
-    bit64 version;
-    int r = IMAP_IOERROR;
-
-    if (modseqp) *modseqp = 0;
-    if (existsp) *existsp = 0;
-    if (unseenp) *unseenp = 0;
-
-    if (!state->db)
-	goto done;
-
-    r = cyrusdb_fetch(state->db,
-		  key, strlen(key),
-		  &data, &datalen,
-		  &state->txn);
-
-    if (r == CYRUSDB_NOTFOUND) {
-	/* not existing is not an error */
-	r = 0;
-	goto done;
-    } 
-    if (r) goto done;
+    int r;
 
     r = parsenum(data, &rest, datalen, &version);
-    if (r) goto done;
+    if (r) return r;
 
     if (rest[0] != ' ')
 	return IMAP_MAILBOX_BADFORMAT;
@@ -694,12 +671,11 @@ int conversation_getstatus(struct conversations_state *state,
 
     if (version != CONVERSATIONS_VERSION) {
 	/* XXX - an error code for "incorrect version"? */
-	r = IMAP_MAILBOX_BADFORMAT;
-	goto done;
+	return IMAP_MAILBOX_BADFORMAT;
     }
 
     r = dlist_parsemap(&dl, 0, rest, restlen);
-    if (r) goto done;
+    if (r) return r;
 
     n = dlist_getchildn(dl, 0);
     if (modseqp && n)
@@ -711,11 +687,46 @@ int conversation_getstatus(struct conversations_state *state,
     if (unseenp && n)
 	*unseenp = dlist_num(n);
 
+    dlist_free(&dl);
+    return 0;
+}
+
+int conversation_getstatus(struct conversations_state *state,
+			   const char *mboxname,
+			   modseq_t *modseqp,
+			   uint32_t *existsp,
+			   uint32_t *unseenp)
+{
+    char *key = strconcat("F", mboxname, (char *)NULL);
+    const char *data;
+    size_t datalen;
+    int r = IMAP_IOERROR;
+
+    if (modseqp) *modseqp = 0;
+    if (existsp) *existsp = 0;
+    if (unseenp) *unseenp = 0;
+
+    if (!state->db)
+	goto done;
+
+    r = cyrusdb_fetch(state->db,
+		      key, strlen(key),
+		      &data, &datalen,
+		      &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND) {
+	/* not existing is not an error */
+	r = 0;
+	goto done;
+    }
+    if (r) goto done;
+
+    r = _parse_status(data, datalen, modseqp, existsp, unseenp);
+
  done:
     if (r)
 	syslog(LOG_ERR, "IOERROR: conversations invalid status %s", mboxname);
 
-    dlist_free(&dl);
     free(key);
 
     return r;
@@ -1269,6 +1280,134 @@ static int do_folder_rename(void *rock,
     conversation_free(conv);
 
     return r;
+}
+
+struct audit_folder {
+    char *name;
+    modseq_t orig_modseq;
+    modseq_t modseq;
+    uint32_t orig_exists;
+    uint32_t exists;
+    uint32_t orig_unseen;
+    uint32_t unseen;
+    struct audit_folder *next;
+};
+
+struct audit_rock {
+    struct conversations_state *state;
+    struct audit_folder *folders;
+    strarray_t *extra;
+};
+
+static int do_audit_folders(void *rock,
+			    const char *key, size_t keylen,
+			    const char *data, size_t datalen)
+{
+    struct audit_rock *arock = (struct audit_rock *)rock;
+    struct audit_folder *af = xzmalloc(sizeof(struct audit_folder));
+    int r = 0;
+
+    af->name = xstrndup(key + 1, keylen - 1);
+
+    r = _parse_status(data, datalen,
+		      &af->orig_modseq,
+		      &af->orig_exists,
+		      &af->orig_unseen);
+
+    if (r) {
+	free(af->name);
+	free(af);
+    }
+    else {
+	af->next = arock->folders;
+	arock->folders = af;
+    }
+
+    return r;
+}
+
+static int do_audit_convs(void *rock,
+			  const char *key, size_t keylen,
+			  const char *data, size_t datalen)
+{
+    struct audit_rock *arock = (struct audit_rock *)rock;
+    conversation_t *conv = NULL;
+    struct audit_folder *af;
+    conv_folder_t *folder;
+    modseq_t modseq = 0;
+    uint32_t exists = 0;
+
+    _conversation_load(arock->state, data, datalen, &conv);
+    if (!conv) return IMAP_IOERROR;
+
+    for (folder = conv->folders; folder; folder = folder->next) {
+	/* track counts for comparison */
+	if (modseq < folder->modseq) modseq = folder->modseq;
+	exists += folder->exists;
+
+	for (af = arock->folders; af; af = af->next) {
+	    if (!strcmp(af->name, folder->mboxname))
+		break;
+	}
+
+	/* case - not even counted! */
+	if (!af) {
+	    if (folder->exists) /* don't note folders with no contents */
+		strarray_add(arock->extra, folder->mboxname);
+	    continue;
+	}
+
+	if (af->modseq < folder->modseq) af->modseq = folder->modseq;
+	if (folder->exists) af->exists++;
+	if (conv->unseen) af->unseen++;
+    }
+
+    if (modseq != conv->modseq || exists != conv->exists) {
+	printf("CID MISMATCH: %.*s %.*s\n",
+	       (int)keylen, key, (int)datalen, data);
+    }
+
+    conversation_free(conv);
+
+    return 0;
+}
+
+void conversations_auditdb(struct conversations_state *state)
+{
+    struct audit_rock arock;
+    struct audit_folder *af, *next;
+    int n;
+
+    arock.extra = strarray_new();
+    arock.folders = NULL;
+    arock.state = state;
+
+    /* read in folders first */
+    cyrusdb_foreach(state->db, "F", 1, NULL, do_audit_folders, &arock, &state->txn);
+
+    /* then check the conversations */
+    cyrusdb_foreach(state->db, "B", 1, NULL, do_audit_convs, &arock, &state->txn);
+
+    for (af = arock.folders; af; af = next) {
+	if (af->orig_modseq != af->modseq ||
+	    af->orig_exists != af->exists ||
+	    af->orig_unseen != af->unseen) {
+	    printf("FOLDER MISMATCH: %s modseq: %llu => %llu, "
+		   "exists: %d => %d, unseen: %d => %d\n",
+		   af->name, af->orig_modseq, af->modseq,
+		   (int)af->orig_exists, (int)af->exists,
+		   (int)af->orig_unseen, (int)af->unseen);
+	}
+	next = af->next;
+	free(af->name);
+	free(af);
+    }
+
+    for (n = 0; n < arock.extra->count; n++) {
+	printf("UNKNOWN FOLDER: %s\n", strarray_nth(arock.extra, n));
+    }
+
+    strarray_free(arock.extra);
 }
 
 static int folder_key_rename(struct conversations_state *state,
