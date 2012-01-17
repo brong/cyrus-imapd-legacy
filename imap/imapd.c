@@ -5511,13 +5511,14 @@ void cmd_xconvsort(char *tag, int updates)
 		error_message(IMAP_OK_COMPLETED), mytime);
 
 out:
-    conversations_abort(&cstate);
+    if (cstate) conversations_commit(&cstate);
     freesortcrit(sortcrit);
     freesearchargs(searchargs);
     free_windowargs(windowargs);
     return;
 
 error:
+    if (cstate) conversations_commit(&cstate);
     if (oldstate) {
 	if (imapd_index) index_close(&imapd_index);
 	imapd_index = oldstate;
@@ -7912,7 +7913,7 @@ static int imapd_statusdata(const char *mailboxname, unsigned statusitems,
 
 	r = conversation_getstatus(state, mailboxname, &sd->xconvmodseq,
 				   &sd->xconvexists, &sd->xconvunseen);
-	conversations_abort(&state);
+	conversations_commit(&state);
     }
 
 out:
