@@ -107,7 +107,7 @@ static int do_dump(const char *fname)
 
     conversations_dump(state, stdout);
 
-    conversations_abort(&state);
+    conversations_commit(&state);
     return 0;
 }
 
