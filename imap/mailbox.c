@@ -2790,12 +2790,12 @@ static int mailbox_index_repack(struct mailbox *mailbox)
 	    /* remove from the conversations tracking counts */
 	    r = mailbox_update_conversations(mailbox, &record, NULL);
 	    if (r) {
-		syslog(LOG_NOTICE, "IOERROR: failed to update conversations for %u", record.uid);
+		syslog(LOG_NOTICE, "IOERROR: failed to update conversations for %u: %s", record.uid, error_message(r));
 		goto fail;
 	    }
 	    r = annotate_msg_expunge(mailbox, record.uid);
 	    if (r) {
-		syslog(LOG_NOTICE, "IOERROR: failed to expunge annotation for %u", record.uid);
+		syslog(LOG_NOTICE, "IOERROR: failed to expunge annotation for %u: %s", record.uid, error_message(r));
 		goto fail;
 	    }
 	    continue;
