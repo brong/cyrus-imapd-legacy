@@ -121,7 +121,8 @@ static struct mailboxlist *open_mailboxes = NULL;
 
 static int mailbox_index_unlink(struct mailbox *mailbox);
 static int mailbox_index_repack(struct mailbox *mailbox);
-static int mailbox_read_index_header(struct mailbox *mailbox);
+static int mailbox_lock_index_internal(struct mailbox *mailbox,
+				       int locktype);
 static int mailbox_post_action(const char *name, const struct buf *);
 static void mailbox_execute_actions_file(struct mailbox *mailbox,
 				         FILE *fp, const char *fname);
@@ -1086,9 +1087,12 @@ void mailbox_close(struct mailbox **mailboxptr)
      * speed is probably more important!) */
     if (!in_shutdown && (mailbox->i.options & MAILBOX_CLEANUP_MASK)) {
 	int r = mailbox_mboxlock_reopen(listitem, LOCK_NONBLOCKING);
+	/* we need to re-open the index because we dropped the mboxname lock,
+	 * so the file may have changed */
 	if (!r) r = mailbox_open_index(mailbox);
-	mailbox->index_locktype = LOCK_EXCLUSIVE; /* we're protected by the mboxlock */
-	if (!r) r = mailbox_read_index_header(mailbox);
+	/* lock_internal so DELETED doesn't cause it to appear to be
+	 * NONEXISTENT */
+	if (!r) r = mailbox_lock_index_internal(mailbox, LOCK_EXCLUSIVE);
 	if (!r) {
 	    /* finish cleaning up */
 	    if (mailbox->i.options & OPT_MAILBOX_DELETED)
@@ -1098,6 +1102,7 @@ void mailbox_close(struct mailbox **mailboxptr)
 	    else if (mailbox->i.options & OPT_MAILBOX_NEEDS_UNLINK)
 		mailbox_index_unlink(mailbox);
 	    /* or we missed out - someone else beat us to it */
+
 	    /* anyway, unlock again */
 	    mailbox_unlock_index(mailbox, NULL);
 	}
@@ -1630,7 +1635,7 @@ int mailbox_find_index_record(struct mailbox *mailbox, uint32_t uid,
 /*
  * Lock the index file for 'mailbox'.  Reread index file header if necessary.
  */
-int mailbox_lock_index(struct mailbox *mailbox, int locktype)
+static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
 {
     char *fname;
     struct stat sbuf;
@@ -1761,12 +1766,6 @@ restart:
 	return IMAP_MAILBOX_CHECKSUM;
     }
 
-    /* we may be in the process of deleting this mailbox */
-    if (mailbox->i.options & OPT_MAILBOX_DELETED) {
-	mailbox_unlock_index(mailbox, NULL);
-	return IMAP_MAILBOX_NONEXISTENT;
-    }
-
     /* fix up 2.4.0 bug breakage */
     if (!mailbox->i.uidvalidity) {
 	mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name,
@@ -1784,6 +1783,23 @@ restart:
 	    mailbox_commit(mailbox);
 	    syslog(LOG_ERR, "%s: fixing zero highestmodseq", mailbox->name);
 	}
+    }
+
+    return 0;
+}
+
+int mailbox_lock_index(struct mailbox *mailbox, int locktype)
+{
+    int r = mailbox_lock_index_internal(mailbox, locktype);
+    if (r) return r;
+
+    /* otherwise, sanity checks for regular use, but not for internal
+     * use during cleanup */
+
+    /* we may be in the process of deleting this mailbox */
+    if (mailbox->i.options & OPT_MAILBOX_DELETED) {
+	mailbox_unlock_index(mailbox, NULL);
+	return IMAP_MAILBOX_NONEXISTENT;
     }
 
     return 0;
