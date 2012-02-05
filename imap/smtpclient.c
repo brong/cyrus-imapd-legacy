@@ -50,11 +50,13 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <syslog.h>
 
 #include "global.h"
 #include "exitcodes.h"
 #include "imap_err.h"
 #include "smtpclient.h"
+#include "strarray.h"
 
 extern void fatal(const char *buf, int code);
 
@@ -123,4 +125,53 @@ char *sendmail_errstr(int sm_stat)
     }
     
     return errstr;
+}
+
+int send_email_mapped(const char *base, size_t len, const char *sender)
+{
+    strarray_t smbuf = STRARRAY_INITIALIZER;
+    FILE *sm = NULL;
+    int sm_stat;
+    pid_t sm_pid;
+    int r = 0;
+    int nwrite;
+
+    strarray_append(&smbuf, "sendmail");
+    strarray_append(&smbuf, "-i");  /* ignore dots */
+    strarray_append(&smbuf, "-f");
+    strarray_append(&smbuf, sender);
+    strarray_append(&smbuf, "-t");
+
+    sm_pid = open_sendmail((const char **)smbuf.data, &sm);
+    if (!sm) {
+	syslog(LOG_ERR, "sendmail failed: could not spawn process");
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    nwrite = fwrite(base, len, 1, sm);
+    if (nwrite < 1) {
+	syslog(LOG_ERR, "sendmail failed: could not write data");
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    fclose(sm);
+    sm = NULL;
+
+    while (waitpid(sm_pid, &sm_stat, 0) < 0);
+
+    if (sm_stat) { /* sendmail exit value */
+	syslog(LOG_ERR, "sendmail failed: %s",
+	       sendmail_errstr(sm_stat));
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+done:
+    strarray_fini(&smbuf);
+    if (sm) fclose(sm);
+
+    return r;
+
 }

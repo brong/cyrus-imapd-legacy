@@ -48,4 +48,6 @@
 pid_t open_sendmail(const char *argv[], FILE **sm);
 char *sendmail_errstr(int sm_stat);
 
+int send_email_mapped(const char *base, size_t len, const char *sender);
+
 #endif

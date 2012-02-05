@@ -940,6 +940,10 @@ static const char *make_flags(struct mailbox *mailbox, struct index_record *reco
 	snprintf(buf, 4096, "%s\\Expunged", sep);
         sep = " ";
     }
+    if (record->system_flags & FLAG_XSENT) {
+	snprintf(buf, 4096, "%s\\Xsent", sep);
+        sep = " ";
+    }
     if (record->system_flags & FLAG_SEEN) {
 	snprintf(buf, 4096, "%s\\Seen", sep);
         sep = " ";

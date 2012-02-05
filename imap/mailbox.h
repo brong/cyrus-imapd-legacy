@@ -302,6 +302,7 @@ struct mailbox {
 #define FLAG_DELETED (1<<2)
 #define FLAG_DRAFT (1<<3)
 #define FLAG_SEEN (1<<4)
+#define FLAG_XSENT (1<<5)     /* NOTE - once you've used it... gotta keep it */
 #define FLAG_UNLINKED (1<<30)
 #define FLAG_EXPUNGED (1U<<31)
 

@@ -316,6 +316,7 @@ struct capa_struct base_capabilities[] = {
     { "SCAN",                  2 },
     { "XLIST",                 2 },
     { "XMOVE",                 2 }, /* not standard */
+    { "XSEND",                 2 }, /* not standard */
     { "SPECIAL-USE",           2 },
     { "CREATE-SPECIAL-USE",    2 },
 
@@ -359,6 +360,7 @@ void cmd_search(char *tag, int usinguid);
 void cmd_sort(char *tag, int usinguid);
 void cmd_thread(char *tag, int usinguid);
 void cmd_copy(char *tag, char *sequence, char *name, int usinguid, int ismove);
+void cmd_xsend(char *tag, unsigned uid);
 void cmd_expunge(char *tag, char *sequence);
 void cmd_create(char *tag, char *name, struct dlist *extargs, int localonly);
 void cmd_delete(char *tag, char *name, int localonly, int force);
@@ -2002,6 +2004,9 @@ void cmdloop(void)
 		else if (!strcmp(arg1.s, "xmove")) {
 		    goto xmove;
 		}
+		else if (!strcmp(arg1.s, "xsend")) {
+		    goto xsend;
+		}
 		else if (!strcmp(arg1.s, "expunge")) {
 		    c = getword(imapd_in, &arg1);
 		    if (!imparse_issequence(arg1.s)) goto badsequence;
@@ -2134,6 +2139,18 @@ void cmdloop(void)
 		if (!arg1.len || !imparse_issequence(arg1.s)) goto badsequence;
 		cmd_xrunannotator(tag.s, arg1.s, usinguid);
 // 		snmp_increment(XRUNANNOTATOR_COUNT, 1);
+	    }
+	    else if (!strcmp(cmd.s, "Xsend")) {
+		if (!imapd_index && !backend_current) goto nomailbox;
+		usinguid = 0;
+		if (c != ' ') goto missingargs;
+	    xsend:
+		c = getword(imapd_in, &arg1);
+		if (!imparse_isnumber(arg1.s)) goto badsequence;
+		if (c == '\r') c = prot_getc(imapd_in);
+		if (c != '\n') goto extraargs;
+
+		cmd_xsend(tag.s, atoi(arg1.s));
 	    }
 	    else goto badcmd;
 	    break;
@@ -5251,6 +5268,38 @@ void cmd_expunge(char *tag, char *sequence)
     if (new > old)
 	prot_printf(imapd_out, "[HIGHESTMODSEQ " MODSEQ_FMT "] ", new);
     prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
+}
+
+/* Send an email */
+void cmd_xsend(char *tag, unsigned uid)
+{
+    const char *userid = imapd_userid;
+    char *sender = NULL;
+    int r;
+
+    if (backend_current) {
+	/* remote mailbox */
+	prot_printf(backend_current->out, "%s Xsend %u\r\n", tag, uid);
+	pipe_including_tag(backend_current, tag, 0);
+	return;
+    }
+
+    if (!strchr(userid, '@')) {
+	const char *dom = config_defdomain;
+	if (!dom) dom = config_servername;
+	sender = strconcat(imapd_userid, "@", dom, (char *)NULL);
+    }
+
+    r = index_send(imapd_index, uid, sender);
+
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+    }
+    else {
+	prot_printf(imapd_out, "%s OK sent\r\n", tag);
+    }
+
+    free(sender);
 }
 
 /*

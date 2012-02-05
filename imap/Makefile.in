@@ -102,7 +102,8 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	imapparse.o telemetry.o user.o notify.o idle.o quota_db.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
-	dlist.o version.o rfc822_header.o
+	dlist.o version.o rfc822_header.o smtpclient.o \
+	@GPB_LOBJS@
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
@@ -248,10 +249,10 @@ pop3d: pop3d.o proxy.o backend.o tls.o mutex_fake.o libimap.a \
 	$(CC) $(LDFLAGS) -o pop3d pop3d.o proxy.o backend.o tls.o $(SERVICE) \
 	 mutex_fake.o libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-nntpd: nntpd.o proxy.o backend.o index.o smtpclient.o spool.o tls.o \
+nntpd: nntpd.o proxy.o backend.o index.o spool.o tls.o \
 	 mutex_fake.o nntp_err.o libimap.a $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o nntpd nntpd.o proxy.o backend.o index.o spool.o \
-	 smtpclient.o tls.o $(SERVICE) mutex_fake.o nntp_err.o \
+	 tls.o $(SERVICE) mutex_fake.o nntp_err.o \
 	 libimap.a $(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
 fud: fud.o libimap.a mutex_fake.o $(DEPLIBS) $(SERVICE)

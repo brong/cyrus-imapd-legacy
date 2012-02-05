@@ -74,6 +74,7 @@
 #include "parseaddr.h"
 #include "search_engines.h"
 #include "seen.h"
+#include "smtpclient.h"
 #include "statuscache.h"
 #include "strhash.h"
 #include "stristr.h"
@@ -711,6 +712,60 @@ int index_check(struct index_state *state, int usinguid, int printuid)
     index_unlock(state);
 
     return r;
+}
+
+int index_send(struct index_state *state, unsigned uid, const char *sender)
+{
+    struct mailbox *mailbox = state->mailbox;
+    struct storeargs storeargs;
+    struct index_map *im;
+    struct index_record record;
+    unsigned msgno;
+    const char *base = NULL;
+    size_t len = 0;
+    int r;
+
+    memset(&storeargs, 0, sizeof(struct storeargs));
+
+    msgno = index_finduid(state, uid);
+    if (msgno < 1) return IMAP_NO_NOSUCHMSG;
+
+    im = &state->map[msgno-1];
+
+    /* skip if already sent */
+    if (im->record.system_flags & FLAG_XSENT)
+	return IMAP_NO_MSGGONE;
+
+    /* we want to send this one! */
+    if (mailbox_map_message(mailbox, im->record.uid, &base, &len)) {
+	syslog(LOG_ERR, "IOERROR failed to open message file %s %u",
+	       mailbox->name, im->record.uid);
+	return IMAP_IOERROR;
+    }
+
+    r = send_email_mapped(base, len, sender);
+
+    mailbox_unmap_message(mailbox, im->record.uid, &base, &len);
+    if (r) return r;
+
+    r = index_lock(state);
+    if (r) return r;
+
+    storeargs.usinguid = 1;
+    storeargs.operation = STORE_ADD_FLAGS;
+    storeargs.system_flags |= FLAG_XSENT;
+
+    r = mailbox_read_index_record(mailbox, im->record.recno, &record);
+    
+    /* write? */
+    if (!r && !(record.system_flags & FLAG_XSENT))
+	r = index_storeflag(state, msgno, &storeargs);
+
+    index_unlock(state);
+    if (r) return r;
+
+    index_tellchanges(state, 1, 1, 0);
+    return 0;
 }
 
 /*
@@ -1769,6 +1824,10 @@ static int index_appendremote(struct index_state *state, uint32_t msgno,
 	prot_printf(pout, "%c\\Deleted", sepchar);
 	sepchar = ' ';
     }
+    if (im->record.system_flags & FLAG_XSENT) {
+	prot_printf(pout, "%c\\Xsent", sepchar);
+	sepchar = ' ';
+    }
     if (im->isseen) {
 	prot_printf(pout, "%c\\Seen", sepchar);
 	sepchar = ' ';
@@ -2404,7 +2463,7 @@ static void index_listflags(struct index_state *state)
     int cancreate = 0;
     char sepchar = '(';
 
-    prot_printf(state->out, "* FLAGS (\\Answered \\Flagged \\Draft \\Deleted \\Seen");
+    prot_printf(state->out, "* FLAGS (\\Answered \\Flagged \\Draft \\Deleted \\Seen \\Xsent");
     for (i = 0; i < MAX_USER_FLAGS; i++) {
 	if (state->flagname[i]) {
 	    prot_printf(state->out, " %s", state->flagname[i]);
@@ -2414,7 +2473,7 @@ static void index_listflags(struct index_state *state)
     prot_printf(state->out, ")\r\n* OK [PERMANENTFLAGS ");
     if (!state->examining) {
 	if (state->myrights & ACL_WRITE) {
-	    prot_printf(state->out, "%c\\Answered \\Flagged \\Draft", sepchar);
+	    prot_printf(state->out, "%c\\Answered \\Flagged \\Draft \\Xsent", sepchar);
 	    sepchar = ' ';
 	}
 	if (state->myrights & ACL_DELETEMSG) {
@@ -2645,6 +2704,10 @@ static void index_fetchflags(struct index_state *state,
     }
     if (im->record.system_flags & FLAG_DELETED) {
 	prot_printf(state->out, "%c\\Deleted", sepchar);
+	sepchar = ' ';
+    }
+    if (im->record.system_flags & FLAG_XSENT) {
+	prot_printf(state->out, "%c\\Xsent", sepchar);
 	sepchar = ' ';
     }
     if (im->isseen) {

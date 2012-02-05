@@ -223,6 +223,8 @@ extern int index_copy(struct index_state *state,
 		      struct namespace *namespace,
 		      int isadmin,
 		      int ismove);
+extern int index_send(struct index_state *state, unsigned uid,
+		      const char *sender);
 extern int find_thread_algorithm(char *arg);
 
 extern int index_open(const char *name, struct index_init *init,

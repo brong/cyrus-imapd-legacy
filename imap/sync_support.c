@@ -213,6 +213,8 @@ void sync_print_flags(struct dlist *kl,
 	dlist_setflag(fl, "FLAG", "\\Draft");
     if (record->system_flags & FLAG_EXPUNGED)
 	dlist_setflag(fl, "FLAG", "\\Expunged");
+    if (record->system_flags & FLAG_XSENT)
+	dlist_setflag(fl, "FLAG", "\\Xsent");
     if (record->system_flags & FLAG_SEEN)
 	dlist_setflag(fl, "FLAG", "\\Seen");
         
