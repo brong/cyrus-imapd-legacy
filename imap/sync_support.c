@@ -481,7 +481,8 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 time_t recenttime,
 					 time_t pop3_last_login,
 					 const char *specialuse,
-					 time_t pop3_show_after)
+					 time_t pop3_show_after,
+					 modseq_t xconvmodseq)
 {
     struct sync_folder *result = xzmalloc(sizeof(struct sync_folder));
 
@@ -508,6 +509,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->pop3_last_login = pop3_last_login;
     result->specialuse = xstrdupnull(specialuse);
     result->pop3_show_after = pop3_show_after;
+    result->xconvmodseq = xconvmodseq;
 
     result->mark     = 0;
     result->reserve  = 0;
@@ -1411,6 +1413,7 @@ int sync_mailbox(struct mailbox *mailbox,
 		 int printrecords)
 {
     int r = 0;
+    modseq_t xconvmodseq = 0;
     char sync_crc[128];
 
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
@@ -1434,6 +1437,9 @@ int sync_mailbox(struct mailbox *mailbox,
 	dlist_setatom(kl, "QUOTAROOT", mailbox->quotaroot);
     if (mailbox->specialuse)
 	dlist_setatom(kl, "SPECIALUSE", mailbox->specialuse);
+    r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+    if (!r && xconvmodseq)
+	dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
 
     if (printrecords) {
 	struct index_record record;
