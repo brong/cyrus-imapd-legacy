@@ -101,6 +101,7 @@
 #include "seen.h"
 #include "statuscache.h"
 #include "sync_log.h"
+#include "sync_support.h"
 #include "telemetry.h"
 #include "tls.h"
 #include "user.h"
@@ -349,7 +350,7 @@ void capa_response(int flags);
 void cmd_capability(char *tag);
 void cmd_append(char *tag, char *name, const char *cur_name);
 void cmd_select(char *tag, char *cmd, char *name);
-void cmd_backup(char *tag, char *name);
+void cmd_backup(char *tag, char *user, struct dlist *extargs);
 void cmd_close(char *tag, char *cmd);
 static int parse_fetch_args(const char *tag, const char *cmd,
 			    int allow_vanished,
@@ -1284,13 +1285,20 @@ void cmdloop(void)
 
 	case 'B':
 	    if (!strcmp(cmd.s, "Backup")) {
+		struct dlist *extargs = NULL;
+
 		if (c != ' ') goto missingargs;
-		c = getword(imapd_in, &arg1);
+		c = getastring(imapd_in, imapd_out, &arg1);
+		if (c != ' ') goto missingargs;
+		c = dlist_parse(&extargs, 0, imapd_in);
+
 		if (c == EOF) goto missingargs;
 		if (c == '\r') c = prot_getc(imapd_in);
 		if (c != '\n') goto extraargs;
 
-		cmd_backup(tag.s, arg1.s);
+		cmd_backup(tag.s, arg1.s, extargs);
+
+		dlist_free(&extargs);
 	    }
 	    else goto badcmd;
 	    break;
@@ -3689,28 +3697,71 @@ static void warn_about_quota(const char *quotaroot)
 }
 
 /* Perform a backup on one folder */
-void cmd_backup(char *tag, char *name)
+void cmd_backup(char *tag, char *user, struct dlist *extargs)
 {
-    int c;
-    char mailboxname[MAX_MAILBOX_BUFFER];
     struct mailbox *mailbox = NULL;
+    struct dlist *folder;
+    struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
+    struct dlist *kupload = dlist_newlist(NULL, "MESSAGE");
     int r = 0;
 
     /* we basically want to do what sync_client does to format
      * up a mailbox for sending.  This is going to involve a
      * bit of calling out to logic in sync */
 
-    r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
-					       imapd_userid, mailboxname);
-    if (r) goto done;
+    /* admins only please - for now */
+    if (!imapd_userisadmin) {
+	r = IMAP_PERMISSION_DENIED;
+	goto done;
+    }
 
-    r = mailbox_open_iwl(mailboxname, &mailbox);
-    if (r) goto done;
+    sync_crc_setup(NULL, NULL, 0);
+
+    for (folder = extargs->head; folder; folder = folder->next) {
+	const char *name = NULL;
+	uint32_t last_uid = 0;
+	bit64 highestmodseq = 0;
+	if (!dlist_getatom(folder, "MBOXNAME", &name)) {
+	    r = IMAP_MAILBOX_BADNAME;
+	    goto done;
+	}
+	dlist_getnum32(folder, "LASTUID", &last_uid);
+	dlist_getnum64(folder, "HIGHESTMODSEQ", &highestmodseq);
+
+	r = mailbox_open_iwl(name, &mailbox);
+	if (r) goto done;
+
+	r = sync_mailbox(mailbox, last_uid, highestmodseq, NULL, kl, kupload, 1);
+	if (r) goto done;
+
+	mailbox_unlock_index(mailbox, NULL);
+
+	prot_printf(imapd_out, "* ");
+	dlist_print(kupload, 1, imapd_out);
+	prot_printf(imapd_out, "\r\n");
+
+	prot_printf(imapd_out, "* ");
+	dlist_print(kl, 1, imapd_out);
+	prot_printf(imapd_out, "\r\n");
+
+	mailbox_close(&mailbox);
+	dlist_free(&kl);
+	dlist_free(&kupload);
+    }
 
 done:
     mailbox_close(&mailbox);
+    dlist_free(&kl);
+    dlist_free(&kupload);
 
-    return r;
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+    }
+    else {
+	prot_printf(imapd_out, "%s OK %s\r\n", tag, error_message(IMAP_OK_COMPLETED));
+    }
+
+    return;
 }
 
 
