@@ -965,21 +965,28 @@ done:
     return r;
 }
 
-int mailbox_open_irl(const char *name, struct mailbox **mailboxptr)
+int mailbox_open(const char *name, unsigned int flags,
+		 struct mailbox **mailboxptr)
 {
-    return mailbox_open_advanced(name, LOCK_SHARED, LOCK_SHARED,
-				 mailboxptr);
-}
+    int locktype = LOCK_SHARED;
+    int index_locktype = LOCK_SHARED;
 
-int mailbox_open_iwl(const char *name, struct mailbox **mailboxptr)
-{
-    return mailbox_open_advanced(name, LOCK_SHARED, LOCK_EXCLUSIVE,
-				 mailboxptr);
-}
+    switch (flags & _MBFLAG_MODEMASK) {
+    case MBFLAG_READ:
+	break;
+    case MBFLAG_WRITE:
+	locktype = LOCK_EXCLUSIVE;
+	/* fall through */
+    case MBFLAG_INDEXWRITE:
+	index_locktype = LOCK_EXCLUSIVE;
+	break;
+    default:
+	if (mailboxptr)
+	    *mailboxptr = NULL;
+	return IMAP_INTERNAL;
+    }
 
-int mailbox_open_exclusive(const char *name, struct mailbox **mailboxptr)
-{
-    return mailbox_open_advanced(name, LOCK_EXCLUSIVE, LOCK_EXCLUSIVE,
+    return mailbox_open_advanced(name, locktype, index_locktype,
 				 mailboxptr);
 }
 

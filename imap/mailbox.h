@@ -440,12 +440,19 @@ const char *cache_base(struct index_record *record);
 unsigned cache_size(struct index_record *record);
 struct buf *cache_buf(struct index_record *record);
 /* opening and closing */
-extern int mailbox_open_iwl(const char *name,
-			    struct mailbox **mailboxptr);
-extern int mailbox_open_irl(const char *name,
-			    struct mailbox **mailboxptr);
-extern int mailbox_open_exclusive(const char *name,
-			          struct mailbox **mailboxptr);
+#define MBFLAG_READ		(0x0)
+#define MBFLAG_INDEXWRITE	(0x1)
+#define MBFLAG_WRITE		(0x2)
+#define _MBFLAG_MODEMASK	(0x3)
+extern int mailbox_open(const char *name,
+			unsigned int flags,
+			struct mailbox **mailboxptr);
+#define mailbox_open_iwl(name, mbptr) \
+    mailbox_open((name), MBFLAG_INDEXWRITE, (mbptr))
+#define mailbox_open_irl(name, mbptr) \
+    mailbox_open((name), MBFLAG_READ, (mbptr))
+#define mailbox_open_exclusive(name, mbptr) \
+    mailbox_open((name), MBFLAG_WRITE, (mbptr))
 extern void mailbox_ref(struct mailbox *mailbox);
 extern void mailbox_close(struct mailbox **mailboxptr);
 extern int mailbox_delete(struct mailbox **mailboxptr);
