@@ -1237,6 +1237,7 @@ static int mailbox_full_update(const char *mboxname)
     modseq_t highestmodseq;
     uint32_t uidvalidity;
     uint32_t last_uid;
+    modseq_t xconvmodseq = 0;
 
     kl = dlist_setatom(NULL, cmd, mboxname);
     sync_send_lookup(kl, sync_out);
@@ -1280,6 +1281,9 @@ static int mailbox_full_update(const char *mboxname)
 	goto done;
     }
 
+    /* optional */
+    dlist_getnum64(kl, "XCONVMODSEQ", &xconvmodseq);
+
     /* we'll be updating it! */
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r) goto done;
@@ -1319,6 +1323,11 @@ static int mailbox_full_update(const char *mboxname)
     }
 
     /* OK - now we're committed to make changes! */
+
+    /* this is safe because "larger than" logic is embedded
+     * inside update_xconvmodseq */
+    r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+    if (r) goto done;
 
     kaction = dlist_newlist(NULL, "ACTION");
     r = mailbox_update_loop(mailbox, kr->head, last_uid,
