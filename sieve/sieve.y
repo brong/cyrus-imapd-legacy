@@ -217,6 +217,8 @@ extern void yyrestart(FILE *f);
 %type <dtag> dtags
 %type <nval> priority
 
+%destructor { free_tree($$); } commands command action elsif block
+
 %%
 
 start: reqs			{ ret = NULL; }
