@@ -1621,9 +1621,10 @@ static int mailbox_cb(char *name,
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     int r;
 
-    r = mailbox_open(name,
-		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
-		     &mailbox);
+    /* XXX - we don't write anything, but there's no interface
+     * to safely get read-only access to the annotation and
+     * other "side" databases here */
+    r = mailbox_open_iwl(name, &mailbox);
     /* doesn't exist?  Probably not finished creating or removing yet */
     if (r == IMAP_MAILBOX_NONEXISTENT ||
         r == IMAP_MAILBOX_RESERVED) {
@@ -1638,7 +1639,6 @@ static int mailbox_cb(char *name,
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 0);
     if (!r) sync_send_response(kl, sync_out);
-    mailbox_close(&mailbox);
 
 out:
     mailbox_close(&mailbox);
@@ -1657,13 +1657,17 @@ static int do_getfullmailbox(struct dlist *kin)
      * don't have a good way to express that, so we use
      * write locks anyway */
     r = mailbox_open_iwl(kin->sval, &mailbox);
-    if (r) return r;
+    if (r) goto out;
+
+    r = annotatemore_begin();
+    if (r) goto out;
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 1);
     if (!r) sync_send_response(kl, sync_out);
     dlist_free(&kl);
-    mailbox_close(&mailbox);
 
+out:
+    mailbox_close(&mailbox);
     return r;
 }
 
@@ -1904,8 +1908,7 @@ static int do_annotation(struct dlist *kin)
     mboxname_hiersep_toexternal(sync_namespacep, name, 0);
 
     r = mailbox_open_iwl(name, &mailbox);
-    if (r)
-	goto done;
+    if (r) goto done;
 
     appendattvalue(&attvalues,
 		   *userid ? "value.priv" : "value.shared",
@@ -1926,6 +1929,7 @@ done:
 	annotate_state_abort(&astate);
 
     mailbox_close(&mailbox);
+
     freeentryatts(entryatts);
     free(name);
 
