@@ -1373,7 +1373,6 @@ static int do_mailbox(struct dlist *kin)
     /* optional fields */
     const char *specialuse = NULL;
     modseq_t xconvmodseq = 0;
-    modseq_t ourxconvmodseq = 0;
 
     struct mailbox *mailbox = NULL;
     struct dlist *kr;
@@ -1466,18 +1465,23 @@ static int do_mailbox(struct dlist *kin)
 	goto done;
     }
 
-    r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
-    if (r) {
-	syslog(LOG_ERR, "Failed to read xconvmodseq for %s", mboxname);
-	goto done;
-    }
+    /* NOTE - this is optional */
+    if (xconvmodseq) {
+	modseq_t ourxconvmodseq = 0;
 
-    /* skip out now, it's going to mismatch for sure! */
-    if (xconvmodseq < ourxconvmodseq) {
-	syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
-	       mboxname, xconvmodseq, ourxconvmodseq);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
+	if (r) {
+	    syslog(LOG_ERR, "Failed to read xconvmodseq for %s", mboxname);
+	    goto done;
+	}
+
+	/* skip out now, it's going to mismatch for sure! */
+	if (xconvmodseq < ourxconvmodseq) {
+	    syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
+		   mboxname, xconvmodseq, ourxconvmodseq);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     r = annotatemore_begin();
