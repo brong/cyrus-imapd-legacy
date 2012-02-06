@@ -218,11 +218,14 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
     struct sync_folder *rfolder;
     struct sync_msgid_list *part_list;
     struct mailbox *mailbox = NULL;
+    modseq_t xconvmodseq;
     int r = 0;
 
     /* Find messages we want to upload that are available on server */
     for (mbox = mboxname_list->head; mbox; mbox = mbox->next) {
-	r = mailbox_open_irl(mbox->name, &mailbox);
+	r = mailbox_open(mbox->name,
+			 MBFLAG_READ|MBFLAG_CONVERSATIONS,
+			 &mailbox);
 
 	/* Quietly skip over folders which have been deleted since we
 	   started working (but record fact in case caller cares) */
@@ -237,6 +240,13 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 	    goto bail;
 	}
 
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (r) {
+	    syslog(LOG_ERR, "IOERROR: Failed to get xconvmodseq %s: %s",
+		   mbox->name, error_message(r));
+	    goto bail;
+	}
+
 	/* mailbox is open from here, no exiting without closing it! */
 
 	part_list = sync_reserve_partlist(reserve_guids, mailbox->part);
@@ -247,7 +257,8 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 			     mailbox->i.highestmodseq, NULL,
 			     mailbox->i.recentuid, mailbox->i.recenttime,
 			     mailbox->i.pop3_last_login, mailbox->specialuse,
-			     mailbox->i.pop3_show_after);
+			     mailbox->i.pop3_show_after,
+			     xconvmodseq);
 
 	rfolder = sync_folder_lookup(replica_folders, mailbox->uniqueid);
 	if (rfolder)
@@ -455,6 +466,8 @@ static int response_parse(const char *cmd,
 	    time_t pop3_last_login = 0;
 	    time_t pop3_show_after = 0;
 	    const char *specialuse = NULL;
+	    modseq_t xconvmodseq = 0;
+
 	    if (!folder_list) goto parse_err;
 	    if (!dlist_getatom(kl, "UNIQUEID", &uniqueid)) goto parse_err;
 	    if (!dlist_getatom(kl, "MBOXNAME", &mboxname)) goto parse_err;
@@ -471,6 +484,7 @@ static int response_parse(const char *cmd,
 	    /* optional */
 	    dlist_getatom(kl, "SPECIALUSE", &specialuse);
 	    dlist_getdate(kl, "POP3_SHOW_AFTER", &pop3_show_after);
+	    dlist_getnum64(kl, "XCONVMODSEQ", &xconvmodseq);
 
 	    sync_folder_list_add(folder_list, uniqueid,
 				 mboxname, part, acl,
@@ -479,7 +493,7 @@ static int response_parse(const char *cmd,
 				 highestmodseq, sync_crc,
 				 recentuid, recenttime,
 				 pop3_last_login, specialuse,
-				 pop3_show_after);
+				 pop3_show_after, xconvmodseq);
 	}
 	else
 	    goto parse_err;
@@ -1373,6 +1387,7 @@ static int is_unchanged(struct mailbox *mailbox, struct sync_folder *remote)
 {
     /* look for any mismatches */
     unsigned options = mailbox->i.options & MAILBOX_OPTIONS_MASK;
+    modseq_t xconvmodseq = 0;
     int r;
     char sync_crc[128];
 
@@ -1394,8 +1409,15 @@ static int is_unchanged(struct mailbox *mailbox, struct sync_folder *remote)
 	 if (remote->specialuse) return 0;
     }
 
+    r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+    if (r) return 0;
+
+    if (remote->xconvmodseq != xconvmodseq) return 0;
+
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
-    if (!r && strcmp(remote->sync_crc, sync_crc)) return 0;
+    if (r) return 0;
+
+    if (strcmp(remote->sync_crc, sync_crc)) return 0;
 
     /* otherwise it's unchanged! */
     return 1;
@@ -1413,7 +1435,9 @@ static int update_mailbox_once(struct sync_folder *local,
     struct dlist *kupload = dlist_newlist(NULL, "MESSAGE");
     annotate_db_t *user_annot_db = NULL;
 
-    r = mailbox_open_irl(local->name, &mailbox);
+    r = mailbox_open(local->name,
+		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
+		     &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	/* been deleted in the meanwhile... */
 	r = folder_delete(remote->name);

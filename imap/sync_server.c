@@ -1368,6 +1368,7 @@ static int do_mailbox(struct dlist *kin)
 
     /* optional fields */
     const char *specialuse = NULL;
+    modseq_t xconvmodseq = 0;
 
     struct mailbox *mailbox = NULL;
     struct dlist *kr;
@@ -1411,6 +1412,7 @@ static int do_mailbox(struct dlist *kin)
     dlist_getlist(kin, "ANNOTATIONS", &ka);
     dlist_getatom(kin, "SPECIALUSE", &specialuse);
     dlist_getdate(kin, "POP3_SHOW_AFTER", &pop3_show_after);
+    dlist_getnum64(kin, "XCONVMODSEQ", &xconvmodseq);
 
     options = sync_parse_options(options_str);
  
@@ -1545,6 +1547,8 @@ static int do_mailbox(struct dlist *kin)
 	r = mboxlist_setspecialuse(mailbox, specialuse);
     }
 
+    r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+
 done:
     annotate_putdb(&user_annot_db);
     annotatemore_commit();
@@ -1624,7 +1628,9 @@ static int mailbox_cb(char *name,
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     int r;
 
-    r = mailbox_open_irl(name, &mailbox);
+    r = mailbox_open(name,
+		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
+		     &mailbox);
     /* doesn't exist?  Probably not finished creating or removing yet */
     if (r == IMAP_MAILBOX_NONEXISTENT ||
         r == IMAP_MAILBOX_RESERVED) {
@@ -1661,7 +1667,9 @@ static int do_getfullmailbox(struct dlist *kin)
     r = annotatemore_begin();
     if (r) return r;
 
-    r = mailbox_open_irl(kin->sval, &mailbox);
+    r = mailbox_open(kin->sval,
+		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
+		     &mailbox);
     if (r) return r;
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 1);
