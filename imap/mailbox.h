@@ -569,6 +569,8 @@ extern int mailbox_rename_cid(struct conversations_state *state,
 extern int mailbox_update_conversations(struct mailbox *mailbox,
 					struct index_record *old,
 					struct index_record *new);
+extern int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *);
+extern int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t);
 
 /* used for testing */
 extern int mailbox_post_nop_action(const char *name, unsigned int tag);

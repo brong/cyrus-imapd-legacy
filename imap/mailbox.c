@@ -2374,6 +2374,50 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     return r;
 }
 
+int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *modseqp)
+{
+    if (modseqp)
+	*modseqp = 0;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    if (!mailbox->local_cstate)
+	return IMAP_INTERNAL;
+
+    return conversation_getstatus(mailbox->local_cstate,
+				  mailbox->name,
+				  modseqp, NULL, NULL);
+}
+
+/* Used in replication */
+int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmodseq)
+{
+    modseq_t modseq;
+    uint32_t exists;
+    uint32_t unseen;
+    int r;
+
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    if (!mailbox->local_cstate)
+	return IMAP_INTERNAL;
+
+    r = conversation_getstatus(mailbox->local_cstate,
+			       mailbox->name,
+			       &modseq, &exists, &unseen);
+    if (r) return r;
+
+    if (newmodseq > modseq)
+	r = conversation_setstatus(mailbox->local_cstate,
+				   mailbox->name,
+				   newmodseq, exists, unseen);
+    return r;
+}
+
+
+
 /*
  * Rewrite an index record in a mailbox - updates all
  * necessary tracking fields automatically.

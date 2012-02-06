@@ -477,11 +477,11 @@ static int folder_number(struct conversations_state *state,
     return pos;
 }
 
-static int _conversation_setstatus(struct conversations_state *state,
-				   const char *mboxname,
-				   modseq_t modseq,
-				   uint32_t exists,
-				   uint32_t unseen)
+int conversation_setstatus(struct conversations_state *state,
+			   const char *mboxname,
+			   modseq_t modseq,
+			   uint32_t exists,
+			   uint32_t unseen)
 {
     char *key = strconcat("F", mboxname, (char *)NULL);
     struct dlist *dl = NULL;
@@ -564,8 +564,8 @@ static int _conversation_save(struct conversations_state *state,
 	    if (modseq < conv->modseq) modseq = conv->modseq;
 	    exists += exists_diff;
 	    unseen += unseen_diff;
-	    r = _conversation_setstatus(state, folder->mboxname,
-				        modseq, exists, unseen);
+	    r = conversation_setstatus(state, folder->mboxname,
+				       modseq, exists, unseen);
 	    if (r) goto done;
 	}
     }
