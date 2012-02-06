@@ -223,9 +223,11 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 
     /* Find messages we want to upload that are available on server */
     for (mbox = mboxname_list->head; mbox; mbox = mbox->next) {
-	r = mailbox_open(mbox->name,
-			 MBFLAG_READ|MBFLAG_CONVERSATIONS,
-			 &mailbox);
+	/* XXX - now this kinda sucks - we use a write lock here
+	 * purely for conversations modseq - but we never actually
+	 * USE the value... the whole "add to master folders" actually
+	 * looks a bit pointless... */
+	r = mailbox_open_iwl(mbox->name, &mailbox);
 
 	/* Quietly skip over folders which have been deleted since we
 	   started working (but record fact in case caller cares) */
@@ -1435,9 +1437,7 @@ static int update_mailbox_once(struct sync_folder *local,
     struct dlist *kupload = dlist_newlist(NULL, "MESSAGE");
     annotate_db_t *user_annot_db = NULL;
 
-    r = mailbox_open(local->name,
-		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
-		     &mailbox);
+    r = mailbox_open_iwl(local->name, &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	/* been deleted in the meanwhile... */
 	r = folder_delete(remote->name);

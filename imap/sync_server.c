@@ -1628,9 +1628,10 @@ static int mailbox_cb(char *name,
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     int r;
 
-    r = mailbox_open(name,
-		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
-		     &mailbox);
+    /* XXX - we don't write anything, but there's no interface
+     * to safely get read-only access to the annotation and
+     * other "side" databases here */
+    r = mailbox_open_iwl(name, &mailbox);
     /* doesn't exist?  Probably not finished creating or removing yet */
     if (r == IMAP_MAILBOX_NONEXISTENT ||
         r == IMAP_MAILBOX_RESERVED) {
@@ -1648,11 +1649,10 @@ static int mailbox_cb(char *name,
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 0);
     if (!r) sync_send_response(kl, sync_out);
-    mailbox_close(&mailbox);
 
 out:
-    /* we didn't write anything */
-    annotatemore_abort();
+    mailbox_close(&mailbox);
+    annotatemore_abort(); /* didn't write anything */
     dlist_free(&kl);
 
     return r;
@@ -1664,21 +1664,22 @@ static int do_getfullmailbox(struct dlist *kin)
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     int r;
 
-    r = annotatemore_begin();
-    if (r) return r;
+    /* XXX again - this is a read-only request, but we
+     * don't have a good way to express that, so we use
+     * write locks anyway */
+    r = mailbox_open_iwl(kin->sval, &mailbox);
+    if (r) goto out;
 
-    r = mailbox_open(kin->sval,
-		     MBFLAG_READ|MBFLAG_CONVERSATIONS,
-		     &mailbox);
-    if (r) return r;
+    r = annotatemore_begin();
+    if (r) goto out;
 
     r = sync_mailbox(mailbox, NULL, NULL, kl, NULL, 1);
     if (!r) sync_send_response(kl, sync_out);
     dlist_free(&kl);
-    mailbox_close(&mailbox);
 
-    /* we didn't write anything */
-    annotatemore_abort();
+out:
+    mailbox_close(&mailbox);
+    annotatemore_abort(); /* didn't write anything */
 
     return r;
 }
@@ -1920,8 +1921,7 @@ static int do_annotation(struct dlist *kin)
     mboxname_hiersep_toexternal(sync_namespacep, name, 0);
 
     r = mailbox_open_iwl(name, &mailbox);
-    if (r)
-	goto done;
+    if (r) goto done;
 
     appendattvalue(&attvalues,
 		   *userid ? "value.priv" : "value.shared",
@@ -1933,14 +1933,16 @@ static int do_annotation(struct dlist *kin)
     annotate_state_set_mailbox(astate, mailbox);
 
     r = annotatemore_begin();
-    if (!r)
-	r = annotate_state_store(astate, entryatts);
-    if (!r)
-	annotatemore_commit();
+    if (r) goto done;
+
+    r = annotate_state_store(astate, entryatts);
 
 done:
     if (r) annotatemore_abort();
+    else annotatemore_commit();
+
     mailbox_close(&mailbox);
+
     freeentryatts(entryatts);
     free(name);
     annotate_state_free(&astate);
