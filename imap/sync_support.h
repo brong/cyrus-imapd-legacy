@@ -403,7 +403,7 @@ int addmbox_sub(void *rockp, const char *key, size_t keylen,
 		size_t datalen __attribute__((unused)));
 
 int sync_mailbox(struct mailbox *mailbox,
-		 struct sync_folder *remote,
+		 unsigned last_uid, modseq_t highestmodseq,
 		 struct sync_msgid_list *part_list,
 		 struct dlist *kl, struct dlist *kupload,
 		 int printrecords);

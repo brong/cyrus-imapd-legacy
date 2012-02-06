@@ -349,6 +349,7 @@ void capa_response(int flags);
 void cmd_capability(char *tag);
 void cmd_append(char *tag, char *name, const char *cur_name);
 void cmd_select(char *tag, char *cmd, char *name);
+void cmd_backup(char *tag, char *name);
 void cmd_close(char *tag, char *cmd);
 static int parse_fetch_args(const char *tag, const char *cmd,
 			    int allow_vanished,
@@ -1281,6 +1282,18 @@ void cmdloop(void)
 	    else goto badcmd;
 	    break;
 
+	case 'B':
+	    if (!strcmp(cmd.s, "Backup")) {
+		if (c != ' ') goto missingargs;
+		c = getword(imapd_in, &arg1);
+		if (c == EOF) goto missingargs;
+		if (c == '\r') c = prot_getc(imapd_in);
+		if (c != '\n') goto extraargs;
+
+		cmd_backup(tag.s, arg1.s);
+	    }
+	    else goto badcmd;
+	    break;
 	case 'C':
 	    if (!strcmp(cmd.s, "Capability")) {
 		if (c == '\r') c = prot_getc(imapd_in);
@@ -3673,6 +3686,31 @@ static void warn_about_quota(const char *quotaroot)
 	if (msg.len)
 	    prot_printf(imapd_out, "* NO [ALERT] %s\r\n", buf_cstring(&msg));
     }
+}
+
+/* Perform a backup on one folder */
+void cmd_backup(char *tag, char *name)
+{
+    int c;
+    char mailboxname[MAX_MAILBOX_BUFFER];
+    struct mailbox *mailbox = NULL;
+    int r = 0;
+
+    /* we basically want to do what sync_client does to format
+     * up a mailbox for sending.  This is going to involve a
+     * bit of calling out to logic in sync */
+
+    r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
+					       imapd_userid, mailboxname);
+    if (r) goto done;
+
+    r = mailbox_open_iwl(mailboxname, &mailbox);
+    if (r) goto done;
+
+done:
+    mailbox_close(&mailbox);
+
+    return r;
 }
 
 

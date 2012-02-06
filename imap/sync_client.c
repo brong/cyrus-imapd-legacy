@@ -1448,7 +1448,8 @@ static int update_mailbox_once(struct sync_folder *local,
 	goto done;
 
     part_list = sync_reserve_partlist(reserve_guids, mailbox->part);
-    r = sync_mailbox(mailbox, remote, part_list, kl, kupload, 1);
+    r = sync_mailbox(mailbox, remote->last_uid, remote->highestmodseq,
+		     part_list, kl, kupload, 1);
     if (r) goto done;
 
     /* drop the annotations DB now */

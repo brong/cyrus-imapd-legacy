@@ -102,7 +102,8 @@ LOBJS= append.o mailbox.o mboxlist.o mupdate-client.o mboxname.o message.o \
 	imapparse.o telemetry.o user.o notify.o idle.o quota_db.o \
 	sync_log.o $(SEEN) mboxkey.o backend.o tls.o message_guid.o \
 	statuscache_db.o userdeny_db.o sequence.o upgrade_index.o \
-	dlist.o version.o rfc822_header.o
+	dlist.o version.o rfc822_header.o sync_support.o \
+	@GPB_LOBJS@
 
 IMAPDOBJS=pushstats.o imapd.o proxy.o imap_proxy.o index.o
 
@@ -262,10 +263,10 @@ smmapd: smmapd.o libimap.a mutex_fake.o $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o smmapd $(SERVICE) smmapd.o mutex_fake.o libimap.a \
 	$(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
-sync_server: sync_server.o sync_support.o \
+sync_server: sync_server.o \
 	imapparse.o tls.o libimap.a mutex_fake.o $(DEPLIBS) $(SERVICE)
 	$(CC) $(LDFLAGS) -o \
-	sync_server sync_server.o sync_support.o \
+	sync_server sync_server.o \
 	imapparse.o tls.o $(SERVICE) libimap.a mutex_fake.o \
 	$(DEPLIBS) $(LIBS) $(LIB_WRAP)
 
@@ -375,16 +376,16 @@ unexpunge: unexpunge.o $(CLIOBJS) libimap.a $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o $@ unexpunge.o $(CLIOBJS) \
 	libimap.a $(DEPLIBS) $(LIBS)
 
-sync_client: sync_client.o sync_support.o \
+sync_client: sync_client.o \
 	backend.o tls.o imapparse.o libimap.a mutex_fake.o $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
-	sync_client sync_client.o sync_support.o \
+	sync_client sync_client.o \
 	backend.o tls.o imapparse.o libimap.a mutex_fake.o $(DEPLIBS) $(LIBS)
 
-sync_reset: sync_reset.o sync_support.o \
+sync_reset: sync_reset.o \
 	libimap.a mutex_fake.o $(DEPLIBS)
 	$(CC) $(LDFLAGS) -o \
-	sync_reset sync_reset.o sync_support.o \
+	sync_reset sync_reset.o \
 	libimap.a mutex_fake.o $(DEPLIBS) $(LIBS)
 
 ### Other Misc Targets

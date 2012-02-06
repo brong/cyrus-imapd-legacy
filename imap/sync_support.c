@@ -1376,31 +1376,34 @@ static int sync_send_file(struct mailbox *mailbox,
 			  struct sync_msgid_list *part_list,
 			  struct dlist *kupload)
 {
-    struct sync_msgid *msgid = sync_msgid_insert(part_list, &record->guid);
     const char *fname;
-
-    /* already uploaded, great */
-    if (!msgid->need_upload)
-	return 0;
 
     /* we'll trust that it exists - if not, we'll bail later,
      * but right now we're under locks, so be fast */
     fname = mailbox_message_fname(mailbox, record->uid);
     if (!fname) return IMAP_MAILBOX_BADNAME;
 
-    dlist_setfile(kupload, "MESSAGE", mailbox->part,
-		  &record->guid, record->size, fname);
-
     /* note that we will be sending it, so it doesn't need to be
      * sent again */
-    msgid->need_upload = 0;
-    part_list->toupload--;
+    if (part_list) {
+	struct sync_msgid *msgid = sync_msgid_insert(part_list, &record->guid);
+
+	/* already uploaded, great */
+	if (!msgid->need_upload)
+	    return 0;
+
+	msgid->need_upload = 0;
+	part_list->toupload--;
+    }
+
+    dlist_setfile(kupload, "MESSAGE", mailbox->part,
+		  &record->guid, record->size, fname);
 
     return 0;
 }
 
 int sync_mailbox(struct mailbox *mailbox,
-		 struct sync_folder *remote,
+		 unsigned last_uid, modseq_t highestmodseq,
 		 struct sync_msgid_list *part_list,
 		 struct dlist *kl, struct dlist *kupload,
 		 int printrecords)
@@ -1430,6 +1433,11 @@ int sync_mailbox(struct mailbox *mailbox,
     if (mailbox->specialuse)
 	dlist_setatom(kl, "SPECIALUSE", mailbox->specialuse);
 
+    if (last_uid)
+	dlist_setnum32(kl, "SINCE_UID", last_uid);
+    if (highestmodseq)
+	dlist_setnum64(kl, "SINCE_MODSEQ", highestmodseq);
+
     if (printrecords) {
 	struct index_record record;
 	struct dlist *il;
@@ -1458,15 +1466,15 @@ int sync_mailbox(struct mailbox *mailbox,
 	    send_file = 1;
 
 	    /* seen it already! SKIP */
-	    if (remote && record.modseq <= remote->highestmodseq)
+	    if (record.modseq <= highestmodseq)
 		continue;
 
 	    /* does it exist at the other end?  Don't send it */
-	    if (remote && record.uid <= remote->last_uid)
+	    if (record.uid <= last_uid)
 		send_file = 0;
 
 	    /* if we're not uploading messages... don't send file */
-	    if (!part_list || !kupload)
+	    if (!kupload)
 		send_file = 0;
 
 	    /* if we don't HAVE the file we can't send it */
