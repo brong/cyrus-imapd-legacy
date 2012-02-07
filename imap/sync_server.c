@@ -1430,7 +1430,8 @@ static int do_mailbox(struct dlist *kin)
 	if (!r) mailbox->i.highestmodseq = 0;
     }
     if (r) {
-	syslog(LOG_ERR, "Failed to open mailbox %s to update", mboxname);
+	syslog(LOG_ERR, "Failed to open mailbox %s to update: %s",
+	       mboxname, error_message(r));
 	goto done;
     }
 
@@ -1471,7 +1472,8 @@ static int do_mailbox(struct dlist *kin)
 
 	r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
 	if (r) {
-	    syslog(LOG_ERR, "Failed to read xconvmodseq for %s", mboxname);
+	    syslog(LOG_ERR, "Failed to read xconvmodseq for %s: %s",
+		   mboxname, error_message(r));
 	    goto done;
 	}
 
@@ -1487,7 +1489,8 @@ static int do_mailbox(struct dlist *kin)
     r = annotatemore_begin();
     if (!r) r = annotate_getdb(mailbox->name, &user_annot_db);
     if (r) {
-	syslog(LOG_ERR, "Failed to open annotations %s to update", mboxname);
+	syslog(LOG_ERR, "Failed to open annotations %s to update: %s",
+	       mboxname, error_message(r));
 	goto done;
     }
 
