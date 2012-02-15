@@ -801,6 +801,8 @@ static int _conversation_load(struct conversations_state *state,
 	if (!nn)
 	    continue;
 	mboxname = strarray_nth(state->folder_names, dlist_num(nn));
+	if (!mboxname)
+	    continue;
 	folder = conversation_add_folder(conv, mboxname);
 
 	nn = dlist_getchildn(n, 1);
