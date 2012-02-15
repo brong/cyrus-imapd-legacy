@@ -316,7 +316,6 @@ static int do_recalc(const char *inboxname)
 
 static int do_audit(const char *inboxname)
 {
-    char buf[MAX_MAILBOX_NAME];
     int r;
     struct conversations_state *state = NULL;
 
