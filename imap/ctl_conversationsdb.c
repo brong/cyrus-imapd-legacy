@@ -314,20 +314,259 @@ static int do_recalc(const char *inboxname)
     return r;
 }
 
-static int do_audit(const char *inboxname)
+static unsigned int diff_folder_names(struct conversations_state *a,
+				      struct conversations_state *b)
+{
+    int i;
+    unsigned int ndiffs = 0;
+
+    for (i = 0 ;
+	 i < a->folder_names->count || i < b->folder_names->count ;
+	 i++) {
+	const char *sa = strarray_nth(a->folder_names, i);
+	const char *sb = strarray_nth(b->folder_names, i);
+	if (verbose > 1) {
+	    if (sa) printf("a[%d]=\"%s\"\n", i, sa);
+	    if (sb) printf("b[%d]=\"%s\"\n", i, sb);
+	}
+	if (!strcmpsafe(sa, sb))
+	    continue;
+	if (!ndiffs++ && verbose) printf("FOLDER_NAMES differ:\n");
+	if (verbose) {
+	    /* This doesn't really generate CHANGED messages, but
+	     * instead we get a pair of ADDED and MISSING */
+	    if (sa) printf("MISSING \"%s\" at %d\n", sa, i);
+	    if (sb) printf("ADDED \"%s\" at %d\n", sb, i);
+	}
+    }
+
+    return ndiffs;
+}
+
+struct cursor
+{
+    struct db *db;
+    struct txn **txnp;
+    const char *key; size_t keylen;
+    const char *data; size_t datalen;
+};
+
+static void cursor_init(struct cursor *c,
+			struct db *db, struct txn **txnp)
+{
+    memset(c, 0, sizeof(*c));
+    c->db = db;
+    c->txnp = txnp;
+}
+
+static int cursor_next(struct cursor *c)
+{
+    return cyrusdb_fetchnext(c->db,
+			     c->key, c->keylen,
+			     &c->key, &c->keylen,
+			     &c->data, &c->datalen,
+			     c->txnp);
+}
+
+static int blob_compare(const char *a, size_t alen,
+			const char *b, size_t blen)
+{
+    int d = memcmp(a, b, MIN(alen, blen));
+    if (!d)
+	d = alen - blen;
+    return d;
+}
+
+static int next_diffable_record(struct cursor *c)
 {
     int r;
-    struct conversations_state *state = NULL;
+#define FNKEY "$FOLDER_NAMES"
 
-    r = conversations_open_mbox(inboxname, &state);
-    if (r) return r;
+    for (;;)
+    {
+	r = cursor_next(c);
+	if (r) return r;
 
-    /* prints, cruddy, but hard to avoid */
-    conversations_auditdb(state);
+	/* skip the $FOLDER_NAMES key, we dealt with
+	 * that already in diff_folder_names */
+	if (!blob_compare(c->key, c->keylen,
+			  FNKEY, sizeof(FNKEY)-1))
+	    continue;
 
-    conversations_commit(&state);
+	/* skip < records, they won't be in the
+	 * temp database and we don't care so much */
+	if (c->keylen > 1 && c->key[0] == '<')
+	    continue;
 
+	break;
+    }
     return 0;
+}
+
+static unsigned int diff_records(struct conversations_state *a,
+				 struct conversations_state *b)
+{
+    unsigned int ndiffs = 0;
+    int ra, rb;
+    struct cursor ca, cb;
+    int keydelta;
+    int delta;
+
+    cursor_init(&ca, a->db, &a->txn);
+    ra = cursor_next(&ca);
+
+    cursor_init(&cb, b->db, &b->txn);
+    rb = cursor_next(&cb);
+
+    while (!ra || !rb)
+    {
+	delta = keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
+	if (!delta)
+	    delta = blob_compare(ca.data, ca.datalen, cb.data, cb.datalen);
+
+	if (delta) {
+	    if (!ndiffs++ && verbose) printf("RECORDS differ:\n");
+	    if (verbose) {
+		int which = (!ra && keydelta <= 0 ? 1 : 0) |
+			    (!rb && keydelta >= 0 ? 2 : 0);
+		switch (which)
+		{
+		case 1:
+		    printf("MISSING key \"%.*s\" data \"%.*s\"\n",
+			   ca.keylen, ca.key, ca.datalen, ca.data);
+		    break;
+		case 2:
+		    printf("ADDED key \"%.*s\" data \"%.*s\"\n",
+			   cb.keylen, cb.key, cb.datalen, cb.data);
+		    break;
+		case 3:
+		    printf("CHANGED key \"%.*s\" data \"%.*s\"\n"
+		           "     TO key \"%.*s\" data \"%.*s\"\n",
+			   ca.keylen, ca.key, ca.datalen, ca.data,
+			   cb.keylen, cb.key, cb.datalen, cb.data);
+		    break;
+		}
+	    }
+	}
+
+	if (keydelta <= 0)
+	    ra = next_diffable_record(&ca);
+	if (keydelta >= 0)
+	    rb = next_diffable_record(&cb);
+    }
+
+    return ndiffs;
+}
+
+static int do_audit(const char *inboxname)
+{
+    char buf[MAX_MAILBOX_NAME];
+    int r;
+    char temp_suffix[64];
+    char *filename_temp = NULL;
+    char *filename_real = NULL;
+    struct conversations_state *state_temp = NULL;
+    struct conversations_state *state_real = NULL;
+    unsigned int ndiffs = 0;
+
+    if (verbose)
+	printf("Inbox %s\n", inboxname);
+
+    if (verbose)
+	printf("Pass 1: recalculate counts into temporary db\n");
+
+    /* Generate a unique suffix for the temp db */
+    snprintf(temp_suffix, sizeof(temp_suffix),
+	     "conversations.audit.%d", (int)getpid());
+
+    /* Get the filenames */
+    filename_real = conversations_getmboxpath(inboxname);
+    conversations_set_suffix(temp_suffix);
+    filename_temp = conversations_getmboxpath(inboxname);
+    conversations_set_suffix(NULL);
+    assert(strcmp(filename_temp, filename_real));
+
+    /* Initialise the temp copy of the database */
+    unlink(filename_temp);
+    r = cyrusdb_copyfile(filename_real, filename_temp);
+    if (r) {
+	fprintf(stderr, "Cannot make temp copy of conversations db %s: %s\n",
+		filename_real, error_message(r));
+	goto out;
+    }
+
+    /* Begin recalculating in the temp db */
+    r = conversations_open_path(filename_temp, &state_temp);
+    if (r) {
+	fprintf(stderr, "Cannot open conversations db %s: %s\n",
+		filename_temp, error_message(r));
+	goto out;
+    }
+
+    conversations_wipe_counts(state_temp);
+
+    /*
+     * Set the conversations db suffix during the recalc pass, so that
+     * calls to conversations_open_mbox() from the mailbox code get
+     * redirected to the temporary db.
+     */
+    conversations_set_suffix(temp_suffix);
+
+    r = recalc_counts_cb(inboxname, 0, 0, NULL);
+    if (r) {
+	fprintf(stderr, "Failed to recalculate counts in %s: %s\n",
+		filename_temp, error_message(r));
+	goto out;
+    }
+
+    snprintf(buf, sizeof(buf), "%s.*", inboxname);
+    r = mboxlist_findall(NULL, buf, 1, NULL,
+			 NULL, recalc_counts_cb, NULL);
+
+    conversations_set_suffix(NULL);
+
+    r = conversations_commit(&state_temp);
+    if (r) {
+	fprintf(stderr, "Cannot commit conversations db %s: %s\n",
+		filename_temp, error_message(r));
+	goto out;
+    }
+
+    if (verbose)
+	printf("Pass 2: find differences from recalculated to live dbs\n");
+
+    r = conversations_open_path(filename_temp, &state_temp);
+    if (r) {
+	fprintf(stderr, "Cannot open conversations db %s: %s\n",
+		filename_temp, error_message(r));
+	goto out;
+    }
+
+    r = conversations_open_path(filename_real, &state_real);
+    if (r) {
+	fprintf(stderr, "Cannot open conversations db %s: %s\n",
+		filename_real, error_message(r));
+	goto out;
+    }
+
+    ndiffs += diff_folder_names(state_temp, state_real);
+    ndiffs += diff_records(state_temp, state_real);
+    if (ndiffs)
+	printf("%s is BROKEN (%u differences)\n", inboxname, ndiffs);
+    else if (verbose)
+	printf("%s is OK\n", inboxname);
+
+out:
+    if (state_temp)
+	conversations_abort(&state_temp);
+    if (state_real)
+	conversations_abort(&state_real);
+    conversations_set_suffix(NULL);
+    if (filename_temp)
+	unlink(filename_temp);
+    free(filename_temp);
+    free(filename_real);
+    return r;
 }
 
 static int usage(const char *name)
