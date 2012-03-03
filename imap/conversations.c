@@ -86,7 +86,7 @@
 #define CONVERSATION_ID_STRMAX	    (1+sizeof(conversation_id_t)*2)
 
 /* per user conversations db extension */
-#define FNAME_CONVERSATIONS_SUFFIX "conversations"
+#define FNAME_CONVERSATIONS_SUFFIX (suffix ? suffix : "conversations")
 #define FNKEY "$FOLDER_NAMES"
 #define CFKEY "$COUNTED_FLAGS"
 
@@ -94,6 +94,13 @@
 
 #define CONVERSATIONS_VERSION 0
 
+static char *suffix = NULL;
+
+void conversations_set_suffix(const char *suff)
+{
+    free(suffix);
+    suffix = xstrdupnull(suff);
+}
 
 char *conversations_getuserpath(const char *username)
 {
