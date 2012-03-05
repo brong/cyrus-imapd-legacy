@@ -105,6 +105,7 @@ TESTSOURCES = \
 	conversations.c \
 	crc32.c \
 	db.c \
+	dlist.c \
 	duplicate.c \
 	getxstring.c \
 	glob.c \
