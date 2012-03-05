@@ -941,20 +941,26 @@ static conv_folder_t *conversation_get_folder(conversation_t *conv,
 					      const char *mboxname,
 					      int create_flag)
 {
-    conv_folder_t *folder, **tailp = &conv->folders;
+    conv_folder_t *folder, **nextp = &conv->folders;
 
-    /* first check if it already exists and find the tail */
+    /* first check if it already exists */
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	if (!strcmp(folder->mboxname, mboxname))
 	    return folder;
-	tailp = &folder->next;
     }
 
     if (create_flag) {
-	/* not found, create a new one at the end of the list */
+	/* not found, create a new one */
+	for (folder = conv->folders ; folder ; folder = folder->next) {
+	    /* XXX - mboxlist sort order */
+	    if (strcmp(folder->mboxname, mboxname) > 0)
+		break;
+	    nextp = &folder->next;
+	}
 	folder = xzmalloc(sizeof(*folder));
 	folder->mboxname = xstrdup(mboxname);
-	*tailp = folder;
+	folder->next = *nextp;
+	*nextp = folder;
 	conv->dirty = 1;
     }
 
