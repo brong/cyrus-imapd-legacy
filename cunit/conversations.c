@@ -738,6 +738,132 @@ static void test_folders(void)
     free(counts);
 }
 
+static void test_folder_ordering(void)
+{
+    int r;
+    struct conversations_state *state = NULL;
+    static const char FOLDER1[] = "foobar.com!user.smurf";
+    static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
+    static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
+    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    conversation_t *conv;
+    conv_folder_t *folder1;
+    conv_folder_t *folder2;
+    conv_folder_t *folder3;
+    int *counts = 0;
+
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* Database is empty, so get should succeed and report no results */
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NULL(conv);
+
+    /* update should succeed */
+    conv = conversation_new(state);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->dirty, 1);
+
+    conversation_update(state, conv, FOLDER1, /*num_records*/1,
+			/*exists*/1, /*unseen*/0, counts,
+			/*modseq*/1);
+
+    /* add folders out of order */
+    conversation_update(state, conv, FOLDER3,/*num_records*/10,
+			/*exists*/10, /*unseen*/0, counts,
+			/*modseq*/55);
+
+    /* save and reload here just to be sure */
+    r = conversation_save(state, C_CID, conv);
+    CU_ASSERT_EQUAL(r, 0);
+    conversation_free(conv);
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+
+    conversation_update(state, conv, FOLDER2,/*num_records*/2,
+			/*exists*/1, /*unseen*/0, counts,
+			/*modseq*/7);
+
+    CU_ASSERT_EQUAL(conv->dirty, 1);
+
+    /* check that they've been created in the same order */
+    folder1 = conversation_find_folder(conv, FOLDER1);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
+    folder2 = conversation_find_folder(conv, FOLDER2);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
+    folder3 = conversation_find_folder(conv, FOLDER3);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
+
+    /* in the right order! */
+    CU_ASSERT_PTR_EQUAL(conv->folders, folder1);
+    CU_ASSERT_PTR_EQUAL(folder1->next, folder2);
+    CU_ASSERT_PTR_EQUAL(folder2->next, folder3);
+    CU_ASSERT_PTR_NULL(folder3->next);
+
+    r = conversation_save(state, C_CID, conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_EQUAL(conv->dirty, 0);
+    conversation_free(conv);
+    conv = NULL;
+
+    /* get should now succeed and report the value we gave it */
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_EQUAL(conv->dirty, 0);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+
+    /* check that they've been re-loaded in the same order */
+    folder1 = conversation_find_folder(conv, FOLDER1);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
+    folder2 = conversation_find_folder(conv, FOLDER2);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
+    folder3 = conversation_find_folder(conv, FOLDER3);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
+
+    /* in the right order! */
+    CU_ASSERT_PTR_EQUAL(conv->folders, folder1);
+    CU_ASSERT_PTR_EQUAL(folder1->next, folder2);
+    CU_ASSERT_PTR_EQUAL(folder2->next, folder3);
+    CU_ASSERT_PTR_NULL(folder3->next);
+
+    conversation_free(conv);
+    conv = NULL;
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* get should still succeed and report all values we gave it */
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+
+    /* check that they are still in the same order */
+    folder1 = conversation_find_folder(conv, FOLDER1);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
+    folder2 = conversation_find_folder(conv, FOLDER2);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
+    folder3 = conversation_find_folder(conv, FOLDER3);
+    CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
+
+    /* in the right order! */
+    CU_ASSERT_PTR_EQUAL(conv->folders, folder1);
+    CU_ASSERT_PTR_EQUAL(folder1->next, folder2);
+    CU_ASSERT_PTR_EQUAL(folder2->next, folder3);
+    CU_ASSERT_PTR_NULL(folder3->next);
+
+    r = conversations_abort(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    free(counts);
+}
+
 static void gen_msgid_cid(int i, char *msgid, int msgidlen,
 			  conversation_id_t *cidp)
 {
