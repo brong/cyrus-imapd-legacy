@@ -985,7 +985,7 @@ void conversation_add_sender(conversation_t *conv,
 			     const char *mailbox,
 			     const char *domain)
 {
-    conv_sender_t *sender, **tailp = &conv->senders;
+    conv_sender_t *sender, **nextp = &conv->senders;
 
     if (!mailbox || !domain) return;
 
@@ -999,7 +999,16 @@ void conversation_add_sender(conversation_t *conv,
 	    }
 	    return;
 	}
-	tailp = &sender->next;
+    }
+
+    /* second pass so we don't break on unordered data */
+    for (sender = conv->senders; sender; sender = sender->next) {
+	int dcmp = strcmp(sender->domain, domain);
+	if (dcmp > 0)
+	    break;
+	if (dcmp == 0 && strcmp(sender->mailbox, mailbox) > 0)
+	    break;
+	nextp = &sender->next;
     }
 
     sender = xzmalloc(sizeof(*sender));
@@ -1007,7 +1016,8 @@ void conversation_add_sender(conversation_t *conv,
     if (route) sender->route = xstrdup(route);
     sender->mailbox = xstrdup(mailbox);
     sender->domain = xstrdup(domain);
-    *tailp = sender;
+    sender->next = *nextp;
+    *nextp = sender;
 
     conv->dirty = 1;
 }
