@@ -864,6 +864,153 @@ static void test_folder_ordering(void)
     free(counts);
 }
 
+static void test_senders(void)
+{
+    int r;
+    struct conversations_state *state = NULL;
+    static const char FOLDER[] = "foobar.com!user.smurf";
+    static const char NAME1[] = "Smurf 1";
+    static const char MAILBOX1[] = "smurf";
+    static const char DOMAIN1[] = "foobar.com";
+    static const char NAME2[] = "Smurf 2";
+    static const char MAILBOX2[] = "smurf2";
+    static const char DOMAIN2[] = "foobar.com";
+    static const char NAME3[] = "Aardvark";
+    static const char MAILBOX3[] = "aardvark";
+    static const char DOMAIN3[] = "aalphabetsoup.com";
+    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    conversation_t *conv;
+    conv_sender_t *sender1;
+    conv_sender_t *sender2;
+    conv_sender_t *sender3;
+    int *counts = 0;
+
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* Database is empty, so get should succeed and report no results */
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NULL(conv);
+
+    /* update should succeed */
+    conv = conversation_new(state);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+    CU_ASSERT_EQUAL(conv->dirty, 1);
+
+    conversation_add_sender(conv, NAME1, NULL, MAILBOX1, DOMAIN1);
+    conversation_add_sender(conv, NAME2, NULL, MAILBOX2, DOMAIN2);
+    conversation_add_sender(conv, NAME3, NULL, MAILBOX3, DOMAIN3);
+
+    conversation_update(state, conv, FOLDER, /*num_records*/1,
+			/*exists*/1, /*unseen*/0, counts,
+			/*modseq*/1);
+
+    /* there's no function for getting sender data, oh well */
+    sender1 = conv->senders;
+    CU_ASSERT_PTR_NOT_NULL(sender1);
+    sender2 = sender1->next;
+    CU_ASSERT_PTR_NOT_NULL(sender2);
+    sender3 = sender2->next;
+    CU_ASSERT_PTR_NOT_NULL(sender3);
+    CU_ASSERT_PTR_NULL(sender3->next);
+
+    /* check ordering */
+    CU_ASSERT_STRING_EQUAL(sender1->name, NAME3);
+    CU_ASSERT_PTR_NULL(sender1->route);
+    CU_ASSERT_STRING_EQUAL(sender1->mailbox, MAILBOX3);
+    CU_ASSERT_STRING_EQUAL(sender1->domain, DOMAIN3);
+
+    CU_ASSERT_STRING_EQUAL(sender2->name, NAME1);
+    CU_ASSERT_PTR_NULL(sender2->route);
+    CU_ASSERT_STRING_EQUAL(sender2->mailbox, MAILBOX1);
+    CU_ASSERT_STRING_EQUAL(sender2->domain, DOMAIN1);
+
+    CU_ASSERT_STRING_EQUAL(sender3->name, NAME2);
+    CU_ASSERT_PTR_NULL(sender3->route);
+    CU_ASSERT_STRING_EQUAL(sender3->mailbox, MAILBOX2);
+    CU_ASSERT_STRING_EQUAL(sender3->domain, DOMAIN2);
+
+    /* save and reload here just to be sure */
+    r = conversation_save(state, C_CID, conv);
+    CU_ASSERT_EQUAL(r, 0);
+    conversation_free(conv);
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+    CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NOT_NULL(conv);
+
+    /* there's no function for getting sender data, oh well */
+    sender1 = conv->senders;
+    CU_ASSERT_PTR_NOT_NULL(sender1);
+    sender2 = sender1->next;
+    CU_ASSERT_PTR_NOT_NULL(sender2);
+    sender3 = sender2->next;
+    CU_ASSERT_PTR_NOT_NULL(sender3);
+    CU_ASSERT_PTR_NULL(sender3->next);
+
+    /* check ordering */
+    CU_ASSERT_STRING_EQUAL(sender1->name, NAME3);
+    CU_ASSERT_PTR_NULL(sender1->route);
+    CU_ASSERT_STRING_EQUAL(sender1->mailbox, MAILBOX3);
+    CU_ASSERT_STRING_EQUAL(sender1->domain, DOMAIN3);
+
+    CU_ASSERT_STRING_EQUAL(sender2->name, NAME1);
+    CU_ASSERT_PTR_NULL(sender2->route);
+    CU_ASSERT_STRING_EQUAL(sender2->mailbox, MAILBOX1);
+    CU_ASSERT_STRING_EQUAL(sender2->domain, DOMAIN1);
+
+    CU_ASSERT_STRING_EQUAL(sender3->name, NAME2);
+    CU_ASSERT_PTR_NULL(sender3->route);
+    CU_ASSERT_STRING_EQUAL(sender3->mailbox, MAILBOX2);
+    CU_ASSERT_STRING_EQUAL(sender3->domain, DOMAIN2);
+
+    conversation_free(conv);
+    conv = NULL;
+
+    r = conversations_commit(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* open the db again */
+    r = conversations_open_path(DBNAME, &state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    /* get should still succeed and report all values we gave it */
+    conv = NULL;
+    r = conversation_load(state, C_CID, &conv);
+
+    /* there's no function for getting sender data, oh well */
+    sender1 = conv->senders;
+    CU_ASSERT_PTR_NOT_NULL(sender1);
+    sender2 = sender1->next;
+    CU_ASSERT_PTR_NOT_NULL(sender2);
+    sender3 = sender2->next;
+    CU_ASSERT_PTR_NOT_NULL(sender3);
+    CU_ASSERT_PTR_NULL(sender3->next);
+
+    /* check ordering */
+    CU_ASSERT_STRING_EQUAL(sender1->name, NAME3);
+    CU_ASSERT_PTR_NULL(sender1->route);
+    CU_ASSERT_STRING_EQUAL(sender1->mailbox, MAILBOX3);
+    CU_ASSERT_STRING_EQUAL(sender1->domain, DOMAIN3);
+
+    CU_ASSERT_STRING_EQUAL(sender2->name, NAME1);
+    CU_ASSERT_PTR_NULL(sender2->route);
+    CU_ASSERT_STRING_EQUAL(sender2->mailbox, MAILBOX1);
+    CU_ASSERT_STRING_EQUAL(sender2->domain, DOMAIN1);
+
+    CU_ASSERT_STRING_EQUAL(sender3->name, NAME2);
+    CU_ASSERT_PTR_NULL(sender3->route);
+    CU_ASSERT_STRING_EQUAL(sender3->mailbox, MAILBOX2);
+    CU_ASSERT_STRING_EQUAL(sender3->domain, DOMAIN2);
+
+    r = conversations_abort(&state);
+    CU_ASSERT_EQUAL(r, 0);
+
+    free(counts);
+}
+
 static void gen_msgid_cid(int i, char *msgid, int msgidlen,
 			  conversation_id_t *cidp)
 {
