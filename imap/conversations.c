@@ -833,8 +833,8 @@ static int _conversation_load(struct conversations_state *state,
 	nn3 = dlist_getchildn(n, 2);
 	nn4 = dlist_getchildn(n, 3);
 	if (nn3 && nn4)
-	    conversation_add_sender(conv, nn ? nn->sval : NULL,
-				    nn2 ? nn2->sval : NULL,
+	    conversation_add_sender(conv,
+				    nn->sval, nn2->sval,
 				    nn3->sval, nn4->sval);
     }
 
