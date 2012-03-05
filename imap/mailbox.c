@@ -2339,7 +2339,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 
     /* drafts don't generate sender records so you don't spuriously get
      * yourself just for clicking on "reply" then aborting */
-    if (!old && new && !(new->system_flags & (FLAG_EXPUNGED|FLAG_DRAFT))) {
+    if (!old && new && !(new->system_flags & FLAG_DRAFT)) {
 	if (!mailbox_cacherecord(mailbox, new)) {
 	    char *env = NULL;
 	    char *envtokens[NUMENVTOKENS];
