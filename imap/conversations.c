@@ -367,6 +367,27 @@ static int _conversations_set_key(struct conversations_state *state,
     return 0;
 }
 
+static int _sanity_check_counts(conversation_t *conv)
+{
+    conv_folder_t *folder;
+    uint32_t num_records = 0;
+    uint32_t exists = 0;
+
+    for (folder = conv->folders; folder; folder = folder->next) {
+	num_records += folder->num_records;
+	exists += folder->exists;
+    }
+
+    if (num_records != conv->num_records)
+	return IMAP_INTERNAL;
+
+    if (exists != conv->exists)
+	return IMAP_INTERNAL;
+
+    return 0;
+}
+
+
 int conversations_set_msgid(struct conversations_state *state,
 			  const char *msgid,
 			  conversation_id_t cid)
@@ -622,6 +643,11 @@ static int _conversation_save(struct conversations_state *state,
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
+    if (_sanity_check_counts(conv)) {
+	syslog(LOG_ERR, "IOERROR: conversations_audit on save: %s %.*s %.*s",
+	       state->path, keylen, key, buf.len, buf.s);
+    }
+
     r = cyrusdb_store(state->db,
 		  keycopy, keylen,
 		  buf.s, buf.len,
@@ -873,6 +899,11 @@ int conversation_load(struct conversations_state *state,
 	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
 	       CONV_FMT, cid);
 	*convp = NULL;
+    }
+
+    if (_sanity_check_counts(*convp)) {
+	syslog(LOG_ERR, "IOERROR: conversations_audit on load: %s %s %.*s",
+	       state->path, bkey, (int)datalen, data);
     }
 
     return 0;
