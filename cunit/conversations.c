@@ -862,6 +862,9 @@ static void test_folder_ordering(void)
     r = conversations_abort(&state);
     CU_ASSERT_EQUAL(r, 0);
 
+    conversation_free(conv);
+    conv = NULL;
+
     free(counts);
 }
 
