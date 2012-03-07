@@ -32,7 +32,7 @@ static void test_getset(void)
     int r;
     struct conversations_state *state = NULL;
     static const char C_MSGID[] = "<0001.1288854309@example.com>";
-    static const conversation_id_t C_CID = 0x12345689abcdef0;
+    static const conversation_id_t C_CID = 0x12345689abcdef0ULL;
     conversation_id_t cid;
 
     r = conversations_open_path(DBNAME, &state);
@@ -75,7 +75,7 @@ static void test_abort(void)
     int r;
     struct conversations_state *state = NULL;
     static const char C_MSGID[] = "<0002.1288854309@example.com>";
-    static const conversation_id_t C_CID = 0x10345689abcdef2;
+    static const conversation_id_t C_CID = 0x10345689abcdef2ULL;
     conversation_id_t cid;
 
     r = conversations_open_path(DBNAME, &state);
@@ -121,13 +121,13 @@ static void test_prune(void)
     int r;
     struct conversations_state *state = NULL;
     static const char C_MSGID1[] = "<0003.1288854309@example.com>";
-    static const conversation_id_t C_CID1 = 0x1045689abcdef23;
+    static const conversation_id_t C_CID1 = 0x1045689abcdef23ULL;
     time_t stamp1;
     static const char C_MSGID2[] = "<0004.1288854309@example.com>";
-    static const conversation_id_t C_CID2 = 0x105689abcdef234;
+    static const conversation_id_t C_CID2 = 0x105689abcdef234ULL;
     time_t stamp2;
     static const char C_MSGID3[] = "<0005.1288854309@example.com>";
-    static const conversation_id_t C_CID3 = 0x10689abcdef2345;
+    static const conversation_id_t C_CID3 = 0x10689abcdef2345ULL;
     time_t stamp3;
     conversation_id_t cid;
     unsigned int nseen = 0, ndeleted = 0;
@@ -218,9 +218,9 @@ static void test_two(void)
     struct conversations_state *state1 = NULL;
     struct conversations_state *state2 = NULL;
     static const char C_MSGID1[] = "<0006.1288854309@example.com>";
-    static const conversation_id_t C_CID1 = 0x1089abcdef23456;
+    static const conversation_id_t C_CID1 = 0x1089abcdef23456ULL;
     static const char C_MSGID2[] = "<0007.1288854309@example.com>";
-    static const conversation_id_t C_CID2 = 0x109abcdef234567;
+    static const conversation_id_t C_CID2 = 0x109abcdef234567ULL;
     conversation_id_t cid;
 
     r = conversations_open_path(DBNAME, &state1);
@@ -290,7 +290,7 @@ static void test_two(void)
 /* test CID encoding */
 static void test_cid_encode(void)
 {
-    static const conversation_id_t CID1 = 0x01089abcdef23456;
+    static const conversation_id_t CID1 = 0x01089abcdef23456ULL;
     static const char STR1[] = "01089abcdef23456";
     static const conversation_id_t CID2 = NULLCONVERSATION;
     static const char STR2[] = "NIL";
@@ -307,7 +307,7 @@ static void test_cid_encode(void)
 static void test_cid_decode(void)
 {
     static const char STR1[] = "01089abcdef23456";
-    static const conversation_id_t CID1 = 0x01089abcdef23456;
+    static const conversation_id_t CID1 = 0x01089abcdef23456ULL;
     static const char STR2[] = "NIL";
     static const conversation_id_t CID2 = NULLCONVERSATION;
     conversation_id_t cid;
@@ -347,8 +347,8 @@ static void test_cid_rename(void)
     static const char C_MSGID1[] = "<0008.1288854309@example.com>";
     static const char C_MSGID2[] = "<0009.1288854309@example.com>";
     static const char C_MSGID3[] = "<0010.1288854309@example.com>";
-    static const conversation_id_t C_CID1 = 0x10bcdef23456789a;
-    static const conversation_id_t C_CID2 = 0x10cdef23456789ab;
+    static const conversation_id_t C_CID1 = 0x10bcdef23456789aULL;
+    static const conversation_id_t C_CID2 = 0x10cdef23456789abULL;
     conversation_id_t cid;
     conversation_t *conv;
     conv_folder_t *folder;
@@ -457,12 +457,13 @@ static void test_folder_rename(void)
     static const char C_MSGID1[] = "<0008.1288854309@example.com>";
     static const char C_MSGID2[] = "<0009.1288854309@example.com>";
     static const char C_MSGID3[] = "<0010.1288854309@example.com>";
-    static const conversation_id_t C_CID = 0x10bcdef23456789a;
+    static const conversation_id_t C_CID = 0x10bcdef23456789aULL;
     conversation_t *conv;
     conv_folder_t *folder;
 
     r = conversations_open_path(DBNAME, &state);
     CU_ASSERT_EQUAL(r, 0);
+    CU_ASSERT_PTR_NOT_NULL(state);
 
     /* setup the records we expect */
     r = conversations_set_msgid(state, C_MSGID1, C_CID);
@@ -570,7 +571,7 @@ static void test_folders(void)
     static const char FOLDER1[] = "foobar.com!user.smurf";
     static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
     static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
-    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    static const conversation_id_t C_CID = 0x10abcdef23456789ULL;
     conversation_t *conv;
     conv_folder_t *folder;
     int *counts;
@@ -745,7 +746,7 @@ static void test_folder_ordering(void)
     static const char FOLDER1[] = "foobar.com!user.smurf";
     static const char FOLDER2[] = "foobar.com!user.smurf.foo bar";
     static const char FOLDER3[] = "foobar.com!user.smurf.quux.foonly";
-    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    static const conversation_id_t C_CID = 0x10abcdef23456789ULL;
     conversation_t *conv;
     conv_folder_t *folder1;
     conv_folder_t *folder2;
@@ -878,7 +879,7 @@ static void test_senders(void)
     static const char NAME3[] = "Aardvark";
     static const char MAILBOX3[] = "aardvark";
     static const char DOMAIN3[] = "aalphabetsoup.com";
-    static const conversation_id_t C_CID = 0x10abcdef23456789;
+    static const conversation_id_t C_CID = 0x10abcdef23456789ULL;
     conversation_t *conv;
     conv_sender_t *sender1;
     conv_sender_t *sender2;
