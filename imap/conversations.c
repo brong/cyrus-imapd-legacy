@@ -519,8 +519,7 @@ static int folder_number_rename(struct conversations_state *state,
 {
     int pos = strarray_find(state->folder_names, from_name, 0);
 
-    if (pos < 0)
-	return IMAP_NOTFOUND;
+    if (pos < 0) return 0; /* nothing to do! */
 
     /* replace the name  - set to '-' if deleted */
     strarray_set(state->folder_names, pos, to_name ? to_name : "-");
