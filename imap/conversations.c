@@ -1304,7 +1304,10 @@ static int folder_key_rename(struct conversations_state *state,
 
     r = cyrusdb_fetch(state->db, oldkey, strlen(oldkey),
 		      &val, &vallen, &state->txn);
-    if (r) goto done;
+    if (r) {
+	if (r == CYRUSDB_NOTFOUND) r = 0; /* nothing to delete */
+	goto done;
+    }
 
     /* create before deleting so val is still valid */
     if (to_name) {
