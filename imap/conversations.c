@@ -472,37 +472,60 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
+static int write_folders(struct conversations_state *state)
+{
+    struct dlist *dl = dlist_newlist(NULL, NULL);
+    struct buf buf = BUF_INITIALIZER;
+    int r;
+    int i;
+
+    for (i = 0; i < state->folder_names->count; i++) {
+	const char *fname = strarray_nth(state->folder_names, i);
+	dlist_setatom(dl, NULL, fname);
+    }
+
+    dlist_printbuf(dl, 0, &buf);
+    dlist_free(&dl);
+
+    r = cyrusdb_store(state->db, FNKEY, strlen(FNKEY),
+		      buf.s, buf.len, &state->txn);
+
+    buf_free(&buf);
+
+    return r;
+}
+
 static int folder_number(struct conversations_state *state,
 			 const char *name)
 {
     int pos = strarray_find(state->folder_names, name, 0);
+    int r;
 
     /* if we have to add it, then save the keys back */
     if (pos < 0) {
-	struct dlist *dl = dlist_newlist(NULL, NULL);
-	struct buf buf = BUF_INITIALIZER;
-	int r;
-	int i;
-
 	pos = strarray_append(state->folder_names, name);
 
-	for (i = 0; i < state->folder_names->count; i++) {
-	    const char *fname = strarray_nth(state->folder_names, i);
-	    dlist_setatom(dl, NULL, fname);
-	}
-
-	dlist_printbuf(dl, 0, &buf);
-
 	/* store must succeed */
-	r = cyrusdb_store(state->db, FNKEY, strlen(FNKEY),
-		      buf.s, buf.len, &state->txn);
-
-	buf_free(&buf);
-	dlist_free(&dl);
+	r = write_folders(state);
 	if (r) abort();
     }
 
     return pos;
+}
+
+static int folder_number_rename(struct conversations_state *state,
+				const char *from_name,
+				const char *to_name)
+{
+    int pos = strarray_find(state->folder_names, from_name, 0);
+
+    if (pos < 0)
+	return IMAP_NOTFOUND;
+
+    /* replace the name  - set to '-' if deleted */
+    strarray_set(state->folder_names, pos, to_name ? to_name : "-");
+
+    return write_folders(state);
 }
 
 int conversation_setstatus(struct conversations_state *state,
@@ -1233,14 +1256,6 @@ struct rename_rock {
     unsigned long entries_renamed;
 };
 
-struct frename_rock {
-    struct conversations_state *state;
-    const char *from_name;
-    const char *to_name;
-    unsigned long entries_seen;
-    unsigned long entries_renamed;
-};
-
 static int do_one_rename(void *rock,
 		         const char *key, size_t keylen,
 		         const char *data, size_t datalen)
@@ -1289,56 +1304,6 @@ int conversations_rename_cid(struct conversations_state *state,
     return r;
 }
 
-static int do_folder_rename(void *rock,
-			    const char *key, size_t keylen,
-			    const char *data, size_t datalen)
-{
-    struct frename_rock *frock = (struct frename_rock *)rock;
-    conversation_t *conv = NULL;
-    conv_folder_t *folder;
-    conv_folder_t **prevp;
-    int r = 0;
-
-    _conversation_load(frock->state, data, datalen, &conv);
-    if (!conv) { /* should be impossible, unless the DB is corrupted */
-	syslog(LOG_ERR, "IOERROR: conversation bogus value %.*s: %.*s",
-	       (int)keylen, key, (int)datalen, data);
-	return IMAP_IOERROR;
-    }
-
-    frock->entries_seen++;
-
-    prevp = &conv->folders;
-    for (folder = conv->folders; folder; folder = folder->next) {
-	if (strcmp(folder->mboxname, frock->from_name)) {
-	    prevp = &folder->next;
-	    continue;
-	}
-
-	if (frock->to_name) {
-	    /* change the record */
-	    free(folder->mboxname);
-	    folder->mboxname = xstrdup(frock->to_name);
-	}
-	else {
-	    /* remove the record */
-	    *prevp = folder->next;
-	    conv->num_records -= folder->num_records;
-	    conv->exists -= folder->exists;
-	    free(folder->mboxname);
-	    free(folder);
-	}
-
-	r = _conversation_save(frock->state, key, keylen, conv);
-	frock->entries_renamed++;
-	break;
-    }
-
-    conversation_free(conv);
-
-    return r;
-}
-
 static int folder_key_rename(struct conversations_state *state,
 			     const char *from_name,
 			     const char *to_name)
@@ -1349,13 +1314,14 @@ static int folder_key_rename(struct conversations_state *state,
     int r = 0;
 
     r = cyrusdb_fetch(state->db, oldkey, strlen(oldkey),
-		  &val, &vallen, &state->txn);
+		      &val, &vallen, &state->txn);
     if (r) goto done;
 
     /* create before deleting so val is still valid */
     if (to_name) {
 	char *newkey = strconcat("F", to_name, (void *)NULL);
-	r = cyrusdb_store(state->db, newkey, strlen(newkey), val, vallen, &state->txn);
+	r = cyrusdb_store(state->db, newkey, strlen(newkey),
+			  val, vallen, &state->txn);
 	free(newkey);
 	if (r) goto done;
     }
@@ -1372,27 +1338,18 @@ int conversations_rename_folder(struct conversations_state *state,
 			        const char *from_name,
 			        const char *to_name)
 {
-    struct frename_rock frock;
-    int r = 0;
+    int r;
 
-    memset(&frock, 0, sizeof(frock));
-    frock.state = state;
-    frock.from_name = from_name;
-    frock.to_name = to_name;
+    r = folder_number_rename(state, from_name, to_name);
+    if (r) return r;
 
-    /* alternatively, find all conversations named in the folder.
-     * in a world with a million folders with a few conversations only
-     * this would make sense - but that's not really likely, so this
-     * is probably faster */
+    r = folder_key_rename(state, from_name, to_name);
+    if (r) return r;
 
-    cyrusdb_foreach(state->db, "B", 1, NULL, do_folder_rename, &frock, &state->txn);
+    syslog(LOG_NOTICE, "conversations_rename_folder: renamed %s to %s",
+	   from_name, to_name);
 
-    folder_key_rename(state, from_name, to_name);
-
-    syslog(LOG_NOTICE, "conversations_rename_folder: saw %lu cids, renamed folder in %lu",
-			frock.entries_seen, frock.entries_renamed);
-
-    return r;
+    return 0;
 }
 
 
