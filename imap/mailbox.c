@@ -3664,7 +3664,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 	/* but we can't abort, because the mailbox is committed.  Error handling
 	 * here is actually a major disaster area */
 	if (r)
-	    syslog(LOG_ERR, "IOERROR: conversations update failed %s", oldmailbox->name);
+	    syslog(LOG_ERR, "IOERROR: conversations update failed %s (%s)", oldmailbox->name, error_message(r));
     }
 
     if (config_auditlog)
