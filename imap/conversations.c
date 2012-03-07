@@ -1282,7 +1282,7 @@ int conversations_rename_cid(struct conversations_state *state,
     cyrusdb_foreach(state->db, "<", 1, NULL, do_one_rename, &rrock, &state->txn);
 
     syslog(LOG_NOTICE, "conversations_rename_cid: saw %lu entries, renamed %lu"
-		       " from %08llx to %08llx",
+		       " from " CONV_FMT " to " CONV_FMT,
 			rrock.entries_seen, rrock.entries_renamed,
 			from_cid, to_cid);
 
