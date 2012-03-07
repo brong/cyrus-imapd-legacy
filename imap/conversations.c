@@ -1420,11 +1420,11 @@ int conversations_wipe_counts(struct conversations_state *state)
     if (r) return r;
 
     /* wipe counted_flags */
-    r = cyrusdb_delete(state->db, CFKEY, 14, &state->txn, 1);
+    r = cyrusdb_delete(state->db, CFKEY, strlen(CFKEY), &state->txn, 1);
     if (r) return r;
 
     /* wipe folder names */
-    r = cyrusdb_delete(state->db, FNKEY, 14, &state->txn, 1);
+    r = cyrusdb_delete(state->db, FNKEY, strlen(FNKEY), &state->txn, 1);
     if (r) return r;
 
     return _init_counted(state, NULL, 0);
