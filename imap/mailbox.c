@@ -4780,14 +4780,16 @@ int mailbox_rename_cid(struct conversations_state *state,
     r = conversation_load(state, from_cid, &conv);
     if (!r && conv) {
 	for (folder = conv->folders ; folder ; folder = folder->next) {
+	    const char *mboxname = strarray_nth(state->folder_names, folder->number);
+
 	    buf_reset(&action);
 	    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
 		       from_cid, to_cid);
 
-	    r = mailbox_post_action(folder->mboxname, &action);
+	    r = mailbox_post_action(mboxname, &action);
 	    if (r)
 		syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
-		       folder->mboxname, error_message(r));
+		       mboxname, error_message(r));
 	    r = 0;	/* ignore any error and keep going */
 	}
 	conversation_free(conv);

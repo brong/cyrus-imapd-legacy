@@ -4745,7 +4745,7 @@ static void do_one_xconvmeta(struct conversations_state *state,
 		    if ((*imapd_namespace.mboxname_tointernal)(&imapd_namespace, fname,
 							       imapd_userid, intname))
 			continue;
-		    folder = conversation_find_folder(conv, intname);
+		    folder = conversation_find_folder(state, conv, intname);
 		    dlist_setatom(flist, "MBOXNAME", fname);
 		    /* ok if it's not there */
 		    dlist_setnum32(flist, "EXISTS", folder ? folder->exists : 0);
@@ -4975,7 +4975,7 @@ static int xconvfetch_lookup(struct conversations_state *statep,
 	    continue;
 
 	/* finally, something worth looking at */
-	strarray_add(folder_list, folder->mboxname);
+	strarray_add(folder_list, strarray_nth(statep->folder_names, folder->number));
     }
 
 out:
