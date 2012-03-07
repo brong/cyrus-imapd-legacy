@@ -79,7 +79,7 @@ typedef struct conv_sender  conv_sender_t;
 
 struct conv_folder {
     conv_folder_t   *next;
-    char	    *mboxname;
+    int		    number;
     modseq_t	    modseq;
     uint32_t	    num_records;
     uint32_t	    exists;
@@ -166,10 +166,9 @@ extern void conversation_update(struct conversations_state *state,
 			        int delta_unseen,
 			        int *delta_counts,
 			        modseq_t modseq);
-extern conv_folder_t *conversation_find_folder(conversation_t *,
+extern conv_folder_t *conversation_find_folder(struct conversations_state *state,
+					       conversation_t *,
 					       const char *mboxname);
-extern conv_folder_t *conversation_add_folder(conversation_t *,
-					      const char *mboxname);
 extern conversation_t *conversation_new(struct conversations_state *state);
 extern void conversation_free(conversation_t *);
 

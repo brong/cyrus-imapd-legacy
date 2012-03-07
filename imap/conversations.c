@@ -138,7 +138,7 @@ static int _init_counted(struct conversations_state *state,
 	if (!val) val = "";
 	vallen = strlen(val);
 	r = cyrusdb_store(state->db, CFKEY, strlen(CFKEY),
-		      val, vallen, &state->txn);
+			  val, vallen, &state->txn);
 	if (r) {
 	    syslog(LOG_ERR, "Failed to write counted_flags");
 	    return r;
@@ -188,7 +188,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
 
     /* ensure a write lock immediately, and also load the counted flags */
     cyrusdb_fetchlock(open->s.db, CFKEY, strlen(CFKEY),
-		  &val, &vallen, &open->s.txn);
+		      &val, &vallen, &open->s.txn);
     _init_counted(&open->s, val, vallen);
 
     /* we should just read the folder names up front too */
@@ -264,7 +264,7 @@ struct conversations_state *conversations_get_mbox(const char *mboxname)
 }
 
 
-void _conv_remove (struct conversations_state **statep)
+void _conv_remove(struct conversations_state **statep)
 {
     struct conversations_open **prevp = &open_conversations;
     struct conversations_open *cur;
@@ -356,9 +356,9 @@ static int _conversations_set_key(struct conversations_state *state,
     buf_printf(&buf, "%d " CONV_FMT " %lu", version, cid, stamp);
 
     r = cyrusdb_store(state->db,
-		  key, keylen,
-		  buf.s, buf.len,
-		  &state->txn);
+		      key, keylen,
+		      buf.s, buf.len,
+		      &state->txn);
 
     buf_free(&buf);
     if (r)
@@ -461,9 +461,9 @@ int conversations_get_msgid(struct conversations_state *state,
 	return r;
 
     r = cyrusdb_fetch(state->db,
-		  msgid, keylen,
-		  &data, &datalen,
-		  &state->txn);
+		      msgid, keylen,
+		      &data, &datalen,
+		      &state->txn);
 
     if (!r) r = _conversations_parse(data, datalen, cidp, NULL);
 
@@ -550,9 +550,9 @@ int conversation_setstatus(struct conversations_state *state,
     dlist_free(&dl);
 
     r = cyrusdb_store(state->db,
-		  key, strlen(key),
-		  buf.s, buf.len,
-		  &state->txn);
+		      key, strlen(key),
+		      buf.s, buf.len,
+		      &state->txn);
 
     buf_free(&buf);
     free(key);
@@ -575,6 +575,7 @@ static int _conversation_save(struct conversations_state *state,
 
     /* see if any 'F' keys need to be changed */
     for (folder = conv->folders ; folder ; folder = folder->next) {
+	const char *mboxname = strarray_nth(state->folder_names, folder->number);
 	int exists_diff = 0;
 	int unseen_diff = 0;
 	modseq_t modseq;
@@ -608,14 +609,14 @@ static int _conversation_save(struct conversations_state *state,
 	 * every cid in every folder in the transaction.  Big
 	 * wins available by caching these in memory and writing
 	 * once at the end of the transaction */
-	r = conversation_getstatus(state, folder->mboxname,
+	r = conversation_getstatus(state, mboxname,
 				   &modseq, &exists, &unseen);
 	if (r) goto done;
 	if (exists_diff || unseen_diff || modseq < conv->modseq) {
 	    if (modseq < conv->modseq) modseq = conv->modseq;
 	    exists += exists_diff;
 	    unseen += unseen_diff;
-	    r = conversation_setstatus(state, folder->mboxname,
+	    r = conversation_setstatus(state, mboxname,
 				       modseq, exists, unseen);
 	    if (r) goto done;
 	}
@@ -645,7 +646,7 @@ static int _conversation_save(struct conversations_state *state,
 	if (!folder->num_records)
 	    continue;
 	nn = dlist_newlist(n, "FOLDER");
-	dlist_setnum32(nn, "FOLDERNUM", folder_number(state, folder->mboxname));
+	dlist_setnum32(nn, "FOLDERNUM", folder->number);
 	dlist_setnum64(nn, "MODSEQ", folder->modseq);
 	dlist_setnum32(nn, "NUMRECORDS", folder->num_records);
 	dlist_setnum32(nn, "EXISTS", folder->exists);
@@ -788,6 +789,31 @@ int conversation_getstatus(struct conversations_state *state,
     return r;
 }
 
+static conv_folder_t *conversation_get_folder(conversation_t *conv,
+					      int number, int create_flag)
+{
+    conv_folder_t *folder, **nextp = &conv->folders;
+
+    /* first check if it already exists */
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	if (folder->number == number)
+	    return folder;
+	if (folder->number < number)
+	    nextp = &folder->next;
+    }
+
+    if (create_flag) {
+	/* not found, create a new one */
+	folder = xzmalloc(sizeof(*folder));
+	folder->number = number;
+	folder->next = *nextp;
+	*nextp = folder;
+	conv->dirty = 1;
+    }
+
+    return folder;
+}
+
 static int _conversation_load(struct conversations_state *state,
 			      const char *data, int datalen,
 			      conversation_t **convp)
@@ -852,14 +878,12 @@ static int _conversation_load(struct conversations_state *state,
 
     n = dlist_getchildn(dl, 5);
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
-	const char *mboxname;
+	int number;
 	nn = dlist_getchildn(n, 0);
 	if (!nn)
 	    continue;
-	mboxname = strarray_nth(state->folder_names, dlist_num(nn));
-	if (!mboxname)
-	    continue;
-	folder = conversation_add_folder(conv, mboxname);
+	number = dlist_num(nn);
+	folder = conversation_get_folder(conv, number, 1);
 
 	nn = dlist_getchildn(n, 1);
 	if (nn)
@@ -991,46 +1015,12 @@ int conversation_get_modseq(struct conversations_state *state,
     return 0;
 }
 
-static conv_folder_t *conversation_get_folder(conversation_t *conv,
-					      const char *mboxname,
-					      int create_flag)
+conv_folder_t *conversation_find_folder(struct conversations_state *state,
+					conversation_t *conv,
+					const char *mboxname)
 {
-    conv_folder_t *folder, **nextp = &conv->folders;
-
-    /* first check if it already exists */
-    for (folder = conv->folders ; folder ; folder = folder->next) {
-	if (!strcmp(folder->mboxname, mboxname))
-	    return folder;
-    }
-
-    if (create_flag) {
-	/* not found, create a new one */
-	for (folder = conv->folders ; folder ; folder = folder->next) {
-	    /* XXX - mboxlist sort order */
-	    if (strcmp(folder->mboxname, mboxname) > 0)
-		break;
-	    nextp = &folder->next;
-	}
-	folder = xzmalloc(sizeof(*folder));
-	folder->mboxname = xstrdup(mboxname);
-	folder->next = *nextp;
-	*nextp = folder;
-	conv->dirty = 1;
-    }
-
-    return folder;
-}
-
-conv_folder_t *conversation_find_folder(conversation_t *conv,
-				        const char *mboxname)
-{
-    return conversation_get_folder(conv, mboxname, /*create*/0);
-}
-
-conv_folder_t *conversation_add_folder(conversation_t *conv,
-				       const char *mboxname)
-{
-    return conversation_get_folder(conv, mboxname, /*create*/1);
+    int number = folder_number(state, mboxname);
+    return conversation_get_folder(conv, number, /*create*/0);
 }
 
 void conversation_add_sender(conversation_t *conv,
@@ -1097,9 +1087,10 @@ void conversation_update(struct conversations_state *state,
 			 int *delta_counts, modseq_t modseq)
 {
     conv_folder_t *folder;
+    int number = folder_number(state, mboxname);
     int i;
 
-    folder = conversation_add_folder(conv, mboxname);
+    folder = conversation_get_folder(conv, number, 1);
 
     if (delta_num_records) {
 	_apply_delta(&conv->num_records, delta_num_records);
@@ -1154,7 +1145,6 @@ void conversation_free(conversation_t *conv)
 
     while ((folder = conv->folders)) {
 	conv->folders = folder->next;
-	free(folder->mboxname);
 	free(folder);
     }
 
@@ -1366,25 +1356,22 @@ static int delete_cb(void *rock,
 int conversations_wipe_counts(struct conversations_state *state)
 {
     int r = 0;
-    /* wipe B counts */
-    r = cyrusdb_foreach(state->db, "B", 1, NULL, delete_cb,
-		    state, &state->txn);
-    if (r) return r;
 
     /* wipe F counts */
     r = cyrusdb_foreach(state->db, "F", 1, NULL, delete_cb,
-		    state, &state->txn);
+			state, &state->txn);
     if (r) return r;
 
-    /* wipe counted_flags */
-    r = cyrusdb_delete(state->db, CFKEY, strlen(CFKEY), &state->txn, 1);
+    /* wipe B counts */
+    r = cyrusdb_foreach(state->db, "B", 1, NULL, delete_cb,
+			state, &state->txn);
     if (r) return r;
 
-    /* wipe folder names */
-    r = cyrusdb_delete(state->db, FNKEY, strlen(FNKEY), &state->txn, 1);
+    /* re-init the counted flags */
+    r = _init_counted(state, NULL, 0);
     if (r) return r;
 
-    return _init_counted(state, NULL, 0);
+    return r;
 }
 
 void conversations_dump(struct conversations_state *state, FILE *fp)

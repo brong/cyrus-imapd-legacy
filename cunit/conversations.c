@@ -414,11 +414,11 @@ static void test_cid_rename(void)
     CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
     CU_ASSERT_EQUAL(conv->modseq, 8);
     CU_ASSERT_EQUAL(num_folders(conv), 3);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
-    folder = conversation_find_folder(conv, FOLDER2);
+    folder = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
-    folder = conversation_find_folder(conv, FOLDER3);
+    folder = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     conversation_free(conv);
     conv = NULL;
@@ -515,20 +515,22 @@ static void test_folder_rename(void)
     CU_ASSERT_EQUAL(conv->modseq, 8);
     CU_ASSERT_EQUAL(num_folders(conv), 2);
     CU_ASSERT_EQUAL(conv->exists, 5);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->exists, 3);
     /* no record for folder2 */
-    folder = conversation_find_folder(conv, FOLDER2);
-    /* have a record for folder3 */
+    folder = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NULL_FATAL(folder);
-    folder = conversation_find_folder(conv, FOLDER3);
+    /* have a record for folder3 */
+    folder = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->exists, 2);
     conversation_free(conv);
     conv = NULL;
 
-    /* now "delete" the folder */
+    /* now "delete" the folder.  NOTE - this doesn't actually
+     * change any counts, because we go through the CIDs
+     * individually on the delete codepath */
     r = conversations_rename_folder(state, FOLDER3, NULL);
     CU_ASSERT_EQUAL(r, 0);
 
@@ -545,18 +547,17 @@ static void test_folder_rename(void)
 
     r = conversation_load(state, C_CID, &conv);
     CU_ASSERT_PTR_NOT_NULL_FATAL(conv);
-    CU_ASSERT_EQUAL(conv->modseq, 8);
-    CU_ASSERT_EQUAL(num_folders(conv), 1);
-    CU_ASSERT_EQUAL(conv->exists, 3);
-    folder = conversation_find_folder(conv, FOLDER1);
+    /* got a record for folder1 */
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->exists, 3);
     /* no record for folder2 */
-    folder = conversation_find_folder(conv, FOLDER2);
-    /* have a record for folder3 */
+    folder = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NULL_FATAL(folder);
-    folder = conversation_find_folder(conv, FOLDER3);
+    /* no record for folder3 either */
+    folder = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NULL_FATAL(folder);
+
     conversation_free(conv);
     conv = NULL;
 
@@ -615,7 +616,7 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(conv->counts[1], 0);
     CU_ASSERT_EQUAL(conv->modseq, 4);
     CU_ASSERT_EQUAL(num_folders(conv), 1);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 13);
     CU_ASSERT_EQUAL(folder->exists, 7);
@@ -640,7 +641,7 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(conv->counts[1], 0);
     CU_ASSERT_EQUAL(conv->modseq, 4);
     CU_ASSERT_EQUAL(num_folders(conv), 1);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 13);
     CU_ASSERT_EQUAL(folder->exists, 7);
@@ -676,17 +677,17 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(conv->counts[1], 7);
     CU_ASSERT_EQUAL(conv->modseq, 55);
     CU_ASSERT_EQUAL(num_folders(conv), 3);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 13);
     CU_ASSERT_EQUAL(folder->exists, 7);
     CU_ASSERT_EQUAL(folder->modseq, 4);
-    folder = conversation_find_folder(conv, FOLDER2);
+    folder = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 2);
     CU_ASSERT_EQUAL(folder->exists, 1);
     CU_ASSERT_EQUAL(folder->modseq, 7);
-    folder = conversation_find_folder(conv, FOLDER3);
+    folder = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 10);
     CU_ASSERT_EQUAL(folder->exists, 10);
@@ -714,17 +715,17 @@ static void test_folders(void)
     CU_ASSERT_EQUAL(conv->counts[1], 7);
     CU_ASSERT_EQUAL(conv->modseq, 55);
     CU_ASSERT_EQUAL(num_folders(conv), 3);
-    folder = conversation_find_folder(conv, FOLDER1);
+    folder = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 13);
     CU_ASSERT_EQUAL(folder->exists, 7);
     CU_ASSERT_EQUAL(folder->modseq, 4);
-    folder = conversation_find_folder(conv, FOLDER2);
+    folder = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 2);
     CU_ASSERT_EQUAL(folder->exists, 1);
     CU_ASSERT_EQUAL(folder->modseq, 7);
-    folder = conversation_find_folder(conv, FOLDER3);
+    folder = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL(folder);
     CU_ASSERT_EQUAL(folder->num_records, 10);
     CU_ASSERT_EQUAL(folder->exists, 10);
@@ -767,6 +768,12 @@ static void test_folder_ordering(void)
     CU_ASSERT_PTR_NOT_NULL(conv);
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
+    /* set up the folder names in order - will return NULL each time,
+     * but will set up the state */
+    conversation_find_folder(state, conv, FOLDER1);
+    conversation_find_folder(state, conv, FOLDER2);
+    conversation_find_folder(state, conv, FOLDER3);
+
     conversation_update(state, conv, FOLDER1, /*num_records*/1,
 			/*exists*/1, /*unseen*/0, counts,
 			/*modseq*/1);
@@ -792,11 +799,11 @@ static void test_folder_ordering(void)
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
     /* check that they've been created in the same order */
-    folder1 = conversation_find_folder(conv, FOLDER1);
+    folder1 = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
-    folder2 = conversation_find_folder(conv, FOLDER2);
+    folder2 = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
-    folder3 = conversation_find_folder(conv, FOLDER3);
+    folder3 = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
 
     /* in the right order! */
@@ -818,11 +825,11 @@ static void test_folder_ordering(void)
     CU_ASSERT_PTR_NOT_NULL(conv);
 
     /* check that they've been re-loaded in the same order */
-    folder1 = conversation_find_folder(conv, FOLDER1);
+    folder1 = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
-    folder2 = conversation_find_folder(conv, FOLDER2);
+    folder2 = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
-    folder3 = conversation_find_folder(conv, FOLDER3);
+    folder3 = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
 
     /* in the right order! */
@@ -846,11 +853,11 @@ static void test_folder_ordering(void)
     r = conversation_load(state, C_CID, &conv);
 
     /* check that they are still in the same order */
-    folder1 = conversation_find_folder(conv, FOLDER1);
+    folder1 = conversation_find_folder(state, conv, FOLDER1);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder1);
-    folder2 = conversation_find_folder(conv, FOLDER2);
+    folder2 = conversation_find_folder(state, conv, FOLDER2);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder2);
-    folder3 = conversation_find_folder(conv, FOLDER3);
+    folder3 = conversation_find_folder(state, conv, FOLDER3);
     CU_ASSERT_PTR_NOT_NULL_FATAL(folder3);
 
     /* in the right order! */
@@ -1180,7 +1187,7 @@ static void test_dump(void)
 	CU_ASSERT_EQUAL(conv->modseq, 100);
 	CU_ASSERT_EQUAL(mboxnames.count, num_folders(conv));
 	for (j = 0 ; j < mboxnames.count ; j++) {
-	    folder = conversation_find_folder(conv, mboxnames.data[j]);
+	    folder = conversation_find_folder(state, conv, mboxnames.data[j]);
 	    CU_ASSERT_PTR_NOT_NULL(folder);
 	    CU_ASSERT_EQUAL(folder->modseq, 100);
 	}
