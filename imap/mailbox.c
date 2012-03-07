@@ -123,6 +123,8 @@ static struct mailboxlist *open_mailboxes = NULL;
                          (m).cache_fd = -1; \
                          (m).header_fd = -1; }
 
+static int mailbox_delete_internal(struct mailbox **mailboxptr, int
+				   was_renamed);
 static int mailbox_index_unlink(struct mailbox *mailbox);
 static int mailbox_index_repack(struct mailbox *mailbox);
 static int mailbox_read_index_header(struct mailbox *mailbox);
@@ -3362,6 +3364,12 @@ static int mailbox_delete_conversations(struct mailbox *mailbox)
  */
 int mailbox_delete(struct mailbox **mailboxptr)
 {
+    return mailbox_delete_internal(mailboxptr, 0);
+}
+
+static int mailbox_delete_internal(struct mailbox **mailboxptr,
+				   int was_renamed)
+{
     int r = 0;
     struct mailbox *mailbox = *mailboxptr;
 
@@ -3381,7 +3389,8 @@ int mailbox_delete(struct mailbox **mailboxptr)
 
     /* remove conversations records - need to update EVERY RECORD
      * to get the counts right */
-    if (!mboxname_isdeletedmailbox(mailbox->name, NULL)) {
+    if (!mboxname_isdeletedmailbox(mailbox->name, NULL) &&
+        !was_renamed) {
 	r = mailbox_delete_conversations(mailbox);
 	if (r) return r;
     }
@@ -3694,7 +3703,7 @@ int mailbox_rename_cleanup(struct mailbox **mailboxptr, int isinbox)
 	if (!r) r = mailbox_commit(oldmailbox);
 	mailbox_close(mailboxptr);
     } else {
-	r = mailbox_delete(mailboxptr);
+	r = mailbox_delete_internal(mailboxptr, /*was_renamed*/1);
     }
 
     if (r) {
