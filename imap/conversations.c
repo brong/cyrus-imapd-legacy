@@ -1332,14 +1332,22 @@ int conversations_rename_folder(struct conversations_state *state,
 {
     int r;
 
+    assert(from_name);
+
     r = folder_number_rename(state, from_name, to_name);
     if (r) return r;
 
     r = folder_key_rename(state, from_name, to_name);
     if (r) return r;
 
-    syslog(LOG_NOTICE, "conversations_rename_folder: renamed %s to %s",
-	   from_name, to_name);
+    if (to_name) {
+	syslog(LOG_NOTICE, "conversations_rename_folder: renamed %s to %s",
+	       from_name, to_name);
+    }
+    else {
+	syslog(LOG_NOTICE, "conversations_rename_folder: deleted %s",
+	       from_name);
+    }
 
     return 0;
 }
