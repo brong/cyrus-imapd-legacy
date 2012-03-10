@@ -795,10 +795,12 @@ static conv_folder_t *conversation_get_folder(conversation_t *conv,
 
     /* first check if it already exists */
     for (folder = conv->folders ; folder ; folder = folder->next) {
-	if (folder->number == number)
-	    return folder;
 	if (folder->number < number)
 	    nextp = &folder->next;
+	else if (folder->number == number)
+	    return folder;
+	else
+	    break;
     }
 
     if (create_flag) {
