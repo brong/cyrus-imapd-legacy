@@ -5029,6 +5029,11 @@ static int do_xconvfetch(struct dlist *cidlist,
 
 	index_checkflags(index_state, 0, 0);
 
+	/* make sure \Deleted messages are expunged.  Will also lock the
+	 * mailbox state and read any new information */
+	r = index_expunge(index_state, NULL, 1);
+	if (r) goto out;
+
 	index_fetchresponses(index_state, NULL, /*usinguid*/1,
 			     fetchargs, NULL);
 
