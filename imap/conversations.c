@@ -496,13 +496,14 @@ static int write_folders(struct conversations_state *state)
 }
 
 static int folder_number(struct conversations_state *state,
-			 const char *name)
+			 const char *name,
+			 int create_flag)
 {
     int pos = strarray_find(state->folder_names, name, 0);
     int r;
 
     /* if we have to add it, then save the keys back */
-    if (pos < 0) {
+    if (pos < 0 && create_flag) {
 	pos = strarray_append(state->folder_names, name);
 
 	/* store must succeed */
@@ -793,6 +794,9 @@ static conv_folder_t *conversation_get_folder(conversation_t *conv,
 {
     conv_folder_t *folder, **nextp = &conv->folders;
 
+    if (number < 0)
+	return NULL;
+
     /* first check if it already exists */
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	if (folder->number < number)
@@ -803,14 +807,15 @@ static conv_folder_t *conversation_get_folder(conversation_t *conv,
 	    break;
     }
 
-    if (create_flag) {
-	/* not found, create a new one */
-	folder = xzmalloc(sizeof(*folder));
-	folder->number = number;
-	folder->next = *nextp;
-	*nextp = folder;
-	conv->dirty = 1;
-    }
+    if (!create_flag)
+	return NULL;
+
+    /* not found, create a new one */
+    folder = xzmalloc(sizeof(*folder));
+    folder->number = number;
+    folder->next = *nextp;
+    *nextp = folder;
+    conv->dirty = 1;
 
     return folder;
 }
@@ -1020,7 +1025,7 @@ conv_folder_t *conversation_find_folder(struct conversations_state *state,
 					conversation_t *conv,
 					const char *mboxname)
 {
-    int number = folder_number(state, mboxname);
+    int number = folder_number(state, mboxname, /*create*/0);
     return conversation_get_folder(conv, number, /*create*/0);
 }
 
@@ -1088,10 +1093,10 @@ void conversation_update(struct conversations_state *state,
 			 int *delta_counts, modseq_t modseq)
 {
     conv_folder_t *folder;
-    int number = folder_number(state, mboxname);
+    int number = folder_number(state, mboxname, /*create*/1);
     int i;
 
-    folder = conversation_get_folder(conv, number, 1);
+    folder = conversation_get_folder(conv, number, /*create*/1);
 
     if (delta_num_records) {
 	_apply_delta(&conv->num_records, delta_num_records);
