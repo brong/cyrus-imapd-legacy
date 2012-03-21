@@ -2275,6 +2275,9 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     if (!old && !new)
 	return IMAP_INTERNAL;
 
+    if (old) assert(!(old->system_flags & FLAG_UNLINKED));
+    if (new) assert(!(new->system_flags & FLAG_UNLINKED));
+
     if (old && new) {
 	assert(old->uid == new->uid);
 	assert(old->modseq <= new->modseq);
@@ -2291,6 +2294,9 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 	}
     }
     cid = (new ? new->cid : old->cid);
+
+    /* skip out on non-CIDed records */
+    if (!cid) return 0;
 
     r = conversation_load(cstate, cid, &conv);
     if (r)
