@@ -768,11 +768,15 @@ static void test_folder_ordering(void)
     CU_ASSERT_PTR_NOT_NULL(conv);
     CU_ASSERT_EQUAL(conv->dirty, 1);
 
-    /* set up the folder names in order - will return NULL each time,
-     * but will set up the state */
-    conversation_find_folder(state, conv, FOLDER1);
-    conversation_find_folder(state, conv, FOLDER2);
-    conversation_find_folder(state, conv, FOLDER3);
+    /* set up the folder names in order - we are going to discard
+     * this conversation, but the folder_number call will persist */
+    conversation_update(state, conv, FOLDER1, 0, 0, 0, 0, 0);
+    conversation_update(state, conv, FOLDER2, 0, 0, 0, 0, 0);
+    conversation_update(state, conv, FOLDER3, 0, 0, 0, 0, 0);
+
+    /* discard and recreate */
+    conversation_free(conv);
+    conv = conversation_new(state);
 
     conversation_update(state, conv, FOLDER1, /*num_records*/1,
 			/*exists*/1, /*unseen*/0, counts,
