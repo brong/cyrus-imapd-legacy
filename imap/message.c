@@ -2732,7 +2732,7 @@ continue2:
 	 * both ends.
 	 */
 	for (i = 0 ; i < nfound ; i++) {
-	    r = mailbox_rename_cid(state, found[i].cid, newcid);
+	    r = conversations_rename_cid(state, found[i].cid, newcid);
 	    if (r)
 		goto out;
 	}

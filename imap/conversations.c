@@ -1283,6 +1283,8 @@ int conversations_rename_cid(struct conversations_state *state,
 			     conversation_id_t to_cid)
 {
     struct rename_rock rrock;
+    conv_folder_t *folder = NULL;
+    conversation_t *conv = NULL;
     int r = 0;
 
     memset(&rrock, 0, sizeof(rrock));
@@ -1297,7 +1299,31 @@ int conversations_rename_cid(struct conversations_state *state,
 			rrock.entries_seen, rrock.entries_renamed,
 			from_cid, to_cid);
 
-    return r;
+    /* Use the B record to find the mailboxes for a CID rename.
+     * The rename events will decrease the NUM_RECORDS count back
+     * to zero, and the record will delete itself! */
+    r = conversation_load(state, from_cid, &conv);
+    if (r) return r;
+    if (!conv) return 0;
+
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	const char *mboxname = strarray_nth(state->folder_names, folder->number);
+	struct mailbox *mailbox = NULL;
+
+	r = mailbox_open_iwl(mboxname, &mailbox);
+	if (r) return r;
+
+	r = mailbox_cid_rename(mailbox, from_cid, to_cid);
+	if (r) return r;
+
+	mailbox_close(&mailbox);
+    }
+
+    conversation_free(conv);
+
+    /* XXX - COULD try to read the B key and confirm that it doesn't exist any more... */
+
+    return 0;
 }
 
 static int folder_key_rename(struct conversations_state *state,
@@ -1405,5 +1431,7 @@ int conversations_undump(struct conversations_state *state, FILE *fp)
 {
     return cyrusdb_undumpfile(state->db, fp, &state->txn);
 }
+
+
 
 #undef DB

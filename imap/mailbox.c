@@ -130,10 +130,6 @@ static int mailbox_index_repack(struct mailbox *mailbox);
 static int mailbox_read_index_header(struct mailbox *mailbox);
 static int mailbox_lock_index_internal(struct mailbox *mailbox,
 				       int locktype);
-static int mailbox_post_action(const char *name, const struct buf *);
-static void mailbox_execute_actions_file(struct mailbox *mailbox,
-				         FILE *fp, const char *fname);
-static int mailbox_execute_actions(struct mailbox *mailbox);
 
 static struct mailboxlist *create_listitem(const char *name)
 {
@@ -984,15 +980,6 @@ static int mailbox_open_advanced(const char *name,
     if (mailbox->i.options & OPT_MAILBOX_DELETED) {
 	r = IMAP_MAILBOX_NONEXISTENT;
 	goto done;
-    }
-
-    if (index_locktype == LOCK_EXCLUSIVE) {
-	r = mailbox_execute_actions(mailbox);
-	if (r) {
-	    syslog(LOG_ERR, "Failed to perform delayed open "
-			    "actions on mailbox %s", mailbox->name);
-	    goto done;
-	}
     }
 
 done:
@@ -4683,175 +4670,25 @@ int mailbox_get_annotate_state(struct mailbox *mailbox,
     return r;
 }
 
-/*
- * Atomically append an action record to the actions file for the named
- * mailbox.  Does not require the mailbox or index locks.  Does very
- * briefly lock the actions file using fcntl locks.  Handles the actions
- * file being renamed to actionsx (i.e. losing the race against a
- * process doing a mailbox open).
- * Returns: 0 on success or IMAP error code.
- */
-static int mailbox_post_action(const char *name,
-			       const struct buf *action)
-{
-    char *fname;
-    int fd = -1;
-    int r = 0;
-    int n;
-    struct mboxlist_entry *mbentry = NULL;
-    const char *failmode;
-
-    /* Ensure the action contains a newline */
-    if (action->len == 0 || action->s[action->len-1] != '\n')
-	return IMAP_INVALID_IDENTIFIER;
-
-    r = mboxlist_lookup(name, &mbentry, NULL);
-    if (r)
-	return r;
-
-    fname = mboxname_metapath(mbentry->partition, name, META_ACTIONS, 0);
-    if (!fname) {
-	r = IMAP_MAILBOX_BADNAME;
-	goto out;
-    }
-
-    for (;;) {
-	fd = open(fname, O_RDWR|O_CREAT, 0600);
-	if (fd < 0) {
-	    r = IMAP_SYS_ERROR;
-	    goto out;
-	}
-
-	failmode = NULL;
-	r = lock_reopen(fd, fname, NULL, &failmode);
-	if (r < 0 && (!failmode || strcmp(failmode, "opening"))) {
-	    r = IMAP_IOERROR;
-	    goto out;
-	}
-	if (r == 0)
-	    break;
-
-	/* lost the race against rename, retry opening */
-	close(fd);
-    }
-
-    /* seek to the end of the file */
-    n = lseek(fd, 0L, SEEK_END);
-    if (n < 0) {
-	r = IMAP_IOERROR;
-	goto out_unlock;
-    }
-
-    /* Finally, do the append */
-    n = retry_write(fd, action->s, action->len);
-    if (n != (int)action->len) {
-	r = IMAP_IOERROR;
-	goto out_unlock;
-    }
-
-    sync_log_mailbox(name);
-
-out_unlock:
-    lock_unlock(fd);
-
-out:
-    close(fd);
-    mboxlist_entry_free(&mbentry);
-    return r;
-}
-
-int mailbox_rename_cid(struct conversations_state *state,
+int mailbox_cid_rename(struct mailbox *mailbox,
 		       conversation_id_t from_cid,
 		       conversation_id_t to_cid)
 {
-    struct buf action = BUF_INITIALIZER;
-    conversation_t *conv = NULL;
-    conv_folder_t *folder;
-    int r = 0;
-
-    /* boring cases - nothing to change */
-    if (!from_cid)
-	goto out;
-    if (from_cid == to_cid)
-	goto out;
-
-    r = conversations_rename_cid(state, from_cid, to_cid);
-    if (r)
-	goto out;
-
-    /* Use the B record to notify mailboxes of a CID rename.
-     * We don't actually alter the values, because the EXPUNGE
-     * events later will decrease the EXISTS back to zero, and
-     * then it will delete itself */
-    r = conversation_load(state, from_cid, &conv);
-    if (!r && conv) {
-	for (folder = conv->folders ; folder ; folder = folder->next) {
-	    const char *mboxname = strarray_nth(state->folder_names, folder->number);
-
-	    buf_reset(&action);
-	    buf_printf(&action, "CIDRENAME " CONV_FMT " " CONV_FMT "\n",
-		       from_cid, to_cid);
-
-	    r = mailbox_post_action(mboxname, &action);
-	    if (r)
-		syslog(LOG_ERR, "Failed to post CID rename for mailbox \"%s\": %s",
-		       mboxname, error_message(r));
-	    r = 0;	/* ignore any error and keep going */
-	}
-	conversation_free(conv);
-    }
-
-out:
-    buf_free(&action);
-    return r;
-}
-
-int mailbox_post_nop_action(const char *name, unsigned int tag)
-{
-    struct buf action = BUF_INITIALIZER;
-    int r;
-
-    buf_printf(&action, "NOP %u\n", tag);
-    r = mailbox_post_action(name, &action);
-    buf_free(&action);
-    return r;
-}
-
-static void mailbox_action_cid_rename(struct mailbox *mailbox,
-				      const strarray_t *action,
-				      const char *fname,
-				      unsigned int lineno)
-{
-    conversation_id_t from_cid, to_cid;
     uint32_t recno, num_records;
     struct index_record record;
     int r;
 
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
-	return;
-
-    if (action->count != 3)
-	goto bad_syntax;
-
-    r = conversation_id_decode(&from_cid, action->data[1]);
-    if (!r)
-	goto bad_syntax;
-    r = conversation_id_decode(&to_cid, action->data[2]);
-    if (!r)
-	goto bad_syntax;
-
-    syslog(LOG_NOTICE, "Performing delayed CID rename: %s -> %s",
-			action->data[1], action->data[2]);
+	return 0;
 
     num_records = mailbox->i.num_records;
     for (recno = 1; recno <= num_records; recno++) {
-
 	r = mailbox_read_index_record(mailbox, recno, &record);
 	if (r) {
-	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+	    syslog(LOG_ERR, "mailbox_cid_rename: error "
 			    "reading record %u, mailbox %s: %s",
 			    recno, mailbox->name, error_message(r));
-	    return;
+	    return r;
 	}
 
 	if (record.system_flags & FLAG_EXPUNGED)
@@ -4868,147 +4705,12 @@ static void mailbox_action_cid_rename(struct mailbox *mailbox,
 	r = mailbox_rewrite_index_record(mailbox, &record);
 
 	if (r) {
-	    syslog(LOG_ERR, "mailbox_action_cid_rename: error "
+	    syslog(LOG_ERR, "mailbox_cid_rename: error "
 			    "rewriting record %u, mailbox %s: %s",
 			    recno, mailbox->name, error_message(r));
-	    return;
+	    return r;
 	}
     }
 
-    return;
-
-bad_syntax:
-    syslog(LOG_ERR, "Bad syntax for CIDRENAME, line %u file %s",
-		    lineno, fname);
-}
-
-/* This is for testing only */
-unsigned int mailbox_nop_action_count = 0;
-unsigned int mailbox_nop_action_tag = 0;
-
-static void mailbox_action_nop(struct mailbox *mailbox __attribute__((unused)),
-			       const strarray_t *action,
-			       const char *fname __attribute__((unused)),
-			       unsigned int lineno __attribute__((unused)))
-{
-    mailbox_nop_action_count++;
-    mailbox_nop_action_tag = (action->count > 1 ?
-			    strtoul(action->data[1], NULL, 0) : 0);
-}
-
-static void mailbox_execute_actions_file(struct mailbox *mailbox,
-				         FILE *fp, const char *fname)
-{
-    char buf[1024];
-    unsigned int lineno = 0;	/* used for error reporting */
-    strarray_t *action;
-
-    while (fgets(buf, sizeof(buf), fp)) {
-	action = strarray_split(buf, NULL);
-	lineno++;
-
-	if (action->count < 1) {
-	    syslog(LOG_ERR, "Unexpected empty line, line %u file %s",
-			    lineno, fname);
-	    strarray_free(action);
-	    continue;
-	}
-
-	if (!strcmp(action->data[0], "NOP")) {
-	    mailbox_action_nop(mailbox, action, fname, lineno);
-	} else if (!strcmp(action->data[0], "CIDRENAME")) {
-	    mailbox_action_cid_rename(mailbox, action, fname, lineno);
-	} else {
-	    syslog(LOG_ERR, "Unknown record type \"%s\", line %u file %s",
-			    action->data[0], lineno, fname);
-	}
-
-	strarray_free(action);
-    }
-}
-
-static int mailbox_execute_actions(struct mailbox *mailbox)
-{
-    char *actions_filename = NULL;
-    char *actionsx_filename = NULL;
-    int fd = -1;
-    int r = 0;
-
-    actionsx_filename = mailbox_meta_fname(mailbox, META_ACTIONSX);
-    if (!actionsx_filename) {
-	r = IMAP_MAILBOX_BADNAME;
-	goto out;
-    }
-    actionsx_filename = xstrdup(actionsx_filename);
-
-    actions_filename = mailbox_meta_fname(mailbox, META_ACTIONS);
-    if (!actions_filename) {
-	r = IMAP_MAILBOX_BADNAME;
-	goto out;
-    }
-    actions_filename = xstrdup(actions_filename);
-
-    for (;;) {
-	fd = open(actionsx_filename, O_RDWR, 0);
-	if (fd < 0) {
-	    if (errno != ENOENT) {
-		syslog(LOG_ERR, "Unable to open %s: %m", actionsx_filename);
-		r = IMAP_SYS_ERROR;
-		goto out;
-	    }
-	} else {
-	    FILE *fp = fdopen(fd, "r");
-	    if (!fp) {
-		syslog(LOG_ERR, "Unable to open %s: %m", actionsx_filename);
-		r = IMAP_SYS_ERROR;
-		close(fd);
-		goto out;
-	    }
-	    mailbox_execute_actions_file(mailbox, fp, actionsx_filename);
-	    fclose(fp);
-	    unlink(actionsx_filename);
-	}
-
-	fd = open(actions_filename, O_RDWR, 0);
-	if (fd < 0) {
-	    if (errno == ENOENT)
-		break;
-	    syslog(LOG_ERR, "Failed opening %s for locking: %m",
-			    actions_filename);
-	    r = IMAP_SYS_ERROR;
-	    goto out;
-	}
-
-	r = lock_blocking(fd);
-	if (r < 0) {
-	    syslog(LOG_ERR, "Failed locking %s: %m",
-			    actions_filename);
-	    r = IMAP_SYS_ERROR;
-	    goto out_unlock;
-	}
-
-	r = rename(actions_filename, actionsx_filename);
-	if (r < 0) {
-	    if (errno == ENOENT)
-		break;
-	    syslog(LOG_ERR, "Failed renaming %s to %s: %m",
-			    actions_filename, actionsx_filename);
-	    r = IMAP_SYS_ERROR;
-	    goto out_unlock;
-	}
-
-	lock_unlock(fd);
-	close(fd);
-    }
-
-out:
-    free(actions_filename);
-    free(actionsx_filename);
-    return r;
-
-out_unlock:
-    lock_unlock(fd);
-    if (fd >= 0)
-	close(fd);
-    goto out;
+    return 0;
 }

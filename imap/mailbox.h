@@ -561,9 +561,8 @@ extern int mailbox_get_annotate_state(struct mailbox *mailbox,
 				      unsigned int uid,
 				      struct annotate_state **statep);
 
-/* Rename a CID.  Note this will post delayed actions on
- * potentially multiple mailboxes */
-extern int mailbox_rename_cid(struct conversations_state *state,
+/* Rename a CID.  Note - this is just one mailbox! */
+extern int mailbox_cid_rename(struct mailbox *mailbox,
 			      conversation_id_t from_cid,
 			      conversation_id_t to_cid);
 extern int mailbox_update_conversations(struct mailbox *mailbox,
@@ -571,11 +570,5 @@ extern int mailbox_update_conversations(struct mailbox *mailbox,
 					struct index_record *new);
 extern int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *);
 extern int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t);
-
-/* used for testing */
-extern int mailbox_post_nop_action(const char *name, unsigned int tag);
-extern unsigned int mailbox_nop_action_count, mailbox_nop_action_tag;
-extern unsigned int mailbox_nop_action_count;
-extern unsigned int mailbox_nop_action_tag;
 
 #endif /* INCLUDED_MAILBOX_H */
