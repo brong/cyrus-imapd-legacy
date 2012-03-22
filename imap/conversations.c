@@ -1302,6 +1302,9 @@ int conversations_rename_cid(struct conversations_state *state,
     conversation_t *conv = NULL;
     int r = 0;
 
+    if (from_cid == to_cid)
+	return 0;
+
     memset(&rrock, 0, sizeof(rrock));
     rrock.state = state;
     rrock.from_cid = from_cid;
