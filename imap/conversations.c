@@ -1326,15 +1326,23 @@ int conversations_rename_cid(struct conversations_state *state,
 
     for (folder = conv->folders ; folder ; folder = folder->next) {
 	const char *mboxname = strarray_nth(state->folder_names, folder->number);
-	struct mailbox *mailbox = NULL;
+	/* use the hacky 'findopen' to get any existing mailbox
+	 * directly, regardless of where we came in */
+	struct mailbox *mailbox = mailbox_findopen(mboxname);
 
-	r = mailbox_open_iwl(mboxname, &mailbox);
-	if (r) return r;
+	if (mailbox) {
+	    r = mailbox_cid_rename(mailbox, from_cid, to_cid);
+	    if (r) return r;
+	}
+	else {
+	    r = mailbox_open_iwl(mboxname, &mailbox);
+	    if (r) return r;
 
-	r = mailbox_cid_rename(mailbox, from_cid, to_cid);
-	if (r) return r;
+	    r = mailbox_cid_rename(mailbox, from_cid, to_cid);
+	    if (r) return r;
 
-	mailbox_close(&mailbox);
+	    mailbox_close(&mailbox);
+	}
     }
 
     conversation_free(conv);
