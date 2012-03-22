@@ -2274,9 +2274,9 @@ int mailbox_update_conversations(struct mailbox *mailbox,
 
 	if (old->cid != new->cid) {
 	    /* handle CID being renamed, by calling ourselves */
-	    r = mailbox_update_conversations(mailbox, old, NULL);
+	    r = mailbox_update_conversations(mailbox, NULL, new);
 	    if (!r)
-		r = mailbox_update_conversations(mailbox, NULL, new);
+		r = mailbox_update_conversations(mailbox, old, NULL);
 	    return r;
 	}
     }
