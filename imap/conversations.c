@@ -86,7 +86,7 @@
 #define CONVERSATION_ID_STRMAX	    (1+sizeof(conversation_id_t)*2)
 
 /* per user conversations db extension */
-#define FNAME_CONVERSATIONS_SUFFIX (suffix ? suffix : "conversations")
+#define FNAME_CONVERSATIONS_SUFFIX "conversations"
 #define FNKEY "$FOLDER_NAMES"
 #define CFKEY "$COUNTED_FLAGS"
 
@@ -94,12 +94,27 @@
 
 #define CONVERSATIONS_VERSION 0
 
+static char *convdir = NULL;
 static char *suffix = NULL;
+
+void conversations_set_directory(const char *dir)
+{
+    free(convdir);
+    convdir = xstrdupnull(dir);
+}
 
 void conversations_set_suffix(const char *suff)
 {
     free(suffix);
     suffix = xstrdupnull(suff);
+}
+
+static char *conversations_path(struct mboxname_parts *parts)
+{
+    const char *suff = (suffix ? suffix : FNAME_CONVERSATIONS_SUFFIX);
+    if (convdir)
+	return strconcat(convdir, "/", parts->userid, ".", suff, (char *)NULL);
+    return mboxname_conf_getpath(parts, suff);
 }
 
 char *conversations_getuserpath(const char *username)
@@ -109,7 +124,7 @@ char *conversations_getuserpath(const char *username)
 
     if (mboxname_userid_to_parts(username, &parts))
 	return NULL;
-    fname = mboxname_conf_getpath(&parts, FNAME_CONVERSATIONS_SUFFIX);
+    fname = conversations_path(&parts);
     mboxname_free_parts(&parts);
 
     return fname;
@@ -122,7 +137,7 @@ char *conversations_getmboxpath(const char *mboxname)
 
     if (mboxname_to_parts(mboxname, &parts))
 	return NULL;
-    fname = mboxname_conf_getpath(&parts, FNAME_CONVERSATIONS_SUFFIX);
+    fname = conversations_path(&parts);
     mboxname_free_parts(&parts);
 
     return fname;

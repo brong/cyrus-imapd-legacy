@@ -108,6 +108,7 @@ struct conversation {
 
 /* Sets the suffix used for conversations db filenames.  Only needed
  * when doing special weird stuff like the conversations audit mode */
+extern void conversations_set_directory(const char *dir);
 extern void conversations_set_suffix(const char *suff);
 extern char *conversations_getmboxpath(const char *mboxname);
 extern char *conversations_getuserpath(const char *username);

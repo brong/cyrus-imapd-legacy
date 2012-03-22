@@ -79,6 +79,7 @@ int verbose = 0;
 
 char *prev_userid;
 int mode = UNKNOWN;
+static const char *audit_temp_directory;
 
 static int do_dump(const char *fname)
 {
@@ -482,8 +483,10 @@ static int do_audit(const char *inboxname)
     /* Get the filenames */
     filename_real = conversations_getmboxpath(inboxname);
     conversations_set_suffix(temp_suffix);
+    conversations_set_directory(audit_temp_directory);
     filename_temp = conversations_getmboxpath(inboxname);
     conversations_set_suffix(NULL);
+    conversations_set_directory(NULL);
     assert(strcmp(filename_temp, filename_real));
 
     /* Initialise the temp copy of the database */
@@ -511,6 +514,7 @@ static int do_audit(const char *inboxname)
      * redirected to the temporary db.
      */
     conversations_set_suffix(temp_suffix);
+    conversations_set_directory(audit_temp_directory);
 
     r = recalc_counts_cb(inboxname, 0, 0, NULL);
     if (r) {
@@ -524,6 +528,7 @@ static int do_audit(const char *inboxname)
 			 NULL, recalc_counts_cb, NULL);
 
     conversations_set_suffix(NULL);
+    conversations_set_directory(NULL);
 
     r = conversations_commit(&state_temp);
     if (r) {
@@ -562,6 +567,7 @@ out:
     if (state_real)
 	conversations_abort(&state_real);
     conversations_set_suffix(NULL);
+    conversations_set_directory(NULL);
     if (filename_temp)
 	unlink(filename_temp);
     free(filename_temp);
@@ -669,7 +675,7 @@ int main(int argc, char **argv)
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "durzAbvRC:")) != EOF) {
+    while ((c = getopt(argc, argv, "durzAbvRC:T:")) != EOF) {
 	switch (c) {
 	case 'd':
 	    if (mode != UNKNOWN)
@@ -717,6 +723,10 @@ int main(int argc, char **argv)
 
 	case 'C': /* alt config file */
 	    alt_config = optarg;
+	    break;
+
+	case 'T': /* tmpfs directory for audit */
+	    audit_temp_directory = optarg;
 	    break;
 
 	default:
@@ -785,6 +795,7 @@ static int usage(const char *name)
     fprintf(stderr, "    -b             build conversations entries for any NULL records\n");
     fprintf(stderr, "    -R             recalculate all counts\n");
     fprintf(stderr, "    -A             audit conversations DB counts\n");
+    fprintf(stderr, "    -T dir         store temporary data for audit in dir\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    -r             recursive mode: username is a prefix\n");
 
