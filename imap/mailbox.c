@@ -2578,6 +2578,16 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 	record->sentdate = mktime(tm);
     }
 
+    /* update the highestmodseq if needed */
+    if (record->silent) {
+	mailbox_index_dirty(mailbox);
+    }
+    else {
+	mailbox_modseq_dirty(mailbox);
+	record->modseq = mailbox->i.highestmodseq;
+	record->last_updated = mailbox->last_updated;
+    }
+
     if (!(record->system_flags & FLAG_UNLINKED)) {
 	/* make the file timestamp correct */
 	settime.actime = settime.modtime = record->internaldate;
@@ -2588,16 +2598,6 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 	 * will set the cache_offset field. */
 	r = mailbox_append_cache(mailbox, record);
 	if (r) return r;
-    }
-
-    /* update the highestmodseq if needed */
-    if (record->silent) {
-	mailbox_index_dirty(mailbox);
-    }
-    else {
-	mailbox_modseq_dirty(mailbox);
-	record->modseq = mailbox->i.highestmodseq;
-	record->last_updated = mailbox->last_updated;
     }
 
     /* add counts */
