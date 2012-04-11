@@ -3344,6 +3344,11 @@ static int mailbox_delete_conversations(struct mailbox *mailbox)
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
 	if (r) return r;
+
+	/* skip UNLINKED records, they've already been processed */
+	if (record.system_flags & FLAG_UNLINKED)
+	    continue;
+
 	r = mailbox_update_conversations(mailbox, &record, NULL);
 	if (r) return r;
     }
