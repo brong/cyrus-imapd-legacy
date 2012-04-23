@@ -434,17 +434,17 @@ static unsigned int diff_records(struct conversations_state *a,
 		{
 		case 1:
 		    printf("MISSING key \"%.*s\" data \"%.*s\"\n",
-			   ca.keylen, ca.key, ca.datalen, ca.data);
+			   (int)ca.keylen, ca.key, (int)ca.datalen, ca.data);
 		    break;
 		case 2:
 		    printf("ADDED key \"%.*s\" data \"%.*s\"\n",
-			   cb.keylen, cb.key, cb.datalen, cb.data);
+			   (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
 		    break;
 		case 3:
 		    printf("CHANGED key \"%.*s\" data \"%.*s\"\n"
 		           "     TO key \"%.*s\" data \"%.*s\"\n",
-			   ca.keylen, ca.key, ca.datalen, ca.data,
-			   cb.keylen, cb.key, cb.datalen, cb.data);
+			   (int)ca.keylen, ca.key, (int)ca.datalen, ca.data,
+			   (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
 		    break;
 		}
 	    }
@@ -457,6 +457,88 @@ static unsigned int diff_records(struct conversations_state *a,
     }
 
     return ndiffs;
+}
+
+static int fix_modseqs(struct conversations_state *a,
+		       struct conversations_state *b)
+{
+    unsigned int ndiffs = 0;
+    int ra, rb;
+    struct cursor ca, cb;
+    int keydelta;
+    int r;
+
+    cursor_init(&ca, a->db, &a->txn);
+    ra = cursor_next(&ca);
+
+    cursor_init(&cb, b->db, &b->txn);
+    rb = cursor_next(&cb);
+
+    while (!ra || !rb)
+    {
+	keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
+	if (keydelta < 0) {
+	    if (ca.key[0] == 'F') {
+		modseq_t modseq;
+		uint32_t exists;
+		/* need to add record if it's zero */
+		r = conversation_parsestatus(ca.data, ca.datalen,
+					     &modseq, &exists, NULL);
+		if (r) return r;
+		if (exists == 0) {
+		    r = conversation_storestatus(b, ca.key, ca.keylen, modseq, 0, 0);
+		    if (r) return r;
+		}
+		/* otherwise it's a bug, so leave it in for reporting */
+	    }
+	    ra = cursor_next(&ca);
+	    continue;
+	}
+	if (keydelta > 0) {
+	    rb = cursor_next(&cb);
+	    continue;
+	}
+	/* folders?  Just modseq check */
+	if (ca.key[0] == 'F') {
+	    /* check if modseq is higher for real */
+	    modseq_t realmodseq;
+	    modseq_t modseq;
+	    uint32_t exists;
+	    uint32_t unseen;
+	    /* need to add record if it's zero */
+	    r = conversation_parsestatus(ca.data, ca.datalen,
+					 &realmodseq, NULL, NULL);
+	    if (r) return r;
+	    r = conversation_parsestatus(cb.data, cb.datalen,
+					 &modseq, &exists, &unseen);
+	    if (r) return r;
+	    if (realmodseq > modseq) {
+		r = conversation_storestatus(b, cb.key, cb.keylen, realmodseq, exists, unseen);
+		if (r) return r;
+	    }
+	}
+	if (ca.key[0] == 'B') {
+	    /* B keys - lots of modseq checking to do! We need to do all folders */
+	    conversation_t *conva = NULL;
+	    conversation_t *convb = NULL;
+
+	    r = conversation_parse(a, ca.data, ca.datalen, &conva);
+	    if (r) return r;
+	    r = conversation_parse(b, cb.data, cb.datalen, &convb);
+	    if (r) return r;
+
+	    if (conva->modseq > convb->modseq) {
+		/* XXX - folders as well */
+		convb->modseq = conva->modseq;
+		r = conversation_store(b, cb.key, cb.keylen, convb);
+		if (r) return r;
+	    }
+	}
+	ra = cursor_next(&ca);
+	rb = cursor_next(&cb);
+    }
+
+    return 0;
 }
 
 static int do_audit(const char *inboxname)
@@ -550,6 +632,13 @@ static int do_audit(const char *inboxname)
     r = conversations_open_path(filename_real, &state_real);
     if (r) {
 	fprintf(stderr, "Cannot open conversations db %s: %s\n",
+		filename_real, error_message(r));
+	goto out;
+    }
+
+    r = fix_modseqs(state_real, state_temp);
+    if (r) {
+	fprintf(stderr, "failed to fixup temporary modseq values %s: %s\n",
 		filename_real, error_message(r));
 	goto out;
     }

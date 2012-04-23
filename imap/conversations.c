@@ -543,17 +543,16 @@ static int folder_number_rename(struct conversations_state *state,
     return write_folders(state);
 }
 
-int conversation_setstatus(struct conversations_state *state,
-			   const char *mboxname,
-			   modseq_t modseq,
-			   uint32_t exists,
-			   uint32_t unseen)
+int conversation_storestatus(struct conversations_state *state,
+			     const char *key, size_t keylen,
+			     modseq_t modseq,
+			     uint32_t exists,
+			     uint32_t unseen)
 {
-    char *key = strconcat("F", mboxname, (char *)NULL);
     struct dlist *dl = NULL;
     struct buf buf = BUF_INITIALIZER;
-    int r = IMAP_IOERROR;
     int version = CONVERSATIONS_VERSION;
+    int r;
 
     dl = dlist_newlist(NULL, NULL);
     dlist_setnum64(dl, "MODSEQ", modseq);
@@ -565,12 +564,91 @@ int conversation_setstatus(struct conversations_state *state,
     dlist_free(&dl);
 
     r = cyrusdb_store(state->db,
-		      key, strlen(key),
+		      key, keylen,
 		      buf.s, buf.len,
 		      &state->txn);
 
     buf_free(&buf);
+
+    return r;
+}
+
+int conversation_setstatus(struct conversations_state *state,
+			   const char *mboxname,
+			   modseq_t modseq,
+			   uint32_t exists,
+			   uint32_t unseen)
+{
+    char *key = strconcat("F", mboxname, (char *)NULL);
+    int r;
+
+    r = conversation_storestatus(state, key, strlen(key),
+				 modseq, exists, unseen);
+
     free(key);
+
+    return r;
+}
+
+int conversation_store(struct conversations_state *state,
+		       const char *key, int keylen,
+		       conversation_t *conv)
+{
+    struct dlist *dl, *n, *nn;
+    struct buf buf = BUF_INITIALIZER;
+    const conv_folder_t *folder;
+    const conv_sender_t *sender;
+    int version = CONVERSATIONS_VERSION;
+    int i;
+    int r;
+
+    dl = dlist_newlist(NULL, NULL);
+    dlist_setnum64(dl, "MODSEQ", conv->modseq);
+    dlist_setnum32(dl, "NUMRECORDS", conv->num_records);
+    dlist_setnum32(dl, "EXISTS", conv->exists);
+    dlist_setnum32(dl, "UNSEEN", conv->unseen);
+    n = dlist_newlist(dl, "COUNTS");
+    if (state->counted_flags) {
+	for (i = 0; i < state->counted_flags->count; i++) {
+	    const char *flag = strarray_nth(state->counted_flags, i);
+	    dlist_setnum32(n, flag, conv->counts[i]);
+	}
+    }
+
+    n = dlist_newlist(dl, "FOLDER");
+    for (folder = conv->folders ; folder ; folder = folder->next) {
+	if (!folder->num_records)
+	    continue;
+	nn = dlist_newlist(n, "FOLDER");
+	dlist_setnum32(nn, "FOLDERNUM", folder->number);
+	dlist_setnum64(nn, "MODSEQ", folder->modseq);
+	dlist_setnum32(nn, "NUMRECORDS", folder->num_records);
+	dlist_setnum32(nn, "EXISTS", folder->exists);
+    }
+
+    n = dlist_newlist(dl, "SENDER");
+    for (sender = conv->senders ; sender ; sender = sender->next) {
+	/* there's no refcounting of senders, they last forever */
+	nn = dlist_newlist(n, "SENDER");
+	/* envelope form */
+	dlist_setatom(nn, "NAME", sender->name);
+	dlist_setatom(nn, "ROUTE", sender->route);
+	dlist_setatom(nn, "MAILBOX", sender->mailbox);
+	dlist_setatom(nn, "DOMAIN", sender->domain);
+    }
+
+    buf_printf(&buf, "%d ", version);
+    dlist_printbuf(dl, 0, &buf);
+    dlist_free(&dl);
+
+    if (_sanity_check_counts(conv)) {
+	syslog(LOG_ERR, "IOERROR: conversations_audit on store: %s %.*s %.*s",
+	       state->path, keylen, key, buf.len, buf.s);
+    }
+
+    r = cyrusdb_store(state->db, key, keylen, buf.s, buf.len, &state->txn);
+
+    buf_free(&buf);
 
     return r;
 }
@@ -579,14 +657,8 @@ static int _conversation_save(struct conversations_state *state,
 			      const char *key, int keylen,
 			      conversation_t *conv)
 {
-    struct dlist *dl, *n, *nn;
-    struct buf buf = BUF_INITIALIZER;
     const conv_folder_t *folder;
-    const conv_sender_t *sender;
-    char *keycopy = xstrndup(key, keylen);
-    int version = CONVERSATIONS_VERSION;
-    int i;
-    int r = 0;
+    int r;
 
     /* see if any 'F' keys need to be changed */
     for (folder = conv->folders ; folder ; folder = folder->next) {
@@ -639,65 +711,16 @@ static int _conversation_save(struct conversations_state *state,
 
     if (!conv->num_records) {
 	/* last existing record removed - clean up the 'B' record */
-	r = cyrusdb_delete(state->db, keycopy, keylen, &state->txn, 1);
+	r = cyrusdb_delete(state->db, key, keylen, &state->txn, 1);
 	goto done;
     }
 
-    dl = dlist_newlist(NULL, NULL);
-    dlist_setnum64(dl, "MODSEQ", conv->modseq);
-    dlist_setnum32(dl, "NUMRECORDS", conv->num_records);
-    dlist_setnum32(dl, "EXISTS", conv->exists);
-    dlist_setnum32(dl, "UNSEEN", conv->unseen);
-    n = dlist_newlist(dl, "COUNTS");
-    if (state->counted_flags) {
-	for (i = 0; i < state->counted_flags->count; i++) {
-	    const char *flag = strarray_nth(state->counted_flags, i);
-	    dlist_setnum32(n, flag, conv->counts[i]);
-	}
-    }
-
-    n = dlist_newlist(dl, "FOLDER");
-    for (folder = conv->folders ; folder ; folder = folder->next) {
-	if (!folder->num_records)
-	    continue;
-	nn = dlist_newlist(n, "FOLDER");
-	dlist_setnum32(nn, "FOLDERNUM", folder->number);
-	dlist_setnum64(nn, "MODSEQ", folder->modseq);
-	dlist_setnum32(nn, "NUMRECORDS", folder->num_records);
-	dlist_setnum32(nn, "EXISTS", folder->exists);
-    }
-
-    n = dlist_newlist(dl, "SENDER");
-    for (sender = conv->senders ; sender ; sender = sender->next) {
-	/* there's no refcounting of senders, they last forever */
-	nn = dlist_newlist(n, "SENDER");
-	/* envelope form */
-	dlist_setatom(nn, "NAME", sender->name);
-	dlist_setatom(nn, "ROUTE", sender->route);
-	dlist_setatom(nn, "MAILBOX", sender->mailbox);
-	dlist_setatom(nn, "DOMAIN", sender->domain);
-    }
-
-    buf_printf(&buf, "%d ", version);
-    dlist_printbuf(dl, 0, &buf);
-    dlist_free(&dl);
-
-    if (_sanity_check_counts(conv)) {
-	syslog(LOG_ERR, "IOERROR: conversations_audit on save: %s %.*s %.*s",
-	       state->path, keylen, key, buf.len, buf.s);
-    }
-
-    r = cyrusdb_store(state->db,
-		  keycopy, keylen,
-		  buf.s, buf.len,
-		  &state->txn);
+    r = conversation_store(state, key, keylen, conv);
 
 done:
-
-    free(keycopy);
-    buf_free(&buf);
     if (!r)
 	conv->dirty = 0;
+
     return r;
 }
 
@@ -721,10 +744,10 @@ int conversation_save(struct conversations_state *state,
     return _conversation_save(state, bkey, strlen(bkey), conv);
 }
 
-int _parse_status(const char *data, size_t datalen,
-		  modseq_t *modseqp,
-		  uint32_t *existsp,
-		  uint32_t *unseenp)
+int conversation_parsestatus(const char *data, size_t datalen,
+			     modseq_t *modseqp,
+			     uint32_t *existsp,
+			     uint32_t *unseenp)
 {
     bit64 version;
     const char *rest;
@@ -793,7 +816,7 @@ int conversation_getstatus(struct conversations_state *state,
     }
     if (r) goto done;
 
-    r = _parse_status(data, datalen, modseqp, existsp, unseenp);
+    r = conversation_parsestatus(data, datalen, modseqp, existsp, unseenp);
 
  done:
     if (r)
@@ -835,9 +858,9 @@ static conv_folder_t *conversation_get_folder(conversation_t *conv,
     return folder;
 }
 
-static int _conversation_load(struct conversations_state *state,
-			      const char *data, int datalen,
-			      conversation_t **convp)
+int conversation_parse(struct conversations_state *state,
+		       const char *data, size_t datalen,
+		       conversation_t **convp)
 {
     const char *rest;
     int i;
@@ -962,7 +985,7 @@ int conversation_load(struct conversations_state *state,
 	return r;
     }
 
-    r = _conversation_load(state, data, datalen, convp);
+    r = conversation_parse(state, data, datalen, convp);
     if (r) {
 	syslog(LOG_ERR, "IOERROR: conversations invalid conversation "
 	       CONV_FMT, cid);

@@ -146,6 +146,15 @@ extern int conversation_setstatus(struct conversations_state *state,
 				  modseq_t modseq,
 				  uint32_t exists,
 				  uint32_t unseen);
+extern int conversation_storestatus(struct conversations_state *state,
+				    const char *key, size_t keylen,
+				    modseq_t modseq,
+				    uint32_t exists,
+				    uint32_t unseen);
+extern int conversation_parsestatus(const char *data, size_t datalen,
+				    modseq_t *modseqp,
+				    uint32_t *existsp,
+				    uint32_t *unseenp);
 extern int conversation_get_modseq(struct conversations_state *state,
 				   conversation_id_t cid,
 				   modseq_t *modseqp);
@@ -155,6 +164,12 @@ extern int conversation_save(struct conversations_state *state,
 extern int conversation_load(struct conversations_state *state,
 			     conversation_id_t cid,
 			     conversation_t **convp);
+extern int conversation_parse(struct conversations_state *state,
+			      const char *data, size_t datalen,
+			      conversation_t **convp);
+extern int conversation_store(struct conversations_state *state,
+			       const char *key, int keylen,
+			       conversation_t *conv);
 /* Update the internal data about a conversation, enforcing
  * consistency rules (e.g. the conversation's modseq is the
  * maximum of all the per-folder modseqs).  Sets conv->dirty
