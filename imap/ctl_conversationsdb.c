@@ -518,7 +518,9 @@ static int fix_modseqs(struct conversations_state *a,
 	    }
 	}
 	if (ca.key[0] == 'B') {
-	    /* B keys - lots of modseq checking to do! We need to do all folders */
+	    /* B keys - just check the main modseq - the per-folder ones actually get
+	     * removed once the last record is gone, apart from on the F keys - and we
+	     * already handled those */
 	    conversation_t *conva = NULL;
 	    conversation_t *convb = NULL;
 
@@ -528,7 +530,6 @@ static int fix_modseqs(struct conversations_state *a,
 	    if (r) return r;
 
 	    if (conva->modseq > convb->modseq) {
-		/* XXX - folders as well */
 		convb->modseq = conva->modseq;
 		r = conversation_store(b, cb.key, cb.keylen, convb);
 		if (r) return r;
