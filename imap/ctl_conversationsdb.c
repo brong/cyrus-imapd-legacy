@@ -285,6 +285,10 @@ static int recalc_counts_cb(const char *mboxname,
 	if (!record.cid)
 	    continue;
 
+	/* unlinked, skip */
+	if (record.system_flags & FLAG_UNLINKED)
+	    continue;
+
 	r = mailbox_update_conversations(mailbox, NULL, &record);
 	if (r) goto done;
     }
