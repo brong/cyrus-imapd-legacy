@@ -523,6 +523,7 @@ static int fix_modseqs(struct conversations_state *a,
 	     * already handled those */
 	    conversation_t *conva = NULL;
 	    conversation_t *convb = NULL;
+	    conv_sender_t *sender;
 
 	    r = conversation_parse(a, ca.data, ca.datalen, &conva);
 	    if (r) return r;
@@ -533,6 +534,12 @@ static int fix_modseqs(struct conversations_state *a,
 		convb->modseq = conva->modseq;
 		r = conversation_store(b, cb.key, cb.keylen, convb);
 		if (r) return r;
+	    }
+
+	    /* add any missing senders too */
+	    for (sender = conva->senders; sender; sender = sender->next) {
+		conversation_add_sender(convb, sender->name, sender->route,
+					sender->mailbox, sender->domain);
 	    }
 	}
 	ra = cursor_next(&ca);
