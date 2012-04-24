@@ -1067,6 +1067,81 @@ conv_folder_t *conversation_find_folder(struct conversations_state *state,
     return conversation_get_folder(conv, number, /*create*/0);
 }
 
+/* Compare a sender vs a new sender key (mailbox and domain).
+ * Returns 0 if identical, nonzero if different (sign indicates
+ * sort order, like strcmp()).
+ *
+ * This is not quite RFC compliant: we are comparing the
+ * localpart case insensitively even though the RFC says the
+ * interpretation is up to the domain itself.  However this
+ * seems to yield better results. [IRIS-1484] */
+static int sender_cmp(const conv_sender_t *sender,
+		      const char *mailbox,
+		      const char *domain)
+{
+    int d = strcasecmp(sender->domain, domain);
+    if (!d)
+	d = strcasecmp(sender->mailbox, mailbox);
+    return d;
+}
+
+/* Choose a preferred mailbox. Returns <0 if @a is preferred,
+ * 0 if we don't care, and >0 if @b is preferred */
+static int sender_preferred_mailbox(const char *a, const char *b)
+{
+    /* choosing the lexically earlier string tends to keep
+     * capital letters, which is an arbitrary asthetic */
+    return strcmp(a, b);
+}
+
+/* Choose a preferred domain. Returns <0 if @a is preferred,
+ * 0 if we don't care, and >0 if @b is preferred */
+static int sender_preferred_domain(const char *a, const char *b)
+{
+    /* choosing the lexically earlier string tends to keep
+     * capital letters, which is an arbitrary asthetic */
+    return strcmp(a, b);
+}
+
+static int has_non_ascii(const char *s)
+{
+    for ( ; *s ; s++) {
+	if (*(unsigned char *)s > 0x7f)
+	    return 1;
+    }
+    return 0;
+}
+
+/* Choose a preferred name. Returns <0 if @a is preferred,
+ * 0 if we don't care, and >0 if @b is preferred */
+static int sender_preferred_name(const char *a, const char *b)
+{
+    int d;
+    char *sa = NULL;
+    char *sb = NULL;
+
+    sa = charset_parse_mimeheader((a ? a : ""));
+    sb = charset_parse_mimeheader((b ? b : ""));
+
+    /* A name with characters > 0x7f is preferred to a flat
+     * ascii one, on the assumption that this is more likely to
+     * contain an actual name rather than a romanisation. */
+    d = has_non_ascii(sb) - has_non_ascii(sa);
+
+    /* A longer name is preferred over a shorter. */
+    if (!d)
+	d = strlen(sb) - strlen(sa);
+
+    /* The lexically earlier name is preferred (earlier on the grounds
+     * that's more likely to start with a capital letter) */
+    if (!d)
+	d = strcmp(sa, sb);
+
+    free(sa);
+    free(sb);
+    return d;
+}
+
 void conversation_add_sender(conversation_t *conv,
 			     const char *name,
 			     const char *route,
@@ -1078,10 +1153,27 @@ void conversation_add_sender(conversation_t *conv,
     if (!mailbox || !domain) return;
 
     for (sender = conv->senders; sender; sender = sender->next) {
-	if (!strcmp(sender->mailbox, mailbox) &&
-	    !strcmp(sender->domain, domain)) {
-	    /* found it.  Just check if we should update the name */
-	    if (name && !sender->name) {
+	if (!sender_cmp(sender, mailbox, domain)) {
+	    /* found it.  To ensure the database is consistent regardless
+	     * of message arrival order, update the record if the newly
+	     * seen values are more preferred */
+	    if (sender_preferred_mailbox(sender->mailbox, mailbox) > 0) {
+		free(sender->mailbox);
+		sender->mailbox = xstrdup(mailbox);
+		conv->dirty = 1;
+	    }
+
+	    if (sender_preferred_domain(sender->domain, domain) > 0) {
+		free(sender->domain);
+		sender->domain = xstrdup(domain);
+		conv->dirty = 1;
+	    }
+
+	    if (sender_preferred_name(sender->name, name) > 0) {
+		free(sender->name);
+		/* a NULL name should never be *more* preferred
+		 * than any other name */
+		assert(name);
 		sender->name = xstrdup(name);
 		conv->dirty = 1;
 	    }
@@ -1091,10 +1183,7 @@ void conversation_add_sender(conversation_t *conv,
 
     /* second pass so we don't break on unordered data */
     for (sender = conv->senders; sender; sender = sender->next) {
-	int dcmp = strcmp(sender->domain, domain);
-	if (dcmp > 0)
-	    break;
-	if (dcmp == 0 && strcmp(sender->mailbox, mailbox) > 0)
+	if (sender_cmp(sender, mailbox, domain) > 0)
 	    break;
 	nextp = &sender->next;
     }
