@@ -466,7 +466,6 @@ static unsigned int diff_records(struct conversations_state *a,
 static int fix_modseqs(struct conversations_state *a,
 		       struct conversations_state *b)
 {
-    unsigned int ndiffs = 0;
     int ra, rb;
     struct cursor ca, cb;
     int keydelta;
