@@ -2522,6 +2522,27 @@ void message_parse_env_address(char *str, struct address *addr)
 }
 
 
+static void de_nstring_buf(struct buf *src, struct buf *dst)
+{
+    char *p, *q;
+
+    if (src->s && src->len == 3 && !memcmp(src->s, "NIL", 3)) {
+	buf_free(dst);
+	return;
+    }
+    q = src->s;
+    p = parse_nstring(&q);
+    buf_setmap(dst, p, q-p);
+    buf_cstring(dst);
+}
+
+static void message_get_subject(struct index_record *record, struct buf *buf)
+{
+    struct buf tmp = BUF_INITIALIZER;
+    buf_copy(&tmp, cacheitem_buf(record, CACHE_SUBJECT));
+    de_nstring_buf(&tmp, buf);
+    buf_free(&tmp);
+}
 
 /*
  * Generate a conversation id from the given message.
@@ -2592,6 +2613,8 @@ int message_update_conversations(struct conversations_state *state,
 {
     char *hdrs[4];
     char *c_refs = NULL, *c_env = NULL, *c_me_msgid = NULL;
+    struct buf msubject = BUF_INITIALIZER;
+    struct buf csubject = BUF_INITIALIZER;
     /* TODO: need an expanding array class here */
     struct {
 	char *msgid;
@@ -2599,11 +2622,13 @@ int message_update_conversations(struct conversations_state *state,
     } *found = NULL;
     int nfound = 0;
 #define ALLOCINCREMENT 16
+    conversation_id_t cid;
+    int created = 0;
     conversation_id_t newcid = record->cid;
     int i;
     int j;
     int r = 0;
-    char *msgid;
+    char *msgid = NULL;
 
     /*
      * Gather all the msgids mentioned in the message, starting with
@@ -2620,6 +2645,7 @@ int message_update_conversations(struct conversations_state *state,
 	hdrs[1] = body->in_reply_to;
 	hdrs[2] = body->message_id;
 	hdrs[3] = body->x_me_message_id;
+	buf_init_ro(&msubject, body->subject, strlen(body->subject));
     }
     else if (cache_size(record)) {
 	/* we have cache loaded, get what we need there */
@@ -2654,6 +2680,8 @@ int message_update_conversations(struct conversations_state *state,
 
 	strarray_fini(&want);
 
+	message_get_subject(record, &msubject);
+
 	/* work around stupid message_guid API */
 	message_guid_isnull(&record->guid);
     }
@@ -2664,6 +2692,8 @@ int message_update_conversations(struct conversations_state *state,
 
     if (!is_valid_rfc2822_inreplyto(hdrs[1]))
 	hdrs[1] = NULL;
+
+    conversation_normalise_subject(&msubject);
 
     for (i = 0 ; i < 4 ; i++) {
 continue2:
@@ -2688,7 +2718,25 @@ continue2:
 		}
 	    }
 
-	    /* it's unique, add it */
+	    /* Lookup the conversations database to work out which
+	     * conversation id that message belongs to. */
+	    r = conversations_get_msgid(state, msgid, &cid);
+	    if (r) goto out;
+
+	    /* Check to see if the conversation has an incompatible
+	     * subject.  We treat a missing subject as compatible
+	     * with anything for backwards compatibility with older
+	     * conversations DBs. */
+	    r = conversations_get_subject(state, cid, &csubject);
+	    if (r) goto out;
+	    if (csubject.len && buf_cmp(&msubject, &csubject)) {
+		buf_free(&csubject);
+		free(msgid);
+		continue;
+	    }
+	    buf_free(&csubject);
+
+	    /* it's unique and compatible, add it */
 
 	    if (nfound % ALLOCINCREMENT == 0) {
 		found = xrealloc(found,
@@ -2696,19 +2744,9 @@ continue2:
 	    }
 
 	    found[nfound].msgid = msgid;
-	    found[nfound].cid = NULLCONVERSATION;
+	    found[nfound].cid = cid;
 	    nfound++;
 	}
-    }
-
-    /*
-     * For each unique message-id, lookup the conversations database
-     * to work out which conversation id that message belongs to.
-     */
-    for (i = 0 ; i < nfound ; i++) {
-	r = conversations_get_msgid(state, found[i].msgid, &found[i].cid);
-	if (r)
-	    goto out;
     }
 
     /*
@@ -2722,8 +2760,10 @@ continue2:
 	 * the MAX of two or more non-NULL CIDs */
 	for (i = 0 ; i < nfound ; i++)
 	    newcid = (newcid > found[i].cid ? newcid : found[i].cid);
-	if (newcid == NULLCONVERSATION)
+	if (newcid == NULLCONVERSATION) {
 	    newcid = generate_conversation_id(record, body);
+	    created = 1;
+	}
 
 	/*
 	 * Detect and handle CID renames.  Note that we don't rename on
@@ -2753,15 +2793,25 @@ continue2:
 	    goto out;
     }
 
+    /* We just created a new conversation, so update it's subject */
+    if (isreplica || created) {
+	r = conversations_set_subject(state, newcid, &msubject);
+	if (r)
+	    goto out;
+    }
+
     record->cid = newcid;
 
 out:
+    free(msgid);
     for (i = 0 ; i < nfound ; i++)
 	free(found[i].msgid);
     free(found);
     free(c_refs);
     free(c_env);
     free(c_me_msgid);
+    buf_free(&msubject);
+    buf_free(&csubject);
     return r;
 }
 
