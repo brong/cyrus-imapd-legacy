@@ -487,6 +487,61 @@ int conversations_get_msgid(struct conversations_state *state,
     return 0;
 }
 
+/*
+ * Normalise a subject string, to a form which can be used for deciding
+ * whether a message belongs in the same conversation as it's antecedent
+ * messages.  What we're doing here is the same idea as the "base
+ * subject" algorithm described in RFC5256 but slightly adapted from
+ * experience.  Differences are:
+ *
+ *  - We eliminate all whitespace; RFC5256 normalises any sequence
+ *    of whitespace characters to a single SP.  We do this because
+ *    we have observed combinations of buggy client software both
+ *    add and remove whitespace around folding points.
+ *
+ *  - Because we eliminate whitespace entirely, and whitespace helps
+ *    delimit some of our other replacements, we do that whitespace
+ *    step last instead of first.
+ *
+ *  - We eliminate leading tokens like Re: and Fwd: using a simpler
+ *    and more generic rule than RFC5256's; this rule catches a number
+ *    of semantically identical prefixes in other human languages, but
+ *    unfortunately also catches lots of other things.  We think we can
+ *    get away with this because the normalised subject is never directly
+ *    seen by human eyes, so some information loss is acceptable as long
+ *    as the subjects in different messages match correctly.
+ */
+void conversation_normalise_subject(struct buf *s)
+{
+    static int initialised_res = 0;
+    static regex_t whitespace_re;
+    static regex_t relike_token_re;
+    static regex_t blob_re;
+    int r;
+
+    if (!initialised_res) {
+	r = regcomp(&whitespace_re, "[ \t\r\n]+", REG_EXTENDED);
+	assert(r == 0);
+	r = regcomp(&relike_token_re, "^[ \t]*[A-Za-z0-9]+:", REG_EXTENDED);
+	assert(r == 0);
+	r = regcomp(&blob_re, "^[ \t]*\\[[^]]+\\]", REG_EXTENDED);
+	assert(r == 0);
+	initialised_res = 1;
+    }
+
+    /* step 1 is to decode any RFC2047 MIME encoding of the header
+     * field, but we assume that has already happened */
+
+    /* step 2 is to eliminate all "Re:"-like tokens and [] blobs
+     * at the start */
+    while (buf_replace_one_re(s, &relike_token_re, NULL) ||
+	   buf_replace_one_re(s, &blob_re, NULL))
+	;
+
+    /* step 3 is eliminating whitespace. */
+    buf_replace_all_re(s, &whitespace_re, NULL);
+}
+
 static int write_folders(struct conversations_state *state)
 {
     struct dlist *dl = dlist_newlist(NULL, NULL);

@@ -1365,6 +1365,42 @@ static void test_dump(void)
 }
 
 
+#define TESTCASE(in, exp) \
+    { \
+	struct buf b = BUF_INITIALIZER; \
+	static const char _in[] = in; \
+	static const char _exp[] = exp; \
+ \
+	buf_appendcstr(&b, _in); \
+	conversation_normalise_subject(&b); \
+	CU_ASSERT_EQUAL(b.len, sizeof(_exp)-1); \
+	CU_ASSERT_STRING_EQUAL(b.s, _exp); \
+ \
+	buf_free(&b); \
+    }
+
+
+static void test_subject_normalise(void)
+{
+    TESTCASE("understanding merge history",
+	     "understandingmergehistory");
+    TESTCASE("Re: Alias of constant passed to sub",
+	     "Aliasofconstantpassedtosub");
+    TESTCASE("Re: RE: Re: Perl_peep recursion exceeds",
+	     "Perl_peeprecursionexceeds");
+    TESTCASE("Fwd: Re: Sv: Re: SV: vms rename Unix mode fixes",
+	     "vmsrenameUnixmodefixes");
+    TESTCASE("[PATCH] merging make_ext and make_ext_cross",
+	     "mergingmake_extandmake_ext_cross");
+    TESTCASE("Re: [PATCH] Parallel testing conflict",
+	     "Paralleltestingconflict");
+    TESTCASE("Re: [PATCH] Fwd: deprecate UNIVERSAL->import",
+	     "deprecateUNIVERSAL->import");
+}
+
+#undef TESTCASE
+
+
 static int set_up(void)
 {
     int r;
