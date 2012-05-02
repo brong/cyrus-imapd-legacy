@@ -542,6 +542,111 @@ void conversation_normalise_subject(struct buf *s)
     buf_replace_all_re(s, &whitespace_re, NULL);
 }
 
+int conversations_set_subject(struct conversations_state *state,
+			      conversation_id_t cid,
+			      const struct buf *sub)
+{
+    char skey[CONVERSATION_ID_STRMAX+2];
+    struct buf buf = BUF_INITIALIZER;
+    int version = CONVERSATIONS_VERSION;
+    int r;
+
+    if (state->db == NULL)
+	return IMAP_IOERROR;
+
+    snprintf(skey, sizeof(skey), "S" CONV_FMT, cid);
+
+    buf_printf(&buf, "%d ", version);
+    buf_append(&buf, sub);
+
+    r = cyrusdb_store(state->db,
+		      skey, strlen(skey),
+		      buf.s, buf.len,
+		      &state->txn);
+
+    buf_free(&buf);
+    if (r)
+	return IMAP_IOERROR;
+
+    return 0;
+}
+
+int conversations_get_subject(struct conversations_state *state,
+			      conversation_id_t cid,
+			      struct buf *sub)
+{
+    char skey[CONVERSATION_ID_STRMAX+2];
+    size_t datalen = 0;
+    const char *data;
+    const char *rest;
+    size_t restlen;
+    int r;
+    bit64 version;
+
+    snprintf(skey, sizeof(skey), "S" CONV_FMT, cid);
+
+    r = cyrusdb_fetch(state->db,
+		      skey, strlen(skey),
+		      &data, &datalen,
+		      &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND) {
+	buf_free(sub);
+	return 0;
+    }
+    if (r)
+	return IMAP_IOERROR;
+
+    rest = data;
+    r = parsenum(data, &rest, datalen, &version);
+    if (r) return r;
+
+    if (rest[0] != ' ')
+	return IMAP_MAILBOX_BADFORMAT;
+    rest++; /* skip space */
+    restlen = datalen - (rest - data);
+
+    if (version != CONVERSATIONS_VERSION) {
+	/* XXX - an error code for "incorrect version"? */
+	return IMAP_MAILBOX_BADFORMAT;
+    }
+
+    buf_init_ro(sub, rest, restlen);
+    buf_cstring(sub);
+
+    return 0;
+}
+
+static int conversation_rename_sub(struct conversations_state *state,
+				   conversation_id_t from_cid,
+				   conversation_id_t to_cid)
+{
+    char skey[CONVERSATION_ID_STRMAX+2];
+    size_t datalen = 0;
+    const char *data;
+    int r;
+
+    snprintf(skey, sizeof(skey), "S" CONV_FMT, from_cid);
+
+    r = cyrusdb_fetch(state->db,
+		      skey, strlen(skey),
+		      &data, &datalen,
+		      &state->txn);
+
+    if (r == CYRUSDB_NOTFOUND)
+	return 0;
+    if (r)
+	return IMAP_IOERROR;
+
+    snprintf(skey, sizeof(skey), "S" CONV_FMT, to_cid);
+
+    r = cyrusdb_store(state->db,
+		      skey, strlen(skey),
+		      data, datalen,
+		      &state->txn);
+    return r;
+}
+
 static int write_folders(struct conversations_state *state)
 {
     struct dlist *dl = dlist_newlist(NULL, NULL);
@@ -1489,6 +1594,9 @@ int conversations_rename_cid(struct conversations_state *state,
 		       " from " CONV_FMT " to " CONV_FMT,
 			rrock.entries_seen, rrock.entries_renamed,
 			from_cid, to_cid);
+
+    /* Rename the 'S' record for the CID */
+    r = conversation_rename_sub(state, from_cid, to_cid);
 
     /* Use the B record to find the mailboxes for a CID rename.
      * The rename events will decrease the NUM_RECORDS count back

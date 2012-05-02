@@ -136,6 +136,12 @@ extern int conversations_get_msgid(struct conversations_state *state,
 				   conversation_id_t *cidp);
 
 extern void conversation_normalise_subject(struct buf *);
+extern int conversations_set_subject(struct conversations_state *state,
+				   conversation_id_t cid,
+				   const struct buf *);
+extern int conversations_get_subject(struct conversations_state *state,
+				   conversation_id_t cid,
+				   struct buf *);
 
 /* functions for CONVDB_COUNTS only */
 extern int conversation_getstatus(struct conversations_state *state,
