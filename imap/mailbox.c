@@ -104,7 +104,10 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+
+#ifdef HAVE_GPB
 #include "pusher.h"
+#endif
 
 struct mailboxlist {
     struct mailboxlist *next;
@@ -1853,11 +1856,13 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	sync_log_mailbox(mailbox->name);
 	statuscache_invalidate(mailbox->name, sdata);
 
+#ifdef HAVE_GPB
 	ret = send_push_notification(mailbox);
 	if (ret) {
 	    errno = ret;
 	    syslog(LOG_ERR, "PUSHER: notification failed: %m");
 	}
+#endif
 
 	mailbox->has_changed = 0;
     }
