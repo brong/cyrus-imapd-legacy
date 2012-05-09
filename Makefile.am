@@ -89,7 +89,8 @@ lib_LTLIBRARIES += imap/libcyrus_imap.la
 service_PROGRAMS += imap/arbitron imap/chk_cyrus imap/ctl_cyrusdb \
 	imap/ctl_deliver imap/ctl_mboxlist imap/cvt_cyrusdb imap/cyr_df \
 	imap/cyrdump imap/cyr_dbtool imap/cyr_expire imap/cyr_info \
-	imap/cyr_sequence imap/cyr_synclog imap/cyr_userseen imap/deliver
+	imap/cyr_sequence imap/cyr_synclog imap/cyr_userseen imap/deliver \
+	imap/ctl_conversationsdb imap/hammer_cyrusdb
 if NNTPD
 service_PROGRAMS += imap/fetchnews
 endif
@@ -417,7 +418,7 @@ imap_libcyrus_imap_la_SOURCES = imap/annotate.c imap/annotate.h imap/append.c \
 	imap/sync_log.h imap/telemetry.c imap/telemetry.h imap/tls.c \
 	imap/tls.h imap/upgrade_index.c imap/upgrade_index.h imap/user.c \
 	imap/user.h imap/userdeny_db.c imap/userdeny.h imap/version.c \
-	imap/version.h
+	imap/version.h imap/idlemsg.c imap/conversations.c
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 
 imap_lmtpd_SOURCES = imap/lmtpd.c imap/lmtpd.h imap/lmtpengine.c \
