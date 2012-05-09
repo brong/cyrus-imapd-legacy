@@ -122,7 +122,7 @@ static void index_fetchcacheheader(struct index_state *state, struct index_recor
 static void index_listflags(struct index_state *state);
 static void index_fetchflags(struct index_state *state, uint32_t msgno);
 static int index_search_evaluate(struct index_state *state,
-				 struct searchargs *searchargs,
+				 const struct searchargs *searchargs,
 				 uint32_t msgno, struct mapfile *msgfile);
 static int index_searchmsg(char *substr, comp_pat *pat,
 			   struct mapfile *msgfile,
@@ -133,7 +133,7 @@ static int index_searchheader(char *name, char *substr, comp_pat *pat,
 static int index_searchcacheheader(struct index_state *state, uint32_t msgno, char *name, char *substr,
 				   comp_pat *pat);
 static int _index_search(unsigned **msgno_list, struct index_state *state,
-			 struct searchargs *searchargs,
+			 const struct searchargs *searchargs,
 			 modseq_t *highestmodseq);
 
 static int index_copysetup(struct index_state *state, uint32_t msgno,
@@ -1340,7 +1340,7 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
  * SEARCH, SORT and THREAD.
  */
 static int _index_search(unsigned **msgno_list, struct index_state *state,
-			 struct searchargs *searchargs,
+			 const struct searchargs *searchargs,
 			 modseq_t *highestmodseq)
 {
     uint32_t msgno;
@@ -4059,7 +4059,7 @@ out:
  * Note: msgfile argument must be 0 if msg is not mapped in.
  */
 static int index_search_evaluate(struct index_state *state,
-				 struct searchargs *searchargs,
+				 const struct searchargs *searchargs,
 				 uint32_t msgno,
 				 struct mapfile *msgfile)
 {
