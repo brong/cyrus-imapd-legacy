@@ -93,6 +93,7 @@
 #include "message.h"
 #include "map.h"
 #include "mboxlist.h"
+#include "parseaddr.h"
 #include "retry.h"
 #include "seen.h"
 #include "upgrade_index.h"
@@ -105,9 +106,7 @@
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 
-#ifdef HAVE_GPB
 #include "mailbox_update_notifier.h"
-#endif
 
 struct mailboxlist {
     struct mailboxlist *next;
@@ -1846,10 +1845,8 @@ void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *sdata)
 	sync_log_mailbox(mailbox->name);
 	statuscache_invalidate(mailbox->name, sdata);
 
-#ifdef HAVE_GPB
 	if (config_getstring(IMAPOPT_MAILBOX_UPDATE_NOTIFIER_SOCKET))
 	    send_push_notification(mailbox);
-#endif
 
 	mailbox->has_changed = 0;
     }

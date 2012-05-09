@@ -84,7 +84,9 @@ bin_PROGRAMS = imtest/imtest
 if SERVER
 BUILT_SOURCES += imap/imap_err.c imap/mupdate_err.c imap/nntp_err.c \
 	imap/lmtpstats.c imap/pushstats.c imap/rfc822_header.c \
-	imap/rfc822_header.h
+	imap/rfc822_header.h \
+	imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
+CLEANFILES += imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
 lib_LTLIBRARIES += imap/libcyrus_imap.la
 service_PROGRAMS += imap/arbitron imap/chk_cyrus imap/ctl_cyrusdb \
 	imap/ctl_deliver imap/ctl_mboxlist imap/cvt_cyrusdb imap/cyr_df \
@@ -206,6 +208,9 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 	@${top_srcdir}/com_err/et/config_script ${top_srcdir}/com_err/et/compile_et.sh ${AWK} ${SED} > $@
 	@chmod 755 $@
 
+imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c: imap/mailbox_update_notifier.proto
+	cd imap && protoc-c --c_out=. mailbox_update_notifier.proto
+
 # ---- Libraries ----
 
 # BASIC is the libraries that every Cyrus program (except master) will
@@ -214,7 +219,7 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 # Note that several places in the code use -lcrypto, e.g. for SHA1 or
 # MD5 algorithms, without needing SSL.  Currently we have no way of
 # minimally linking such code.
-LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS}
+LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS} -lprotobuf-c
 
 # UTILITY is the libraries that utility programs which use Cyrus'
 # mailbox and message handling code need to link with.
@@ -334,6 +339,10 @@ imap_arbitron_LDADD = $(LD_UTILITY_ADD)
 imap_chk_cyrus_SOURCES = imap/chk_cyrus.c imap/cli_fatal.c imap/mutex_fake.c
 imap_chk_cyrus_LDADD = $(LD_UTILITY_ADD)
 
+imap_ctl_conversationsdb_SOURCES = imap/cli_fatal.c imap/ctl_conversationsdb.c imap/mutex_fake.c
+imap_ctl_conversationsdb_LDFLAGS = $(LD_UTILITY_FLAGS)
+imap_ctl_conversationsdb_LDADD = $(LD_UTILITY_ADD)
+
 imap_ctl_cyrusdb_SOURCES = imap/cli_fatal.c imap/ctl_cyrusdb.c imap/mutex_fake.c
 imap_ctl_cyrusdb_LDADD = $(LD_UTILITY_ADD)
 
@@ -382,6 +391,10 @@ imap_fetchnews_LDADD = $(LD_UTILITY_ADD)
 imap_fud_SOURCES = imap/fud.c imap/mutex_fake.c master/service.c
 imap_fud_LDADD = $(LD_SERVER_ADD)
 
+imap_hammer_skiplist_SOURCES = imap/cli_fatal.c imap/hammer_skiplist.c imap/mutex_fake.c
+imap_hammer_skiplist_LDFLAGS = $(LD_UTILITY_FLAGS)
+imap_hammer_skiplist_LDADD = $(LD_UTILITY_ADD)
+
 imap_idled_SOURCES = imap/idled.c imap/mutex_fake.c
 imap_idled_LDADD = $(LD_UTILITY_ADD)
 
@@ -418,7 +431,9 @@ imap_libcyrus_imap_la_SOURCES = imap/annotate.c imap/annotate.h imap/append.c \
 	imap/sync_log.h imap/telemetry.c imap/telemetry.h imap/tls.c \
 	imap/tls.h imap/upgrade_index.c imap/upgrade_index.h imap/user.c \
 	imap/user.h imap/userdeny_db.c imap/userdeny.h imap/version.c \
-	imap/version.h imap/idlemsg.c imap/conversations.c
+	imap/version.h imap/idlemsg.c imap/conversations.c \
+	imap/mailbox_update_notifier.c imap/mailbox_update_notifier.h \
+	imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 
 imap_lmtpd_SOURCES = imap/lmtpd.c imap/lmtpd.h imap/lmtpengine.c \
