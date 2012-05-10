@@ -66,13 +66,10 @@ PACKAGE=\$(shell dh_listpackages)
 
 build:
 	dh_testdir
-	aclocal -I cmulocal
-	autoheader
-	autoconf
-	./configure --with-auth=unix --without-krb --with-perl=/usr/bin/perl --enable-idled --with-idle=idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-com_err=/usr --with-zlib --without-snmp --enable-replication --with-bdb=db-4.8
-	make depend
+	autoreconf -v -i
+	./configure --without-krb --with-perl=/usr/bin/perl --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --with-bdb=db-4.8
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -fstack-protector-all"
-	make -C sieve test
+	make sieve/test
 	touch build
 
 clean:
