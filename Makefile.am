@@ -122,8 +122,10 @@ user_PROGRAMS += \
 	imap/mbpath \
 	imap/mbtool \
 	imap/quota \
-	imap/reconstruct \
-	imap/squatter
+	imap/reconstruct
+if USE_SQUAT
+service_PROGRAMS += imap/squatter
+endif
 if NNTPD
 user_PROGRAMS += imap/fetchnews
 endif
@@ -797,16 +799,11 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/saslserver.c \
 	imap/search_engines.c \
 	imap/search_engines.h \
-	imap/search_squat.c \
 	imap/seen.h \
 	imap/seen_db.c \
 	imap/sequence.c \
 	imap/sequence.h \
 	imap/setproctitle.c \
-	imap/squat.c \
-	imap/squat.h \
-	imap/squat_internal.c \
-	imap/squat_internal.h \
 	imap/statuscache.h \
 	imap/statuscache_db.c \
 	imap/sync_log.c \
@@ -823,6 +820,14 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/userdeny.h \
 	imap/version.c \
 	imap/version.h
+if USE_SQUAT
+imap_libcyrus_imap_la_SOURCES += \
+	imap/search_squat.c \
+	imap/squat.c \
+	imap/squat.h \
+	imap/squat_internal.c \
+	imap/squat_internal.h
+endif
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
 if JANSSON
@@ -1144,7 +1149,6 @@ dist_man_MANS = \
 	man/reconstruct.8 \
 	man/rmnews.8 \
 	man/smmapd.8 \
-	man/squatter.8 \
 	man/syncnews.8 \
 	man/sync_client.8 \
 	man/sync_reset.8 \
@@ -1152,6 +1156,10 @@ dist_man_MANS = \
 	man/timsieved.8 \
 	man/tls_prune.8 \
 	man/unexpunge.8
+if USE_SQUAT
+dist_man_MANS += \
+	man/squatter.8
+endif
 
 master_master_SOURCES = \
 	master/cyrusMasterMIB.c \
