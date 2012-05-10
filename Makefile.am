@@ -326,7 +326,7 @@ include_HEADERS = lib/acl.h lib/assert.h lib/auth.h lib/auth_pts.h \
 	lib/map.h lib/mappedfile.h lib/mkgmtime.h lib/mpool.h lib/nonblock.h \
 	lib/parseaddr.h lib/retry.h lib/rfc822date.h lib/signals.h \
 	lib/strarray.h lib/strhash.h lib/stristr.h lib/sysexits.h lib/times.h \
-	lib/tok.h lib/wildmat.h lib/xmalloc.h
+	lib/tok.h lib/wildmat.h lib/xmalloc.h lib/hashu64.h
 nobase_include_HEADERS = sieve/sieve_interface.h
 nobase_nodist_include_HEADERS = sieve/sieve_err.h
 
@@ -339,7 +339,7 @@ imap_arbitron_LDADD = $(LD_UTILITY_ADD)
 imap_chk_cyrus_SOURCES = imap/chk_cyrus.c imap/cli_fatal.c imap/mutex_fake.c
 imap_chk_cyrus_LDADD = $(LD_UTILITY_ADD)
 
-imap_ctl_conversationsdb_SOURCES = imap/cli_fatal.c imap/ctl_conversationsdb.c imap/mutex_fake.c
+imap_ctl_conversationsdb_SOURCES = imap/ctl_conversationsdb.c imap/mutex_fake.c
 imap_ctl_conversationsdb_LDFLAGS = $(LD_UTILITY_FLAGS)
 imap_ctl_conversationsdb_LDADD = $(LD_UTILITY_ADD)
 
@@ -391,9 +391,9 @@ imap_fetchnews_LDADD = $(LD_UTILITY_ADD)
 imap_fud_SOURCES = imap/fud.c imap/mutex_fake.c master/service.c
 imap_fud_LDADD = $(LD_SERVER_ADD)
 
-imap_hammer_skiplist_SOURCES = imap/cli_fatal.c imap/hammer_skiplist.c imap/mutex_fake.c
-imap_hammer_skiplist_LDFLAGS = $(LD_UTILITY_FLAGS)
-imap_hammer_skiplist_LDADD = $(LD_UTILITY_ADD)
+imap_hammer_cyrusdb_SOURCES = imap/cli_fatal.c imap/hammer_cyrusdb.c imap/mutex_fake.c
+imap_hammer_cyrusdb_LDFLAGS = $(LD_UTILITY_FLAGS)
+imap_hammer_cyrusdb_LDADD = $(LD_UTILITY_ADD)
 
 imap_idled_SOURCES = imap/idled.c imap/mutex_fake.c
 imap_idled_LDADD = $(LD_UTILITY_ADD)
@@ -580,7 +580,8 @@ lib_libcyrus_min_la_SOURCES += lib/map_nommap.c
 endif
 endif
 lib_libcyrus_min_la_SOURCES += lib/mpool.c lib/retry.c lib/strarray.c \
-	lib/strhash.c lib/util.c lib/xmalloc.c lib/xstrlcat.c lib/xstrlcpy.c
+	lib/strhash.c lib/util.c lib/xmalloc.c lib/xstrlcat.c lib/xstrlcpy.c \
+	lib/hashu64.c
 lib_libcyrus_min_la_LIBADD = $(LTLIBOBJS)
 
 lib/chartable.c: lib/mkchartable.pl lib/charset/unifix.txt \
