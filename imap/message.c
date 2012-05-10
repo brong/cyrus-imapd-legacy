@@ -2645,7 +2645,8 @@ int message_update_conversations(struct conversations_state *state,
 	hdrs[1] = body->in_reply_to;
 	hdrs[2] = body->message_id;
 	hdrs[3] = body->x_me_message_id;
-	buf_init_ro(&msubject, body->subject, strlen(body->subject));
+	if (body->subject)
+	    buf_init_ro(&msubject, body->subject, strlen(body->subject));
     }
     else if (cache_size(record)) {
 	/* we have cache loaded, get what we need there */
