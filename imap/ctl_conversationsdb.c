@@ -558,6 +558,7 @@ static int do_audit(const char *inboxname)
 {
     char buf[MAX_MAILBOX_NAME];
     int r;
+    int i;
     char temp_suffix[64];
     char *filename_temp = NULL;
     char *filename_real = NULL;
@@ -602,6 +603,10 @@ static int do_audit(const char *inboxname)
     }
 
     conversations_wipe_counts(state_temp);
+
+    /* but keep the folder names */
+    for (i = 0; i < state_real->folder_names->count; i++)
+	strarray_set(state_temp->folder_names, i, strarray_nth(state_real->folder_names, i));
 
     /*
      * Set the conversations db suffix during the recalc pass, so that
