@@ -840,6 +840,10 @@ imap_libcyrus_imap_la_SOURCES += \
 	imap/squat_internal.c \
 	imap/squat_internal.h
 endif
+if USE_SPHINX
+imap_libcyrus_imap_la_SOURCES += \
+	imap/search_sphinx.c
+endif
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
 
