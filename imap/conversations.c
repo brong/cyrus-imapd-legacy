@@ -1706,14 +1706,24 @@ int conversations_wipe_counts(struct conversations_state *state)
 {
     int r = 0;
 
+    /* wipe B counts */
+    r = cyrusdb_foreach(state->db, "B", 1, NULL, delete_cb,
+			state, &state->txn);
+    if (r) return r;
+
     /* wipe F counts */
     r = cyrusdb_foreach(state->db, "F", 1, NULL, delete_cb,
 			state, &state->txn);
     if (r) return r;
 
-    /* wipe B counts */
-    r = cyrusdb_foreach(state->db, "B", 1, NULL, delete_cb,
+    /* wipe S keys */
+    r = cyrusdb_foreach(state->db, "S", 1, NULL, delete_cb,
 			state, &state->txn);
+    if (r) return r;
+
+    /* remove folder names */
+    strarray_truncate(state->folder_names, 0);
+    r = write_folders(state);
     if (r) return r;
 
     /* re-init the counted flags */
