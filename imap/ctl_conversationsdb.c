@@ -52,6 +52,7 @@
 
 /* cyrus includes */
 #include "assert.h"
+#include "bsearch.h"
 #include "exitcodes.h"
 #include "global.h"
 #include "imap_err.h"
@@ -73,7 +74,7 @@
 const int config_need_data = CONFIG_NEED_PARTITION_DATA;
 static struct namespace conv_namespace;
 
-enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD, RECALC, AUDIT };
+enum { UNKNOWN, DUMP, UNDUMP, ZERO, BUILD, RECALC, AUDIT, CHECKFOLDERS };
 
 int verbose = 0;
 
@@ -554,6 +555,38 @@ static int fix_modseqs(struct conversations_state *a,
     return 0;
 }
 
+int do_checkfolders(const char *inboxname)
+{
+    int r;
+    struct conversations_state *state = NULL;
+    strarray_t *copy1, *copy2;
+
+    /* open the DB */
+    r = conversations_open_mbox(inboxname, &state);
+    if (r) {
+	fprintf(stderr, "Cannot open conversations db %s: %s\n",
+		inboxname, error_message(r));
+	goto out;
+    }
+
+    /* don't mess with the original */
+    copy1 = strarray_dup(state->folder_names);
+    /* remove empty folders first, they will duplicate for sure */
+    strarray_remove_all(copy1, "-");
+    copy2 = strarray_dup(copy1);
+    strarray_sort(copy2, cmpstringp_raw);
+    strarray_uniq(copy2);
+    if (copy1->count != copy2->count) {
+	printf("DUPLICATE FOLDERS FOR %s\n", inboxname);
+    }
+    strarray_free(copy1);
+    strarray_free(copy2);
+
+out:
+    conversations_abort(&state);
+    return r;
+}
+
 static int do_audit(const char *inboxname)
 {
     char buf[MAX_MAILBOX_NAME];
@@ -737,6 +770,11 @@ static int do_user(const char *userid)
 	    r = EC_NOINPUT;
 	break;
 
+    case CHECKFOLDERS:
+	if (do_checkfolders(inboxname))
+	    r = EC_NOINPUT;
+	break;
+
     case UNKNOWN:
 	fatal("UNKNOWN MODE", EC_SOFTWARE);
     }
@@ -782,7 +820,7 @@ int main(int argc, char **argv)
 	fatal("must run as the Cyrus user", EC_USAGE);
     }
 
-    while ((c = getopt(argc, argv, "durzAbvRC:T:")) != EOF) {
+    while ((c = getopt(argc, argv, "durzAbvRFC:T:")) != EOF) {
 	switch (c) {
 	case 'd':
 	    if (mode != UNKNOWN)
@@ -822,6 +860,12 @@ int main(int argc, char **argv)
 	    if (mode != UNKNOWN)
 		usage(argv[0]);
 	    mode = AUDIT;
+	    break;
+
+	case 'F':
+	    if (mode != UNKNOWN)
+		usage(argv[0]);
+	    mode = CHECKFOLDERS;
 	    break;
 
 	case 'v':
@@ -902,6 +946,7 @@ static int usage(const char *name)
     fprintf(stderr, "    -b             build conversations entries for any NULL records\n");
     fprintf(stderr, "    -R             recalculate all counts\n");
     fprintf(stderr, "    -A             audit conversations DB counts\n");
+    fprintf(stderr, "    -F             check folder names\n");
     fprintf(stderr, "    -T dir         store temporary data for audit in dir\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "    -r             recursive mode: username is a prefix\n");
