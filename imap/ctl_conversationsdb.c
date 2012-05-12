@@ -577,7 +577,10 @@ int do_checkfolders(const char *inboxname)
     strarray_sort(copy2, cmpstringp_raw);
     strarray_uniq(copy2);
     if (copy1->count != copy2->count) {
-	printf("DUPLICATE FOLDERS FOR %s\n", inboxname);
+	printf("DUPLICATE %s\n", inboxname);
+    }
+    else {
+	printf("OK %s\n", inboxname);
     }
     strarray_free(copy1);
     strarray_free(copy2);
