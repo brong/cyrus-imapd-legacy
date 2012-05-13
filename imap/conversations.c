@@ -1702,7 +1702,8 @@ static int delete_cb(void *rock,
     return cyrusdb_delete(state->db, key, keylen, &state->txn, 1);
 }
 
-int conversations_wipe_counts(struct conversations_state *state)
+int conversations_wipe_counts(struct conversations_state *state,
+			      int keepnames)
 {
     int r = 0;
 
@@ -1721,10 +1722,12 @@ int conversations_wipe_counts(struct conversations_state *state)
 			state, &state->txn);
     if (r) return r;
 
-    /* remove folder names */
-    strarray_truncate(state->folder_names, 0);
-    r = write_folders(state);
-    if (r) return r;
+    if (!keepnames) {
+	/* remove folder names */
+	strarray_truncate(state->folder_names, 0);
+	r = write_folders(state);
+	if (r) return r;
+    }
 
     /* re-init the counted flags */
     r = _init_counted(state, NULL, 0);

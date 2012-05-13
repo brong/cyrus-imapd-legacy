@@ -307,7 +307,7 @@ static int do_recalc(const char *inboxname)
 
     r = conversations_open_mbox(inboxname, &state);
 
-    conversations_wipe_counts(state);
+    conversations_wipe_counts(state, 0);
 
     r = recalc_counts_cb(inboxname, 0, 0, NULL);
     if (r) return r;
@@ -598,7 +598,6 @@ static int do_audit(const char *inboxname)
     char temp_suffix[64];
     char *filename_temp = NULL;
     char *filename_real = NULL;
-    strarray_t *folder_copy;
     struct conversations_state *state_temp = NULL;
     struct conversations_state *state_real = NULL;
     unsigned int ndiffs = 0;
@@ -639,13 +638,8 @@ static int do_audit(const char *inboxname)
 	goto out;
     }
 
-    /* keep the folder names */
-    folder_copy = strarray_dup(state_temp->folder_names);
-
-    conversations_wipe_counts(state_temp);
-
-    strarray_free(state_temp->folder_names);
-    state_temp->folder_names = folder_copy;
+    /* keep foldernames */
+    conversations_wipe_counts(state_temp, 1);
 
     /*
      * Set the conversations db suffix during the recalc pass, so that
