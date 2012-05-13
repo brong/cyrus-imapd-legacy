@@ -598,6 +598,7 @@ static int do_audit(const char *inboxname)
     char temp_suffix[64];
     char *filename_temp = NULL;
     char *filename_real = NULL;
+    strarray_t *folder_copy;
     struct conversations_state *state_temp = NULL;
     struct conversations_state *state_real = NULL;
     unsigned int ndiffs = 0;
@@ -638,11 +639,13 @@ static int do_audit(const char *inboxname)
 	goto out;
     }
 
+    /* keep the folder names */
+    folder_copy = strarray_dup(state_temp->folder_names);
+
     conversations_wipe_counts(state_temp);
 
-    /* but keep the folder names */
-    for (i = 0; i < state_real->folder_names->count; i++)
-	strarray_set(state_temp->folder_names, i, strarray_nth(state_real->folder_names, i));
+    strarray_free(state_temp->folder_names);
+    state_temp->folder_names = folder_copy;
 
     /*
      * Set the conversations db suffix during the recalc pass, so that
