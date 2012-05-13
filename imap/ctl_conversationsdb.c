@@ -355,6 +355,7 @@ struct cursor
     struct txn **txnp;
     const char *key; size_t keylen;
     const char *data; size_t datalen;
+    int err;
 };
 
 static void cursor_init(struct cursor *c,
@@ -367,11 +368,13 @@ static void cursor_init(struct cursor *c,
 
 static int cursor_next(struct cursor *c)
 {
-    return cyrusdb_fetchnext(c->db,
-			     c->key, c->keylen,
-			     &c->key, &c->keylen,
-			     &c->data, &c->datalen,
-			     c->txnp);
+    if (!c->err)
+	c->err = cyrusdb_fetchnext(c->db,
+				   c->key, c->keylen,
+				   &c->key, &c->keylen,
+				   &c->data, &c->datalen,
+				   c->txnp);
+    return c->err;
 }
 
 static int blob_compare(const char *a, size_t alen,
