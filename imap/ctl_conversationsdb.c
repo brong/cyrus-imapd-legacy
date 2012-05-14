@@ -427,41 +427,38 @@ static unsigned int diff_records(struct conversations_state *a,
     cursor_init(&cb, b->db, &b->txn);
     rb = cursor_next(&cb);
 
-    while (!ra || !rb)
-    {
-	delta = keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
-	if (!delta)
-	    delta = blob_compare(ca.data, ca.datalen, cb.data, cb.datalen);
-
-	if (delta) {
-	    if (!ndiffs++ && verbose) printf("RECORDS differ:\n");
-	    if (verbose) {
-		int which = (!ra && keydelta <= 0 ? 1 : 0) |
-			    (!rb && keydelta >= 0 ? 2 : 0);
-		switch (which)
-		{
-		case 1:
-		    printf("MISSING key \"%.*s\" data \"%.*s\"\n",
-			   (int)ca.keylen, ca.key, (int)ca.datalen, ca.data);
-		    break;
-		case 2:
-		    printf("ADDED key \"%.*s\" data \"%.*s\"\n",
-			   (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
-		    break;
-		case 3:
-		    printf("CHANGED key \"%.*s\" data \"%.*s\"\n"
-		           "     TO key \"%.*s\" data \"%.*s\"\n",
-			   (int)ca.keylen, ca.key, (int)ca.datalen, ca.data,
-			   (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
-		    break;
-		}
-	    }
+    while (!ra || !rb) {
+	keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
+	if (rb || keydelta < 0) {
+	    ndiffs++;
+	    if (verbose)
+		printf("MISSING: \"%.*s\" data \"%.*s\"\n",
+		       (int)ca.keylen, ca.key, (int)ca.datalen, ca.data);
+	    ra = next_diffable_record(&ca);
+	    continue;
+	}
+	if (ra || keydelta > 0) {
+	    ndiffs++;
+	    if (verbose)
+		printf("FOUND: \"%.*s\" data \"%.*s\"\n",
+		       (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
+	    rb = next_diffable_record(&cb);
+	    continue;
 	}
 
-	if (keydelta <= 0)
-	    ra = next_diffable_record(&ca);
-	if (keydelta >= 0)
-	    rb = next_diffable_record(&cb);
+	/* both exist an are the same key */
+	delta = blob_compare(ca.data, ca.datalen, cb.data, cb.datalen);
+	if (delta) {
+	    ndiffs++;
+	    if (verbose)
+		printf("REAL: \"%.*s\" data \"%.*s\"\n"
+		       "TEMP: \"%.*s\" data \"%.*s\"\n",
+		       (int)ca.keylen, ca.key, (int)ca.datalen, ca.data,
+		       (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
+	}
+
+	ra = next_diffable_record(&ca);
+	rb = next_diffable_record(&cb);
     }
 
     return ndiffs;
@@ -481,10 +478,9 @@ static int fix_modseqs(struct conversations_state *a,
     cursor_init(&cb, b->db, &b->txn);
     rb = cursor_next(&cb);
 
-    while (!ra || !rb)
-    {
+    while (!ra || !rb) {
 	keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
-	if (keydelta < 0) {
+	if (rb || keydelta < 0) {
 	    if (ca.key[0] == 'F') {
 		modseq_t modseq;
 		uint32_t exists;
@@ -499,14 +495,13 @@ static int fix_modseqs(struct conversations_state *a,
 		/* otherwise it's a bug, so leave it in for reporting */
 	    }
 	    ra = cursor_next(&ca);
-	    if (ra) break;
 	    continue;
 	}
-	if (keydelta > 0) {
+	if (ra || keydelta > 0) {
 	    rb = cursor_next(&cb);
-	    if (rb) break;
 	    continue;
 	}
+
 	/* folders?  Just modseq check */
 	if (ca.key[0] == 'F') {
 	    /* check if modseq is higher for real */
@@ -553,6 +548,7 @@ static int fix_modseqs(struct conversations_state *a,
 	    r = conversation_store(b, cb.key, cb.keylen, convb);
 	    if (r) return r;
 	}
+
 	ra = cursor_next(&ca);
 	rb = cursor_next(&cb);
     }
