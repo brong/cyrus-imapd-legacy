@@ -186,8 +186,6 @@ static int do_zero(const char *inboxname)
 
     r = conversations_open_mbox(inboxname, &state);
 
-    conversations_truncate(state);
-
     r = zero_cid_cb(inboxname, 0, 0, NULL);
     if (r) return r;
 
