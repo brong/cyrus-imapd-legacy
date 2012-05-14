@@ -595,7 +595,6 @@ static int do_audit(const char *inboxname)
 {
     char buf[MAX_MAILBOX_NAME];
     int r;
-    int i;
     char temp_suffix[64];
     char *filename_temp = NULL;
     char *filename_real = NULL;
