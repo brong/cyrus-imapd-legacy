@@ -430,6 +430,7 @@ static unsigned int diff_records(struct conversations_state *a,
     while (!ra || !rb) {
 	keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
 	if (rb || keydelta < 0) {
+	    if (ra) break;
 	    ndiffs++;
 	    if (verbose)
 		printf("MISSING: \"%.*s\" data \"%.*s\"\n",
@@ -438,6 +439,7 @@ static unsigned int diff_records(struct conversations_state *a,
 	    continue;
 	}
 	if (ra || keydelta > 0) {
+	    if (rb) break;
 	    ndiffs++;
 	    if (verbose)
 		printf("FOUND: \"%.*s\" data \"%.*s\"\n",
@@ -481,6 +483,7 @@ static int fix_modseqs(struct conversations_state *a,
     while (!ra || !rb) {
 	keydelta = blob_compare(ca.key, ca.keylen, cb.key, cb.keylen);
 	if (rb || keydelta < 0) {
+	    if (ra) break;
 	    if (ca.key[0] == 'F') {
 		modseq_t modseq;
 		uint32_t exists;
@@ -498,6 +501,7 @@ static int fix_modseqs(struct conversations_state *a,
 	    continue;
 	}
 	if (ra || keydelta > 0) {
+	    if (rb) break;
 	    rb = cursor_next(&cb);
 	    continue;
 	}
