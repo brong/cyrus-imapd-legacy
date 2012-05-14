@@ -872,6 +872,13 @@ static int _conversation_save(struct conversations_state *state,
     if (!conv->num_records) {
 	/* last existing record removed - clean up the 'B' record */
 	r = cyrusdb_delete(state->db, key, keylen, &state->txn, 1);
+	if (!r) {
+	    /* and the 'S' record too */
+	    char *skey = xstrndup(key, keylen);
+	    skey[0] = 'S';
+	    r = cyrusdb_delete(state->db, skey, keylen, &state->txn, 1);
+	    free(skey);
+	}
 	goto done;
     }
 
