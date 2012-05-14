@@ -499,10 +499,12 @@ static int fix_modseqs(struct conversations_state *a,
 		/* otherwise it's a bug, so leave it in for reporting */
 	    }
 	    ra = cursor_next(&ca);
+	    if (ra) break;
 	    continue;
 	}
 	if (keydelta > 0) {
 	    rb = cursor_next(&cb);
+	    if (rb) break;
 	    continue;
 	}
 	/* folders?  Just modseq check */
