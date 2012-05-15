@@ -2697,6 +2697,8 @@ int message_update_conversations(struct conversations_state *state,
     if (!is_valid_rfc2822_inreplyto(hdrs[1]))
 	hdrs[1] = NULL;
 
+    /* Note that a NULL subject, e.g. due to a missing Subject: header
+     * field in the original message, is normalised to "" not NULL */
     conversation_normalise_subject(&msubject);
 
     for (i = 0 ; i < 4 ; i++) {
@@ -2728,12 +2730,12 @@ continue2:
 	    if (r) goto out;
 
 	    /* Check to see if the conversation has an incompatible
-	     * subject.  We treat a missing subject as compatible
+	     * subject.  We treat a missing S-record as compatible
 	     * with anything for backwards compatibility with older
 	     * conversations DBs. */
 	    r = conversations_get_subject(state, cid, &csubject);
 	    if (r) goto out;
-	    if (csubject.len && buf_cmp(&msubject, &csubject)) {
+	    if (csubject.s != NULL && buf_cmp(&msubject, &csubject)) {
 		buf_free(&csubject);
 		free(msgid);
 		continue;
