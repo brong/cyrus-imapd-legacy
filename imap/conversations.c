@@ -680,7 +680,7 @@ static int folder_number(struct conversations_state *state,
     /* if we have to add it, then save the keys back */
     if (pos < 0 && create_flag) {
 	/* replace the first unused if there is one */
-	pos = strarray_find(state->folder_names, '-', 0);
+	pos = strarray_find(state->folder_names, "-", 0);
 	if (pos >= 0)
 	    strarray_set(state->folder_names, pos, name);
 	/* otherwise append */
