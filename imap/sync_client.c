@@ -239,11 +239,14 @@ static int find_reserve_all(struct sync_name_list *mboxname_list,
 	    goto bail;
 	}
 
-	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
-	if (r) {
-	    syslog(LOG_ERR, "IOERROR: Failed to get xconvmodseq %s: %s",
-		   mbox->name, error_message(r));
-	    goto bail;
+	xconvmodseq = 0;
+	if (mailbox_has_conversations(mailbox)) {
+	    r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	    if (r) {
+		syslog(LOG_ERR, "IOERROR: Failed to get xconvmodseq %s: %s",
+		       mbox->name, error_message(r));
+		goto bail;
+	    }
 	}
 
 	/* mailbox is open from here, no exiting without closing it! */
@@ -1336,8 +1339,10 @@ static int mailbox_full_update(const char *mboxname)
 
     /* this is safe because "larger than" logic is embedded
      * inside update_xconvmodseq */
-    r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
-    if (r) goto done;
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+	if (r) goto done;
+    }
 
     kaction = dlist_newlist(NULL, "ACTION");
     r = mailbox_update_loop(mailbox, kr->head, last_uid,
@@ -1424,10 +1429,12 @@ static int is_unchanged(struct mailbox *mailbox, struct sync_folder *remote)
 	 if (remote->specialuse) return 0;
     }
 
-    r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
-    if (r) return 0;
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (r) return 0;
 
-    if (remote->xconvmodseq != xconvmodseq) return 0;
+	if (remote->xconvmodseq != xconvmodseq) return 0;
+    }
 
     r = sync_crc_calc(mailbox, sync_crc, sizeof(sync_crc));
     if (r) return 0;

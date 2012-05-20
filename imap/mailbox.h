@@ -570,5 +570,6 @@ extern int mailbox_update_conversations(struct mailbox *mailbox,
 					struct index_record *new);
 extern int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *);
 extern int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t);
+extern int mailbox_has_conversations(struct mailbox *mailbox);
 
 #endif /* INCLUDED_MAILBOX_H */

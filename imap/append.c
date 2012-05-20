@@ -918,7 +918,7 @@ int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
-	if (!r && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	if (!r && mailbox_has_conversations(mailbox)) {
 	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 	    if (cstate)
 		r = message_update_conversations(cstate, &record, *body,
@@ -1248,7 +1248,7 @@ int append_copy(struct mailbox *mailbox,
 	record.crec = copymsg[msg].crec;
 
 	if (record.cid == NULLCONVERSATION &&
-	    config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    mailbox_has_conversations(as->mailbox)) {
 	    struct conversations_state *cstate = conversations_get_mbox(as->mailbox->name);
 	    if (cstate)
 		r = message_update_conversations(cstate, &record,

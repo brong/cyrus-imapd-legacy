@@ -112,6 +112,11 @@ void conversations_set_suffix(const char *suff)
 static char *conversations_path(struct mboxname_parts *parts)
 {
     const char *suff = (suffix ? suffix : FNAME_CONVERSATIONS_SUFFIX);
+    /* only users have conversations.  Later we may introduce the idea of
+     * "conversationroot" in the same way we have quotaroot, but for now
+     * it's hard-coded as the user */
+    if (!parts->userid)
+	return NULL;
     if (convdir)
 	return strconcat(convdir, "/", parts->userid, ".", suff, (char *)NULL);
     return mboxname_conf_getpath(parts, suff);

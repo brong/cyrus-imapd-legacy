@@ -1467,7 +1467,7 @@ static int do_mailbox(struct dlist *kin)
     }
 
     /* NOTE - this is optional */
-    if (xconvmodseq) {
+    if (mailbox_has_conversations(mailbox) && xconvmodseq) {
 	modseq_t ourxconvmodseq = 0;
 
 	r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
@@ -1564,6 +1564,7 @@ static int do_mailbox(struct dlist *kin)
        Need to check whether the above code ensures that we traverse
        all the replica records in the correct order */
     r = sync_crc_calc(mailbox, sync_crc.rvalue, sizeof(sync_crc.rvalue));
+    if (r) goto done;
 
     /* this is an ugly construct that's an artifact of the
      * inversion of mboxlist and mailbox stuff that means
@@ -1572,9 +1573,12 @@ static int do_mailbox(struct dlist *kin)
     if (!specialuse || !mailbox->specialuse || 
 	strcmp(specialuse, mailbox->specialuse)) {
 	r = mboxlist_setspecialuse(mailbox, specialuse);
+	if (r) goto done;
     }
 
-    r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+    }
 
 done:
     mailbox_close(&mailbox);

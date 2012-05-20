@@ -1600,10 +1600,29 @@ int mailbox_read_index_record(struct mailbox *mailbox,
     return r;
 }
 
-int mailbox_lock_conversations(struct mailbox *mailbox)
+int mailbox_has_conversations(struct mailbox *mailbox)
 {
+    char *path;
+
     /* not needed */
     if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+
+    /* we never store data about deleted mailboxes */
+    if (mboxname_isdeletedmailbox(mailbox->name, NULL))
+	return 0;
+
+    path = conversations_getmboxpath(mailbox->name);
+    if (!path) return 0;
+    free(path);
+
+    return 1;
+}
+
+static int mailbox_lock_conversations(struct mailbox *mailbox)
+{
+    /* does this mailbox have conversations? */
+    if (!mailbox_has_conversations(mailbox))
 	return 0;
 
     /* already locked */
@@ -2245,11 +2264,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     conversation_id_t cid = NULLCONVERSATION;
     struct conversations_state *cstate = NULL;
 
-    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
-	return 0;
-
-    /* we never store data about deleted mailboxes */
-    if (mboxname_isdeletedmailbox(mailbox->name, NULL))
+    if (!mailbox_has_conversations(mailbox))
 	return 0;
 
     cstate = conversations_get_mbox(mailbox->name);
@@ -3331,7 +3346,7 @@ static int mailbox_delete_conversations(struct mailbox *mailbox)
     uint32_t recno;
     int r;
 
-    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+    if (!mailbox_has_conversations(mailbox))
 	return 0;
 
     cstate = conversations_get_mbox(mailbox->name);
@@ -3578,7 +3593,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     /* NOTE: in the case of renaming a user to another user, we
      * update all the names in the SOURCE username.conversations,
      * then we rename the conversation file last */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+    if (mailbox_has_conversations(oldmailbox)) {
 	cstate = conversations_get_mbox(oldmailbox->name);
 	assert(cstate);
     }
@@ -3650,12 +3665,13 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
     r = mailbox_commit(newmailbox);
     if (r) goto fail;
 
-    /* if new name is deleted, don't keep the numbers */
+    /* if new mailbox has conversations, rename the record */
+    /* XXX - what if it's a user rename? */
     if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	if (mboxname_isdeletedmailbox(newname, NULL))
-	    r = mailbox_delete_conversations(oldmailbox);
-	else
+	if (mailbox_has_conversations(newmailbox))
 	    r = conversations_rename_folder(cstate, oldmailbox->name, newname);
+	else
+	    r = mailbox_delete_conversations(oldmailbox);
 	/* but we can't abort, because the mailbox is committed.  Error handling
 	 * here is actually a major disaster area */
 	if (r)

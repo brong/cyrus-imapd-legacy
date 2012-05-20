@@ -1437,9 +1437,11 @@ int sync_mailbox(struct mailbox *mailbox,
 	dlist_setatom(kl, "QUOTAROOT", mailbox->quotaroot);
     if (mailbox->specialuse)
 	dlist_setatom(kl, "SPECIALUSE", mailbox->specialuse);
-    r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
-    if (!r && xconvmodseq)
-	dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (!r && xconvmodseq)
+	    dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
+    }
 
     if (printrecords) {
 	struct index_record record;
@@ -1598,7 +1600,7 @@ int sync_rename_cid(struct mailbox *mailbox,
     local->cid = remote->cid;
 
     /* apply the new value to all message ids */
-    if (local->cid && config_getswitch(IMAPOPT_CONVERSATIONS)) {
+    if (local->cid && mailbox_has_conversations(mailbox)) {
 	struct conversations_state *cstate;
 	cstate = conversations_get_mbox(mailbox->name);
 	assert(cstate);
@@ -1645,7 +1647,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
     }
 
     record->cid = cid;	/* use the CID given us */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+    if (mailbox_has_conversations(mailbox)) {
 	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
 	r = message_update_conversations(cstate, record, body, /*isreplica*/1);
 	/* check r later... */
