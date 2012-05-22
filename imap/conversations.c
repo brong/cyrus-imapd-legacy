@@ -1315,6 +1315,9 @@ static int sender_preferred_name(const char *a, const char *b)
     if (!d)
 	d = strcmp(sa, sb);
 
+    if (!d)
+	d = strcmpsafe(a, b);
+
     free(sa);
     free(sb);
     return d;
