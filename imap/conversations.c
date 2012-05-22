@@ -1005,8 +1005,8 @@ int conversation_getstatus(struct conversations_state *state,
     return r;
 }
 
-static conv_folder_t *conversation_get_folder(conversation_t *conv,
-					      int number, int create_flag)
+conv_folder_t *conversation_get_folder(conversation_t *conv,
+				       int number, int create_flag)
 {
     conv_folder_t *folder, **nextp = &conv->folders;
 

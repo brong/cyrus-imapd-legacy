@@ -524,12 +524,12 @@ static int fix_modseqs(struct conversations_state *a,
 	    }
 	}
 	if (ca.key[0] == 'B') {
-	    /* B keys - just check the main modseq - the per-folder ones actually get
-	     * removed once the last record is gone, apart from on the F keys - and we
-	     * already handled those */
+	    /* B keys - check all the modseqs, both top level and per folder */
 	    conversation_t *conva = NULL;
 	    conversation_t *convb = NULL;
 	    conv_sender_t *sender;
+	    conv_folder_t *foldera;
+	    conv_folder_t *folderb;
 
 	    r = conversation_parse(a, ca.data, ca.datalen, &conva);
 	    if (r) return r;
@@ -544,6 +544,12 @@ static int fix_modseqs(struct conversations_state *a,
 
 	    if (conva->modseq > convb->modseq)
 		convb->modseq = conva->modseq;
+
+	    for (foldera = conva->folders; foldera; foldera = foldera->next) {
+		folderb = conversation_get_folder(convb, foldera->number, 1);
+		if (folderb->modseq < foldera->modseq)
+		    folderb->modseq = foldera->modseq;
+	    }
 
 	    /* be nice to know if this is needed, but at least twoskip
 	     * will dedup for us */

@@ -134,6 +134,8 @@ extern int conversations_set_msgid(struct conversations_state *state,
 extern int conversations_get_msgid(struct conversations_state *state,
 				   const char *msgid,
 				   conversation_id_t *cidp);
+extern conv_folder_t *conversation_get_folder(conversation_t *conv,
+					      int number, int create_flag);
 
 extern void conversation_normalise_subject(struct buf *);
 extern int conversations_set_subject(struct conversations_state *state,
