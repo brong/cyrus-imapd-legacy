@@ -339,8 +339,8 @@ static unsigned int diff_folder_names(struct conversations_state *a,
 	if (verbose) {
 	    /* This doesn't really generate CHANGED messages, but
 	     * instead we get a pair of ADDED and MISSING */
-	    if (sa) printf("MISSING \"%s\" at %d\n", sa, i);
-	    if (sb) printf("ADDED \"%s\" at %d\n", sb, i);
+	    if (sa) printf("REALONLY \"%s\" at %d\n", sa, i);
+	    if (sb) printf("TEMPONLY \"%s\" at %d\n", sb, i);
 	}
     }
 
@@ -431,7 +431,7 @@ static unsigned int diff_records(struct conversations_state *a,
 	    if (ra) break;
 	    ndiffs++;
 	    if (verbose)
-		printf("MISSING: \"%.*s\" data \"%.*s\"\n",
+		printf("REALONLY: \"%.*s\" data \"%.*s\"\n",
 		       (int)ca.keylen, ca.key, (int)ca.datalen, ca.data);
 	    ra = next_diffable_record(&ca);
 	    continue;
@@ -440,7 +440,7 @@ static unsigned int diff_records(struct conversations_state *a,
 	    if (rb) break;
 	    ndiffs++;
 	    if (verbose)
-		printf("FOUND: \"%.*s\" data \"%.*s\"\n",
+		printf("TEMPONLY: \"%.*s\" data \"%.*s\"\n",
 		       (int)cb.keylen, cb.key, (int)cb.datalen, cb.data);
 	    rb = next_diffable_record(&cb);
 	    continue;
@@ -696,8 +696,8 @@ static int do_audit(const char *inboxname)
 	goto out;
     }
 
-    ndiffs += diff_folder_names(state_temp, state_real);
-    ndiffs += diff_records(state_temp, state_real);
+    ndiffs += diff_folder_names(state_real, state_temp);
+    ndiffs += diff_records(state_real, state_temp);
     if (ndiffs)
 	printf("%s is BROKEN (%u differences)\n", inboxname, ndiffs);
     else if (verbose)
