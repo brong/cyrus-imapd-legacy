@@ -357,12 +357,9 @@ static int blob_compare(const char *a, size_t alen,
 
 static int next_diffable_record(struct cursor *c)
 {
-    int r;
-#define FNKEY "$FOLDER_NAMES"
-
     for (;;)
     {
-	r = cursor_next(c);
+	int r = cursor_next(c);
 	if (r) return r;
 
 	/* skip < records, they won't be in the
@@ -374,9 +371,8 @@ static int next_diffable_record(struct cursor *c)
 	if (c->key[0] == 'S')
 	    continue;
 
-	break;
+	return 0;
     }
-    return 0;
 }
 
 static unsigned int diff_records(struct conversations_state *a,
