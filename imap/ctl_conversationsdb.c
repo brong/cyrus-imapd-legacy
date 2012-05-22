@@ -318,35 +318,6 @@ static int do_recalc(const char *inboxname)
     return r;
 }
 
-static unsigned int diff_folder_names(struct conversations_state *a,
-				      struct conversations_state *b)
-{
-    int i;
-    unsigned int ndiffs = 0;
-
-    for (i = 0 ;
-	 i < a->folder_names->count || i < b->folder_names->count ;
-	 i++) {
-	const char *sa = strarray_nth(a->folder_names, i);
-	const char *sb = strarray_nth(b->folder_names, i);
-	if (verbose > 1) {
-	    if (sa) printf("a[%d]=\"%s\"\n", i, sa);
-	    if (sb) printf("b[%d]=\"%s\"\n", i, sb);
-	}
-	if (!strcmpsafe(sa, sb))
-	    continue;
-	if (!ndiffs++ && verbose) printf("FOLDER_NAMES differ:\n");
-	if (verbose) {
-	    /* This doesn't really generate CHANGED messages, but
-	     * instead we get a pair of ADDED and MISSING */
-	    if (sa) printf("REALONLY \"%s\" at %d\n", sa, i);
-	    if (sb) printf("TEMPONLY \"%s\" at %d\n", sb, i);
-	}
-    }
-
-    return ndiffs;
-}
-
 struct cursor
 {
     struct db *db;
@@ -394,15 +365,13 @@ static int next_diffable_record(struct cursor *c)
 	r = cursor_next(c);
 	if (r) return r;
 
-	/* skip the $FOLDER_NAMES key, we dealt with
-	 * that already in diff_folder_names */
-	if (!blob_compare(c->key, c->keylen,
-			  FNKEY, sizeof(FNKEY)-1))
-	    continue;
-
 	/* skip < records, they won't be in the
 	 * temp database and we don't care so much */
-	if (c->keylen > 1 && c->key[0] == '<')
+	if (c->key[0] == '<')
+	    continue;
+
+	/* Subject, not re-calculated */
+	if (c->key[0] == 'S')
 	    continue;
 
 	break;
@@ -702,7 +671,6 @@ static int do_audit(const char *inboxname)
 	goto out;
     }
 
-    ndiffs += diff_folder_names(state_real, state_temp);
     ndiffs += diff_records(state_real, state_temp);
     if (ndiffs)
 	printf("%s is BROKEN (%u differences)\n", inboxname, ndiffs);
