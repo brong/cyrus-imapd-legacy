@@ -2729,18 +2729,22 @@ continue2:
 	    r = conversations_get_msgid(state, msgid, &cid);
 	    if (r) goto out;
 
-	    /* Check to see if the conversation has an incompatible
-	     * subject.  We treat a missing S-record as compatible
-	     * with anything for backwards compatibility with older
-	     * conversations DBs. */
-	    r = conversations_get_subject(state, cid, &csubject);
-	    if (r) goto out;
-	    if (csubject.s != NULL && buf_cmp(&msubject, &csubject)) {
+	    /* [IRIS-1576] if X-ME-Message-ID says the messages are
+	     * linked, ignore any difference in Subject: header fields.  */
+	    if (i != 3) {
+		/* Check to see if the conversation has an incompatible
+		 * subject.  We treat a missing S-record as compatible
+		 * with anything for backwards compatibility with older
+		 * conversations DBs. */
+		r = conversations_get_subject(state, cid, &csubject);
+		if (r) goto out;
+		if (csubject.s != NULL && buf_cmp(&msubject, &csubject)) {
+		    buf_free(&csubject);
+		    free(msgid);
+		    continue;
+		}
 		buf_free(&csubject);
-		free(msgid);
-		continue;
 	    }
-	    buf_free(&csubject);
 
 	    /* it's unique and compatible, add it */
 
