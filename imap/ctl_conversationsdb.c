@@ -456,7 +456,13 @@ static int fix_modseqs(struct conversations_state *a,
 		if (r) return r;
 		if (exists == 0) {
 		    r = conversation_storestatus(b, ca.key, ca.keylen, modseq, 0, 0);
-		    if (r) return r;
+		    if (r) {
+			fprintf(stderr, "Failed to store conversations "
+					"record \"%.*s\" to %s: %s, giving up\n",
+					(int)ca.keylen, ca.key,
+					b->path, error_message(r));
+			return r;
+		    }
 		}
 		/* otherwise it's a bug, so leave it in for reporting */
 	    }
@@ -479,13 +485,36 @@ static int fix_modseqs(struct conversations_state *a,
 	    /* need to add record if it's zero */
 	    r = conversation_parsestatus(ca.data, ca.datalen,
 					 &realmodseq, NULL, NULL);
-	    if (r) return r;
+	    if (r) {
+		fprintf(stderr, "Failed to parse conversations "
+				"record \"%.*s\" in %s: %s\n",
+				(int)ca.keylen, ca.key,
+				a->path, error_message(r));
+		/* There's no need to report failure to the caller - the
+		 * record diffing passing that occurs after this will
+		 * also pick up the same problem */
+		goto next;
+	    }
 	    r = conversation_parsestatus(cb.data, cb.datalen,
 					 &modseq, &exists, &unseen);
-	    if (r) return r;
+	    if (r) {
+		fprintf(stderr, "Failed to parse conversations "
+				"record \"%.*s\" in %s: %s\n",
+				(int)cb.keylen, cb.key,
+				b->path, error_message(r));
+		goto next;
+	    }
 	    if (realmodseq > modseq) {
 		r = conversation_storestatus(b, cb.key, cb.keylen, realmodseq, exists, unseen);
-		if (r) return r;
+		if (r) {
+		    fprintf(stderr, "Failed to store conversations "
+				    "record \"%.*s\" to %s: %s, giving up\n",
+				    (int)cb.keylen, cb.key,
+				    b->path, error_message(r));
+		    /* If we cannot write to the temp DB, something is
+		     * drastically wrong and we need to report a failure */
+		    return r;
+		}
 	    }
 	}
 	if (ca.key[0] == 'B') {
@@ -497,9 +526,21 @@ static int fix_modseqs(struct conversations_state *a,
 	    conv_folder_t *folderb;
 
 	    r = conversation_parse(a, ca.data, ca.datalen, &conva);
-	    if (r) return r;
+	    if (r) {
+		fprintf(stderr, "Failed to parse conversations "
+				"record \"%.*s\" in %s: %s\n",
+				(int)ca.keylen, ca.key,
+				a->path, error_message(r));
+		goto next;
+	    }
 	    r = conversation_parse(b, cb.data, cb.datalen, &convb);
-	    if (r) return r;
+	    if (r) {
+		fprintf(stderr, "Failed to parse conversations "
+				"record \"%.*s\" in %s: %s\n",
+				(int)cb.keylen, cb.key,
+				b->path, error_message(r));
+		goto next;
+	    }
 
 	    /* add any missing senders */
 	    for (sender = conva->senders; sender; sender = sender->next) {
@@ -519,9 +560,16 @@ static int fix_modseqs(struct conversations_state *a,
 	    /* be nice to know if this is needed, but at least twoskip
 	     * will dedup for us */
 	    r = conversation_store(b, cb.key, cb.keylen, convb);
-	    if (r) return r;
+	    if (r) {
+		fprintf(stderr, "Failed to store conversations "
+				"record \"%.*s\" to %s: %s, giving up\n",
+				(int)cb.keylen, cb.key,
+				b->path, error_message(r));
+		return r;
+	    }
 	}
 
+next:
 	ra = cursor_next(&ca);
 	rb = cursor_next(&cb);
     }
@@ -662,8 +710,7 @@ static int do_audit(const char *inboxname)
 
     r = fix_modseqs(state_real, state_temp);
     if (r) {
-	fprintf(stderr, "failed to fixup temporary modseq values %s: %s\n",
-		filename_real, error_message(r));
+	/* Error reported in fix_modseqs() */
 	goto out;
     }
 
