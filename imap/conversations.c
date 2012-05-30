@@ -432,7 +432,7 @@ static int _conversations_parse(const char *data, size_t datalen,
     bit64 version;
 
     r = parsenum(data, &rest, datalen, &version);
-    if (r) return r;
+    if (r) return IMAP_MAILBOX_BADFORMAT;
 
     if (rest[0] != ' ')
 	return IMAP_MAILBOX_BADFORMAT;
@@ -604,7 +604,7 @@ int conversations_get_subject(struct conversations_state *state,
 
     rest = data;
     r = parsenum(data, &rest, datalen, &version);
-    if (r) return r;
+    if (r) return IMAP_MAILBOX_BADFORMAT;
 
     if (rest[0] != ' ')
 	return IMAP_MAILBOX_BADFORMAT;
@@ -935,7 +935,7 @@ int conversation_parsestatus(const char *data, size_t datalen,
     int r;
 
     r = parsenum(data, &rest, datalen, &version);
-    if (r) return r;
+    if (r) return IMAP_MAILBOX_BADFORMAT;
 
     if (rest[0] != ' ')
 	return IMAP_MAILBOX_BADFORMAT;
@@ -1050,23 +1050,16 @@ int conversation_parse(struct conversations_state *state,
     conv_folder_t *folder;
     int r;
 
-    r = parsenum(data, &rest, datalen, &version);
-    if (r) {
-	*convp = NULL;
-	return 0;
-    }
+    *convp = NULL;
 
-    if (rest[0] != ' ') {
-	*convp = NULL;
-	return 0;
-    }
+    r = parsenum(data, &rest, datalen, &version);
+    if (r) return IMAP_MAILBOX_BADFORMAT;
+
+    if (rest[0] != ' ') return IMAP_MAILBOX_BADFORMAT;
     rest++; /* skip space */
     restlen = datalen - (rest - data);
 
-    if (version != CONVERSATIONS_VERSION) {
-	*convp = NULL;
-	return 0;
-    }
+    if (version != CONVERSATIONS_VERSION) return IMAP_MAILBOX_BADFORMAT;
 
     r = dlist_parsemap(&dl, 0, rest, restlen);
     if (r) return r;
@@ -1192,15 +1185,15 @@ static int _conversation_load_modseq(const char *data, int datalen,
 
     r = parsenum(p, &p, (end-p), &version);
     if (r || version != CONVERSATIONS_VERSION)
-	return IMAP_INTERNAL;
+	return IMAP_MAILBOX_BADFORMAT;
 
     if ((end - p) < 4 || p[0] != ' ' || p[1] != '(')
-	return IMAP_INTERNAL;
+	return IMAP_MAILBOX_BADFORMAT;
     p += 2; /* skip space and left parenthesis */
 
     r = parsenum(p, &p, (end-p), modseqp);
     if ((end - p) < 1 || *p != ' ')
-	return IMAP_INTERNAL;
+	return IMAP_MAILBOX_BADFORMAT;
 
     return 0;
 }
