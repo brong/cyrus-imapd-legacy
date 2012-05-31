@@ -331,6 +331,8 @@ static int expire_conversations(char *name,
     struct conversations_state *state = NULL;
     unsigned int nseen = 0, ndeleted = 0;
 
+    if (!filename) goto out;
+
     if (hash_lookup(filename, &crock->seen))
 	goto out;
     hash_insert(filename, (void *)1, &crock->seen);
