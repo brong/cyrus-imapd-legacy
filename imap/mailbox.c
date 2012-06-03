@@ -3663,7 +3663,7 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 
     /* if new mailbox has conversations, rename the record */
     /* XXX - what if it's a user rename? */
-    if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+    if (mailbox_has_conversations(oldmailbox)) {
 	if (mailbox_has_conversations(newmailbox))
 	    r = conversations_rename_folder(cstate, oldmailbox->name, newname);
 	else
@@ -3672,6 +3672,10 @@ int mailbox_rename_copy(struct mailbox *oldmailbox,
 	 * here is actually a major disaster area */
 	if (r)
 	    syslog(LOG_ERR, "IOERROR: conversations update failed %s (%s)", oldmailbox->name, error_message(r));
+    }
+    else {
+	/* XXX - what about if new mailbox has conversations?  We would have to
+	 * fetch the cstate there, and add these records. */
     }
 
     if (config_auditlog)
