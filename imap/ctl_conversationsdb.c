@@ -539,6 +539,7 @@ static int fix_modseqs(struct conversations_state *a,
 				"record \"%.*s\" in %s: %s\n",
 				(int)cb.keylen, cb.key,
 				b->path, error_message(r));
+		conversation_free(conva);
 		goto next;
 	    }
 
@@ -560,6 +561,11 @@ static int fix_modseqs(struct conversations_state *a,
 	    /* be nice to know if this is needed, but at least twoskip
 	     * will dedup for us */
 	    r = conversation_store(b, cb.key, cb.keylen, convb);
+
+	    /* free first before checking for errors */
+	    conversation_free(conva);
+	    conversation_free(convb);
+
 	    if (r) {
 		fprintf(stderr, "Failed to store conversations "
 				"record \"%.*s\" to %s: %s, giving up\n",
