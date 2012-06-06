@@ -2270,11 +2270,12 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     if (!cstate)
 	return IMAP_CONVERSATIONS_NOT_OPEN;
 
-    if (!old && !new)
-	return IMAP_INTERNAL;
+    /* handle unlinked items as if they didn't exist */
+    if (old && (old->system_flags & FLAG_UNLINKED)) old = NULL;
+    if (new && (new->system_flags & FLAG_UNLINKED)) new = NULL;
 
-    if (old) assert(!(old->system_flags & FLAG_UNLINKED));
-    if (new) assert(!(new->system_flags & FLAG_UNLINKED));
+    if (!old && !new)
+	return 0;
 
     if (old && new) {
 	assert(old->uid == new->uid);
@@ -2496,6 +2497,9 @@ int mailbox_rewrite_index_record(struct mailbox *mailbox,
 	if (r) return r;
     }
 
+    r = mailbox_update_conversations(mailbox, &oldrecord, record);
+    if (r) return r;
+
     /* remove the counts for the old copy, and add them for
      * the new copy */
 
@@ -2535,9 +2539,6 @@ int mailbox_rewrite_index_record(struct mailbox *mailbox,
 		session_id(), mailbox->name, mailbox->uniqueid,
 		record->uid, message_guid_encode(&record->guid));
     }
-
-    r = mailbox_update_conversations(mailbox, &oldrecord, record);
-    if (r) return r;
 
     return mailbox_refresh_index_map(mailbox);
 }
@@ -2615,6 +2616,9 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 	if (r) return r;
     }
 
+    r = mailbox_update_conversations(mailbox, NULL, record);
+    if (r) return r;
+
     /* add counts */
     mailbox_index_update_counts(mailbox, record, 1);
 
@@ -2669,9 +2673,6 @@ int mailbox_append_index_record(struct mailbox *mailbox,
 		   session_id(), mailbox->name, mailbox->uniqueid,
 		   record->uid);
     }
-
-    r = mailbox_update_conversations(mailbox, NULL, record);
-    if (r) return r;
 
     return mailbox_refresh_index_map(mailbox);
 }
@@ -2907,10 +2908,6 @@ static int mailbox_index_repack(struct mailbox *mailbox)
 	    /* track the modseq for QRESYNC purposes */
 	    if (record.modseq > repack->i.deletedmodseq)
 		repack->i.deletedmodseq = record.modseq;
-
-	    /* remove from the conversations tracking counts */
-	    r = mailbox_update_conversations(mailbox, &record, NULL);
-	    if (r) goto fail;
 
 	    continue;
 	}
@@ -3359,10 +3356,6 @@ static int mailbox_delete_conversations(struct mailbox *mailbox)
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
 	if (r) return r;
-
-	/* skip UNLINKED records, they've already been processed */
-	if (record.system_flags & FLAG_UNLINKED)
-	    continue;
 
 	r = mailbox_update_conversations(mailbox, &record, NULL);
 	if (r) return r;
