@@ -91,7 +91,8 @@ noinst_LIBRARIES += imap/libimap.a
 service_PROGRAMS += imap/arbitron imap/chk_cyrus imap/ctl_cyrusdb \
 	imap/ctl_deliver imap/ctl_mboxlist imap/cvt_cyrusdb imap/cyr_df \
 	imap/cyrdump imap/cyr_dbtool imap/cyr_expire imap/cyr_info \
-	imap/cyr_sequence imap/cyr_synclog imap/cyr_userseen imap/deliver
+	imap/cyr_sequence imap/cyr_synclog imap/cyr_userseen imap/deliver \
+	imap/compile_sieve
 if NNTPD
 service_PROGRAMS += imap/fetchnews
 endif
@@ -408,7 +409,7 @@ imap_libimap_a_SOURCES = imap/annotate.c imap/annotate.h imap/append.c \
 	imap/sync_log.h imap/telemetry.c imap/telemetry.h imap/tls.c \
 	imap/tls.h imap/upgrade_index.c imap/upgrade_index.h imap/user.c \
 	imap/user.h imap/userdeny_db.c imap/userdeny.h imap/version.c \
-	imap/version.h
+	imap/version.h imap/autosieve.c
 
 imap_lmtpd_SOURCES = imap/lmtpd.c imap/lmtpd.h imap/lmtpengine.c \
 	imap/lmtpengine.h imap/lmtpstats.c imap/lmtpstats.h \
@@ -474,6 +475,9 @@ imap_tls_prune_LDADD = $(LD_UTILITY_ADD)
 
 imap_unexpunge_SOURCES = imap/cli_fatal.c imap/mutex_fake.c imap/unexpunge.c
 imap_unexpunge_LDADD = $(LD_UTILITY_ADD)
+
+imap_compile_sieve_SOURCES = imap/cli_fatal.c imap/mutex_fake.c imap/compile_sieve.c
+imap_compile_sieve_LDADD = $(LD_UTILITY_ADD)
 
 imap/imap_err.h imap/imap_err.c: imap/imap_err.et $(COMPILE_ET_DEP)
 	cd imap && $(COMPILE_ET) ../$(top_srcdir)/imap/imap_err.et

@@ -88,6 +88,9 @@ typedef struct script_data {
     struct auth_state *authstate;
 } script_data_t;
 
+static int autosieve_subfolder(char *userid, struct auth_state *auth_state,
+                               char *subfolder, struct namespace *namespace);
+
 static char *make_sieve_db(const char *user)
 {
     static char buf[MAX_MAILBOX_PATH+1];
@@ -505,7 +508,20 @@ static int sieve_fileinto(void *ac,
 			      sd->username, mdata->notifyheader,
 			      namebuf, md->date, quotaoverride, 0);
     }
+    
+    if (ret == IMAP_MAILBOX_NONEXISTENT) {
+        /* if "plus" folder under INBOX, then try to create it */
+        ret = autosieve_subfolder((char *) sd->username, sd->authstate, namebuf, mdata->namespace);
 
+	/* Try to deliver the mail again. */
+        if (!ret)
+            ret = deliver_mailbox(md->f, mdata->content, mdata->stage, md->size,
+                                  fc->imapflags->flag, fc->imapflags->nflags,
+                                  (char *) sd->username, sd->authstate, md->id,
+                                  sd->username, mdata->notifyheader,
+                                  namebuf, md->date, quotaoverride, 0);
+    }
+    
     if (!ret) {
 	snmp_increment(SIEVE_FILEINTO, 1);
 	return SIEVE_OK;
@@ -978,3 +994,80 @@ int run_sieve(const char *user, const char *domain, const char *mailbox,
        we'll do normal delivery */
     return r;
 }
+
+
+#define SEP '|'
+
+static int autosieve_subfolder(char *userid, struct auth_state *auth_state,
+                               char *subfolder, struct namespace *namespace)
+{
+     char option_name_external[MAX_MAILBOX_NAME + 1];
+     char option_name_internal[MAX_MAILBOX_NAME + 1];
+     const char *subf ;
+     char *p, *q, *next_subf;
+     int len, r = 0;
+     int createsievefolder = 0;
+
+    /* Check if subfolder or userid are NULL */
+    if(userid == NULL || subfolder == NULL)
+         return IMAP_MAILBOX_NONEXISTENT;
+
+    syslog(LOG_DEBUG, "autosievefolder: autosieve_subfolder() was called for user %s, folder %s", 
+		    userid, subfolder);
+
+    if (config_getswitch(IMAPOPT_ANYSIEVEFOLDER)) {
+         createsievefolder = 1;
+    } else if ((subf = config_getstring(IMAPOPT_AUTOSIEVEFOLDERS)) != NULL) {
+         /* Roll through subf */
+         next_subf = (char *) subf;
+         while (*next_subf) {
+              for (p = next_subf ; isspace((int) *p) || *p == SEP ; p++);
+              for (next_subf = p ; *next_subf && *next_subf != SEP ; next_subf++);
+              for (q = next_subf ; q > p && (isspace((int) *q) || *q == SEP || !*q); q--);
+
+              if (!*p) continue;
+                    
+              len = q - p + 1;
+             /*
+              * This is a preliminary length check based on the assumption
+              * that the *final* internal format will be something
+              * like user.userid.subfolder(s).
+              */
+              if (len > sizeof(option_name_external) - strlen(userid) - 5)
+                   return IMAP_MAILBOX_BADNAME;
+
+              strlcpy(option_name_external, namespace->prefix[NAMESPACE_INBOX], sizeof(option_name_external));
+	      strncat(option_name_external, p, len);
+                    
+              /* 
+               * Transform the option folder name to internal namespace and compare it
+	       * with what must be created.
+               */
+              r = namespace->mboxname_tointernal(namespace, option_name_external, userid, option_name_internal);
+              if (r) continue;
+
+              if (!strcmp(option_name_internal, subfolder)) {
+                  createsievefolder = 1;
+                  break;
+              }
+         }
+    }
+
+    if (createsievefolder) {
+        /* Folder is already in internal namespace format */
+        r = mboxlist_createmailbox(subfolder, 0, NULL,
+                                           1, userid, auth_state, 0, 0, 0);
+        if (!r) {
+            mboxlist_changesub(subfolder, userid, auth_state, 1, 1);
+            syslog(LOG_DEBUG, "autosievefolder: User %s, folder %s creation succeeded",
+                                                   userid, subfolder);
+            return 0;
+        } else {
+            syslog(LOG_ERR, "autosievefolder: User %s, folder %s creation failed. %s",
+                                                  userid, subfolder,error_message(r));
+            return r;
+        }
+    } else
+        return IMAP_MAILBOX_NONEXISTENT;
+}
+

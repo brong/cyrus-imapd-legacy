@@ -229,4 +229,9 @@ int mboxlist_abort(struct txn *tid);
 
 int mboxlist_delayed_delete_isenabled(void);
 
+int mboxlist_autocreateinbox(struct namespace *namespace,char *userid,
+				struct auth_state *auth_state, char *mailboxname, 
+			       int autocreatequota);
+
+
 #endif

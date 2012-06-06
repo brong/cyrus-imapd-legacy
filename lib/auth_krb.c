@@ -332,6 +332,15 @@ static void myfreestate(struct auth_state *auth_state)
     free((char *)auth_state);
 }
 
+static char *mycanonuser(struct auth_state *auth_state)
+{
+    if (auth_state)
+       return auth_state->userid;
+
+    return NULL;
+}
+
+
 #else /* HAVE_KRB */
 
 static int mymemberof(
@@ -363,6 +372,13 @@ static void myfreestate(
 	fatal("Authentication mechanism (krb) not compiled in", EC_CONFIG);
 }
 
+static char *mycanonuser(
+    struct auth_state *auth_state __attribute__((unused)))
+{
+        fatal("Authentication mechanism (krb) not compiled in", EC_CONFIG);
+}
+
+
 #endif
 
 struct auth_mech auth_krb = 
@@ -373,4 +389,5 @@ struct auth_mech auth_krb =
     &mymemberof,
     &mynewstate,
     &myfreestate,
+    &mycanonuser,
 };

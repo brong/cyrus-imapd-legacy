@@ -200,6 +200,14 @@ static void myfreestate(struct auth_state *auth_state)
     free(auth_state);
 }
 
+static char *mycanonuser(struct auth_state *auth_state)
+{
+    if (auth_state)
+       return auth_state->userid;
+
+    return NULL;
+}
+
 #else /* HAVE_GSSAPI_H */
 
 static int mymemberof(
@@ -231,6 +239,13 @@ static void myfreestate(
 	fatal("Authentication mechanism (krb5) not compiled in", EC_CONFIG);
 }
 
+static char *mycanonuser(
+    struct auth_state *auth_state __attribute__((unused)))
+{
+        fatal("Authentication mechanism (krb5) not compiled in", EC_CONFIG);
+	return NULL;
+}
+
 #endif
 
 struct auth_mech auth_krb5 = 
@@ -241,4 +256,5 @@ struct auth_mech auth_krb5 =
     &mymemberof,
     &mynewstate,
     &myfreestate,
+    &mycanonuser,
 };

@@ -112,3 +112,11 @@ void auth_freestate(struct auth_state *auth_state)
 
     if (auth_state) auth->freestate(auth_state);
 }
+
+char *auth_canonuser(struct auth_state *auth_state)
+{
+    struct auth_mech *auth = auth_fromname();
+
+    return auth->auth_canonuser(auth_state);
+}
+

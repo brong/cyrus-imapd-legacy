@@ -520,6 +520,14 @@ static void myfreestate(struct auth_state *auth_state)
     free(auth_state);
 }
 
+static char *mycanonuser(struct auth_state *auth_state)
+{
+    if (auth_state)
+       return auth_state->userid.id;
+
+    return NULL;
+}
+
 struct auth_mech auth_pts = 
 {
     "pts",		/* name */
@@ -528,4 +536,5 @@ struct auth_mech auth_pts =
     &mymemberof,
     &mynewstate,
     &myfreestate,
+    &mycanonuser,
 };
