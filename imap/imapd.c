@@ -73,6 +73,7 @@
 #include "annotate.h"
 #include "append.h"
 #include "auth.h"
+#include "autocreate.h"
 #include "backend.h"
 #include "bsearch.h"
 #include "charset.h"
@@ -339,7 +340,6 @@ enum {
 static void motd_file(void);
 void shut_down(int code);
 void fatal(const char *s, int code);
-void autocreate_inbox(void);
 
 void cmdloop(void);
 void cmd_login(char *tag, char *user);
@@ -2180,6 +2180,24 @@ void cmdloop(void)
     }
 }
 
+/*
+ * Autocreate Inbox and subfolders upon login
+ */
+static void autocreate_inbox(void)
+{
+    if (imapd_userisadmin) return;
+    if (imapd_userisproxyadmin) return;
+
+    if (config_getint(IMAPOPT_AUTOCREATEQUOTA)) {
+	char *inboxname = mboxname_user_mbox(imapd_userid, NULL);
+	int r = mboxlist_lookup(inboxname, NULL, NULL);
+	free(inboxname);
+	if (r != IMAP_MAILBOX_NONEXISTENT) return;
+    }
+
+    autocreate_user(&imapd_namespace, imapd_userid);
+}
+
 static void authentication_success(void)
 {
     int r;
@@ -2210,42 +2228,6 @@ static void authentication_success(void)
 				strcspn(imapd_userid, "@") : 0);
 
     autocreate_inbox();
-}
-
-/*
- * Autocreate Inbox and subfolders upon login
- */
-void autocreate_inbox()
-{
-    char inboxname[MAX_MAILBOX_NAME+1];
-    int autocreatequota;
-    int r;
- 
-    /*
-     * Exlude admin's accounts
-     */
-    if (imapd_userisadmin || imapd_userisproxyadmin)
-        return;
- 
-    /*
-     * Exclude anonymous
-     */
-    if (!strcmp(imapd_userid, "anonymous"))
-        return;
- 
-    if ((autocreatequota = config_getint(IMAPOPT_AUTOCREATEQUOTA))) {
-        /* This is actyally not required
-           as long as the lenght of userid is ok */
-           r = (*imapd_namespace.mboxname_tointernal) (&imapd_namespace,
-                                      "INBOX", imapd_userid, inboxname);
-           if (!r)
-               r = mboxlist_lookup(inboxname, NULL, NULL);
- 
-           if (r == IMAP_MAILBOX_NONEXISTENT) {
-                mboxlist_autocreateinbox(&imapd_namespace, imapd_userid,
-                         imapd_authstate, inboxname, autocreatequota);
-	   }
-     }
 }
 
 static int checklimits(const char *tag)

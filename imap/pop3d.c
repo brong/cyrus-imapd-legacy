@@ -68,6 +68,7 @@
 
 #include "assert.h"
 #include "acl.h"
+#include "autocreate.h"
 #include "util.h"
 #include "auth.h"
 #include "global.h"
@@ -185,8 +186,6 @@ static void bitpipe(void);
 static char popd_apop_chal[45 + MAXHOSTNAMELEN + 1]; /* <rand.time@hostname> */
 static void cmd_apop(char *response);
 
-static int autocreate_inbox(char *inboxname, char *userid);
-
 static void cmd_auth(char *arg);
 static void cmd_capa(void);
 static void cmd_pass(char *pass);
@@ -229,6 +228,9 @@ static int popd_canon_user(sasl_conn_t *conn, void *context,
     size_t n;
     int r;
 
+    if (popd_subfolder) free(popd_subfolder);
+    popd_subfolder = NULL;
+
     if (!ulen) ulen = strlen(user);
 
     if (config_getswitch(IMAPOPT_POPSUBFOLDERS)) {
@@ -237,6 +239,7 @@ static int popd_canon_user(sasl_conn_t *conn, void *context,
 	    sasl_seterror(conn, 0, "buffer overflow while canonicalizing");
 	    return SASL_BUFOVER;
 	}
+
 	memcpy(userbuf, user, ulen);
 	userbuf[ulen] = '\0';
 	user = userbuf;
@@ -247,7 +250,6 @@ static int popd_canon_user(sasl_conn_t *conn, void *context,
 
 	    if (flags & SASL_CU_AUTHZID) {
 		/* make a copy of the subfolder */
-		if (popd_subfolder) free(popd_subfolder);
 		popd_subfolder = xstrndup(p, n);
 	    }
 
@@ -1337,10 +1339,8 @@ static void cmd_apop(char *response)
 	prot_printf(popd_out, "-ERR [AUTH] authenticating: %s\r\n",
 		    sasl_errstring(sasl_result, NULL, NULL));
 
-	if (popd_subfolder) {
-	    free(popd_subfolder);
-	    popd_subfolder = 0;
-	}
+	free(popd_subfolder);
+	popd_subfolder = NULL;
 	return;
     }
 
@@ -1355,10 +1355,8 @@ static void cmd_apop(char *response)
 	prot_printf(popd_out, 
 		    "-ERR [AUTH] weird SASL error %d getting SASL_USERNAME\r\n", 
 		    sasl_result);
-	if (popd_subfolder) {
-	    free(popd_subfolder);
-	    popd_subfolder = 0;
-	}
+	free(popd_subfolder);
+	popd_subfolder = NULL;
 	return;
     }
     popd_userid = xstrdup((const char *) canon_user);
@@ -1469,11 +1467,9 @@ void cmd_pass(char *pass)
 	}
 	prot_printf(popd_out, "-ERR [AUTH] Invalid login\r\n");
 	free(popd_userid);
-	popd_userid = 0;
-	if (popd_subfolder) {
-	    free(popd_subfolder);
-	    popd_subfolder = 0;
-	}
+	popd_userid = NULL;
+	free(popd_subfolder);
+	popd_subfolder = NULL;
 	return;
     }
     else {
@@ -1666,10 +1662,9 @@ void cmd_auth(char *arg)
 			sasl_errstring(sasl_result, NULL, NULL));
 	}
 	
-	if (popd_subfolder) {
-	    free(popd_subfolder);
-	    popd_subfolder = 0;
-	}
+	free(popd_subfolder);
+	popd_subfolder = NULL;
+
 	reset_saslconn(&popd_saslconn);
 	return;
     }
@@ -1725,49 +1720,11 @@ void cmd_auth(char *arg)
 }
 
 /*
- * Autocreate Inbox and subfolders upon login
- */
-int autocreate_inbox(char *inboxname, char *auth_userid)
-{
-    struct auth_state *auth_state;
-    int autocreatequota;
-    int r;
-
-    if (inboxname == NULL || auth_userid == NULL)
-	    return IMAP_MAILBOX_NONEXISTENT;
-    
-    /*
-     * Exclude anonymous
-     */
-    if (!strcmp(popd_userid, "anonymous"))
-        return IMAP_MAILBOX_NONEXISTENT;
-
-    /*
-     * Check for autocreatequota
-     */
-    if (!(autocreatequota = config_getint(IMAPOPT_AUTOCREATEQUOTA)))
-        return IMAP_MAILBOX_NONEXISTENT;
-
-    /*
-     * Exclude admin's accounts
-     */
-     auth_state = auth_newstate(popd_userid);
-     if (global_authisa(auth_state, IMAPOPT_ADMINS))
-          return IMAP_MAILBOX_NONEXISTENT;
-
-     r = mboxlist_autocreateinbox(&popd_namespace, auth_userid,
-                         auth_state, inboxname, autocreatequota);
-     return r;
-}
-
-
-/*
  * Complete the login process by opening and locking the user's inbox
  */
 int openinbox(void)
 {
-    char userid[MAX_MAILBOX_BUFFER], inboxname[MAX_MAILBOX_BUFFER];
-    char extname[MAX_MAILBOX_BUFFER] = "INBOX";
+    char *inboxname;
     int myrights = 0;
     int r, log_level = LOG_ERR;
     const char *statusline = NULL;
@@ -1775,27 +1732,26 @@ int openinbox(void)
     struct statusdata sdata;
     struct proc_limits limits;
 
-    /* Translate any separators in userid
-       (use a copy since we need the original userid for AUTH to backend) */
-    strlcpy(userid, popd_userid, sizeof(userid));
-    mboxname_hiersep_tointernal(&popd_namespace, userid,
-				config_virtdomains ?
-				strcspn(userid, "@") : 0);
-
-    /* Create the mailbox that we're trying to access */
-    if (popd_subfolder && popd_subfolder[1]) {
-	snprintf(extname+5, sizeof(extname)-5, "%c%s",
-		 popd_namespace.hier_sep, popd_subfolder+1);
+    if (popd_subfolder) {
+	/* we need to convert to internal namespace dammit */
+	char *internal_subfolder = xstrdup(popd_subfolder);
+	mboxname_hiersep_tointernal(&popd_namespace, internal_subfolder, 0);
+	inboxname = mboxname_user_mbox(popd_userid, internal_subfolder);
+	free(internal_subfolder);
     }
-    r = (*popd_namespace.mboxname_tointernal)(&popd_namespace, extname,
-					      userid, inboxname);
+    else {
+	inboxname = mboxname_user_mbox(popd_userid, NULL);
+    }
 
-    if (!r) r = mboxlist_lookup(inboxname, &mbentry, NULL);
+    r = mboxlist_lookup(inboxname, &mbentry, NULL);
 
     /* Try once again after autocreate_inbox */
-    if (r == IMAP_MAILBOX_NONEXISTENT && 
-      !(r = autocreate_inbox(inboxname, userid)))
-	r = mboxlist_lookup(inboxname, &mbentry, NULL);
+    if (r == IMAP_MAILBOX_NONEXISTENT) {
+	/* NOTE - if we have a subfolder, autocreateinbox should still create
+	 * it if it's an autocreate folder - otherwise tough luck */
+	r = autocreate_user(&popd_namespace, popd_userid);
+	if (!r) r = mboxlist_lookup(inboxname, &mbentry, NULL);
+    }
 
     if (!r && (config_popuseacl = config_getswitch(IMAPOPT_POPUSEACL)) &&
 	(!mbentry->acl ||
@@ -1816,6 +1772,7 @@ int openinbox(void)
 
     if (mbentry->mbtype & MBTYPE_REMOTE) {
 	/* remote mailbox */
+	char userid[MAX_MAILBOX_NAME];
 
 	/* Make a working copy of userid in case we need to alter it */
 	strlcpy(userid, popd_userid, sizeof(userid));
@@ -1843,7 +1800,7 @@ int openinbox(void)
 	}
     }
     else if (config_getswitch(IMAPOPT_STATUSCACHE) &&
-	     !(r = statuscache_lookup(inboxname, userid, STATUS_MESSAGES, &sdata)) &&
+	     !(r = statuscache_lookup(inboxname, popd_userid, STATUS_MESSAGES, &sdata)) &&
 	     !sdata.messages) {
 	/* local mailbox (empty) -- don't bother opening the mailbox */
 	syslog(LOG_INFO, "optimized mode for empty maildrop: %s", popd_userid);
@@ -1959,6 +1916,7 @@ int openinbox(void)
     popd_logfd = telemetry_log(popd_userid, popd_in, popd_out, 0);
 
     mboxlist_entry_free(&mbentry);
+    free(inboxname);
 
     if (statusline)
 	prot_printf(popd_out, "+OK%s", statusline);
@@ -1970,6 +1928,7 @@ int openinbox(void)
 
   fail:
     mboxlist_entry_free(&mbentry);
+    free(inboxname);
     free(popd_userid);
     popd_userid = 0;
     if (popd_subfolder) {

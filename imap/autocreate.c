@@ -1,3 +1,47 @@
+/* autocreate.c -- Mailbox list manipulation routines
+ *
+ * Copyright (c) 1994-2012 Carnegie Mellon University.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ *
+ * 3. The name "Carnegie Mellon University" must not be used to
+ *    endorse or promote products derived from this software without
+ *    prior written permission. For permission or any legal
+ *    details, please contact
+ *      Carnegie Mellon University
+ *      Center for Technology Transfer and Enterprise Creation
+ *      4615 Forbes Avenue
+ *      Suite 302
+ *      Pittsburgh, PA  15213
+ *      (412) 268-7393, fax: (412) 268-7395
+ *      innovation@andrew.cmu.edu
+ *
+ * 4. Redistributions of any form whatsoever must retain the following
+ *    acknowledgment:
+ *    "This product includes software developed by Computing Services
+ *     at Carnegie Mellon University (http://www.cmu.edu/computing/)."
+ *
+ * CARNEGIE MELLON UNIVERSITY DISCLAIMS ALL WARRANTIES WITH REGARD TO
+ * THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+ * AND FITNESS, IN NO EVENT SHALL CARNEGIE MELLON UNIVERSITY BE LIABLE
+ * FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+ * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
+ * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+#include <config.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,23 +63,23 @@
 
 #include "global.h"
 #include "util.h"
+#include "user.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
 #include "mailbox.h"
+#include "mboxlist.h"
 #include "imap_err.h"
-#include "sieve_interface.h"
-#include "script.h"
+
+#ifdef USE_SIEVE
+
+#include "sieve/sieve_interface.h"
+#include "sieve/script.h"
 
 #define TIMSIEVE_FAIL 	-1
 #define TIMSIEVE_OK 	0
 #define MAX_FILENAME	1024
 
-static int get_script_name(char *sievename, size_t buflen, const char *filename);
-static int get_script_dir(char *sieve_script_dir, size_t buflen, char *userid, const char *sieve_dir);
-int autoadd_sieve(char *userid, const char *source_script);
-
-//static void fatal(const char *s, int code);
 static void foo(void);
 static int sieve_notify(void *ac __attribute__((unused)),
                         void *interp_context __attribute__((unused)),
@@ -59,69 +103,29 @@ sieve_vacation_t vacation2 = {
  * Find the name of the sieve script
  * given the source script and compiled script names
  */
-static int get_script_name(char *sievename, size_t buflen, const char *filename)
+static const char *get_script_name(const char *filename)
 {
-  char *p;
-  int r;
+    const char *p;
 
-  p = strrchr(filename, '/');
-  if (p == NULL)
-      p = (char *) filename;
-  else
-      p++;
-
-  r = strlcpy(sievename, p, buflen) - buflen;
-  return (r >= 0 || r == -buflen ? 1 : 0);
+    p = strrchr(filename, '/');
+    if (p == NULL)
+	return filename;
+    else
+	return p + 1;
 }
 
-
-/*
- * Find the directory where the sieve scripts of the user
- * reside
- */
-static int get_script_dir(char *sieve_script_dir, size_t buflen, char *userid, const char *sieve_dir)
-{
-    char *user = NULL, *domain = NULL;
-
-    /* Setup the user and the domain */
-    if(config_virtdomains && (domain = strchr(userid, '@'))) {
-        user = (char *) xmalloc((domain - userid +1) * sizeof(char));
-        strlcpy(user, userid, domain - userid + 1);
-        domain++;
-    } else
-        user = userid;
-
-    /*  Find the dir path where the sieve scripts of the user will reside */   
-    if (config_virtdomains && domain) {
-         if(snprintf(sieve_script_dir, buflen, "%s%s%c/%s/%c/%s/",
-              sieve_dir, FNAME_DOMAINDIR, dir_hash_c(domain, config_fulldirhash), domain, dir_hash_c(user,config_fulldirhash), user) >= buflen) {
-                 free(user);
-                 return 1;
- 	 }
-    } else {
-         if(snprintf(sieve_script_dir, buflen, "%s/%c/%s/", 
-     	      sieve_dir, dir_hash_c(user,config_fulldirhash), user) >= buflen) 
-                 return 1;
-    }
-
-    /* Free the xmalloced user memory, reserved above */
-    if(user != userid)
-        free(user);
-
-    return 0;
-}
-
-int autoadd_sieve(char *userid, const char *source_script)
+static int autocreate_sieve(const char *userid, const char *source_script)
 {   
+    /* XXX - this is really ugly, but too much work to tidy up right now -- Bron */
+    const char *sieve_dir = user_sieve_path(userid);
     sieve_script_t *s = NULL;
     bytecode_info_t *bc = NULL;
     char *err = NULL;
     FILE *in_stream, *out_fp;
     int out_fd, in_fd, r, k;
     int do_compile = 0;
-    const char *sieve_dir = NULL;
     const char *compiled_source_script = NULL;
-    char sievename[MAX_FILENAME];
+    const char *sievename = get_script_name(source_script);
     char sieve_script_name[MAX_FILENAME];
     char sieve_script_dir[MAX_FILENAME];
     char sieve_bcscript_name[MAX_FILENAME];
@@ -146,42 +150,32 @@ int autoadd_sieve(char *userid, const char *source_script)
     }
 
     /* Check if autocreate_sieve_compiledscript is defined in imapd.conf */
-    if(!(compiled_source_script  = config_getstring(IMAPOPT_AUTOCREATE_SIEVE_COMPILEDSCRIPT))) {
+    if(!(compiled_source_script = config_getstring(IMAPOPT_AUTOCREATE_SIEVE_COMPILEDSCRIPT))) {
         syslog(LOG_WARNING, "autocreate_sieve: autocreate_sieve_compiledscript option is not defined. Compiling it");
         do_compile = 1;
     }
 
-    if(get_script_dir(sieve_script_dir, sizeof(sieve_script_dir), userid, sieve_dir)) {
-        syslog(LOG_WARNING, "autocreate_sieve: Cannot find sieve scripts directory");
-        return 1;
-    }
-
-    if (get_script_name(sievename, sizeof(sievename), source_script)) {
-        syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve script %s", source_script);
-        return 1;
-    }
-
-    if(snprintf(sieve_tmpname, sizeof(sieve_tmpname), "%s%s.script.NEW",sieve_script_dir, sievename) >= sizeof(sieve_tmpname)) {
+    if(snprintf(sieve_tmpname, MAX_FILENAME, "%s%s.script.NEW",sieve_script_dir, sievename) >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }
-    if(snprintf(sieve_bctmpname, sizeof(sieve_bctmpname), "%s%s.bc.NEW",sieve_script_dir, sievename) >= sizeof(sieve_bctmpname)) {
+    if(snprintf(sieve_bctmpname, MAX_FILENAME, "%s%s.bc.NEW",sieve_script_dir, sievename) >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }    
-    if(snprintf(sieve_script_name, sizeof(sieve_script_name), "%s%s.script",sieve_script_dir, sievename) >= sizeof(sieve_script_name)) {
+    if(snprintf(sieve_script_name, MAX_FILENAME, "%s%s.script",sieve_script_dir, sievename) >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }
-    if(snprintf(sieve_bcscript_name, sizeof(sieve_bcscript_name), "%s%s.bc",sieve_script_dir, sievename) >= sizeof(sieve_bcscript_name)) {
+    if(snprintf(sieve_bcscript_name, MAX_FILENAME, "%s%s.bc",sieve_script_dir, sievename) >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }
-    if(snprintf(sieve_default, sizeof(sieve_default), "%s%s",sieve_script_dir,"defaultbc") >= sizeof(sieve_default)) {
+    if(snprintf(sieve_default, MAX_FILENAME, "%s%s",sieve_script_dir,"defaultbc") >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }
-    if(snprintf(sieve_bclink_name, sizeof(sieve_bclink_name), "%s.bc", sievename) >= sizeof(sieve_bclink_name))  {
+    if(snprintf(sieve_bclink_name, MAX_FILENAME, "%s.bc", sievename) >= MAX_FILENAME) {
         syslog(LOG_WARNING, "autocreate_sieve: Invalid sieve path %s, %s, %s", sieve_dir, sievename, userid);
         return 1;
     }
@@ -189,7 +183,6 @@ int autoadd_sieve(char *userid, const char *source_script)
     /* Check if a default sieve filter alrady exists */
     if(!stat(sieve_default,&statbuf)) {
         syslog(LOG_WARNING,"autocreate_sieve: Default sieve script already exists");
-        fclose(in_stream);
         return 1;
     }
 
@@ -199,8 +192,7 @@ int autoadd_sieve(char *userid, const char *source_script)
         syslog(LOG_WARNING,"autocreate_sieve: Unable to open sieve script %s. Check permissions",source_script);
         return 1;
     }
-    
-    
+
     /* 
      * At this point we start the modifications of the filesystem 
      */
@@ -210,6 +202,7 @@ int autoadd_sieve(char *userid, const char *source_script)
     if(r == -1) {
         /* If this fails we just leave */
         syslog(LOG_WARNING,"autocreate_sieve: Unable to create directory %s. Check permissions",sieve_script_name);
+	fclose(in_stream);
         return 1;
     }
 
@@ -322,8 +315,8 @@ int autoadd_sieve(char *userid, const char *source_script)
     }
     umask(oldmask);
 
-    while((r = fread(buf,sizeof(char), sizeof(buf), in_stream))) {
-        if( fwrite(buf,sizeof(char), r, out_fp) != r) {
+    while((r = fread(buf,sizeof(char), sizeof(buf), in_stream)) > 0) {
+        if( fwrite(buf,sizeof(char), r, out_fp) != (unsigned)r) {
             syslog(LOG_WARNING,"autocreate_sieve: Problem writing to sieve script file: %s",sieve_tmpname);
             fclose(out_fp);
             unlink(sieve_tmpname);
@@ -378,7 +371,7 @@ int autoadd_sieve(char *userid, const char *source_script)
             return 0;
         }
 
-        if(snprintf(sieve_tmpname, sizeof(sieve_tmpname), "%s.NEW", compiled_source_script) >= sizeof(sieve_tmpname))
+        if(snprintf(sieve_tmpname, MAX_FILENAME, "%s.NEW", compiled_source_script) >= MAX_FILENAME)
             return 0;
 
         /*
@@ -441,12 +434,6 @@ int autoadd_sieve(char *userid, const char *source_script)
     return 0;
 }
 
-/*static void fatal(const char *s, int code)
-{   
-    printf("Fatal error: %s (%d)\r\n", s, code);
-    exit(1);
-}*/
-
 /* to make larry's stupid functions happy :) */
 static void foo(void)
 {
@@ -480,7 +467,7 @@ static int mysieve_error(int lineno, const char *msg,
 /* end the boilerplate */
 
 /* returns TRUE or FALSE */
-int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret)
+static int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret)
 {
     sieve_interp_t *i;
     sieve_script_t *s;
@@ -583,8 +570,300 @@ int is_script_parsable(FILE *stream, char **errstr, sieve_script_t **ret)
     return (res == SIEVE_OK) ? TIMSIEVE_OK : TIMSIEVE_FAIL;
 }
 
-/*
- * Btw the initial date of this patch is Sep, 02 2004 which is the birthday of
- * Pavlos. Author of cyrusmaster. So consider this patch as his birthday present
- */
+#endif /* USE_SIEVE */
 
+/*
+ * Struct needed to be passed as void *rock to
+ * mboxlist_autochangesub();
+ */
+struct changesub_rock_st {
+    const char *userid;
+    const char *auth_userid;
+    struct auth_state *auth_state;
+    int was_explicit;
+};
+
+/*
+ * Automatically subscribe user to *ALL* shared folders,
+ * one has permissions to be subscribed to.
+ * INBOX subfolders are excluded.
+ */
+static int autochangesub(const char *name,
+			 int matchlen __attribute__((unused)),
+			 int maycreate __attribute__((unused)),
+			 void *rock)
+{
+    struct changesub_rock_st *crock = (struct changesub_rock_st *)rock;
+    const char *userid = crock->userid;
+    const char *auth_userid = crock->auth_userid;
+    struct auth_state *auth_state = crock->auth_state;
+    int was_explicit = crock->was_explicit;
+    int r;
+
+    /* ignore all user mailboxes, we only want shared */
+    if (mboxname_isusermailbox(name, 0)) return 0;
+
+    r = mboxlist_changesub(name, userid, auth_state, 1, 0);
+
+    /* unless this name was explicitly chosen, ignore the failure */
+    if (!was_explicit) return 0;
+
+    if (r) {
+	syslog(LOG_WARNING,
+	       "autosubscribe: User %s to folder %s, subscription failed: %s",
+	       auth_userid, name, error_message(r));
+    } else {
+	syslog(LOG_NOTICE,
+	       "autosubscribe: User %s to folder %s, subscription succeeded",
+	       auth_userid, name);
+    }
+
+    return 0;
+}
+
+/* string for strarray_split */
+#define SEP "|"
+
+/*
+ * Automatically subscribe user to a shared folder.
+ * Subscription is done successfully, if the shared
+ * folder exists and the user has the necessary 
+ * permissions.
+ */
+static void autosubscribe_sharedfolders(struct namespace *namespace,
+					const char *userid,
+					const char *auth_userid,
+					struct auth_state *auth_state)
+{
+    strarray_t *folders = NULL;
+    const char *sub;
+    int i;
+    struct changesub_rock_st changesub_rock;
+
+    changesub_rock.userid = userid;
+    changesub_rock.auth_userid = auth_userid;
+    changesub_rock.auth_state = auth_state;
+    changesub_rock.was_explicit = 0;
+
+    /*
+     * If subscribeallsharedfolders is set to yes in imapd.conf, then
+     * subscribe user to every shared folder one has the apropriate 
+     * permissions.
+     */
+    if (config_getswitch(IMAPOPT_AUTOSUBSCRIBE_ALL_SHAREDFOLDERS)) {
+	/* don't care about errors here, the sub will log them */
+	mboxlist_findall(namespace, "*", 0, userid, auth_state,
+			 autochangesub, &changesub_rock);
+	return;
+    }
+
+    /* otherwise, check if there are particular folders to subscribe */
+
+    sub = config_getstring(IMAPOPT_AUTOSUBSCRIBESHAREDFOLDERS);
+    if (!sub) return;
+
+    changesub_rock.was_explicit = 1;
+
+    folders = strarray_split(sub, SEP, STRARRAY_TRIM);
+
+    for (i = 0; i < folders->count; i++) {
+	const char *mboxname = strarray_nth(folders, i);
+	autochangesub(mboxname, 0, 0, &changesub_rock);
+    }
+
+    strarray_free(folders);
+
+    return;
+}
+
+int autocreate_user(struct namespace *namespace,
+		    const char *userid)
+{
+    const char *auth_userid = NULL;
+    int r = IMAP_MAILBOX_NONEXISTENT; /* default error if we break early */
+    int autocreatequota = config_getint(IMAPOPT_AUTOCREATEQUOTA);
+    int autocreatequotamessage = config_getint(IMAPOPT_AUTOCREATEQUOTAMSG);
+    int n;
+    char *inboxname = mboxname_user_mbox(userid, NULL);
+    struct auth_state *auth_state = NULL;
+    strarray_t *create = NULL;
+    strarray_t *subscribe = NULL;
+    int numcrt = 0;
+    int numsub = 0;
+#ifdef USE_SIEVE
+    const char *source_script;
+#endif
+
+    /* check for anonymous */
+    if (!strcmp(userid, "anonymous"))
+	return IMAP_MAILBOX_NONEXISTENT;
+
+    auth_state = auth_newstate(userid);
+    auth_userid = auth_canonuser(auth_state);
+    if (auth_userid == NULL) {
+	 /*
+	  * Couldn't get canon userid
+	  */
+	syslog(LOG_ERR,
+	       "autocreateinbox: Could not get canonified userid for user %s", userid);
+	goto done;
+    }
+
+    /* Added this for debug information. */
+    syslog(LOG_DEBUG, "autocreateinbox: autocreate inbox for user %s was called", auth_userid);
+
+    /*
+     * While this is not needed for admins
+     * and imap_admins accounts, it would be
+     * better to separate *all* admins and
+     * proxyservers from normal accounts
+     * (accounts that have mailboxes).
+     * UOA Specific note(1): Even if we do not
+     * exclude these servers-classes here,
+     * UOA specific code, will neither return
+     * role, nor create INBOX, because none of these
+     * administrative accounts belong to  the
+     * mailRecipient objectclass, or have imapPartition.
+     * UOA Specific note(2): Another good reason for doing
+     * this, is to prevent the code, from getting into
+     * cyrus_ldap.c because of the continues MSA logins to LMTPd.
+     */
+
+    /*
+     * we need to exclude admins here
+     */
+
+    /*
+     * Do we really need group membership
+     * for admins or service_admins?
+     */
+    if (global_authisa(auth_state, IMAPOPT_ADMINS)) goto done;
+
+    /*
+     * Do we really need group membership
+     * for proxyservers?
+     */
+    if (global_authisa(auth_state, IMAPOPT_PROXYSERVERS)) goto done;
+
+    /* 
+     * Check if user belongs to the autocreate_users group. This option
+     * controls for whom the mailbox may be automatically created. Default
+     * value for this option is 'anyone'. So, if not declared, all mailboxes
+     * will be created.
+     */
+    if (!global_authisa(auth_state, IMAPOPT_AUTOCREATE_USERS)) {
+	syslog(LOG_DEBUG, "autocreateinbox: User %s does not belong to the autocreate_users. No mailbox is created",
+	       auth_userid);
+	goto done;
+    }
+
+    r = mboxlist_createmailbox(inboxname, /*mbtype*/0, /*partition*/NULL,
+			       /*isadmin*/1, userid, auth_state,
+			       /*localonly*/0, /*forceuser*/0,
+			       /*dbonly*/0, /*extargs*/NULL);
+
+    if (!r) r = mboxlist_changesub(inboxname, userid, auth_state, 1, 1);
+    if (r) {
+	syslog(LOG_ERR, "autocreateinbox: User %s, INBOX failed. %s", 
+	       auth_userid, error_message(r));
+	goto done;
+    }
+
+    if (autocreatequota >= 0 || autocreatequotamessage >= 0) {
+	int newquotas[QUOTA_NUMRESOURCES];
+	int res;
+
+	for (res = 0 ; res < QUOTA_NUMRESOURCES ; res++)
+	    newquotas[res] = QUOTA_UNLIMITED;
+
+	newquotas[QUOTA_STORAGE] = autocreatequota;
+	newquotas[QUOTA_MESSAGE] = autocreatequotamessage;
+
+	r = mboxlist_setquotas(inboxname, newquotas, 0);
+	if (r) {
+	    syslog(LOG_ERR, "autocreateinbox: User %s, QUOTA failed. %s",
+		   auth_userid, error_message(r));
+	    goto done;
+	}
+    }
+
+    syslog(LOG_NOTICE, "autocreateinbox: User %s, INBOX was successfully created", 
+	   auth_userid);
+
+    create = strarray_split(config_getstring(IMAPOPT_AUTOCREATEINBOXFOLDERS), SEP, STRARRAY_TRIM);
+    subscribe = strarray_split(config_getstring(IMAPOPT_AUTOSUBSCRIBEINBOXFOLDERS), SEP, STRARRAY_TRIM);
+
+    /* need to convert all names to internal namespace first */
+    for (n = 0; n < create->count; n++)
+	mboxname_hiersep_tointernal(namespace, create->data[n], 0);
+
+    for (n = 0; n < subscribe->count; n++)
+	mboxname_hiersep_tointernal(namespace, subscribe->data[n], 0);
+
+    for (n = 0; n < create->count; n++) {
+	const char *name = strarray_nth(create, n);
+	char *foldername = mboxname_user_mbox(userid, name);
+
+	r = mboxlist_createmailbox(foldername, /*mbtype*/0, /*partition*/NULL,
+				   /*isadmin*/1, userid, auth_state,
+				   /*localonly*/0, /*forceuser*/0,
+				   /*dbonly*/0, /*extargs*/NULL);
+
+	if (!r) {
+	    numcrt++;
+	    syslog(LOG_NOTICE, "autocreateinbox: User %s, subfolder %s creation succeeded.", 
+		   auth_userid, name);
+	} else {
+	    syslog(LOG_WARNING, "autocreateinbox: User %s, subfolder %s creation failed. %s", 
+		   auth_userid, name, error_message(r));
+	    r = 0;
+	    continue;
+	}
+
+	/* skip to next if not subscribing */
+	if (strarray_find(subscribe, name, 0) < 0)
+	    continue;
+
+	r = mboxlist_changesub(foldername, userid, auth_state, 1, 1);
+	if (!r) {
+	    numsub++;
+	    syslog(LOG_NOTICE,"autocreateinbox: User %s, subscription to %s succeeded",
+		   auth_userid, name);
+	} else {
+	    syslog(LOG_WARNING, "autocreateinbox: User %s, subscription to  %s failed. %s",
+		   auth_userid, name, error_message(r));
+	    r = 0;
+	}
+    }
+
+    if (numcrt)
+	syslog(LOG_INFO, "User %s, Inbox subfolders, created %d, subscribed %d", 
+	       auth_userid, numcrt, numsub);
+
+    /*
+     * Check if shared folders are available for subscription.
+     */
+    autosubscribe_sharedfolders(namespace, userid, auth_userid, auth_state);
+
+#ifdef USE_SIEVE
+    /*
+     * Here the autocreate sieve script feature is iniated from.
+     */
+    source_script = config_getstring(IMAPOPT_AUTOCREATE_SIEVE_SCRIPT);
+ 
+    if (source_script) {
+        if (!autocreate_sieve(userid, source_script))
+            syslog(LOG_NOTICE, "autocreate_sieve: User %s, default sieve script creation succeeded", auth_userid);
+        else
+            syslog(LOG_WARNING, "autocreate_sieve: User %s, default sieve script creation failed", auth_userid);
+    }
+#endif
+
+ done:
+    free(inboxname);
+    strarray_free(create);
+    strarray_free(subscribe);
+    auth_freestate(auth_state);   
+
+    return r;
+}
