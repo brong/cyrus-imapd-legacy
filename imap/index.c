@@ -108,7 +108,7 @@ static void index_fetchmsg(struct index_state *state,
 		    unsigned offset, unsigned size,
 		    unsigned start_octet, unsigned octet_count);
 static int index_fetchsection(struct index_state *state, const char *resp,
-			      const char *msg_base, unsigned long msg_size,
+			      const struct buf *msg,
 			      char *section,
 			      const char *cachestr, unsigned size,
 			      unsigned start_octet, unsigned octet_count);
@@ -2883,7 +2883,7 @@ void index_fetchmsg(struct index_state *state, const char *msg_base,
  * Helper function to fetch a body section
  */
 static int index_fetchsection(struct index_state *state, const char *resp,
-			      const char *msg_base, unsigned long msg_size,
+			      const struct buf *msg,
 			      char *section, const char *cachestr, unsigned size,
 			      unsigned start_octet, unsigned octet_count)
 {
@@ -2892,6 +2892,8 @@ static int index_fetchsection(struct index_state *state, const char *resp,
     int fetchmime = 0;
     unsigned offset = 0;
     char *decbuf = NULL;
+    const char *msg_base = msg->s;
+    size_t msg_size = msg->len;
 
     p = section;
 
@@ -2901,7 +2903,7 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 	    prot_printf(state->out, "%s%u", resp, size);
 	} else {
 	    prot_printf(state->out, "%s", resp);
-	    index_fetchmsg(state, msg_base, msg_size, 0, size,
+	    index_fetchmsg(state, msg->s, msg->len, 0, size,
 			   start_octet, octet_count);
 	}
 	return 0;
@@ -2968,18 +2970,18 @@ static int index_fetchsection(struct index_state *state, const char *resp,
     offset = CACHE_ITEM_BIT32(cachestr);
     size = CACHE_ITEM_BIT32(cachestr + CACHE_ITEM_SIZE_SKIP);
 
-    if (msg_base && (p = strstr(resp, "BINARY"))) {
+    if (msg->s && (p = strstr(resp, "BINARY"))) {
 	/* BINARY or BINARY.SIZE */
 	int encoding = CACHE_ITEM_BIT32(cachestr + 2 * 4) & 0xff;
 	size_t newsize;
 
 	/* check that the offset isn't corrupt */
 	if (offset + size > msg_size) {
-	    syslog(LOG_ERR, "invalid part offset in %s", state->mboxname);
+	    syslog(LOG_ERR, "invalid part offset in %s", state_mboxname(state));
 	    return IMAP_IOERROR;
 	}
 
-	msg_base = charset_decode_mimebody(msg_base + offset, size, encoding,
+	msg_base = charset_decode_mimebody(msg->s + offset, size, encoding,
 					   &decbuf, &newsize);
 
 	if (!msg_base) {
@@ -3553,13 +3555,6 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     struct index_map *im = &state->map[msgno-1];
     struct index_record record;
 
-    /* Check against the CID list filter */
-    if (fetchargs->cidhash) {
-	const char *key = conversation_id_encode(im->record.cid);
-	if (!hash_lookup(key, fetchargs->cidhash))
-	    return 0;
-    }
-
     /* Check the modseq against changedsince */
     if (fetchargs->changedsince && im->modseq <= fetchargs->changedsince)
 	return 0;
@@ -3574,6 +3569,13 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	prot_printf(state->out, error_message(IMAP_NO_MSGGONE), msgno);
 	prot_printf(state->out, "\r\n");
 	return 0;
+    }
+
+    /* Check against the CID list filter */
+    if (fetchargs->cidhash) {
+	const char *key = conversation_id_encode(record.cid);
+	if (!hash_lookup(key, fetchargs->cidhash))
+	    return 0;
     }
 
     /* Open the message file if we're going to need it */
@@ -3661,10 +3663,10 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     if ((fetchitems & FETCH_CID) &&
 	config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	struct buf buf = BUF_INITIALIZER;
-	if (!im->record.cid)
+	if (!record.cid)
 	    buf_appendcstr(&buf, "NIL");
 	else
-	    buf_printf(&buf, CONV_FMT, im->record.cid);
+	    buf_printf(&buf, CONV_FMT, record.cid);
 	prot_printf(state->out, "%cCID %s", sepchar, buf_cstring(&buf));
 	buf_free(&buf);
 	sepchar = ' ';
@@ -3721,7 +3723,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     else if (fetchargs->headers.count || fetchargs->headers_not.count) {
 	prot_printf(state->out, "%cRFC822.HEADER ", sepchar);
 	sepchar = ' ';
-	if (fetchargs->cache_atleast > im->record.cache_version) {
+	if (fetchargs->cache_atleast > record.cache_version) {
 	    index_fetchheader(state, msg.s, msg.len,
 			      record.header_size,
 			      &fetchargs->headers, &fetchargs->headers_not);
@@ -3765,7 +3767,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 
 	prot_printf(state->out, "%s ", fsection->trail);
 
-	if (fetchargs->cache_atleast > im->record.cache_version) {
+	if (fetchargs->cache_atleast > record.cache_version) {
 	    if (!mailbox_cacherecord(mailbox, &record))
 		index_fetchfsection(state, msg.s, msg.len,
 				    fsection,
@@ -3798,8 +3800,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	oi = &section->octetinfo;
 
 	if (!mailbox_cacherecord(mailbox, &record)) {
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&record, CACHE_SECTION),
 				   record.size,
 				   (fetchitems & FETCH_IS_PARTIAL) ?
@@ -3820,8 +3821,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 
 	if (!mailbox_cacherecord(mailbox, &record)) {
 	    oi = &section->octetinfo;
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&record, CACHE_SECTION),
 				   record.size,
 				   (fetchitems & FETCH_IS_PARTIAL) ?
@@ -3841,8 +3841,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 		 "%cBINARY.SIZE[%s ", sepchar, section->name);
 
         if (!mailbox_cacherecord(mailbox, &record)) {
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&record, CACHE_SECTION),
 				   record.size,
 				   fetchargs->start_octet, fetchargs->octet_count);
@@ -4536,7 +4535,7 @@ static int index_search_evaluate(struct index_state *state,
 	searchargs->flags & (SEARCH_CONVSEEN_SET | SEARCH_CONVSEEN_UNSET)) {
 	struct conversations_state *cstate = conversations_get_mbox(state->mailbox->name);
 	if (!cstate) goto zero;
-	if (conversation_load(cstate, im->record.cid, &conv))
+	if (conversation_load(cstate, record.cid, &conv))
 	    goto zero;
 	if (!conv) conv = conversation_new(cstate);
 
@@ -4893,7 +4892,7 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
      * between mailboxes owned by the same user.  Otherwise we need
      * to zap the cid and let append_copy() recalculate it. */
     copyargs->copymsg[copyargs->nummsg].cid =
-		    (is_same_user ? im->record.cid : NULLCONVERSATION);
+		    (is_same_user ? record.cid : NULLCONVERSATION);
 
     copyargs->nummsg++;
 
@@ -4938,7 +4937,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 	/* set msgno */
 	cur->msgno = (msgno_list ? msgno_list[i] : (unsigned)(i+1));
 	im = &state->map[cur->msgno-1];
-	cur->uid = im->record.uid;
+	cur->uid = record.uid;
 	if (found_anchor && im->uid == anchor)
 	    *found_anchor = 1;
 
@@ -4987,7 +4986,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 		label == SORT_CONVEXISTS || label == SORT_CONVSIZE) && !did_conv) {
 		if (!cstate) cstate = conversations_get_mbox(state->mailbox->name);
 		assert(cstate);
-		if (conversation_load(cstate, im->record.cid, &conv))
+		if (conversation_load(cstate, record.cid, &conv))
 		    continue;
 		if (!conv) conv = conversation_new(cstate);
 		did_conv++;
@@ -5049,7 +5048,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 		break;
 	    case SORT_HASFLAG: {
 		const char *name = sortcrit[j].args.flag.name;
-		if (mailbox_record_hasflag(mailbox, &im->record, name))
+		if (mailbox_record_hasflag(mailbox, &record, name))
 		    cur->hasflag |= (1<<j);
 		break;
 	    }
