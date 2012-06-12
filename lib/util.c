@@ -965,7 +965,7 @@ EXPORTED int buf_replace_all(struct buf *buf, const char *match,
     char *p;
 
     if (replace)
-	buf_init_ro(&replace_buf, replace, strlen(replace));
+	buf_init_ro_cstr(&replace_buf, replace);
 
     /* we need buf to be a nul terminated string now please */
     buf_cstring(buf);
@@ -996,7 +996,7 @@ EXPORTED int buf_replace_one_re(struct buf *buf, const regex_t *preg,
     regmatch_t rm;
 
     if (replace)
-	buf_init_ro(&replace_buf, replace, strlen(replace));
+	buf_init_ro_cstr(&replace_buf, replace);
 
     /* we need buf to be a nul terminated string now please */
     buf_cstring(buf);
@@ -1025,7 +1025,7 @@ EXPORTED int buf_replace_all_re(struct buf *buf, const regex_t *preg,
     size_t off;
 
     if (replace)
-	buf_init_ro(&replace_buf, replace, strlen(replace));
+	buf_init_ro_cstr(&replace_buf, replace);
 
     /* we need buf to be a nul terminated string now please */
     buf_cstring(buf);
@@ -1083,6 +1083,17 @@ EXPORTED void buf_init_ro(struct buf *buf, const char *base, size_t len)
     buf->len = len;
     buf->flags = 0;
     buf->s = (char *)base;
+}
+
+/*
+ * Initialise a struct buf to point to a read-only C string.
+ */
+EXPORTED void buf_init_ro_cstr(struct buf *buf, const char *str)
+{
+    buf->alloc = 0;
+    buf->len = (str ? strlen(str) : 0);
+    buf->flags = (str ? BUF_CSTRING : 0);
+    buf->s = (char *)str;
 }
 
 EXPORTED void buf_free(struct buf *buf)
