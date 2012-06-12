@@ -110,7 +110,7 @@ static void index_fetchmsg(struct index_state *state,
 		    unsigned offset, unsigned size,
 		    unsigned start_octet, unsigned octet_count);
 static int index_fetchsection(struct index_state *state, const char *resp,
-			      const char *msg_base, unsigned long msg_size,
+			      const struct buf *msg,
 			      char *section,
 			      const char *cachestr, unsigned size,
 			      unsigned start_octet, unsigned octet_count);
@@ -2715,7 +2715,7 @@ void index_fetchmsg(struct index_state *state, const char *msg_base,
  * Helper function to fetch a body section
  */
 static int index_fetchsection(struct index_state *state, const char *resp,
-			      const char *msg_base, unsigned long msg_size,
+			      const struct buf *msg,
 			      char *section, const char *cachestr, unsigned size,
 			      unsigned start_octet, unsigned octet_count)
 {
@@ -2724,6 +2724,8 @@ static int index_fetchsection(struct index_state *state, const char *resp,
     int fetchmime = 0;
     unsigned offset = 0;
     char *decbuf = NULL;
+    const char *msg_base = msg->s;
+    size_t msg_size = msg->len;
 
     p = section;
 
@@ -2733,7 +2735,7 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 	    prot_printf(state->out, "%s%u", resp, size);
 	} else {
 	    prot_printf(state->out, "%s", resp);
-	    index_fetchmsg(state, msg_base, msg_size, 0, size,
+	    index_fetchmsg(state, msg->s, msg->len, 0, size,
 			   start_octet, octet_count);
 	}
 	return 0;
@@ -2800,18 +2802,18 @@ static int index_fetchsection(struct index_state *state, const char *resp,
     offset = CACHE_ITEM_BIT32(cachestr);
     size = CACHE_ITEM_BIT32(cachestr + CACHE_ITEM_SIZE_SKIP);
 
-    if (msg_base && (p = strstr(resp, "BINARY"))) {
+    if (msg->s && (p = strstr(resp, "BINARY"))) {
 	/* BINARY or BINARY.SIZE */
 	int encoding = CACHE_ITEM_BIT32(cachestr + 2 * 4) & 0xff;
 	size_t newsize;
 
 	/* check that the offset isn't corrupt */
-	if (offset + size > msg_size) {
+	if (offset + size > msg->len) {
 	    syslog(LOG_ERR, "invalid part offset in %s", state->mailbox->name);
 	    return IMAP_IOERROR;
 	}
 
-	msg_base = charset_decode_mimebody(msg_base + offset, size, encoding,
+	msg_base = charset_decode_mimebody(msg->s + offset, size, encoding,
 					   &decbuf, &newsize);
 
 	if (!msg_base) {
@@ -3619,8 +3621,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	oi = &section->octetinfo;
 
 	if (!mailbox_cacherecord(mailbox, &im->record)) {
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&im->record, CACHE_SECTION),
 				   im->record.size,
 				   (fetchitems & FETCH_IS_PARTIAL) ?
@@ -3641,8 +3642,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 
 	if (!mailbox_cacherecord(mailbox, &im->record)) {
 	    oi = &section->octetinfo;
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&im->record, CACHE_SECTION),
 				   im->record.size,
 				   (fetchitems & FETCH_IS_PARTIAL) ?
@@ -3662,8 +3662,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 		 "%cBINARY.SIZE[%s ", sepchar, section->name);
 
         if (!mailbox_cacherecord(mailbox, &im->record)) {
-	    r = index_fetchsection(state, respbuf,
-				   msg.s, msg.len,
+	    r = index_fetchsection(state, respbuf, &msg,
 				   section->name, cacheitem_base(&im->record, CACHE_SECTION),
 				   im->record.size,
 				   fetchargs->start_octet, fetchargs->octet_count);
