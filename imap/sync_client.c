@@ -1466,6 +1466,9 @@ static int update_mailbox_once(struct sync_folder *local,
     else if (r)
 	goto done;
 
+    /* hold the annotate state open */
+    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, NULL);
+
     /* definitely bad if these don't match! */
     if (strcmp(mailbox->uniqueid, local->uniqueid) ||
 	strcmp(mailbox->part, local->part)) {
