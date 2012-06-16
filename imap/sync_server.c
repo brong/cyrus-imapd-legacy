@@ -1379,6 +1379,8 @@ static int do_mailbox(struct dlist *kin)
     struct dlist *ka = NULL;
     int r;
 
+    annotate_state_t *astate = NULL;
+
     if (!dlist_getatom(kin, "UNIQUEID", &uniqueid))
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
     if (!dlist_getatom(kin, "PARTITION", &partition))
@@ -1436,7 +1438,9 @@ static int do_mailbox(struct dlist *kin)
     }
 
     /* hold the annotate state open */
-    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, NULL);
+    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, &astate);
+    /* and make it hold a transaction open */
+    annotate_state_begin(astate);
 
     if (strcmp(mailbox->uniqueid, uniqueid)) {
 	syslog(LOG_ERR, "Mailbox uniqueid changed %s - retry", mboxname);

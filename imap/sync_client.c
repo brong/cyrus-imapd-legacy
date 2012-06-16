@@ -1455,6 +1455,7 @@ static int update_mailbox_once(struct sync_folder *local,
     int r = 0;
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
     struct dlist *kupload = dlist_newlist(NULL, "MESSAGE");
+    annotate_state_t *astate = NULL;
 
     r = mailbox_open_iwl(local->name, &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
@@ -1467,7 +1468,9 @@ static int update_mailbox_once(struct sync_folder *local,
 	goto done;
 
     /* hold the annotate state open */
-    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, NULL);
+    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, &astate);
+    /* and force it to hold a transaction while it does stuff */
+    annotate_state_begin(astate);
 
     /* definitely bad if these don't match! */
     if (strcmp(mailbox->uniqueid, local->uniqueid) ||
