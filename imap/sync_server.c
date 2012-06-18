@@ -1654,6 +1654,7 @@ static int mailbox_cb(char *name,
     struct sync_name_list *qrl = (struct sync_name_list *)rock;
     struct mailbox *mailbox = NULL;
     struct dlist *kl = dlist_newkvlist(NULL, "MAILBOX");
+    annotate_state_t *astate = NULL;
     int r;
 
     /* XXX - we don't write anything, but there's no interface
@@ -1667,6 +1668,11 @@ static int mailbox_cb(char *name,
 	goto out;
     }
     if (r) goto out;
+
+    /* hold the annotate state open */
+    mailbox_get_annotate_state(mailbox, /*synthetic*/UINT32_MAX, &astate);
+    /* and make it hold a transaction open */
+    annotate_state_begin(astate);
 
     if (qrl && mailbox->quotaroot &&
 	 !sync_name_lookup(qrl, mailbox->quotaroot))
