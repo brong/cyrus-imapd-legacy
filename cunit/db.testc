@@ -950,11 +950,14 @@ static int ffstatemachine(void *rockp,
 	fr->state = 4;
 	break;
     case 4:
-	CU_ASSERT_STRING_EQUAL(kcopy, K4A);
 	/* we found the after-added record correctly */
+	CU_ASSERT_STRING_EQUAL(kcopy, K4A);
+	r = cyrusdb_store(fr->db, K4A, strlen(K4A), "another", 7, fr->tid);
+	CU_ASSERT_EQUAL(r, 0);
 	fr->state = 5;
 	break;
     case 5:
+	/* didn't repeat after replacing */
 	CU_ASSERT_STRING_EQUAL(kcopy, K5);
 	fr->state = 6;
 	break;
