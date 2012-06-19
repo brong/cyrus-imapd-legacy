@@ -121,6 +121,7 @@ user_PROGRAMS += \
 	imap/mbexamine \
 	imap/mbpath \
 	imap/mbtool \
+	imap/message_test \
 	imap/quota \
 	imap/reconstruct
 if USE_SQUAT
@@ -876,6 +877,9 @@ imap_mbpath_LDADD = $(LD_UTILITY_ADD)
 
 imap_mbtool_SOURCES = imap/cli_fatal.c imap/mbtool.c imap/mutex_fake.c
 imap_mbtool_LDADD = $(LD_UTILITY_ADD)
+
+imap_message_test_SOURCES = imap/message_test.c imap/mutex_fake.c
+imap_message_test_LDADD = $(LD_UTILITY_ADD)
 
 imap_mupdate_SOURCES = \
 	imap/mupdate.c \
