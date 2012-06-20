@@ -2372,7 +2372,7 @@ static int write_entry(struct mailbox *mailbox,
 #endif
 
 	do {
-	    r = cyrusdb_delete(d->db, key, keylen, tid(d), 0);
+	    r = cyrusdb_delete(d->db, key, keylen, tid(d), /*force*/1);
 	} while (r == CYRUSDB_AGAIN);
     }
     else {
