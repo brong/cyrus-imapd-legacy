@@ -4766,7 +4766,7 @@ struct getsearchtext_rock
     index_search_text_receiver_t receiver;
     void *rock;
     int partcount;
-    unsigned int uid;
+    uint32_t uid;
 };
 
 static int getsearchtext_cb(int partno, int charset, int encoding,
@@ -4795,88 +4795,68 @@ static int getsearchtext_cb(int partno, int charset, int encoding,
 			    data->s, data->len,
 			    charset, encoding, charset_flags);
     }
+
+    str->partcount++;
     return 0;
 }
 
-static void index_getsearchtextmsg(struct mailbox *mailbox,
-				   struct index_record *record,
-				   index_search_text_receiver_t receiver,
-				   void *rock)
+EXPORTED void index_getsearchtext_single(message_t *msg,
+					 index_search_text_receiver_t receiver,
+					 void *rock)
 {
-    struct buf msgfile = BUF_INITIALIZER;
     struct getsearchtext_rock str;
+    int utf8 = charset_lookupname("utf-8");
+    struct buf buf = BUF_INITIALIZER;
+    uint32_t uid = 0;
 
-    if (mailbox_map_message(mailbox, record->uid, &msgfile))
-	return;
-
-    /* Won't find anything in a truncated file */
-    if (msgfile.len == 0)
-	return;
+    assert(utf8 >= 0);
+    message_get_uid(msg, &uid);
 
     str.receiver = receiver;
     str.rock = rock;
     str.partcount = 0;
-    str.uid = record->uid;
-    message_foreach_part(record, &msgfile, getsearchtext_cb, &str);
+    str.uid = uid;
+    message_foreach_text_section(msg, getsearchtext_cb, &str);
 
-    receiver(record->uid, SEARCHINDEX_PART_BODY,
+    receiver(uid, SEARCHINDEX_PART_BODY,
 	     SEARCHINDEX_CMD_ENDPART, NULL, 0, rock);
 
-    buf_free(&msgfile);
-}
+    if (message_get_field(msg, "From", MESSAGE_DECODED, &buf))
+	charset_extractitem(receiver, rock, uid,
+			    buf.s, buf.len,
+			    utf8, ENCODING_NONE, charset_flags,
+			    SEARCHINDEX_PART_FROM,
+			    SEARCHINDEX_CMD_STUFFPART);
 
-EXPORTED void index_getsearchtext_single(struct index_state *state, uint32_t msgno,
-				index_search_text_receiver_t receiver,
-				void *rock)
-{
-    struct mailbox *mailbox = state->mailbox;
-    int utf8 = charset_lookupname("utf-8");
-    struct index_record record;
+    if (message_get_field(msg, "To", MESSAGE_DECODED, &buf))
+	charset_extractitem(receiver, rock, uid,
+			    buf.s, buf.len,
+			    utf8, ENCODING_NONE, charset_flags,
+			    SEARCHINDEX_PART_TO,
+			    SEARCHINDEX_CMD_STUFFPART);
 
-    assert(utf8 >= 0);
+    if (message_get_field(msg, "Cc", MESSAGE_DECODED, &buf))
+	charset_extractitem(receiver, rock, uid,
+			    buf.s, buf.len,
+			    utf8, ENCODING_NONE, charset_flags,
+			    SEARCHINDEX_PART_CC,
+			    SEARCHINDEX_CMD_STUFFPART);
 
-    if (index_reload_record(state, msgno, &record))
-	return;
+    if (message_get_field(msg, "Bcc", MESSAGE_DECODED, &buf))
+	charset_extractitem(receiver, rock, uid,
+			    buf.s, buf.len,
+			    utf8, ENCODING_NONE, charset_flags,
+			    SEARCHINDEX_PART_BCC,
+			    SEARCHINDEX_CMD_STUFFPART);
 
-    if (mailbox_cacherecord(mailbox, &record))
-	return;
+    if (message_get_field(msg, "Subject", MESSAGE_DECODED, &buf))
+	charset_extractitem(receiver, rock, uid,
+			    buf.s, buf.len,
+			    utf8, ENCODING_NONE, charset_flags,
+			    SEARCHINDEX_PART_SUBJECT,
+			    SEARCHINDEX_CMD_STUFFPART);
 
-    index_getsearchtextmsg(state->mailbox, &record, receiver, rock);
-
-    charset_extractitem(receiver, rock, record.uid,
-			cacheitem_base(&record, CACHE_FROM),
-			cacheitem_size(&record, CACHE_FROM),
-			utf8, ENCODING_NONE, charset_flags,
-			SEARCHINDEX_PART_FROM,
-			SEARCHINDEX_CMD_STUFFPART);
-
-    charset_extractitem(receiver, rock, record.uid,
-			cacheitem_base(&record, CACHE_TO),
-			cacheitem_size(&record, CACHE_TO),
-			utf8, ENCODING_NONE, charset_flags,
-			SEARCHINDEX_PART_TO,
-			SEARCHINDEX_CMD_STUFFPART);
-
-    charset_extractitem(receiver, rock, record.uid,
-			cacheitem_base(&record, CACHE_CC),
-			cacheitem_size(&record, CACHE_CC),
-			utf8, ENCODING_NONE, charset_flags,
-			SEARCHINDEX_PART_CC,
-			SEARCHINDEX_CMD_STUFFPART);
-
-    charset_extractitem(receiver, rock, record.uid,
-			cacheitem_base(&record, CACHE_BCC),
-			cacheitem_size(&record, CACHE_BCC),
-			utf8, ENCODING_NONE, charset_flags,
-			SEARCHINDEX_PART_BCC,
-			SEARCHINDEX_CMD_STUFFPART);
-
-    charset_extractitem(receiver, rock, record.uid,
-			cacheitem_base(&record, CACHE_SUBJECT),
-			cacheitem_size(&record, CACHE_SUBJECT),
-			utf8, ENCODING_NONE, charset_flags,
-			SEARCHINDEX_PART_SUBJECT,
-			SEARCHINDEX_CMD_STUFFPART);
+    buf_free(&buf);
 }
 
 /*
