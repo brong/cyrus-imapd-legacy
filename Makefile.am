@@ -113,6 +113,8 @@ BUILT_SOURCES += \
 	imap/nntp_err.c \
 	imap/lmtpstats.c \
 	imap/pushstats.c \
+	lib/htmlchar.c \
+	lib/htmlchar.h \
 	imap/rfc822_header.c \
 	imap/rfc822_header.h
 lib_LTLIBRARIES += imap/libcyrus_imap.la
@@ -289,6 +291,7 @@ EXTRA_DIST = \
 	lib/charset/windows-1252.t \
 	lib/charset/windows-1255.t \
 	lib/charset/windows-1256.t \
+	lib/htmlchar.st \
 	lib/test/cyrusdb.c \
 	lib/test/cyrusdb.INPUT \
 	lib/test/cyrusdblong.INPUT \
@@ -1048,6 +1051,12 @@ imap/rfc822_header.c: imap/rfc822_header.st
 
 imap/rfc822_header.h: imap/rfc822_header.st
 	${top_srcdir}/tools/compile_st.pl -h $< > $@.NEW && mv $@.NEW $@
+
+lib/htmlchar.c: lib/htmlchar.st
+	${top_srcdir}/tools/compile_st.pl -c $< > $@.NEW && mv $@.NEW $@
+
+lib/htmlchar.h: lib/htmlchar.st
+	${top_srcdir}/tools/compile_st.pl -h $< > $@.NEW && mv $@.NEW $@
 endif
 
 imtest_imtest_SOURCES = imtest/imtest.c
@@ -1075,6 +1084,8 @@ lib_libcyrus_la_SOURCES = \
 	lib/cyrusdb_skiplist.c \
 	lib/cyrusdb_twoskip.c \
 	lib/glob.c \
+	lib/htmlchar.c \
+	lib/htmlchar.h \
 	lib/imapurl.c \
 	lib/imclient.c \
 	lib/imparse.c \
