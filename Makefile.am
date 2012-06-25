@@ -340,7 +340,6 @@ imap_chk_cyrus_SOURCES = imap/chk_cyrus.c imap/cli_fatal.c imap/mutex_fake.c
 imap_chk_cyrus_LDADD = $(LD_UTILITY_ADD)
 
 imap_ctl_conversationsdb_SOURCES = imap/ctl_conversationsdb.c imap/mutex_fake.c
-imap_ctl_conversationsdb_LDFLAGS = $(LD_UTILITY_FLAGS)
 imap_ctl_conversationsdb_LDADD = $(LD_UTILITY_ADD)
 
 imap_ctl_cyrusdb_SOURCES = imap/cli_fatal.c imap/ctl_cyrusdb.c imap/mutex_fake.c
@@ -431,7 +430,7 @@ imap_libcyrus_imap_la_SOURCES = imap/annotate.c imap/annotate.h imap/append.c \
 	imap/sync_log.h imap/telemetry.c imap/telemetry.h imap/tls.c \
 	imap/tls.h imap/upgrade_index.c imap/upgrade_index.h imap/user.c \
 	imap/user.h imap/userdeny_db.c imap/userdeny.h imap/version.c \
-	imap/version.h imap/idlemsg.c imap/conversations.c \
+	imap/version.h imap/conversations.c \
 	imap/mailbox_update_notifier.c imap/mailbox_update_notifier.h \
 	imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
@@ -580,7 +579,7 @@ lib_libcyrus_min_la_SOURCES += lib/map_nommap.c
 endif
 endif
 lib_libcyrus_min_la_SOURCES += lib/mpool.c lib/retry.c lib/strarray.c \
-	lib/strhash.c lib/util.c lib/xmalloc.c lib/xstrlcat.c lib/xstrlcpy.c \ 
+	lib/strhash.c lib/util.c lib/xmalloc.c lib/xstrlcat.c lib/xstrlcpy.c \
 	lib/hashu64.c lib/me.c
 lib_libcyrus_min_la_LIBADD = $(LTLIBOBJS)
 

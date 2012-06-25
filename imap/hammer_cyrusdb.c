@@ -189,7 +189,7 @@ int main(int argc, char *argv[])
 	exit(EC_OSERR);
     }
 
-    cyrus_init(alt_config, "hammer_cyrusdb", 0);
+    cyrus_init(alt_config, "hammer_cyrusdb", 0, 0);
 
     r = cyrusdb_open(dbtype, dbfile, db_flags, &db);
     if (r) fatal("can't open database", EC_TEMPFAIL);

@@ -173,7 +173,7 @@ static int _init_counted(struct conversations_state *state,
 
     /* add the value only if there's some flags set */
     if (vallen) {
-	state->counted_flags = strarray_nsplit(val, vallen, " ");
+	state->counted_flags = strarray_nsplit(val, vallen, " ", /*flags*/0);
     }
 
     return 0;

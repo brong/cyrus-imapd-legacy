@@ -1589,15 +1589,18 @@ static void annotation_get_usermodseq(annotate_state_t *state,
 {
     struct buf value = BUF_INITIALIZER;
     modseq_t modseq;
+    char *mboxname = NULL;
 
     assert(state);
     assert(state->userid);
 
-    modseq = mboxname_readmodseq(mboxname_user_inbox(state->userid));
+    mboxname = mboxname_user_mbox(state->userid, NULL);
+    modseq = mboxname_readmodseq(mboxname);
 
     buf_printf(&value, "%llu", modseq);
 
     output_entryatt(state, entry->name, state->userid, &value);
+    free(mboxname);
     buf_free(&value);
 }
 

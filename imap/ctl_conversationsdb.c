@@ -745,7 +745,7 @@ static int usage(const char *name)
 
 static int do_user(const char *userid)
 {
-    const char *inboxname;
+    char *inboxname;
     char *fname;
     int r;
 
@@ -757,8 +757,9 @@ static int do_user(const char *userid)
 	return EC_USAGE;
     }
 
-    inboxname = mboxname_user_inbox(userid);
+    inboxname = mboxname_user_mbox(userid, NULL);
     if (inboxname == NULL) {
+	free(fname);
 	fprintf(stderr, "Invalid userid %s", userid);
 	return EC_USAGE;
     }
@@ -805,6 +806,7 @@ static int do_user(const char *userid)
     }
 
     free(fname);
+    free(inboxname);
 
     return r;
 }
@@ -921,7 +923,7 @@ int main(int argc, char **argv)
     else
 	usage(argv[0]);
 
-    cyrus_init(alt_config, "ctl_conversationsdb", 0);
+    cyrus_init(alt_config, "ctl_conversationsdb", 0, 0);
 
     mboxlist_init(0);
     mboxlist_open(NULL);
