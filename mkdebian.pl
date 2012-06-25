@@ -32,7 +32,7 @@ Section: mail
 Priority: extra
 Maintainer: Bron Gondwana <brong\@fastmail.fm>
 Build-Depends: libssl-dev, zlib1g-dev, comerr-dev, libsasl2-dev,
-	libdb4.8-dev, libzephyr-dev, libpcre3-dev, autoconf,
+	libzephyr-dev, libpcre3-dev, autoconf,
 	flex, bison, debhelper, libsnmp-dev
 
 Package: $basename
@@ -67,7 +67,7 @@ PACKAGE=\$(shell dh_listpackages)
 build:
 	dh_testdir
 	autoreconf -v -i
-	./configure --without-krb --with-perl=/usr/bin/perl --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --with-bdb=db-4.8
+	./configure --without-krb --with-perl=/usr/bin/perl --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --without-bdb
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -fstack-protector-all"
 	make sieve/test
 	touch build
