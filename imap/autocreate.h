@@ -48,6 +48,9 @@
 #include "config.h"
 #include "mboxname.h"
 
+extern int autosubscribe_mailbox(struct namespace *namespace, struct auth_state *auth_state,
+				 const char *userid, const char *mboxname);
+
 extern int autocreate_user(struct namespace *namespace, const char *userid);
 
 #endif /* INCLUDED_AUTOCREATE_H */

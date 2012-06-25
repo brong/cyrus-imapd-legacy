@@ -324,6 +324,10 @@ Blank lines and lines beginning with ``#'' are ignored.
    have been created and the user must have the required permissions to get subscribed 
    to it. Otherwise, subscribing to the shared folder fails. */
 
+{ "autosubscribe_all_inboxfolders", 0, SWITCH }
+/* If set to yes, the user is automatically subscribed to all inbox folders, one has permission
+   to subscribe to. */
+
 { "autosubscribe_all_sharedfolders", 0, SWITCH }
 /* If set to yes, the user is automatically subscribed to all shared folders, one has permission
    to subscribe to. */

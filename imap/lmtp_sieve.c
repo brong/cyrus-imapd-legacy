@@ -59,6 +59,7 @@
 #include "annotate.h"
 #include "append.h"
 #include "auth.h"
+#include "autocreate.h"
 #include "duplicate.h"
 #include "exitcodes.h"
 #include "global.h"
@@ -89,8 +90,8 @@ typedef struct script_data {
     struct auth_state *authstate;
 } script_data_t;
 
-static int autosieve_createfolder(const char *userid, struct auth_state *auth_state,
-				  const char *internalname);
+static int autosieve_createfolder(struct namespace *namespace, struct auth_state *auth_state,
+				  const char *userid, const char *internalname);
 
 static char *make_sieve_db(const char *user)
 {
@@ -512,7 +513,8 @@ static int sieve_fileinto(void *ac,
 
     if (ret == IMAP_MAILBOX_NONEXISTENT) {
 	/* if "plus" folder under INBOX, then try to create it */
-	ret = autosieve_createfolder(sd->username, sd->authstate, namebuf);
+	ret = autosieve_createfolder(mdata->namespace, sd->authstate,
+				     sd->username, namebuf);
 
 	/* Try to deliver the mail again. */
 	if (!ret)
@@ -999,8 +1001,8 @@ int run_sieve(const char *user, const char *domain, const char *mailbox,
 
 #define SEP "|"
 
-static int autosieve_createfolder(const char *userid, struct auth_state *auth_state,
-				  const char *internalname)
+static int autosieve_createfolder(struct namespace *namespace, struct auth_state *auth_state,
+				  const char *userid, const char *internalname)
 {
     const char *subf ;
     int createsievefolder = 0;
@@ -1039,7 +1041,7 @@ static int autosieve_createfolder(const char *userid, struct auth_state *auth_st
 	r = mboxlist_createmailbox(internalname, 0, NULL,
 				   1, userid, auth_state, 0, 0, 0, NULL);
 	if (!r) {
-	    mboxlist_changesub(internalname, userid, auth_state, 1, 1);
+	    autosubscribe_mailbox(namespace, auth_state, userid, internalname);
 	    syslog(LOG_DEBUG, "autosievefolder: User %s, folder %s creation succeeded",
 		   userid, internalname);
 	    return 0;

@@ -6022,6 +6022,9 @@ void cmd_create(char *tag, char *name, struct dlist *extargs, int localonly)
 		(void) mboxlist_setquotas(mailboxname, newquotas, 0);
 	    }
 	}
+
+	if (!r)
+	    autosubscribe_mailbox(&imapd_namespace, imapd_authstate, imapd_userid, mailboxname);
     }
 
     imapd_check(NULL, 0);

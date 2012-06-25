@@ -671,6 +671,50 @@ static void autosubscribe_sharedfolders(struct namespace *namespace,
     return;
 }
 
+int autosubscribe_mailbox(struct auth_state *auth_state, struct namespace *namespace,
+			  const char *userid, const char *mboxname)
+{
+    strarray_t *subscribe = NULL;
+    char *inbox = mboxname_user_mbox(userid, NULL); 
+    int inboxlen = strlen(inbox);
+    int r = 0;
+    int n;
+
+    /* not the same user */
+    if (strncmp(userid, mboxname, inboxlen) || mboxname[inboxlen] != '.')
+	goto done;
+
+    if (!config_getswitch(IMAPOPT_AUTOSUBSCRIBE_ALL_INBOXFOLDERS)) {
+	/* convert to internal namespace for comparison */
+	subscribe = strarray_split(config_getstring(IMAPOPT_AUTOSUBSCRIBEINBOXFOLDERS), SEP, STRARRAY_TRIM);
+	for (n = 0; n < subscribe->count; n++)
+	    mboxname_hiersep_tointernal(namespace, subscribe->data[n], 0);
+
+	/* not in the autosubscribe list? */
+	if (strarray_find(subscribe, inbox+inboxlen+1, 0) < 0)
+	    goto done;
+    }
+
+    r = mboxlist_changesub(mboxname, userid, auth_state, 1, 1);
+
+    if (r) {
+	syslog(LOG_WARNING,
+	       "autosubscribe: User %s to folder %s, subscription failed: %s",
+	       userid, mboxname, error_message(r));
+    } else {
+	syslog(LOG_NOTICE,
+	       "autosubscribe: User %s to folder %s, subscription succeeded",
+	       userid, mboxname);
+    }
+
+done:
+
+    free(inbox);
+    strarray_free(subscribe);
+
+    return r;
+}
+
 int autocreate_user(struct namespace *namespace,
 		    const char *userid)
 {
@@ -681,9 +725,7 @@ int autocreate_user(struct namespace *namespace,
     char *inboxname = mboxname_user_mbox(userid, NULL);
     struct auth_state *auth_state = NULL;
     strarray_t *create = NULL;
-    strarray_t *subscribe = NULL;
     int numcrt = 0;
-    int numsub = 0;
 #ifdef USE_SIEVE
     const char *source_script;
 #endif
@@ -776,14 +818,10 @@ int autocreate_user(struct namespace *namespace,
 	   userid);
 
     create = strarray_split(config_getstring(IMAPOPT_AUTOCREATEINBOXFOLDERS), SEP, STRARRAY_TRIM);
-    subscribe = strarray_split(config_getstring(IMAPOPT_AUTOSUBSCRIBEINBOXFOLDERS), SEP, STRARRAY_TRIM);
 
     /* need to convert all names to internal namespace first */
     for (n = 0; n < create->count; n++)
 	mboxname_hiersep_tointernal(namespace, create->data[n], 0);
-
-    for (n = 0; n < subscribe->count; n++)
-	mboxname_hiersep_tointernal(namespace, subscribe->data[n], 0);
 
     for (n = 0; n < create->count; n++) {
 	const char *name = strarray_nth(create, n);
@@ -805,25 +843,12 @@ int autocreate_user(struct namespace *namespace,
 	    continue;
 	}
 
-	/* skip to next if not subscribing */
-	if (strarray_find(subscribe, name, 0) < 0)
-	    continue;
-
-	r = mboxlist_changesub(foldername, userid, auth_state, 1, 1);
-	if (!r) {
-	    numsub++;
-	    syslog(LOG_NOTICE,"autocreateinbox: User %s, subscription to %s succeeded",
-		   userid, name);
-	} else {
-	    syslog(LOG_WARNING, "autocreateinbox: User %s, subscription to  %s failed. %s",
-		   userid, name, error_message(r));
-	    r = 0;
-	}
+	autosubscribe_mailbox(auth_state, namespace, userid, foldername);
     }
 
     if (numcrt)
-	syslog(LOG_INFO, "User %s, Inbox subfolders, created %d, subscribed %d", 
-	       userid, numcrt, numsub);
+	syslog(LOG_INFO, "User %s, Inbox subfolders, created %d", 
+	       userid, numcrt);
 
     /*
      * Check if shared folders are available for subscription.
@@ -847,7 +872,6 @@ int autocreate_user(struct namespace *namespace,
  done:
     free(inboxname);
     strarray_free(create);
-    strarray_free(subscribe);
     auth_freestate(auth_state);   
 
     return r;
