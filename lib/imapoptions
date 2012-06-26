@@ -1423,6 +1423,9 @@ And the notification message will be available on \fIstdin\fR.
 /* The mechanism used by the server to verify plaintext passwords. 
    Possible values include "auxprop", "saslauthd", and "pwcheck". */
 
+{ "search_engine", "none", ENUM("none", "squat", "sphinx") }
+/* The indexing engine used to speed up searching.  */
+
 { "search_skipdiacrit", 1, SWITCH }
 /* When searching, should diacriticals be stripped from the search
    terms.  The default is "true", a search for "hav" will match
