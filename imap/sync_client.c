@@ -1255,6 +1255,9 @@ static int mailbox_full_update(const char *mboxname)
     uint32_t uidvalidity;
     uint32_t last_uid;
     modseq_t xconvmodseq = 0;
+    struct sync_annot_list *mannots = NULL;
+    struct sync_annot_list *rannots = NULL;
+    int remote_modseq_was_higher = 0;
 
     kl = dlist_setatom(NULL, cmd, mboxname);
     sync_send_lookup(kl, sync_out);
@@ -1325,6 +1328,7 @@ static int mailbox_full_update(const char *mboxname)
 	mailbox->modseq_dirty = 0;
 	mailbox->i.highestmodseq = highestmodseq;
 	mailbox_modseq_dirty(mailbox);
+	remote_modseq_was_higher = 1;
     }
 
     r = mailbox_update_loop(mailbox, kr->head, last_uid,
@@ -1354,6 +1358,16 @@ static int mailbox_full_update(const char *mboxname)
     if (mailbox->i.last_uid < last_uid)
         mailbox->i.last_uid = last_uid;
 
+    /* ugly variable reuse */
+    dlist_getlist(kl, "ANNOTATIONS", &ka);
+
+    if (ka) decode_annotations(ka, &rannots);
+    r = read_annotations(mailbox, NULL, &mannots);
+    if (r) goto cleanup;
+    r = apply_annotations(mailbox, NULL, mannots, rannots,
+			  !remote_modseq_was_higher);
+    if (r) goto cleanup;
+
     /* blatant reuse 'r' us */
     kexpunge = dlist_newkvlist(NULL, "EXPUNGE");
     dlist_setatom(kexpunge, "MBOXNAME", mailbox->name);
@@ -1376,6 +1390,10 @@ static int mailbox_full_update(const char *mboxname)
 
     /* we still need to do the EXPUNGEs */
  cleanup:
+
+    sync_annot_list_free(&mannots);
+    sync_annot_list_free(&rannots);
+
 
     /* close the mailbox before sending any expunges
      * to avoid deadlocks */
