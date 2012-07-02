@@ -2300,8 +2300,16 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     r = conversation_load(cstate, cid, &conv);
     if (r)
 	return r;
-    if (!conv)
+    if (!conv) {
+	if (!new) {
+	    /* We're trying to delete a conversation that's already
+	     * gone...don't try to hard */
+	    syslog(LOG_NOTICE, "conversation "CONV_FMT" already "
+			       "deleted, ignoring", cid);
+	    return 0;
+	}
 	conv = conversation_new(cstate);
+    }
 
     if (cstate->counted_flags)
 	delta_counts = xzmalloc(sizeof(int) * cstate->counted_flags->count);
