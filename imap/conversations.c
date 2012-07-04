@@ -1381,8 +1381,10 @@ static void _apply_delta(uint32_t *valp, int delta)
     else {
 	uint32_t decrease = -delta;
 	/* let us die where it broke */
-	assert (decrease <= *valp);
-	*valp -= decrease;
+	if (decrease <= *valp)
+	    *valp -= decrease;
+	else
+	    *valp = 0;
     }
 }
 
