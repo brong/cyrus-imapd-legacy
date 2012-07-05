@@ -565,6 +565,7 @@ include_HEADERS = \
 	lib/bsearch.h \
 	lib/charset.h \
 	lib/chartable.h \
+	lib/command.h \
 	lib/crc32.h \
 	lib/cyr_lock.h \
 	lib/cyrusdb.h \
@@ -930,6 +931,7 @@ lib_libcyrus_la_SOURCES = \
 	lib/bsearch.c \
 	lib/byteorder64.c \
 	lib/charset.c \
+	lib/command.c \
 	lib/crc32.c \
 	lib/cyrusdb.c \
 	lib/cyrusdb_flat.c \
