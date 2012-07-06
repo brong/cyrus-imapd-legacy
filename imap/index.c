@@ -199,6 +199,8 @@ void index_close(struct index_state **stateptr)
 
     if (!state) return;
 
+    imapsync_close(state);
+
     free(state->userid);
     free(state->map);
     for (i = 0; i < MAX_USER_FLAGS; i++)
@@ -248,6 +250,9 @@ int index_open(const char *name, struct index_init *init,
 	if (r) goto fail;
     }
 
+    r = imapsync_open(state);
+    if (r) goto fail;
+
     /* initialise the index_state */
     index_refresh(state);
 
@@ -283,6 +288,9 @@ int index_expunge(struct index_state *state, char *sequence,
     /* XXX - earlier list if the sequence names UIDs that don't exist? */
     seq = _parse_sequence(state, sequence, 1);
 
+    r = imapsync_expunge(state, seq, need_deleted);
+    if (r) goto done;
+
     for (msgno = 1; msgno <= state->exists; msgno++) {
 	im = &state->map[msgno-1];
 
@@ -308,18 +316,17 @@ int index_expunge(struct index_state *state, char *sequence,
 
 	r = mailbox_rewrite_index_record(state->mailbox, &im->record);
 
-	if (r) break;
+	if (r) goto done;
     }
 
-    seqset_free(seq);
-
-    /* unlock before responding */
-    index_unlock(state);
-
-    if (!r && (numexpunged > 0)) {
+done:
+    if (numexpunged) {
 	syslog(LOG_NOTICE, "Expunged %d messages from %s",
 	       numexpunged, state->mailbox->name);
     }
+
+    seqset_free(seq);
+    index_unlock(state);
     return r;
 }
 
@@ -683,6 +690,9 @@ int index_check(struct index_state *state, int usinguid, int printuid)
 
     if (r) return r;
 
+    r = imapsync_check(state);
+    if (r) goto done;
+
     /* if highestmodseq has changed, read updates */
     if (state->highestmodseq != mailbox->i.highestmodseq)
 	index_refresh(state);
@@ -700,6 +710,7 @@ int index_check(struct index_state *state, int usinguid, int printuid)
     }
 #endif
 
+done:
     index_unlock(state);
 
     return r;
@@ -921,6 +932,8 @@ int index_fetch(struct index_state *state,
 
     /* set the \Seen flag if necessary - while we still have the lock */
     if (fetchargs->fetchitems & FETCH_SETSEEN && !state->examining) {
+	r = imapsync_setseen(state, seq, usinguid);
+	if (r) goto done;
 	for (msgno = 1; msgno <= state->exists; msgno++) {
 	    im = &state->map[msgno-1];
 	    checkval = usinguid ? im->record.uid : msgno;
@@ -929,7 +942,7 @@ int index_fetch(struct index_state *state,
 	    if (im->isseen)
 		continue;
 	    r = _fetch_setseen(state, msgno);   
-	    if (r) break;
+	    if (r) goto done;
 	}
     }
 
@@ -957,9 +970,10 @@ int index_fetch(struct index_state *state,
 
     index_fetchresponses(state, seq, usinguid, fetchargs, fetchedsomething);
 
-    seqset_free(seq);
-
     index_tellchanges(state, usinguid, usinguid, 0);
+
+done:
+    seqset_free(seq);
 
     return r;
 }
@@ -992,6 +1006,9 @@ int index_store(struct index_state *state, char *sequence,
     if (r) return r;
 
     seq = _parse_sequence(state, sequence, storeargs->usinguid);
+
+    r = imapsync_store(state, seq, storeargs);
+    if (r) goto out;
 
     for (i = 0; i < flags->count ; i++) {
 	r = mailbox_user_flag(mailbox, flags->data[i], &userflag, 1);
