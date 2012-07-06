@@ -810,10 +810,6 @@ static int _fetch_setseen(struct index_state *state, uint32_t msgno)
     struct index_map *im = &state->map[msgno-1];
     int r;
 
-    /* already seen */
-    if (im->isseen)
-	return 0;
-
     /* no rights to change it */
     if (!(state->myrights & ACL_SETSEEN))
 	return 0;
@@ -929,6 +925,8 @@ int index_fetch(struct index_state *state,
 	    im = &state->map[msgno-1];
 	    checkval = usinguid ? im->record.uid : msgno;
 	    if (!seqset_ismember(seq, checkval))
+		continue;
+	    if (im->isseen)
 		continue;
 	    r = _fetch_setseen(state, msgno);   
 	    if (r) break;
