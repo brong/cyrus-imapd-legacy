@@ -65,6 +65,8 @@
 #include "sequence.h"
 #include "strarray.h"
 
+extern struct imapsync_state;
+
 /* Special "sort criteria" to load message-id and references/in-reply-to
  * into msgdata array for threaders that need them.
  */
@@ -121,6 +123,7 @@ struct index_state {
     struct protstream *out;
     int qresync;
     struct auth_state *authstate;
+    struct imapsync_state *imapsync;
 };
 
 struct copyargs {
