@@ -309,17 +309,9 @@ static void do_search(const strarray_t *terms, const strarray_t *mboxnames)
     int i;
     int r;
     int j;
-    struct searchargs searchargs;
+    search_builder_t *bx;
     int count;
     unsigned int *msgno_list;
-
-    /* Construct a struct searchargs which describes the
-     * search terms. */
-    memset(&searchargs, 0, sizeof(searchargs));
-    for (i = 0 ; i < terms->count ; i++)
-	appendstrlistpat(&searchargs.text,
-			 charset_convert(terms->data[i],
-					 /*US-ASCII*/0, charset_flags));
 
     /* At the moment we only have a single-mailbox API for searching
      * so we have to handle multiple mailbox searches with a loop */
@@ -335,14 +327,24 @@ static void do_search(const strarray_t *terms, const strarray_t *mboxnames)
 	}
 	printf("mailbox %s\n", mboxname);
 	msgno_list = xmalloc(sizeof(unsigned int) * state->exists);
-	count = search_prefilter_messages(msgno_list, state, &searchargs);
+
+	bx = search_begin_search1(state, msgno_list, verbose);
+	if (!bx) goto next;
+
+	bx->begin_boolean(bx, SEARCH_OP_AND);
+	for (j = 0 ; j < terms->count ; j++)
+	    bx->match(bx, SEARCH_PART_ANY, terms->data[j]);
+	bx->end_boolean(bx, SEARCH_OP_AND);
+
+	count = search_end_search1(bx);
+	if (r < 0) goto next;
+
 	for (j = 0 ; j < count ; j++)
 	    printf("uid %u\n", state->map[msgno_list[j]-1].record.uid);
+next:
 	free(msgno_list);
 	index_close(&state);
     }
-
-    freestrlist(searchargs.text);
 }
 
 int main(int argc, char **argv)
@@ -378,7 +380,8 @@ int main(int argc, char **argv)
 
 	case 'e':		/* add a search term */
 	    if (mode != UNKNOWN && mode != SEARCH) usage(argv[0]);
-	    strarray_append(&terms, optarg);
+	    strarray_appendm(&terms, charset_convert(optarg,
+			     /*US-ASCII*/0, charset_flags));
 	    mode = SEARCH;
 	    break;
 
