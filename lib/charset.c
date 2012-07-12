@@ -66,6 +66,10 @@ struct b64_state {
     int codepoint;
 };
 
+struct unfold_state {
+    int state;
+};
+
 struct table_state {
     const struct charmap (*curtable)[256];
     const struct charmap (*initialtable)[256];
@@ -353,10 +357,44 @@ static void b64_2byte(struct convert_rock *rock, int c)
     }
 }
 
-static void stripnl2uni(struct convert_rock *rock, int c)
+/*
+ * This filter unfolds folded RFC2822 header field lines, i.e. it strips
+ * a CRLF pair only if the first character after the CRLF is LWS, and
+ * leaves other CRLF or lone CR or LF alone.  In particular the CRLFs
+ * which *separate* different header fields are preserved.  This allows
+ * the 'keep' and 'merge' whitespace options to behave as expected when
+ * the search engine is term-based, i.e. uses whitespace and punctuation
+ * to find indexing terms.
+ */
+static void unfold2uni(struct convert_rock *rock, int c)
 {
-    if (c != '\r' && c != '\n')
+    struct unfold_state *s = (struct unfold_state *)rock->state;
+
+    switch (s->state) {
+    case 0:
+	if (c == '\r')
+	    s->state = 1;
+	else
+	    convert_putc(rock->next, c);
+	break;
+    case 1:
+	if (c == '\n')
+	    s->state = 2;
+	else {
+	    convert_putc(rock->next, '\r');
+	    convert_putc(rock->next, c);
+	    s->state = 0;
+	}
+	break;
+    case 2:
+	if (c != ' ' && c != '\t') {
+	    convert_putc(rock->next, '\r');
+	    convert_putc(rock->next, '\n');
+	}
 	convert_putc(rock->next, c);
+	s->state = 0;
+	break;
+    }
 }
 
 /* Given an octet which is a codepoint in some 7bit or 8bit character
@@ -1188,7 +1226,7 @@ static const char *convert_name(struct convert_rock *rock)
     if (rock->f == byte2search) return "byte2search";
     if (rock->f == qp2byte) return "qp2byte";
     if (rock->f == striphtml2uni) return "striphtml2uni";
-    if (rock->f == stripnl2uni) return "stripnl2uni";
+    if (rock->f == unfold2uni) return "unfold2uni";
     if (rock->f == table2uni) return "table2uni";
     if (rock->f == uni2searchform) return "uni2searchform";
     if (rock->f == uni2utf8) return "uni2utf8";
@@ -1318,10 +1356,11 @@ static struct convert_rock *b64_init(struct convert_rock *next)
     return rock;
 }
 
-static struct convert_rock *stripnl_init(struct convert_rock *next)
+static struct convert_rock *unfold_init(struct convert_rock *next)
 {
     struct convert_rock *rock = xzmalloc(sizeof(struct convert_rock));
-    rock->f = stripnl2uni;
+    rock->state = xzmalloc(sizeof(struct unfold_state));
+    rock->f = unfold2uni;
     rock->next = next;
     return rock;
 }
@@ -1539,7 +1578,7 @@ EXPORTED char *charset_to_utf8(const char *msg_base, size_t len, int charset, in
 
 static void mimeheader_cat(struct convert_rock *target, const char *s)
 {
-    struct convert_rock *input, *stripnl;
+    struct convert_rock *input, *unfold;
     int eatspace = 0;
     const char *start, *endcharset, *encoding, *end;
     int len;
@@ -1552,7 +1591,7 @@ static void mimeheader_cat(struct convert_rock *target, const char *s)
     input = table_init(0, target);
     /* note: we assume the caller of this function has already 
      * determined that all newlines are followed by whitespace */
-    stripnl = stripnl_init(input);
+    unfold = unfold_init(input);
 
     start = s;
     while ((start = (const char*) strchr(start, '=')) != 0) {
@@ -1581,7 +1620,7 @@ static void mimeheader_cat(struct convert_rock *target, const char *s)
 	if (!eatspace) {
 	    len = start - s - 1;
 	    table_switch(input, 0); /* US_ASCII */
-	    convert_catn(stripnl, s, len);
+	    convert_catn(unfold, s, len);
 	}
 
 	/*
@@ -1620,11 +1659,11 @@ static void mimeheader_cat(struct convert_rock *target, const char *s)
     /* Copy over the tail part of the input string */
     if (*s) {
 	table_switch(input, 0); /* US_ASCII */
-	convert_cat(stripnl, s);
+	convert_cat(unfold, s);
     }
 
     /* just free these ones, the rest can be cleaned up by the sender */
-    basic_free(stripnl);
+    basic_free(unfold);
     basic_free(input);
 }
 
