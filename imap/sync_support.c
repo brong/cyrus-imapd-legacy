@@ -1836,7 +1836,6 @@ out:
 struct sync_crc_algorithm {
     const char *name;
     int preference;
-    int (*setup)(int);
     void (*begin)(void);
     void (*addrecord)(const struct mailbox *, const struct index_record *, int);
     void (*addannot)(const struct sync_annot *);
@@ -1846,13 +1845,6 @@ struct sync_crc_algorithm {
 
 static bit32 sync_crc32;
 static struct buf sync_crc32_buf;
-
-static int sync_crc32_setup(int cflags)
-{
-    if (!(cflags & SYNC_CRC_BASIC))
-	return IMAP_INVALID_IDENTIFIER;
-    return 0;
-}
 
 static void sync_crc32_begin(void)
 {
@@ -2050,26 +2042,23 @@ static int sync_crc32_end(char *buf, int maxlen)
 static const struct sync_crc_algorithm sync_crc_algorithms[] = {
     { "CRC32",
 	1,
-	sync_crc32_setup,
 	sync_crc32_begin,
 	sync_crc32_addrecord_xor,
 	sync_crc32_addannot_xor,
 	sync_crc32_end },
     { "CRC32M", /* modulo arithmetic */
 	2,
-	sync_crc32_setup,
 	sync_crc32_begin,
 	sync_crc32_addrecord_plus,
 	sync_crc32_addannot_plus,
 	sync_crc32_end },
     { "MD5",  /* XOR the first 16 bytes of md5s instead */
 	3,
-	sync_crc32_setup,
 	sync_crc32_begin,
 	sync_md5_addrecord_xor,
 	sync_md5_addannot_xor,
 	sync_crc32_end },
-    { NULL, 0, NULL, NULL, NULL, NULL, NULL }
+    { NULL, 0, NULL, NULL, NULL, NULL }
 };
 
 static const struct sync_crc_algorithm *find_algorithm(const char *string)
@@ -2168,7 +2157,6 @@ int sync_crc_setup(const char *algorithm, const char *covers,
 {
     const struct sync_crc_algorithm *alg;
     int cflags;
-    int r;
 
     if (!algorithm || !*algorithm) {
 	/* default is first one */
@@ -2195,9 +2183,8 @@ int sync_crc_setup(const char *algorithm, const char *covers,
 	}
     }
 
-    r = alg->setup(cflags);
-    if (r < 0)
-	return r;
+    if (!(cflags & SYNC_CRC_BASIC))
+	return IMAP_INVALID_IDENTIFIER;
 
     sync_crc_algorithm = alg;
     sync_crc_covers = cflags;
