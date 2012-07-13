@@ -1836,20 +1836,13 @@ out:
 struct sync_crc_algorithm {
     const char *name;
     int preference;
-    void (*begin)(void);
-    void (*addrecord)(const struct mailbox *, const struct index_record *, int);
-    void (*addannot)(const struct sync_annot *);
-    int (*end)(char *, int);
+    void (*addrecord)(const struct mailbox *, const struct index_record *,
+		      int, bit32 *);
+    void (*addannot)(const struct sync_annot *, bit32 *);
 };
 
 
-static bit32 sync_crc32;
 static struct buf sync_crc32_buf;
-
-static void sync_crc32_begin(void)
-{
-    sync_crc32 = 0;
-}
 
 static const char *basic_representation(
 	const struct mailbox *mailbox,
@@ -1958,27 +1951,27 @@ static const char *sync_record_representation(
 
 static void sync_crc32_addrecord_xor(const struct mailbox *mailbox,
 				     const struct index_record *record,
-				     int cflags)
+				     int cflags, bit32 *crcp)
 {
     const char *rep = sync_record_representation(mailbox, record, cflags);
 
     if (rep)
-	sync_crc32 ^= crc32_cstring(rep);
+	*crcp ^= crc32_cstring(rep);
 }
 
 static void sync_crc32_addrecord_plus(const struct mailbox *mailbox,
 				      const struct index_record *record,
-				      int cflags)
+				      int cflags, bit32 *crcp)
 {
     const char *rep = sync_record_representation(mailbox, record, cflags);
 
     if (rep)
-	sync_crc32 += crc32_cstring(rep);
+	*crcp += crc32_cstring(rep);
 }
 
 static void sync_md5_addrecord_xor(const struct mailbox *mailbox,
 				   const struct index_record *record,
-				   int cflags)
+				   int cflags, bit32 *crcp)
 {
     MD5_CTX ctx;
     unsigned char result[16];
@@ -1990,7 +1983,7 @@ static void sync_md5_addrecord_xor(const struct mailbox *mailbox,
     MD5Update(&ctx, rep, strlen(rep));
     MD5Final(result, &ctx);
 
-    sync_crc32 ^= ntohl(*((bit32 *)result));
+    *crcp ^= ntohl(*((bit32 *)result));
 }
 
 static const char *sync_annot_representation(const struct sync_annot *annot)
@@ -2002,7 +1995,7 @@ static const char *sync_annot_representation(const struct sync_annot *annot)
     return buf_cstring(&sync_crc32_buf);
 }
 
-static void sync_md5_addannot_xor(const struct sync_annot *annot)
+static void sync_md5_addannot_xor(const struct sync_annot *annot, bit32 *crcp)
 {
     MD5_CTX ctx;
     unsigned char result[16];
@@ -2014,51 +2007,39 @@ static void sync_md5_addannot_xor(const struct sync_annot *annot)
     MD5Update(&ctx, rep, strlen(rep));
     MD5Final(result, &ctx);
 
-    sync_crc32 ^= ntohl(*((bit32 *)result));
+    *crcp ^= ntohl(*((bit32 *)result));
 }
 
-static void sync_crc32_addannot_xor(const struct sync_annot *annot)
+static void sync_crc32_addannot_xor(const struct sync_annot *annot, bit32 *crcp)
 {
     const char *rep = sync_annot_representation(annot);
 
     if (rep)
-	sync_crc32 ^= crc32_cstring(rep);
+	*crcp ^= crc32_cstring(rep);
 }
 
-static void sync_crc32_addannot_plus(const struct sync_annot *annot)
+static void sync_crc32_addannot_plus(const struct sync_annot *annot, bit32 *crcp)
 {
     const char *rep = sync_annot_representation(annot);
 
     if (rep)
-	sync_crc32 += crc32_cstring(rep);
-}
-
-static int sync_crc32_end(char *buf, int maxlen)
-{
-    snprintf(buf, maxlen, "%u", sync_crc32);
-    return 0;
+	*crcp += crc32_cstring(rep);
 }
 
 static const struct sync_crc_algorithm sync_crc_algorithms[] = {
     { "CRC32",
 	1,
-	sync_crc32_begin,
 	sync_crc32_addrecord_xor,
-	sync_crc32_addannot_xor,
-	sync_crc32_end },
+	sync_crc32_addannot_xor },
     { "CRC32M", /* modulo arithmetic */
 	2,
-	sync_crc32_begin,
 	sync_crc32_addrecord_plus,
-	sync_crc32_addannot_plus,
-	sync_crc32_end },
+	sync_crc32_addannot_plus },
     { "MD5",  /* XOR the first 16 bytes of md5s instead */
 	3,
-	sync_crc32_begin,
 	sync_md5_addrecord_xor,
-	sync_md5_addannot_xor,
-	sync_crc32_end },
-    { NULL, 0, NULL, NULL, NULL, NULL }
+	sync_md5_addannot_xor },
+    { NULL, 0, NULL, NULL }
 };
 
 static const struct sync_crc_algorithm *find_algorithm(const char *string)
@@ -2201,15 +2182,21 @@ const char *sync_crc_get_covers(void)
     return covers_to_string(sync_crc_covers);
 }
 
-static void calc_annots(struct sync_annot_list *annots)
+static void calc_annots(struct mailbox *mailbox,
+			struct index_record *record,
+			bit32 *crcp)
 {
+    struct sync_annot_list *annots = NULL;
     struct sync_annot *annot;
+    int r;
 
+    r = read_annotations(mailbox, record, &annots);
+    if (r) return;
     if (!annots) return;
 
-    for (annot = annots->head; annot; annot = annot->next) {
-	sync_crc_algorithm->addannot(annot);
-    }
+    for (annot = annots->head; annot; annot = annot->next)
+	sync_crc_algorithm->addannot(annot, crcp);
+    sync_annot_list_free(&annots);
 }
 
 /*
@@ -2222,10 +2209,7 @@ int sync_crc_calc(struct mailbox *mailbox, char *buf, int maxlen)
 {
     struct index_record record;
     uint32_t recno;
-    struct sync_annot_list *annots = NULL;
-    int r = 0;
-
-    sync_crc_algorithm->begin();
+    bit32 crc = 0;
 
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	/* we can't send bogus records, just skip them! */
@@ -2236,24 +2220,16 @@ int sync_crc_calc(struct mailbox *mailbox, char *buf, int maxlen)
 	if (record.system_flags & FLAG_EXPUNGED)
 	    continue;
 
-	sync_crc_algorithm->addrecord(mailbox, &record, sync_crc_covers);
-	if (sync_crc_covers & SYNC_CRC_ANNOTATIONS) {
-	    r = read_annotations(mailbox, &record, &annots);
-	    if (r) continue;
-	    calc_annots(annots);
-	    sync_annot_list_free(&annots);
-	}
+	sync_crc_algorithm->addrecord(mailbox, &record, sync_crc_covers, &crc);
+	if (sync_crc_covers & SYNC_CRC_ANNOTATIONS)
+	    calc_annots(mailbox, &record, &crc);
     }
 
-    if (sync_crc_covers & SYNC_CRC_ANNOTATIONS) {
-	r = read_annotations(mailbox, NULL, &annots);
-	if (!r) {
-	    calc_annots(annots);
-	    sync_annot_list_free(&annots);
-	}
-    }
+    if (sync_crc_covers & SYNC_CRC_ANNOTATIONS)
+	calc_annots(mailbox, NULL, &crc);
 
-    return sync_crc_algorithm->end(buf, maxlen);
+    snprintf(buf, maxlen, "%u", crc);
+    return 0;
 }
 
 /* ====================================================================== */
