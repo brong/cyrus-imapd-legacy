@@ -2903,7 +2903,8 @@ static void replica_connect(const char *channel)
 
     for (wait = 15;; wait *= 2) {
 	sync_backend = backend_connect(sync_backend, servername,
-				       &csync_protocol, "", cb, NULL);
+				       &csync_protocol, "", cb, NULL,
+				       (verbose > 1 ? fileno(stderr) : -1));
 
 	if (sync_backend || connect_once || wait > 1000) break;
 
