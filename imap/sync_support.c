@@ -1888,10 +1888,6 @@ static const char *sync_record_representation(
     char *flags;
     int i;
 
-    /* expunged flags have no sync CRC */
-    if (record->system_flags & FLAG_EXPUNGED)
-	return NULL;
-
     /* system flags */
     if (record->system_flags & FLAG_ANSWERED)
 	strarray_append(&lcflags, "\\answered");
