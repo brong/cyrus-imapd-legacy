@@ -541,6 +541,15 @@ struct mailbox_repack {
     int newcache_fd;
 };
 
+#define MAILBOX_CRC_VERSION_MIN		1
+#define MAILBOX_CRC_VERSION_MAX		2
+typedef struct mailbox_crcalgo mailbox_crcalgo_t;
+struct mailbox_crcalgo {
+    unsigned version;
+    bit32 (*record)(const struct mailbox *, const struct index_record *);
+    bit32 (*annot)(const char *entry, const char *userid, const struct buf *value);
+};
+
 extern int mailbox_repack_setup(struct mailbox *mailbox,
 			        struct mailbox_repack **repackptr);
 extern int mailbox_repack_add(struct mailbox_repack *repack,
@@ -568,5 +577,7 @@ extern int mailbox_update_conversations(struct mailbox *mailbox,
 extern int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *);
 extern int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t);
 extern int mailbox_has_conversations(struct mailbox *mailbox);
+
+const mailbox_crcalgo_t *mailbox_find_crcalgo(unsigned minvers, unsigned maxvers);
 
 #endif /* INCLUDED_MAILBOX_H */
