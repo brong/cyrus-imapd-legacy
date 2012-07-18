@@ -866,7 +866,7 @@ static int _fetch_setseen(struct index_state *state, uint32_t msgno)
 }
 
 /* seq can be NULL - means "ALL" */
-void index_fetchresponses(struct index_state *state,
+EXPORTED void index_fetchresponses(struct index_state *state,
 			  struct seqset *seq,
 			  int usinguid,
 			  const struct fetchargs *fetchargs,
@@ -1813,7 +1813,7 @@ static int search_predict_total(struct index_state *state,
 /*
  * Performs a XCONVSORT command
  */
-int index_convsort(struct index_state *state,
+EXPORTED int index_convsort(struct index_state *state,
 		   struct sortcrit *sortcrit,
 		   struct searchargs *searchargs,
 		   const struct windowargs *windowargs)
@@ -1989,7 +1989,7 @@ static modseq_t get_modseq_of(struct index_record *record,
 /*
  * Performs a XCONVUPDATES command
  */
-int index_convupdates(struct index_state *state,
+EXPORTED int index_convupdates(struct index_state *state,
 		      struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
 		      const struct windowargs *windowargs)
@@ -2997,7 +2997,7 @@ static void index_listflags(struct index_state *state)
     prot_printf(state->out, ")] Ok\r\n");
 }
 
-void index_checkflags(struct index_state *state, int print, int dirty)
+EXPORTED void index_checkflags(struct index_state *state, int print, int dirty)
 {
     struct mailbox *mailbox = state->mailbox;
     unsigned i;

@@ -2607,7 +2607,7 @@ static int is_valid_rfc2822_inreplyto(const char *p)
  * @body may be NULL, in which case we get everything
  * we need out of the cache item in @record.
  */
-int message_update_conversations(struct conversations_state *state,
+EXPORTED int message_update_conversations(struct conversations_state *state,
 			         struct index_record *record,
 			         const struct body *body, int isreplica)
 {

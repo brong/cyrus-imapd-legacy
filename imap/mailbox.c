@@ -1599,7 +1599,7 @@ EXPORTED int mailbox_read_index_record(struct mailbox *mailbox,
     return r;
 }
 
-int mailbox_has_conversations(struct mailbox *mailbox)
+EXPORTED int mailbox_has_conversations(struct mailbox *mailbox)
 {
     char *path;
 
@@ -2248,7 +2248,7 @@ out:
     return r;
 }
 
-int mailbox_update_conversations(struct mailbox *mailbox,
+EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 				 struct index_record *old,
 				 struct index_record *new)
 {
@@ -2389,7 +2389,7 @@ int mailbox_update_conversations(struct mailbox *mailbox,
     return r;
 }
 
-int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *modseqp)
+EXPORTED int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *modseqp)
 {
     if (modseqp)
 	*modseqp = 0;
@@ -2406,7 +2406,7 @@ int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *modseqp)
 }
 
 /* Used in replication */
-int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmodseq)
+EXPORTED int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmodseq)
 {
     modseq_t modseq;
     uint32_t exists;

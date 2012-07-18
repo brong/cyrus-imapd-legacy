@@ -1,5 +1,9 @@
 /* Messagingengine.com utility functions */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
@@ -15,7 +19,7 @@
 static void rc4_encode(int key_len, unsigned char * key_buf, int data_len, unsigned char * data_buf);
 static char * base64_encode (int data_len, unsigned char * data);
 
-const char *me_create_sasl_enc(const char *username)
+EXPORTED const char *me_create_sasl_enc(const char *username)
 {
   static char padded_sasl[256], junk_buf[256], key_buf[256];
   int i, junk_len, epoch, key_len, data_len;

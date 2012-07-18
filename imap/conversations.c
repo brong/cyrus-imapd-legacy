@@ -97,13 +97,13 @@
 static char *convdir = NULL;
 static char *suffix = NULL;
 
-void conversations_set_directory(const char *dir)
+EXPORTED void conversations_set_directory(const char *dir)
 {
     free(convdir);
     convdir = xstrdupnull(dir);
 }
 
-void conversations_set_suffix(const char *suff)
+EXPORTED void conversations_set_suffix(const char *suff)
 {
     free(suffix);
     suffix = xstrdupnull(suff);
@@ -122,7 +122,7 @@ static char *conversations_path(struct mboxname_parts *parts)
     return mboxname_conf_getpath(parts, suff);
 }
 
-char *conversations_getuserpath(const char *username)
+EXPORTED char *conversations_getuserpath(const char *username)
 {
     struct mboxname_parts parts;
     char *fname;
@@ -135,7 +135,7 @@ char *conversations_getuserpath(const char *username)
     return fname;
 }
 
-char *conversations_getmboxpath(const char *mboxname)
+EXPORTED char *conversations_getmboxpath(const char *mboxname)
 {
     struct mboxname_parts parts;
     char *fname;
@@ -179,7 +179,7 @@ static int _init_counted(struct conversations_state *state,
     return 0;
 }
 
-int conversations_open_path(const char *fname, struct conversations_state **statep)
+EXPORTED int conversations_open_path(const char *fname, struct conversations_state **statep)
 {
     struct conversations_open *open = NULL;
     const char *val = NULL;
@@ -231,7 +231,7 @@ int conversations_open_path(const char *fname, struct conversations_state **stat
     return 0;
 }
 
-int conversations_open_user(const char *username, struct conversations_state **statep)
+EXPORTED int conversations_open_user(const char *username, struct conversations_state **statep)
 {
     char *path = conversations_getuserpath(username);
     int r;
@@ -241,7 +241,7 @@ int conversations_open_user(const char *username, struct conversations_state **s
     return r;
 }
 
-int conversations_open_mbox(const char *mboxname, struct conversations_state **statep)
+EXPORTED int conversations_open_mbox(const char *mboxname, struct conversations_state **statep)
 {
     char *path = conversations_getmboxpath(mboxname);
     int r;
@@ -251,7 +251,7 @@ int conversations_open_mbox(const char *mboxname, struct conversations_state **s
     return r;
 }
 
-struct conversations_state *conversations_get_path(const char *fname)
+EXPORTED struct conversations_state *conversations_get_path(const char *fname)
 {
     struct conversations_open *open = NULL;
 
@@ -263,7 +263,7 @@ struct conversations_state *conversations_get_path(const char *fname)
     return NULL;
 }
 
-struct conversations_state *conversations_get_user(const char *username)
+EXPORTED struct conversations_state *conversations_get_user(const char *username)
 {
     struct conversations_state *state;
     char *path = conversations_getuserpath(username);
@@ -273,7 +273,7 @@ struct conversations_state *conversations_get_user(const char *username)
     return state;
 }
 
-struct conversations_state *conversations_get_mbox(const char *mboxname)
+EXPORTED struct conversations_state *conversations_get_mbox(const char *mboxname)
 {
     struct conversations_state *state;
     char *path = conversations_getmboxpath(mboxname);
@@ -284,7 +284,7 @@ struct conversations_state *conversations_get_mbox(const char *mboxname)
 }
 
 
-void _conv_remove(struct conversations_state **statep)
+static void _conv_remove(struct conversations_state **statep)
 {
     struct conversations_open **prevp = &open_conversations;
     struct conversations_open *cur;
@@ -308,7 +308,7 @@ void _conv_remove(struct conversations_state **statep)
     fatal("unknown conversation db closed", EC_SOFTWARE);
 }
 
-int conversations_abort(struct conversations_state **statep)
+EXPORTED int conversations_abort(struct conversations_state **statep)
 {
     struct conversations_state *state = *statep;
 
@@ -325,7 +325,7 @@ int conversations_abort(struct conversations_state **statep)
     return 0;
 }
 
-int conversations_commit(struct conversations_state **statep)
+EXPORTED int conversations_commit(struct conversations_state **statep)
 {
     struct conversations_state *state = *statep;
     int r = 0;
@@ -408,7 +408,7 @@ static int _sanity_check_counts(conversation_t *conv)
 }
 
 
-int conversations_set_msgid(struct conversations_state *state,
+EXPORTED int conversations_set_msgid(struct conversations_state *state,
 			  const char *msgid,
 			  conversation_id_t cid)
 {
@@ -467,7 +467,7 @@ static int _conversations_parse(const char *data, size_t datalen,
     return 0;
 }
 
-int conversations_get_msgid(struct conversations_state *state,
+EXPORTED int conversations_get_msgid(struct conversations_state *state,
 		          const char *msgid,
 		          conversation_id_t *cidp)
 {
@@ -516,7 +516,7 @@ int conversations_get_msgid(struct conversations_state *state,
  *    seen by human eyes, so some information loss is acceptable as long
  *    as the subjects in different messages match correctly.
  */
-void conversation_normalise_subject(struct buf *s)
+EXPORTED void conversation_normalise_subject(struct buf *s)
 {
     static int initialised_res = 0;
     static regex_t whitespace_re;
@@ -547,7 +547,7 @@ void conversation_normalise_subject(struct buf *s)
     buf_replace_all_re(s, &whitespace_re, NULL);
 }
 
-int conversations_set_subject(struct conversations_state *state,
+EXPORTED int conversations_set_subject(struct conversations_state *state,
 			      conversation_id_t cid,
 			      const struct buf *sub)
 {
@@ -576,7 +576,7 @@ int conversations_set_subject(struct conversations_state *state,
     return 0;
 }
 
-int conversations_get_subject(struct conversations_state *state,
+EXPORTED int conversations_get_subject(struct conversations_state *state,
 			      conversation_id_t cid,
 			      struct buf *sub)
 {
@@ -714,7 +714,7 @@ static int folder_number_rename(struct conversations_state *state,
     return write_folders(state);
 }
 
-int conversation_storestatus(struct conversations_state *state,
+EXPORTED int conversation_storestatus(struct conversations_state *state,
 			     const char *key, size_t keylen,
 			     modseq_t modseq,
 			     uint32_t exists,
@@ -744,7 +744,7 @@ int conversation_storestatus(struct conversations_state *state,
     return r;
 }
 
-int conversation_setstatus(struct conversations_state *state,
+EXPORTED int conversation_setstatus(struct conversations_state *state,
 			   const char *mboxname,
 			   modseq_t modseq,
 			   uint32_t exists,
@@ -761,7 +761,7 @@ int conversation_setstatus(struct conversations_state *state,
     return r;
 }
 
-int conversation_store(struct conversations_state *state,
+EXPORTED int conversation_store(struct conversations_state *state,
 		       const char *key, int keylen,
 		       conversation_t *conv)
 {
@@ -902,7 +902,7 @@ done:
     return r;
 }
 
-int conversation_save(struct conversations_state *state,
+EXPORTED int conversation_save(struct conversations_state *state,
 		      conversation_id_t cid,
 		      conversation_t *conv)
 {
@@ -922,7 +922,7 @@ int conversation_save(struct conversations_state *state,
     return _conversation_save(state, bkey, strlen(bkey), conv);
 }
 
-int conversation_parsestatus(const char *data, size_t datalen,
+EXPORTED int conversation_parsestatus(const char *data, size_t datalen,
 			     modseq_t *modseqp,
 			     uint32_t *existsp,
 			     uint32_t *unseenp)
@@ -964,7 +964,7 @@ int conversation_parsestatus(const char *data, size_t datalen,
     return 0;
 }
 
-int conversation_getstatus(struct conversations_state *state,
+EXPORTED int conversation_getstatus(struct conversations_state *state,
 			   const char *mboxname,
 			   modseq_t *modseqp,
 			   uint32_t *existsp,
@@ -1005,7 +1005,7 @@ int conversation_getstatus(struct conversations_state *state,
     return r;
 }
 
-conv_folder_t *conversation_get_folder(conversation_t *conv,
+EXPORTED conv_folder_t *conversation_get_folder(conversation_t *conv,
 				       int number, int create_flag)
 {
     conv_folder_t *folder, **nextp = &conv->folders;
@@ -1036,7 +1036,7 @@ conv_folder_t *conversation_get_folder(conversation_t *conv,
     return folder;
 }
 
-int conversation_parse(struct conversations_state *state,
+EXPORTED int conversation_parse(struct conversations_state *state,
 		       const char *data, size_t datalen,
 		       conversation_t **convp)
 {
@@ -1134,7 +1134,7 @@ int conversation_parse(struct conversations_state *state,
     return 0;
 }
 
-int conversation_load(struct conversations_state *state,
+EXPORTED int conversation_load(struct conversations_state *state,
 		      conversation_id_t cid,
 		      conversation_t **convp)
 {
@@ -1198,7 +1198,7 @@ static int _conversation_load_modseq(const char *data, int datalen,
     return 0;
 }
 
-int conversation_get_modseq(struct conversations_state *state,
+EXPORTED int conversation_get_modseq(struct conversations_state *state,
 			    conversation_id_t cid,
 			    modseq_t *modseqp)
 {
@@ -1230,7 +1230,7 @@ int conversation_get_modseq(struct conversations_state *state,
     return 0;
 }
 
-conv_folder_t *conversation_find_folder(struct conversations_state *state,
+EXPORTED conv_folder_t *conversation_find_folder(struct conversations_state *state,
 					conversation_t *conv,
 					const char *mboxname)
 {
@@ -1316,7 +1316,7 @@ static int sender_preferred_name(const char *a, const char *b)
     return d;
 }
 
-void conversation_add_sender(conversation_t *conv,
+EXPORTED void conversation_add_sender(conversation_t *conv,
 			     const char *name,
 			     const char *route,
 			     const char *mailbox,
@@ -1388,7 +1388,7 @@ static void _apply_delta(uint32_t *valp, int delta)
     }
 }
 
-void conversation_update(struct conversations_state *state,
+EXPORTED void conversation_update(struct conversations_state *state,
 			 conversation_t *conv, const char *mboxname,
 			 int delta_num_records,
 			 int delta_exists, int delta_unseen,
@@ -1432,7 +1432,7 @@ void conversation_update(struct conversations_state *state,
     }
 }
 
-conversation_t *conversation_new(struct conversations_state *state)
+EXPORTED conversation_t *conversation_new(struct conversations_state *state)
 {
     conversation_t *conv;
 
@@ -1444,7 +1444,7 @@ conversation_t *conversation_new(struct conversations_state *state)
     return conv;
 }
 
-void conversation_free(conversation_t *conv)
+EXPORTED void conversation_free(conversation_t *conv)
 {
     conv_folder_t *folder;
     conv_sender_t *sender;
@@ -1505,9 +1505,9 @@ static int prunecb(void *rock,
 		      /*force*/1);
 }
 
-int conversations_prune(struct conversations_state *state,
-			time_t thresh, unsigned int *nseenp,
-			unsigned int *ndeletedp)
+EXPORTED int conversations_prune(struct conversations_state *state,
+				 time_t thresh, unsigned int *nseenp,
+				 unsigned int *ndeletedp)
 {
     struct prune_rock rock = { state, thresh, 0, 0 };
 
@@ -1522,7 +1522,7 @@ int conversations_prune(struct conversations_state *state,
 }
 
 /* NOTE: this makes an "ATOM" return */
-const char *conversation_id_encode(conversation_id_t cid)
+EXPORTED const char *conversation_id_encode(conversation_id_t cid)
 {
     static char text[2*sizeof(cid)+1];
 
@@ -1535,7 +1535,7 @@ const char *conversation_id_encode(conversation_id_t cid)
     return text;
 }
 
-int conversation_id_decode(conversation_id_t *cid, const char *text)
+EXPORTED int conversation_id_decode(conversation_id_t *cid, const char *text)
 {
     if (!strcmp(text, "NIL")) {
 	*cid = NULLCONVERSATION;
@@ -1580,7 +1580,7 @@ static int do_one_rename(void *rock,
 				  rrock->to_cid, stamp);
 }
 
-int conversations_rename_cid(struct conversations_state *state,
+EXPORTED int conversations_rename_cid(struct conversations_state *state,
 			     conversation_id_t from_cid,
 			     conversation_id_t to_cid)
 {
@@ -1681,7 +1681,7 @@ static int folder_key_rename(struct conversations_state *state,
     return r;
 }
 
-int conversations_rename_folder(struct conversations_state *state,
+EXPORTED int conversations_rename_folder(struct conversations_state *state,
 			        const char *from_name,
 			        const char *to_name)
 {
@@ -1718,7 +1718,7 @@ static int delete_cb(void *rock,
     return cyrusdb_delete(state->db, key, keylen, &state->txn, 1);
 }
 
-int conversations_wipe_counts(struct conversations_state *state,
+EXPORTED int conversations_wipe_counts(struct conversations_state *state,
 			      int keepnames)
 {
     int r = 0;
@@ -1752,17 +1752,17 @@ int conversations_wipe_counts(struct conversations_state *state,
     return r;
 }
 
-void conversations_dump(struct conversations_state *state, FILE *fp)
+EXPORTED void conversations_dump(struct conversations_state *state, FILE *fp)
 {
     cyrusdb_dumpfile(state->db, "", 0, fp, &state->txn);
 }
 
-int conversations_truncate(struct conversations_state *state)
+EXPORTED int conversations_truncate(struct conversations_state *state)
 {
     return cyrusdb_truncate(state->db, &state->txn);
 }
 
-int conversations_undump(struct conversations_state *state, FILE *fp)
+EXPORTED int conversations_undump(struct conversations_state *state, FILE *fp)
 {
     return cyrusdb_undumpfile(state->db, fp, &state->txn);
 }

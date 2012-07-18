@@ -390,9 +390,12 @@ static void cmd_idle(char* tag);
 
 static void cmd_starttls(char *tag, int imaps);
 
+static void cmd_xconvsort(char *tag, int updates);
 static void cmd_xconvmeta(const char *tag);
 static void cmd_xconvfetch(const char *tag);
 static int do_xconvfetch(struct dlist *cidlist,
+			 modseq_t ifchangedsince,
+			 struct fetchargs *fetchargs);
 
 #ifdef HAVE_SSL
 static void cmd_urlfetch(char *tag);
