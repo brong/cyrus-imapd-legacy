@@ -2224,7 +2224,7 @@ static void header_update_counts(struct index_header *i,
     }
 }
 
-const mailbox_crcalgo_t *mailbox_get_crcalgo(struct mailbox *mailbox)
+EXPORTED const mailbox_crcalgo_t *mailbox_get_crcalgo(struct mailbox *mailbox)
 {
     const mailbox_crcalgo_t *alg = NULL;
 
@@ -5014,7 +5014,7 @@ static const mailbox_crcalgo_t crcalgos[] = {
     { 0, NULL, NULL }
 };
 
-const mailbox_crcalgo_t *mailbox_find_crcalgo(unsigned minvers, unsigned maxvers)
+EXPORTED const mailbox_crcalgo_t *mailbox_find_crcalgo(unsigned minvers, unsigned maxvers)
 {
     const mailbox_crcalgo_t *alg;
     const mailbox_crcalgo_t *best = NULL;
@@ -5054,7 +5054,7 @@ static int crc_one_annot(const char *mailbox __attribute__((unused)),
  * version @vers, and store the result in *@crcp.
  * Returns: 0 on success, -ve on error.
  */
-int mailbox_calc_sync_crc(struct mailbox *mailbox, unsigned vers, uint32_t *crcp)
+EXPORTED int mailbox_calc_sync_crc(struct mailbox *mailbox, unsigned vers, uint32_t *crcp)
 {
     struct index_record record;
     uint32_t recno;
