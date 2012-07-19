@@ -582,5 +582,6 @@ extern int mailbox_has_conversations(struct mailbox *mailbox);
 
 const mailbox_crcalgo_t *mailbox_get_crcalgo(struct mailbox *);
 const mailbox_crcalgo_t *mailbox_find_crcalgo(unsigned minvers, unsigned maxvers);
+int mailbox_calc_sync_crc(struct mailbox *mailbox, unsigned vers, uint32_t *crcp);
 
 #endif /* INCLUDED_MAILBOX_H */
