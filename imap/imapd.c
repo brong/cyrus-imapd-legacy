@@ -11303,7 +11303,7 @@ out:
     /* these two are mutually exclusive */
     if (windowargs.anchor && windowargs.position)
 	goto syntax_error;
-    /* changesince is mandatory for XCONVUPDATES
+    /* changedsince is mandatory for XCONVUPDATES
      * and illegal for XCONVSORT */
     if (!!updates != windowargs.changedsince)
 	goto syntax_error;
