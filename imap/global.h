@@ -154,6 +154,7 @@ int getxstring(struct protstream *pin, struct protstream *pout,
 #define getqstring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_QSTRING)
 #define getstring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_STRING)
 #define getnastring(pin, pout, buf) getxstring((pin), (pout), (buf), IMAP_NASTRING)
+#define getcharset(pin, pout, buf) getxstring((pin), (pout), (buf), GXS_ATOM|GXS_QUOTED)
 int getint32(struct protstream *pin, int *num);
 int getsint32(struct protstream *pin, int *num);
 int getuint32(struct protstream *pin, unsigned int *num);

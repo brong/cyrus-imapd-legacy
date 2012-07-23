@@ -11191,9 +11191,14 @@ static int parse_windowargs(const char *tag,
 
     memset(&windowargs, 0, sizeof(windowargs));
 
-    c = getword(imapd_in, arg);
-    if (arg->len || c != '(')
+    c = prot_getc(imapd_in);
+    if (c == EOF)
 	goto out;
+    if (c != '(') {
+	prot_ungetc(c, imapd_in);
+	c = getcharset(imapd_in, imapd_out, arg);
+	goto out;
+    }
 
     for (;;)
     {
@@ -11290,7 +11295,7 @@ static int parse_windowargs(const char *tag,
     if (c != ' ')
 	goto syntax_error;
 
-    c = getword(imapd_in, arg);
+    c = getcharset(imapd_in, imapd_out, arg);
     if (c != ' ')
 	goto syntax_error;
 
