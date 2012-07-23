@@ -2115,7 +2115,7 @@ EXPORTED int index_convupdates(struct index_state *state,
 	 * we need to keep going to calculate an accurate total */
 	if (!search_is_mutable &&
 	    !upto_pos &&
-	    msg->uid == windowargs->anchor) {
+	    msg->uid == windowargs->upto) {
 	    if (total != UNPREDICTABLE)
 		break;
 	    upto_pos = pos;
