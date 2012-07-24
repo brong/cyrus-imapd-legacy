@@ -1293,6 +1293,37 @@ out:
     return r;
 }
 
+/*
+ * Warm up a file, by beginning background readahead.  @offset and
+ * @length define a subset of the file to be warmed; @length = 0 means
+ * to the end of the file.  Returns a UNIX errno or 0 on success.  No
+ * error is reported if the file is missing or the kernel doesn't have
+ * the magic system call.
+ *
+ * Returns zero on success or an error code (system error code).
+ */
+static int warmup_file(const char *filename,
+		       off_t offset, off_t length)
+{
+    int fd;
+    int r;
+
+    fd = open(filename, O_RDONLY, 0);
+    if (fd < 0) return errno;
+
+    /* Note, posix_fadvise() returns it's error code rather than
+     * setting errno.  Unlike every other system call including
+     * others defined in the same standard by the same committee. */
+    r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
+
+    /* posix_fadvise(WILLNEED) on Linux will return an EINVAL error
+     * if the file is on tmpfs, even though this effectively means
+     * the file's bytes are all already available in RAM.  Duh. */
+    if (r == EINVAL) r = 0;
+
+    close(fd);
+    return r;
+}
 
 static void prefetch_messages(struct index_state *state,
 			      struct seqset *seq,
@@ -1302,7 +1333,6 @@ static void prefetch_messages(struct index_state *state,
     struct index_map *im;
     uint32_t msgno;
     char *fname;
-    int fd;
 
     syslog(LOG_ERR, "Prefetching initial parts of messages\n");
 
@@ -1315,12 +1345,7 @@ static void prefetch_messages(struct index_state *state,
 	if (!fname)
 	    continue;
 
-	fd = open(fname, O_RDONLY, 0);
-	if (fd < 0)
-	    continue;
-
-	posix_fadvise(fd, 0, 16384, POSIX_FADV_WILLNEED);
-	close(fd);
+	warmup_file(fname, 0, 16384);
     }
 }
 
@@ -1394,6 +1419,49 @@ out:
 
     index_tellchanges(state, usinguid, usinguid, 1);
 
+    return r;
+}
+
+EXPORTED int index_warmup(struct mboxlist_entry *mbentry, unsigned int warmup_flags)
+{
+    const char *fname = NULL;
+    char *tofree1 = NULL;
+    char *tofree2 = NULL;
+    int r = 0;
+
+    if (warmup_flags & WARMUP_INDEX) {
+	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_INDEX, 0);
+	r = warmup_file(fname, 0, 0);
+	if (r) goto out;
+    }
+    if (warmup_flags & WARMUP_CONVERSATIONS) {
+	if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    fname = tofree1 = conversations_getmboxpath(mbentry->name);
+	    r = warmup_file(fname, 0, 0);
+	    if (r) goto out;
+	}
+    }
+    if (warmup_flags & WARMUP_ANNOTATIONS) {
+	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_ANNOTATIONS, 0);
+	r = warmup_file(fname, 0, 0);
+	if (r) goto out;
+    }
+    if (warmup_flags & WARMUP_FOLDERSTATUS) {
+	if (config_getswitch(IMAPOPT_STATUSCACHE)) {
+	    fname = tofree2 = statuscache_filename();
+	    r = warmup_file(fname, 0, 0);
+	    if (r) goto out;
+	}
+    }
+
+out:
+    if (r == ENOENT || r == ENOSYS)
+	r = 0;
+    if (r)
+	syslog(LOG_ERR, "IOERROR: unable to warmup file %s: %s",
+		fname, error_message(r));
+    free(tofree1);
+    free(tofree2);
     return r;
 }
 
