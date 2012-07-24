@@ -1080,6 +1080,31 @@ out:
     return r;
 }
 
+/*
+ * Warm up a file, by beginning background readahead.  @offset and
+ * @length define a subset of the file to be warmed; @length = 0 means
+ * to the end of the file.  Returns a UNIX errno or 0 on success.  No
+ * error is reported if the file is missing or the kernel doesn't have
+ * the magic system call.
+ */
+static int warmup_file(const char *filename,
+		       off_t offset, off_t length)
+{
+    int fd;
+    int r;
+
+    fd = open(filename, O_RDONLY, 0);
+    if (fd < 0) {
+	r = (errno == ENOENT ? 0 : errno);
+	return r;
+    }
+
+    r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
+    if (r) r = (errno == ENOSYS ? 0 : errno);
+
+    close(fd);
+    return r;
+}
 
 static void prefetch_messages(struct index_state *state,
 			      struct seqset *seq,
@@ -1090,7 +1115,6 @@ static void prefetch_messages(struct index_state *state,
     unsigned checkval;
     uint32_t msgno;
     char *fname;
-    int fd;
 
     syslog(LOG_ERR, "Prefetching initial parts of messages\n");
 
@@ -1104,12 +1128,7 @@ static void prefetch_messages(struct index_state *state,
 	if (!fname)
 	    continue;
 
-	fd = open(fname, O_RDONLY, 0);
-	if (fd < 0)
-	    continue;
-
-	posix_fadvise(fd, 0, 16384, POSIX_FADV_WILLNEED);
-	close(fd);
+	warmup_file(fname, 0, 16384);
     }
 }
 
@@ -1189,6 +1208,47 @@ out:
     }
     seqset_free(seq);
     index_tellchanges(state, usinguid, usinguid, 1);
+    return r;
+}
+
+EXPORTED int index_warmup(struct index_state *state, unsigned int warmup_flags)
+{
+    const char *fname = NULL;
+    char *tofree1 = NULL;
+    char *tofree2 = NULL;
+    int r;
+
+    if (warmup_flags & WARMUP_INDEX) {
+	fname = mailbox_meta_fname(state->mailbox, META_INDEX);
+	r = warmup_file(fname, 0, 0);
+	if (r) goto out;
+    }
+    if (warmup_flags & WARMUP_CONVERSATIONS) {
+	if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
+	    fname = tofree1 = conversations_getmboxpath(state->mailbox->name);
+	    r = warmup_file(fname, 0, 0);
+	    if (r) goto out;
+	}
+    }
+    if (warmup_flags & WARMUP_ANNOTATIONS) {
+	fname = mailbox_meta_fname(state->mailbox, META_ANNOTATIONS);
+	r = warmup_file(fname, 0, 0);
+	if (r) goto out;
+    }
+    if (warmup_flags & WARMUP_FOLDERSTATUS) {
+	if (config_getswitch(IMAPOPT_STATUSCACHE)) {
+	    fname = tofree2 = statuscache_filename();
+	    r = warmup_file(fname, 0, 0);
+	    if (r) goto out;
+	}
+    }
+
+out:
+    if (r)
+	syslog(LOG_ERR, "IOERROR: unable to warmup file %s: %s",
+		fname, error_message(r));
+    free(tofree1);
+    free(tofree2);
     return r;
 }
 

@@ -417,6 +417,7 @@ static void cmd_setannotation(const char* tag, char *mboxpat);
 static void cmd_setmetadata(const char* tag, char *mboxpat);
 static void cmd_xrunannotator(const char *tag, const char *sequence,
 			      int usinguid);
+static void cmd_xwarmup(const char *tag);
 
 static void cmd_enable(char* tag);
 
@@ -2165,6 +2166,12 @@ static void cmdloop(void)
 		if (!arg1.len || !imparse_issequence(arg1.s)) goto badsequence;
 		cmd_xrunannotator(tag.s, arg1.s, usinguid);
 // 		snmp_increment(XRUNANNOTATOR_COUNT, 1);
+	    }
+	    else if (!strcmp(cmd.s, "Xwarmup")) {
+		/* XWARMUP doesn't need a mailbox to be selected */
+		if (c != ' ') goto missingargs;
+		cmd_xwarmup(tag.s);
+// 		snmp_increment(XWARMUP_COUNT, 1);
 	    }
 	    else goto badcmd;
 	    break;
@@ -9345,6 +9352,127 @@ static void cmd_xrunannotator(const char *tag, const char *sequence,
     else
 	prot_printf(imapd_out, "%s OK %s (%s sec)\r\n", tag,
 		    error_message(IMAP_OK_COMPLETED), mytime);
+}
+
+
+static void cmd_xwarmup(const char *tag)
+{
+    const char *cmd = "Xwarmup";
+    clock_t start = clock();
+    char mytime[100];
+    struct buf arg = BUF_INITIALIZER;
+    int warmup_flags = 0;
+    struct mboxlist_entry *mbentry = NULL;
+    struct index_state *state = NULL;
+    int c, r = 0;
+    char mboxname[MAX_MAILBOX_BUFFER];
+
+    /* parse arguments: expect <mboxname> '('<warmup-items>')' */
+
+    c = getastring(imapd_in, imapd_out, &arg);
+    if (c != ' ') {
+syntax_error:
+	prot_printf(imapd_out, "%s BAD syntax error in %s\r\n", tag, cmd);
+	goto out_noprint;
+    }
+
+    r = imapd_namespace.mboxname_tointernal(&imapd_namespace, arg.s,
+					    imapd_userid, mboxname);
+    if (r) {
+	prot_printf(imapd_out, "%s BAD Invalid mboxname in %s\r\n", tag, cmd);
+	goto out_noprint;
+    }
+
+    r = mboxlist_lookup(mboxname, &mbentry, NULL);
+    if (r) goto out;
+
+    if (mbentry->mbtype & MBTYPE_REMOTE) {
+	/* remote mailbox */
+	struct backend *be;
+
+	be = proxy_findserver(mbentry->server, &imap_protocol,
+			      proxy_userid, &backend_cached,
+			      &backend_current, &backend_inbox, imapd_in);
+	if (!be) {
+	    r = IMAP_SERVER_UNAVAILABLE;
+	    goto out;
+	}
+
+	prot_printf(be->out, "%s %s %s ", tag, cmd, arg.s);
+	if (!pipe_command(backend_current, 65536)) {
+	    pipe_including_tag(backend_current, tag, 0);
+	}
+	goto out;
+    }
+    /* local mailbox */
+
+    /* parse the arguments after the mailbox */
+
+    c = prot_getc(imapd_in);
+    if (c != '(') goto syntax_error;
+
+    for (;;) {
+	c = getword(imapd_in, &arg);
+	if (arg.len) {
+	    if (!strcasecmp(arg.s, "index"))
+		warmup_flags |= WARMUP_INDEX;
+	    else if (!strcasecmp(arg.s, "conversations"))
+		warmup_flags |= WARMUP_CONVERSATIONS;
+	    else if (!strcasecmp(arg.s, "annotations"))
+		warmup_flags |= WARMUP_ANNOTATIONS;
+	    else if (!strcasecmp(arg.s, "folderstatus"))
+		warmup_flags |= WARMUP_FOLDERSTATUS;
+	    else if (!strcasecmp(arg.s, "all"))
+		warmup_flags |= WARMUP_ALL;
+	    else
+		goto syntax_error;
+	}
+	if (c == ')')
+	    break;
+	if (c != ' ') goto syntax_error;
+    }
+
+    /* we're expecting no more arguments */
+    c = prot_getc(imapd_in);
+    if (c == '\r') c = prot_getc(imapd_in);
+    if (c != '\n') goto syntax_error;
+
+    if (imapd_index && !strcmp(mboxname, imapd_index->mailbox->name))
+	state = imapd_index;
+    else {
+	struct index_init init;
+
+	memset(&init, 0, sizeof(struct index_init));
+	init.userid = imapd_userid;
+	/* Do a permissions check to avoid server DoS opportunity */
+	init.authstate = imapd_authstate;
+	init.out = imapd_out;
+	/* But we only need read permission to warmup a mailbox */
+	init.examine_mode = 1;
+	r = index_open(mboxname, &init, &state);
+	if (r) goto out;
+    }
+
+    r = index_warmup(state, warmup_flags);
+
+out:
+    if (state != imapd_index) index_close(&state);
+
+    snprintf(mytime, sizeof(mytime), "%2.3f",
+	     (clock() - start) / (double) CLOCKS_PER_SEC);
+
+    if (r)
+	prot_printf(imapd_out, "%s NO %s (%s sec)\r\n", tag,
+		    error_message(r), mytime);
+    else
+	prot_printf(imapd_out, "%s OK %s (%s sec)\r\n", tag,
+		    error_message(IMAP_OK_COMPLETED), mytime);
+
+out_noprint:
+    if (r)
+	eatline(imapd_in, c);
+    mboxlist_entry_free(&mbentry);
+    buf_free(&arg);
 }
 
 /*
