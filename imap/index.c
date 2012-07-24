@@ -1211,27 +1211,27 @@ out:
     return r;
 }
 
-EXPORTED int index_warmup(struct index_state *state, unsigned int warmup_flags)
+EXPORTED int index_warmup(struct mboxlist_entry *mbentry, unsigned int warmup_flags)
 {
     const char *fname = NULL;
     char *tofree1 = NULL;
     char *tofree2 = NULL;
-    int r;
+    int r = 0;
 
     if (warmup_flags & WARMUP_INDEX) {
-	fname = mailbox_meta_fname(state->mailbox, META_INDEX);
+	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_INDEX, 0);
 	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
     if (warmup_flags & WARMUP_CONVERSATIONS) {
 	if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
-	    fname = tofree1 = conversations_getmboxpath(state->mailbox->name);
+	    fname = tofree1 = conversations_getmboxpath(mbentry->name);
 	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
     if (warmup_flags & WARMUP_ANNOTATIONS) {
-	fname = mailbox_meta_fname(state->mailbox, META_ANNOTATIONS);
+	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_ANNOTATIONS, 0);
 	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }

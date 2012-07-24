@@ -9362,8 +9362,12 @@ static void cmd_xwarmup(const char *tag)
     char mytime[100];
     struct buf arg = BUF_INITIALIZER;
     int warmup_flags = 0;
+    /* We deal with the mboxlist API instead of the index_state API or
+     * mailbox API to avoid the overhead of index_open(), which will
+     * block while reading all the cyrus.index...we want to be
+     * non-blocking */
     struct mboxlist_entry *mbentry = NULL;
-    struct index_state *state = NULL;
+    int myrights;
     int c, r = 0;
     char mboxname[MAX_MAILBOX_BUFFER];
 
@@ -9384,6 +9388,20 @@ syntax_error:
     }
 
     r = mboxlist_lookup(mboxname, &mbentry, NULL);
+    if (r) goto out;
+
+    /* Do a permissions check to avoid server DoS opportunity.  But we
+     * only need read permission to warmup a mailbox.  Also, be careful
+     * to avoid telling the client about the existance of mailboxes to
+     * which he doesn't have LOOKUP rights. */
+    r = IMAP_PERMISSION_DENIED;
+    myrights = (mbentry->acl ? cyrus_acl_myrights(imapd_authstate, mbentry->acl) : 0);
+    if (imapd_userisadmin)
+	r = 0;
+    else if (!(myrights & ACL_LOOKUP))
+	r = IMAP_MAILBOX_NONEXISTENT;
+    else if (myrights & ACL_READ)
+	r = 0;
     if (r) goto out;
 
     if (mbentry->mbtype & MBTYPE_REMOTE) {
@@ -9437,27 +9455,9 @@ syntax_error:
     if (c == '\r') c = prot_getc(imapd_in);
     if (c != '\n') goto syntax_error;
 
-    if (imapd_index && !strcmp(mboxname, imapd_index->mailbox->name))
-	state = imapd_index;
-    else {
-	struct index_init init;
-
-	memset(&init, 0, sizeof(struct index_init));
-	init.userid = imapd_userid;
-	/* Do a permissions check to avoid server DoS opportunity */
-	init.authstate = imapd_authstate;
-	init.out = imapd_out;
-	/* But we only need read permission to warmup a mailbox */
-	init.examine_mode = 1;
-	r = index_open(mboxname, &init, &state);
-	if (r) goto out;
-    }
-
-    r = index_warmup(state, warmup_flags);
+    r = index_warmup(mbentry, warmup_flags);
 
 out:
-    if (state != imapd_index) index_close(&state);
-
     snprintf(mytime, sizeof(mytime), "%2.3f",
 	     (clock() - start) / (double) CLOCKS_PER_SEC);
 
