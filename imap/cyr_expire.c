@@ -126,7 +126,7 @@ static int parse_duration(const char *s, int *secondsp)
 
     /* no negative or empty numbers please */
     if (!*s || *s == '-')
-        return 0;
+	return 0;
 
     val = strtod(s, &end);
     /* Allow 'd', 'h', 'm' and 's' as end, else return error. */
@@ -159,8 +159,8 @@ static int parse_duration(const char *s, int *secondsp)
 /*
  * mailbox_expunge() callback to expunge expired articles.
  */
-static unsigned expire_cb(struct mailbox *mailbox __attribute__((unused)), 
-			  struct index_record *record, 
+static unsigned expire_cb(struct mailbox *mailbox __attribute__((unused)),
+			  struct index_record *record,
 			  void *rock)
 {
     struct expire_rock *erock = (struct expire_rock *) rock;
@@ -182,7 +182,7 @@ static unsigned expire_cb(struct mailbox *mailbox __attribute__((unused)),
  * - and perform a cleanup of expunged messages
  */
 static int expire(char *name, int matchlen __attribute__((unused)),
-	          int maycreate __attribute__((unused)), void *rock)
+		  int maycreate __attribute__((unused)), void *rock)
 {
     struct mboxlist_entry *mbentry = NULL;
     struct expire_rock *erock = (struct expire_rock *) rock;
@@ -218,14 +218,14 @@ static int expire(char *name, int matchlen __attribute__((unused)),
      * we need to iterate all the way up to "" (server entry)
      */
     if (!erock->skip_annotate) {
-        do {
+	do {
 	    buf_free(&attrib);
 	    r = annotatemore_lookup(buf, "/vendor/cmu/cyrus-imapd/expire", "",
 				    &attrib);
 
 	    if (r ||				/* error */
-	        attrib.s)			/* found an entry */
-	        break;
+		attrib.s)			/* found an entry */
+		break;
 
 	} while (mboxname_make_parent(buf));
     }
@@ -280,9 +280,9 @@ static int expire(char *name, int matchlen __attribute__((unused)),
 }
 
 static int delete(char *name,
-	          int matchlen __attribute__((unused)),
-	          int maycreate __attribute__((unused)),
-	          void *rock)
+		  int matchlen __attribute__((unused)),
+		  int maycreate __attribute__((unused)),
+		  void *rock)
 {
     struct mboxlist_entry *mbentry = NULL;
     struct delete_rock *drock = (struct delete_rock *) rock;
@@ -313,7 +313,7 @@ static int delete(char *name,
     mboxlist_entry_free(&mbentry);
 
     if ((timestamp == 0) || (timestamp > drock->delete_mark))
-        return 0;
+	return 0;
 
     /* Add this mailbox to list of mailboxes to delete */
     strarray_append(&drock->to_delete, name);
@@ -322,9 +322,9 @@ static int delete(char *name,
 }
 
 static int expire_conversations(char *name,
-			        int matchlen __attribute__((unused)),
-			        int maycreate __attribute__((unused)),
-			        void *rock)
+				int matchlen __attribute__((unused)),
+				int maycreate __attribute__((unused)),
+				void *rock)
 {
     struct conversations_rock *crock = (struct conversations_rock *)rock;
     char *filename = conversations_getmboxpath(name);
@@ -467,7 +467,7 @@ int main(int argc, char *argv[])
     quotadb_open(NULL);
 
     if (duplicate_init(NULL) != 0) {
-	fprintf(stderr, 
+	fprintf(stderr,
 		"cyr_expire: unable to init duplicate delivery database\n");
 	exit(1);
     }
@@ -516,10 +516,10 @@ int main(int argc, char *argv[])
 	cid_expire_seconds = config_getint(IMAPOPT_CONVERSATIONS_EXPIRE_DAYS) * 86400;
 	crock.expire_mark = time(0) - cid_expire_seconds;
 
-        if (verbose)
-            fprintf(stderr,
-                    "Removing conversation entries older than %0.2f days\n",
-                    (double)(cid_expire_seconds/86400));
+	if (verbose)
+	    fprintf(stderr,
+		    "Removing conversation entries older than %0.2f days\n",
+		    (double)(cid_expire_seconds/86400));
 
 	mboxlist_findall(NULL, find_prefix, 1, 0, 0,
 			 expire_conversations, &crock);
@@ -550,7 +550,7 @@ int main(int argc, char *argv[])
 	    fprintf(stderr,
 		    "Removing deleted mailboxes older than %0.2f days\n",
 		    ((double)delete_seconds/86400));
-        }
+	}
 
 	drock.delete_mark = time(0) - delete_seconds;
 
