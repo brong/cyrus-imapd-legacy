@@ -1094,13 +1094,10 @@ static int warmup_file(const char *filename,
     int r;
 
     fd = open(filename, O_RDONLY, 0);
-    if (fd < 0) {
-	r = (errno == ENOENT ? 0 : errno);
-	return r;
-    }
+    if (fd < 0) return errno;
 
     r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
-    if (r) r = (errno == ENOSYS ? 0 : errno);
+    if (r) r = errno;
 
     close(fd);
     return r;
@@ -1244,7 +1241,7 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry, unsigned int warmup_fl
     }
 
 out:
-    if (r)
+    if (r != ENOENT && r != ENOSYS)
 	syslog(LOG_ERR, "IOERROR: unable to warmup file %s: %s",
 		fname, error_message(r));
     free(tofree1);
