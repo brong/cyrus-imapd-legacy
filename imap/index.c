@@ -1103,6 +1103,11 @@ static int warmup_file(const char *filename,
      * others defined in the same standard by the same committee. */
     r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
 
+    /* posix_fadvise(WILLNEED) on Linux will return an EINVAL error
+     * if the file is on tmpfs, even though this effectively means
+     * the file's bytes are all already available in RAM.  Duh. */
+    if (r == EINVAL) r = 0;
+
     close(fd);
     return r;
 }
