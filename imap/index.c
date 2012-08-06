@@ -1086,8 +1086,6 @@ out:
  * to the end of the file.  Returns a UNIX errno or 0 on success.  No
  * error is reported if the file is missing or the kernel doesn't have
  * the magic system call.
- *
- * Returns an error code (a system errno) or zero on success.
  */
 static int warmup_file(const char *filename,
 		       off_t offset, off_t length)
@@ -1099,15 +1097,7 @@ static int warmup_file(const char *filename,
     if (fd < 0) return errno;
 
     r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
-
-    /* Some versions of eglibc (the libc on Debian) have a bug
-     * where the system call wrapper for posix_fadvise() misreports
-     * errors by returning a positive error number and not setting
-     * the errno variable.  This can cause incorrect and confusing
-     * error messages.  We work around that here by carefully leaving
-     * 'r' alone if it's positive. */
-    if (r < 0)
-	r = errno;
+    if (r) r = errno;
 
     close(fd);
     return r;
