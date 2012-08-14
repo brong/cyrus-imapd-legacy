@@ -448,6 +448,7 @@ struct buf *cache_buf(struct index_record *record);
 /* opening and closing */
 extern int mailbox_open_iwl(const char *name,
 			    struct mailbox **mailboxptr);
+extern int mailbox_open_iwlnb(const char *name, struct mailbox **);
 /* This is a filthy hack - it also asserts iwl, it's for
    doing things on the current mailbox when you're deep
    enough in layers that you don't have a ref any more */
