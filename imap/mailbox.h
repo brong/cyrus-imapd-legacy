@@ -450,6 +450,7 @@ struct buf *cache_buf(struct index_record *record);
 /* opening and closing */
 extern int mailbox_open_iwl(const char *name,
 			    struct mailbox **mailboxptr);
+extern int mailbox_open_iwlnb(const char *name, struct mailbox **);
 extern int mailbox_open_irl(const char *name,
 			    struct mailbox **mailboxptr);
 extern int mailbox_open_exclusive(const char *name,
