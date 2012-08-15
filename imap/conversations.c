@@ -806,6 +806,8 @@ EXPORTED int conversation_store(struct conversations_state *state,
 	dlist_setatom(nn, "ROUTE", sender->route);
 	dlist_setatom(nn, "MAILBOX", sender->mailbox);
 	dlist_setatom(nn, "DOMAIN", sender->domain);
+	dlist_setnum32(nn, "LASTSEEN", sender->lastseen);
+	dlist_setnum32(nn, "EXISTS", sender->exists);
     }
 
     buf_printf(&buf, "%d ", version);
