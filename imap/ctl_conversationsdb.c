@@ -521,7 +521,6 @@ static int fix_modseqs(struct conversations_state *a,
 	    /* B keys - check all the modseqs, both top level and per folder */
 	    conversation_t *conva = NULL;
 	    conversation_t *convb = NULL;
-	    conv_sender_t *sender;
 	    conv_folder_t *foldera;
 	    conv_folder_t *folderb;
 
@@ -543,14 +542,8 @@ static int fix_modseqs(struct conversations_state *a,
 		goto next;
 	    }
 
-	    /* add any missing senders */
-	    for (sender = conva->senders; sender; sender = sender->next) {
-		conversation_update_sender(convb,
-					   sender->name, sender->route,
-					   sender->mailbox, sender->domain,
-					   sender->lastseen, sender->exists);
-	    }
-
+	    /* because expunged messages could have had higher modseqs,
+	     * we need to re-copy any higher modseqs in */
 	    if (conva->modseq > convb->modseq)
 		convb->modseq = conva->modseq;
 
