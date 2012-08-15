@@ -264,8 +264,7 @@ EXPORTED int message_copy_strict(struct protstream *from, FILE *to,
     }
 }
 
-EXPORTED int message_parse2(const char *fname, struct index_record *record,
-		   struct body **bodyp)
+EXPORTED int message_parse(const char *fname, struct index_record *record)
 {
     struct body *body = NULL;
     FILE *f;
@@ -277,16 +276,11 @@ EXPORTED int message_parse2(const char *fname, struct index_record *record,
     r = message_parse_file(f, NULL, NULL, &body);
     if (!r) r = message_create_record(record, body);
 
-    if (f) fclose(f);
+    fclose(f);
 
     if (body) {
-	if (!r && bodyp) {
-	    *bodyp = body;
-	}
-	else {
-	    message_free_body(body);
-	    free(body);
-	}
+	message_free_body(body);
+	free(body);
     }
 
     return r;
@@ -2551,23 +2545,17 @@ static void message_get_subject(struct index_record *record, struct buf *buf)
  * conversation id is not valid.
  */
 static conversation_id_t generate_conversation_id(
-			    const struct index_record *record,
-			    const struct body *body)
+			    const struct index_record *record)
 {
     const struct message_guid *guid;
     conversation_id_t cid = 0;
     size_t i;
 
-    if (body)
-	guid = &body->guid;
-    else
-	guid = &record->guid;
-
-    assert(guid->status == GUID_NONNULL);
+    assert(record->guid.status == GUID_NONNULL);
 
     for (i = 0 ; i < sizeof(cid) ; i++) {
 	cid <<= 8;
-	cid |= guid->value[i];
+	cid |= record->guid.value[i];
     }
 
     /*
@@ -2608,8 +2596,7 @@ static int is_valid_rfc2822_inreplyto(const char *p)
  * we need out of the cache item in @record.
  */
 EXPORTED int message_update_conversations(struct conversations_state *state,
-			         struct index_record *record,
-			         const struct body *body, int isreplica)
+					  struct index_record *record)
 {
     char *hdrs[4];
     char *c_refs = NULL, *c_env = NULL, *c_me_msgid = NULL;
@@ -2639,19 +2626,7 @@ EXPORTED int message_update_conversations(struct conversations_state *state,
      * msgid in In-Reply-To:), so we weed those out before proceeding
      * to the database.
      */
-    if (body) {
-	/* goody, we have everything we need in the struct body */
-	hdrs[0] = body->references;
-	hdrs[1] = body->in_reply_to;
-	hdrs[2] = body->message_id;
-	hdrs[3] = body->x_me_message_id;
-	if (body->subject) {
-	    char *subject = charset_parse_mimeheader(body->subject);
-	    buf_appendcstr(&msubject, subject);
-	    free(subject);
-	}
-    }
-    else if (cache_size(record)) {
+    if (cache_size(record)) {
 	/* we have cache loaded, get what we need there */
 	strarray_t want = STRARRAY_INITIALIZER;
 	char *envtokens[NUMENVTOKENS];
@@ -2759,19 +2734,17 @@ continue2:
 	}
     }
 
-    /*
-     * Work out the new CID this message will belong to.
-     * The @isreplica flag forces us to use the CID passed
-     * in the record, which came from the master.
-     */
-    if (!isreplica) {
+    /* Work out the new CID this message will belong to.
+     * If it already has a cid allocated, then it has been
+     * checked already (maybe on a master) so don't try again */
+    if (!record->cid) {
 	/* Use the MAX of any CIDs found - as NULLCONVERSATION is
 	 * numerically zero this will be the only non-NULL CID or
 	 * the MAX of two or more non-NULL CIDs */
 	for (i = 0 ; i < nfound ; i++)
 	    newcid = (newcid > found[i].cid ? newcid : found[i].cid);
 	if (newcid == NULLCONVERSATION) {
-	    newcid = generate_conversation_id(record, body);
+	    newcid = generate_conversation_id(record);
 	    created = 1;
 	}
 
@@ -2803,12 +2776,10 @@ continue2:
 	    goto out;
     }
 
-    /* We just created a new conversation, so update it's subject */
-    if (isreplica || created) {
-	r = conversations_set_subject(state, newcid, &msubject);
-	if (r)
-	    goto out;
-    }
+    /* Update the subject header */
+    r = conversations_set_subject(state, newcid, &msubject);
+    if (r)
+	goto out;
 
     record->cid = newcid;
 

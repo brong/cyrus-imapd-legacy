@@ -918,14 +918,6 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	if (!*body || (as->nummsg - 1))
 	    r = message_parse_file(destfile, NULL, NULL, body);
 	if (!r) r = message_create_record(&record, *body);
-	if (!r && mailbox_has_conversations(mailbox)) {
-	    struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
-	    if (cstate)
-		r = message_update_conversations(cstate, &record, *body,
-						 /*isreplica*/0);
-	    else
-		r = IMAP_CONVERSATIONS_NOT_OPEN;
-	}
     }
     if (destfile) {
 	/* this will hopefully ensure that the link() actually happened
@@ -933,6 +925,10 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	fsync(fileno(destfile));
 	fclose(destfile);
     }
+
+    /* Write out index file entry */
+    r = mailbox_append_index_record(mailbox, &record);
+
     if (!r && config_getstring(IMAPOPT_ANNOTATION_CALLOUT)) {
 	if (flags)
 	    newflags = strarray_dup(flags);
@@ -967,16 +963,11 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	    }
 	}
     }
-    if (r)
-	goto out;
 
     /* Handle flags the user wants to set in the message */
-    if (flags) {
+    if (!r && flags) {
 	r = append_apply_flags(as, &record, flags);
-	if (r) goto out;
     }
-    /* Write out index file entry */
-    r = mailbox_append_index_record(mailbox, &record);
 
 out:
     if (newflags)
@@ -1246,17 +1237,6 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 	record.cache_crc = copymsg[msg].cache_crc;
 	record.cid = copymsg[msg].cid;
 	record.crec = copymsg[msg].crec;
-
-	if (record.cid == NULLCONVERSATION &&
-	    mailbox_has_conversations(as->mailbox)) {
-	    struct conversations_state *cstate = conversations_get_mbox(as->mailbox->name);
-	    if (cstate)
-		r = message_update_conversations(cstate, &record,
-						 NULL, /*isreplica*/0);
-	    else
-		r = IMAP_CONVERSATIONS_NOT_OPEN;
-	    if (r) goto out;
-	}
 
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);

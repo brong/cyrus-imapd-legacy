@@ -1276,6 +1276,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    /* skip out on the first pass */
 	    if (!doupdate) continue;
 
+	    rrecord.cid = mrecord.cid;
 	    rrecord.modseq = mrecord.modseq;
 	    rrecord.last_updated = mrecord.last_updated;
 	    rrecord.internaldate = mrecord.internaldate;
@@ -1283,13 +1284,6 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 				   (rrecord.system_flags & FLAG_UNLINKED);
 	    for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		rrecord.user_flags[i] = mrecord.user_flags[i];
-
-	    r = sync_rename_cid(mailbox, &mrecord, &rrecord);
-	    if (r) {
-		syslog(LOG_ERR, "Failed to rename cid %s %u: %s",
-		       mailbox->name, recno, error_message(r));
-		goto out;
-	    }
 
 	    r = read_annotations(mailbox, &rrecord, &rannots);
 	    if (r) {

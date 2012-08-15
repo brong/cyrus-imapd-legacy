@@ -2298,6 +2298,13 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
     if (!old && !new)
 	return 0;
 
+    if (!old && new) {
+	/* add the conversation */
+	mailbox_cacherecord(mailbox, new); /* make sure it's loaded */
+	r = message_update_conversations(cstate, new);
+	if (r) return r;
+    }
+
     if (old && new) {
 	assert(old->uid == new->uid);
 	assert(old->modseq <= new->modseq);
@@ -2383,8 +2390,8 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	/* Need to find the sender */
 
 	/* +1 -> skip the leading paren */
-	env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
-		       cacheitem_size(new, CACHE_ENVELOPE) - 1);
+	env = xstrndup(cacheitem_base(record, CACHE_ENVELOPE) + 1,
+		       cacheitem_size(record, CACHE_ENVELOPE) - 1);
 
 	parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
 
@@ -4758,8 +4765,8 @@ int mailbox_cid_rename(struct mailbox *mailbox,
 
 	if (r) {
 	    syslog(LOG_ERR, "mailbox_cid_rename: error "
-			    "rewriting record %u, mailbox %s: %s",
-			    recno, mailbox->name, error_message(r));
+			    "rewriting record %u, mailbox %s: %s from %llu to %llu",
+			    recno, mailbox->name, error_message(r), from_cid, to_cid);
 	    return r;
 	}
     }

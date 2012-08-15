@@ -229,9 +229,6 @@ static int build_cid_cb(const char *mboxname,
 	r = mailbox_cacherecord(mailbox, &record);
 	if (r) goto done;
 
-	r = message_update_conversations(cstate, &record, NULL, /*isreplica*/0);
-	if (r) goto done;
-
 	r = mailbox_rewrite_index_record(mailbox, &record);
 	if (r) goto done;
     }

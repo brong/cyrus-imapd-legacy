@@ -131,9 +131,7 @@ struct param {
 extern int message_copy_strict P((struct protstream *from, FILE *to,
 				  unsigned size, int allow_null));
 
-extern int message_parse2(const char *fname, struct index_record *record,
-			  struct body **bodyp);
-#define message_parse(fname, record) message_parse2((fname), (record), NULL)
+extern int message_parse(const char *fname, struct index_record *record);
 
 struct message_content {
     const char *base;  /* memory mapped file */
@@ -179,7 +177,6 @@ extern void message_parse_env_address(char *str, struct address *addr);
 
 extern char *parse_nstring(char **str);
 
-extern int message_update_conversations(struct conversations_state *,
-			         struct index_record *, const struct body *, int);
+extern int message_update_conversations(struct conversations_state *, struct index_record *);
 
 #endif /* INCLUDED_MESSAGE_H */

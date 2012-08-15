@@ -1092,23 +1092,16 @@ static int compare_one_record(struct mailbox *mailbox,
 		rp->last_updated >= mp->last_updated) {
 		/* then copy all the flag data over from the replica */
 		mp->system_flags = rp->system_flags;
+		mp->cid = rp->cid;
 		for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		    mp->user_flags[i] = rp->user_flags[i];
 
 		log_mismatch("more recent on replica", mailbox, mp, rp);
-
-		if (kaction) {
-		    r = sync_rename_cid(mailbox, rp, mp);
-		    if (r) return r;
-		    r = apply_annotations(mailbox, mp, mannots, rannots, 0);
-		    if (r) return r;
-		}
 	    }
-	    else {
-		if (kaction) {
-		    r = apply_annotations(mailbox, mp, mannots, rannots, 1);
-		    if (r) return r;
-		}
+
+	    if (kaction) {
+		r = apply_annotations(mailbox, mp, mannots, rannots, 0);
+		if (r) return r;
 	    }
 
 	}

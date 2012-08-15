@@ -1553,34 +1553,6 @@ int sync_parse_response(const char *cmd, struct protstream *in,
     return IMAP_PROTOCOL_ERROR;
 }
 
-int sync_rename_cid(struct mailbox *mailbox,
-		    struct index_record *remote,
-		    struct index_record *local)
-{
-    int r;
-
-    if (local->cid == remote->cid)
-	return 0; /* nothing to do */
-
-    /* copy the cid */
-    local->cid = remote->cid;
-
-    /* apply the new value to all message ids */
-    if (local->cid && mailbox_has_conversations(mailbox)) {
-	struct conversations_state *cstate;
-	cstate = conversations_get_mbox(mailbox->name);
-	assert(cstate);
-	/* load in cache to find message ids */
-	r = mailbox_cacherecord(mailbox, local);
-	if (r) return r;
-	/* update the conversations db */
-	r = message_update_conversations(cstate, local, NULL, 1);
-	if (r) return r;
-    }
-
-    return 0;
-}
-
 int sync_append_copyfile(struct mailbox *mailbox,
 			 struct index_record *record,
 			 const struct sync_annot_list *annots)
@@ -1601,7 +1573,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return r;
     }
 
-    r = message_parse2(fname, record, &body);
+    r = message_parse(fname, record);
     if (r) {
 	/* deal with unlinked master records */
 	if (record->system_flags & FLAG_EXPUNGED) {
@@ -1611,18 +1583,6 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	syslog(LOG_ERR, "IOERROR: failed to parse %s", fname);
 	return r;
     }
-
-    record->cid = cid;	/* use the CID given us */
-    if (mailbox_has_conversations(mailbox)) {
-	struct conversations_state *cstate = conversations_get_mbox(mailbox->name);
-	r = message_update_conversations(cstate, record, body, /*isreplica*/1);
-	/* check r later... */
-    }
-    message_free_body(body);
-    free(body);
-    body = NULL;
-    /* ... after we have freed the body */
-    if (r) return r;
 
     if (!message_guid_equal(&tmp_guid, &record->guid)) {
 	syslog(LOG_ERR, "IOERROR: guid mismatch on parse %s (%s)",
