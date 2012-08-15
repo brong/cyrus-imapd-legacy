@@ -1115,15 +1115,22 @@ EXPORTED int conversation_parse(struct conversations_state *state,
 
     n = dlist_getchildn(dl, 6);
     for (n = (n ? n->head : NULL) ; n ; n = n->next) {
-	struct dlist *nn2, *nn3, *nn4;
+	struct dlist *nn2, *nn3, *nn4, *nn5, *nn6;
 	nn = dlist_getchildn(n, 0);
 	nn2 = dlist_getchildn(n, 1);
 	nn3 = dlist_getchildn(n, 2);
 	nn4 = dlist_getchildn(n, 3);
-	if (nn3 && nn4)
-	    conversation_add_sender(conv,
-				    nn->sval, nn2->sval,
-				    nn3->sval, nn4->sval);
+	nn5 = dlist_getchildn(n, 4);
+	nn6 = dlist_getchildn(n, 5);
+	if (nn6)
+	    conversation_update_sender(conv, nn->sval, nn2->sval,
+				       nn3->sval, nn4->sval,
+				       dlist_num(nn5), dlist_num(nn6));
+	else if (nn4) /* XXX: remove when cleaned up - handle old-style too */
+	    conversation_update_sender(conv, nn->sval, nn2->sval,
+				       nn3->sval, nn4->sval,
+				       0/*time_t*/, (1<<30)/*exists*/);
+	/* INSANE EXISTS NUMBER MEANS IT NEVER GETS CLEANED UP */
     }
 
     conv->prev_unseen = conv->unseen;
@@ -1316,19 +1323,41 @@ static int sender_preferred_name(const char *a, const char *b)
     return d;
 }
 
-EXPORTED void conversation_add_sender(conversation_t *conv,
-			     const char *name,
-			     const char *route,
-			     const char *mailbox,
-			     const char *domain)
+EXPORTED void conversation_update_sender(conversation_t *conv,
+					 const char *name,
+					 const char *route,
+					 const char *mailbox,
+					 const char *domain,
+					 time_t lastseen,
+					 int delta_exists)
 {
-    conv_sender_t *sender, **nextp = &conv->senders;
+    conv_sender_t *sender, **nextp;
 
     if (!mailbox || !domain) return;
 
+    nextp = &conv->senders;
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (!sender_cmp(sender, mailbox, domain)) {
-	    /* found it.  To ensure the database is consistent regardless
+	    /* counts first, may be just removing it */
+	    if (delta_exists) {
+		conv->dirty = 1;
+
+		/* removed? */
+		if (delta_exists < 0 && (- delta_exists) >= sender->exists) {
+		    *nextp = sender->next;
+		    free(sender->name);
+		    free(sender->route);
+		    free(sender->mailbox);
+		    free(sender->domain);
+		    free(sender);
+		    return;
+		}
+
+		/* otherwise update the counter */
+		sender->exists += delta_exists;
+	    }
+
+	    /* ensure the database is consistent regardless
 	     * of message arrival order, update the record if the newly
 	     * seen values are more preferred */
 	    if (sender_preferred_mailbox(sender->mailbox, mailbox) > 0) {
@@ -1351,11 +1380,26 @@ EXPORTED void conversation_add_sender(conversation_t *conv,
 		sender->name = xstrdup(name);
 		conv->dirty = 1;
 	    }
+
+	    /* last seen for display sorting */
+	    if (sender->lastseen < lastseen) {
+		sender->lastseen = lastseen;
+		conv->dirty = 1;
+	    }
+
 	    return;
 	}
+	nextp = &sender->next;
+    }
+
+    /* corruption? ignore */
+    if (delta_exists <= 0) {
+	conv->dirty = 1;
+	return;
     }
 
     /* second pass so we don't break on unordered data */
+    nextp = &conv->senders;
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (sender_cmp(sender, mailbox, domain) > 0)
 	    break;
@@ -1367,6 +1411,8 @@ EXPORTED void conversation_add_sender(conversation_t *conv,
     if (route) sender->route = xstrdup(route);
     sender->mailbox = xstrdup(mailbox);
     sender->domain = xstrdup(domain);
+    sender->lastseen = lastseen;
+    sender->exists = delta_exists;
     sender->next = *nextp;
     *nextp = sender;
 

@@ -92,6 +92,8 @@ struct conv_sender {
     char	    *route;
     char	    *mailbox;
     char	    *domain;
+    time_t	    lastseen;
+    uint32_t	    exists;
 };
 
 struct conversation {
@@ -198,11 +200,13 @@ extern conv_folder_t *conversation_find_folder(struct conversations_state *state
 extern conversation_t *conversation_new(struct conversations_state *state);
 extern void conversation_free(conversation_t *);
 
-extern void conversation_add_sender(conversation_t *conv,
-				    const char *name,
-				    const char *route,
-				    const char *mailbox,
-				    const char *domain);
+extern void conversation_update_sender(conversation_t *conv,
+				       const char *name,
+				       const char *route,
+				       const char *mailbox,
+				       const char *domain,
+				       time_t lastseen,
+				       int delta_exists);
 
 extern int conversations_prune(struct conversations_state *state,
 			       time_t thresh, unsigned int *,

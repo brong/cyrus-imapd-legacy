@@ -545,8 +545,10 @@ static int fix_modseqs(struct conversations_state *a,
 
 	    /* add any missing senders */
 	    for (sender = conva->senders; sender; sender = sender->next) {
-		conversation_add_sender(convb, sender->name, sender->route,
-					sender->mailbox, sender->domain);
+		conversation_update_sender(convb,
+					   sender->name, sender->route,
+					   sender->mailbox, sender->domain,
+					   sender->lastseen, sender->exists);
 	    }
 
 	    if (conva->modseq > convb->modseq)

@@ -2281,7 +2281,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
     int *delta_counts = NULL;
     int i;
     modseq_t modseq = 0;
-    conversation_id_t cid = NULLCONVERSATION;
+    struct index_record *record = NULL;
     struct conversations_state *cstate = NULL;
 
     if (!mailbox_has_conversations(mailbox))
@@ -2313,12 +2313,12 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	    return r;
 	}
     }
-    cid = (new ? new->cid : old->cid);
+    record = new ? new : old;
 
     /* skip out on non-CIDed records */
-    if (!cid) return 0;
+    if (!record->cid) return 0;
 
-    r = conversation_load(cstate, cid, &conv);
+    r = conversation_load(cstate, record->cid, &conv);
     if (r)
 	return r;
     if (!conv) {
@@ -2326,7 +2326,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	    /* We're trying to delete a conversation that's already
 	     * gone...don't try to hard */
 	    syslog(LOG_NOTICE, "conversation "CONV_FMT" already "
-			       "deleted, ignoring", cid);
+			       "deleted, ignoring", record->cid);
 	    return 0;
 	}
 	conv = conversation_new(cstate);
@@ -2375,28 +2375,28 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 
     /* drafts don't generate sender records so you don't spuriously get
      * yourself just for clicking on "reply" then aborting */
-    if (!old && new && !(new->system_flags & FLAG_DRAFT)) {
-	if (!mailbox_cacherecord(mailbox, new)) {
-	    char *env = NULL;
-	    char *envtokens[NUMENVTOKENS];
-	    struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
+    if (!mailbox_cacherecord(mailbox, record)) {
+	char *env = NULL;
+	char *envtokens[NUMENVTOKENS];
+	struct address addr = { NULL, NULL, NULL, NULL, NULL, NULL };
 
-	    /* Need to find the sender */
+	/* Need to find the sender */
 
-	    /* +1 -> skip the leading paren */
-	    env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
-			   cacheitem_size(new, CACHE_ENVELOPE) - 1);
+	/* +1 -> skip the leading paren */
+	env = xstrndup(cacheitem_base(new, CACHE_ENVELOPE) + 1,
+		       cacheitem_size(new, CACHE_ENVELOPE) - 1);
 
-	    parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
+	parse_cached_envelope(env, envtokens, VECTOR_SIZE(envtokens));
 
-	    if (envtokens[ENV_FROM])
-		message_parse_env_address(envtokens[ENV_FROM], &addr);
+	if (envtokens[ENV_FROM])
+	    message_parse_env_address(envtokens[ENV_FROM], &addr);
 
-	    conversation_add_sender(conv, addr.name, addr.route,
-				    addr.mailbox, addr.domain);
-
-	    free(env);
-	}
+	/* XXX - internaldate vs gmtime? */
+	conversation_update_sender(conv,
+				   addr.name, addr.route,
+				   addr.mailbox, addr.domain,
+				   record->gmtime, delta_exists);
+	free(env);
     }
 
     conversation_update(cstate, conv, mailbox->name,
@@ -2404,7 +2404,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 			delta_exists, delta_unseen,
 			delta_counts, modseq);
 
-    r = conversation_save(cstate, cid, conv);
+    r = conversation_save(cstate, record->cid, conv);
 
     conversation_free(conv);
     return r;
