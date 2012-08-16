@@ -2298,13 +2298,6 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
     if (!old && !new)
 	return 0;
 
-    if (!old && new) {
-	/* add the conversation */
-	mailbox_cacherecord(mailbox, new); /* make sure it's loaded */
-	r = message_update_conversations(cstate, new);
-	if (r) return r;
-    }
-
     if (old && new) {
 	assert(old->uid == new->uid);
 	assert(old->modseq <= new->modseq);
@@ -2320,23 +2313,32 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	    return r;
 	}
     }
-    record = new ? new : old;
 
-    /* skip out on non-CIDed records */
-    if (!record->cid) return 0;
+    if (!old && new) {
+	/* add the conversation */
+	mailbox_cacherecord(mailbox, new); /* make sure it's loaded */
+	r = message_update_conversations(cstate, new, &conv);
+	if (r) return r;
+	record = new;
+    }
+    else {
+	record = new ? new : old;
+	/* skip out on non-CIDed records */
+	if (!record->cid) return 0;
 
-    r = conversation_load(cstate, record->cid, &conv);
-    if (r)
-	return r;
-    if (!conv) {
-	if (!new) {
-	    /* We're trying to delete a conversation that's already
-	     * gone...don't try to hard */
-	    syslog(LOG_NOTICE, "conversation "CONV_FMT" already "
-			       "deleted, ignoring", record->cid);
-	    return 0;
+	r = conversation_load(cstate, record->cid, &conv);
+	if (r)
+	    return r;
+	if (!conv) {
+	    if (!new) {
+		/* We're trying to delete a conversation that's already
+		 * gone...don't try to hard */
+		syslog(LOG_NOTICE, "conversation "CONV_FMT" already "
+				   "deleted, ignoring", record->cid);
+		return 0;
+	    }
+	    conv = conversation_new(cstate);
 	}
-	conv = conversation_new(cstate);
     }
 
     if (cstate->counted_flags)
@@ -2380,8 +2382,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	modseq = MAX(modseq, new->modseq);
     }
 
-    /* drafts don't generate sender records so you don't spuriously get
-     * yourself just for clicking on "reply" then aborting */
+    /* XXX - combine this with the earlier cache parsing */
     if (!mailbox_cacherecord(mailbox, record)) {
 	char *env = NULL;
 	char *envtokens[NUMENVTOKENS];

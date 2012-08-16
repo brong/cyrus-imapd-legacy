@@ -2596,7 +2596,8 @@ static int is_valid_rfc2822_inreplyto(const char *p)
  * we need out of the cache item in @record.
  */
 EXPORTED int message_update_conversations(struct conversations_state *state,
-					  struct index_record *record)
+					  struct index_record *record,
+					  conversation_t **convp)
 {
     char *hdrs[4];
     char *c_refs = NULL, *c_env = NULL, *c_me_msgid = NULL;
@@ -2612,6 +2613,8 @@ EXPORTED int message_update_conversations(struct conversations_state *state,
     conversation_id_t cid;
     int created = 0;
     conversation_id_t newcid = record->cid;
+    conversation_t *conv = NULL;
+    const char *msubj = NULL;
     int i;
     int j;
     int r = 0;
@@ -2675,6 +2678,7 @@ EXPORTED int message_update_conversations(struct conversations_state *state,
     /* Note that a NULL subject, e.g. due to a missing Subject: header
      * field in the original message, is normalised to "" not NULL */
     conversation_normalise_subject(&msubject);
+    msubj = buf_cstring(&msubject);
 
     for (i = 0 ; i < 4 ; i++) {
 continue2:
@@ -2711,14 +2715,16 @@ continue2:
 		 * subject.  We treat a missing S-record as compatible
 		 * with anything for backwards compatibility with older
 		 * conversations DBs. */
-		r = conversations_get_subject(state, cid, &csubject);
+		r = conversation_load(state, cid, &conv);
 		if (r) goto out;
-		if (csubject.s != NULL && buf_cmp(&msubject, &csubject)) {
-		    buf_free(&csubject);
+		if (conv && strcmpsafe(conv->subject, msubj)) {
+		    conversation_free(conv);
+		    conv = NULL;
 		    free(msgid);
 		    continue;
 		}
-		buf_free(&csubject);
+		conversation_free(conv);
+		conv = NULL;
 	    }
 
 	    /* it's unique and compatible, add it */
@@ -2761,6 +2767,11 @@ continue2:
 	}
     }
 
+    r = conversation_load(state, newcid, &conv);
+    if (r) goto out;
+
+    if (!conv) conv = conversation_new(state);
+
     /*
      * Update the database to add records for all the message-ids
      * not already mentioned.  Note that we take care to avoid
@@ -2777,9 +2788,7 @@ continue2:
     }
 
     /* Update the subject header */
-    r = conversations_set_subject(state, newcid, &msubject);
-    if (r)
-	goto out;
+    conv->subject = xstrdupnull(msubj);
 
     record->cid = newcid;
 
@@ -2792,7 +2801,12 @@ out:
     free(c_env);
     free(c_me_msgid);
     buf_free(&msubject);
-    buf_free(&csubject);
+
+    if (r)
+	conversation_free(conv);
+    else
+	*convp = conv;
+
     return r;
 }
 

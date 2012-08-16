@@ -177,6 +177,6 @@ extern void message_parse_env_address(char *str, struct address *addr);
 
 extern char *parse_nstring(char **str);
 
-extern int message_update_conversations(struct conversations_state *, struct index_record *);
+extern int message_update_conversations(struct conversations_state *, struct index_record *, conversation_t **);
 
 #endif /* INCLUDED_MESSAGE_H */

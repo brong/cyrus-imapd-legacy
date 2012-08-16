@@ -810,6 +810,8 @@ EXPORTED int conversation_store(struct conversations_state *state,
 	dlist_setnum32(nn, "EXISTS", sender->exists);
     }
 
+    dlist_setatom(dl, "SUBJECT", conv->subject);
+
     buf_printf(&buf, "%d ", version);
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
@@ -1134,6 +1136,9 @@ EXPORTED int conversation_parse(struct conversations_state *state,
 				       0/*time_t*/, (1<<30)/*exists*/);
 	/* INSANE EXISTS NUMBER MEANS IT NEVER GETS CLEANED UP */
     }
+
+    n = dlist_getchildn(dl, 7);
+    conv->subject = xstrdupnull(dlist_cstring(n));
 
     conv->prev_unseen = conv->unseen;
 
@@ -1513,6 +1518,7 @@ EXPORTED void conversation_free(conversation_t *conv)
 	free(sender);
     }
 
+    free(conv->subject);
     free(conv->counts);
     free(conv);
 }

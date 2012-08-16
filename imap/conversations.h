@@ -105,6 +105,7 @@ struct conversation {
     uint32_t	    *counts;
     conv_folder_t   *folders;
     conv_sender_t   *senders;
+    char	    *subject;
     int		    dirty;
 };
 
