@@ -816,6 +816,8 @@ EXPORTED int conversation_store(struct conversations_state *state,
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
+    syslog(LOG_ERR, "BUF: %.*s", buf.len, buf.s);
+
     if (_sanity_check_counts(conv)) {
 	syslog(LOG_ERR, "IOERROR: conversations_audit on store: %s %.*s %.*s",
 	       state->path, keylen, key, buf.len, buf.s);
@@ -1276,7 +1278,7 @@ static int sender_preferred_mailbox(const char *a, const char *b)
 {
     /* choosing the lexically earlier string tends to keep
      * capital letters, which is an arbitrary asthetic */
-    return strcmp(a, b);
+    return strcmpsafe(a, b);
 }
 
 /* Choose a preferred domain. Returns <0 if @a is preferred,
@@ -1285,7 +1287,16 @@ static int sender_preferred_domain(const char *a, const char *b)
 {
     /* choosing the lexically earlier string tends to keep
      * capital letters, which is an arbitrary asthetic */
-    return strcmp(a, b);
+    return strcmpsafe(a, b);
+}
+
+/* Choose a preferred route. Returns <0 if @a is preferred,
+ * 0 if we don't care, and >0 if @b is preferred */
+static int sender_preferred_route(const char *a, const char *b)
+{
+    /* choosing the lexically earlier string tends to keep
+     * capital letters, which is an arbitrary asthetic */
+    return strcmpsafe(a, b);
 }
 
 static int has_non_ascii(const char *s)
@@ -1338,88 +1349,86 @@ EXPORTED void conversation_update_sender(conversation_t *conv,
 					 time_t lastseen,
 					 int delta_exists)
 {
-    conv_sender_t *sender, **nextp;
+    conv_sender_t *sender, *ptr, **nextp = &conv->senders;
 
     if (!mailbox || !domain) return;
 
-    nextp = &conv->senders;
+    syslog(LOG_ERR, "UPDATE: %s %s %s %s %u %i", name, route, mailbox, domain, lastseen, delta_exists);
+
+    /* always re-stitch the found record, it's just simpler */
     for (sender = conv->senders; sender; sender = sender->next) {
-	if (!sender_cmp(sender, mailbox, domain)) {
-	    /* counts first, may be just removing it */
-	    if (delta_exists) {
-		conv->dirty = 1;
-
-		/* removed? */
-		if (delta_exists < 0 && (- delta_exists) >= sender->exists) {
-		    *nextp = sender->next;
-		    free(sender->name);
-		    free(sender->route);
-		    free(sender->mailbox);
-		    free(sender->domain);
-		    free(sender);
-		    return;
-		}
-
-		/* otherwise update the counter */
-		sender->exists += delta_exists;
-	    }
-
-	    /* ensure the database is consistent regardless
-	     * of message arrival order, update the record if the newly
-	     * seen values are more preferred */
-	    if (sender_preferred_mailbox(sender->mailbox, mailbox) > 0) {
-		free(sender->mailbox);
-		sender->mailbox = xstrdup(mailbox);
-		conv->dirty = 1;
-	    }
-
-	    if (sender_preferred_domain(sender->domain, domain) > 0) {
-		free(sender->domain);
-		sender->domain = xstrdup(domain);
-		conv->dirty = 1;
-	    }
-
-	    if (sender_preferred_name(sender->name, name) > 0) {
-		free(sender->name);
-		/* a NULL name should never be *more* preferred
-		 * than any other name */
-		assert(name);
-		sender->name = xstrdup(name);
-		conv->dirty = 1;
-	    }
-
-	    /* last seen for display sorting */
-	    if (sender->lastseen < lastseen) {
-		sender->lastseen = lastseen;
-		conv->dirty = 1;
-	    }
-
-	    return;
-	}
-	nextp = &sender->next;
-    }
-
-    /* corruption? ignore */
-    if (delta_exists <= 0) {
-	conv->dirty = 1;
-	return;
-    }
-
-    /* second pass so we don't break on unordered data */
-    nextp = &conv->senders;
-    for (sender = conv->senders; sender; sender = sender->next) {
-	if (sender_cmp(sender, mailbox, domain) > 0)
+	if (!sender_cmp(sender, mailbox, domain))
 	    break;
 	nextp = &sender->next;
     }
 
-    sender = xzmalloc(sizeof(*sender));
-    if (name) sender->name = xstrdup(name);
-    if (route) sender->route = xstrdup(route);
-    sender->mailbox = xstrdup(mailbox);
-    sender->domain = xstrdup(domain);
-    sender->lastseen = lastseen;
-    sender->exists = delta_exists;
+    if (sender) {
+	/* unstitch */
+	*nextp = sender->next;
+    }
+    else {
+	/* we start with zero */
+	sender = xzmalloc(sizeof(*sender));
+    }
+
+    /* counts first, may be just removing it */
+    if (delta_exists) {
+	/* removed? */
+	if (delta_exists < 0 && (- delta_exists) >= sender->exists) {
+	    conv->dirty = 1;
+	    free(sender->name);
+	    free(sender->route);
+	    free(sender->mailbox);
+	    free(sender->domain);
+	    free(sender);
+	    return;
+	}
+
+	/* otherwise update the counter */
+	sender->exists += delta_exists;
+    }
+
+    /* ensure the database is consistent regardless
+     * of message arrival order, update the record if the newly
+     * seen values are more preferred */
+    if (!sender->name || sender_preferred_name(sender->name, name) > 0) {
+	free(sender->name);
+	sender->name = xstrdupnull(name);
+    }
+
+    if (!sender->route || sender_preferred_route(sender->route, route) > 0) {
+	free(sender->route);
+	sender->route = xstrdupnull(route);
+    }
+
+    syslog(LOG_ERR, "LOG: %s %s", sender->mailbox, mailbox);
+    if (!sender->mailbox || sender_preferred_mailbox(sender->mailbox, mailbox) > 0) {
+	syslog(LOG_ERR, "CHOSE: %s", mailbox);
+	free(sender->mailbox);
+	sender->mailbox = xstrdup(mailbox);
+    }
+
+    if (!sender->domain || sender_preferred_domain(sender->domain, domain) > 0) {
+	free(sender->domain);
+	sender->domain = xstrdup(domain);
+    }
+
+    /* last seen for display sorting */
+    if (sender->lastseen < lastseen) {
+	sender->lastseen = lastseen;
+    }
+
+    /* now re-stitch it into place */
+    nextp = &conv->senders;
+    for (ptr = conv->senders; ptr; ptr = ptr->next) {
+	if (ptr->lastseen < sender->lastseen)
+	    break;
+	if (sender->lastseen == ptr->lastseen && 
+	    sender_cmp(ptr, mailbox, domain) > 0)
+	    break;
+	nextp = &ptr->next;
+    }
+
     sender->next = *nextp;
     *nextp = sender;
 
