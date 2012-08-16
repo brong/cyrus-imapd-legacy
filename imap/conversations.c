@@ -816,8 +816,6 @@ EXPORTED int conversation_store(struct conversations_state *state,
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
 
-    syslog(LOG_ERR, "BUF: %.*s", buf.len, buf.s);
-
     if (_sanity_check_counts(conv)) {
 	syslog(LOG_ERR, "IOERROR: conversations_audit on store: %s %.*s %.*s",
 	       state->path, keylen, key, buf.len, buf.s);
@@ -1353,8 +1351,6 @@ EXPORTED void conversation_update_sender(conversation_t *conv,
 
     if (!mailbox || !domain) return;
 
-    syslog(LOG_ERR, "UPDATE: %s %s %s %s %u %i", name, route, mailbox, domain, lastseen, delta_exists);
-
     /* always re-stitch the found record, it's just simpler */
     for (sender = conv->senders; sender; sender = sender->next) {
 	if (!sender_cmp(sender, mailbox, domain))
@@ -1401,9 +1397,7 @@ EXPORTED void conversation_update_sender(conversation_t *conv,
 	sender->route = xstrdupnull(route);
     }
 
-    syslog(LOG_ERR, "LOG: %s %s", sender->mailbox, mailbox);
     if (!sender->mailbox || sender_preferred_mailbox(sender->mailbox, mailbox) > 0) {
-	syslog(LOG_ERR, "CHOSE: %s", mailbox);
 	free(sender->mailbox);
 	sender->mailbox = xstrdup(mailbox);
     }
