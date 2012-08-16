@@ -161,6 +161,7 @@ typedef struct msgdata {
 				   (stored in order of sortcrit) */
     modseq_t convmodseq;	/* modseq of conversation */
     uint32_t convexists;	/* exists count of conversation */
+    uint32_t convsize;		/* total size of messages in conversation */
     bit32 hasflag;		/* hasflag values (up to 32 of them) */
     bit32 hasconvflag;		/* hasconvflag values (up to 32 of them) */
 } MsgData;

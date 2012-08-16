@@ -845,6 +845,7 @@ static int _conversation_save(struct conversations_state *state,
 	modseq_t modseq;
 	uint32_t exists;
 	uint32_t unseen;
+	uint32_t size;
 
 	/* case: full removal of conversation - make sure to remove
 	 * unseen as well */

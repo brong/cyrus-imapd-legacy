@@ -4737,6 +4737,8 @@ static void do_one_xconvmeta(struct conversations_state *state,
 	    dlist_setnum32(item, "EXISTS", conv->exists);
 	else if (!strcasecmp(key, "UNSEEN"))
 	    dlist_setnum32(item, "UNSEEN", conv->unseen);
+	else if (!strcasecmp(key, "SIZE"))
+	    dlist_setnum32(item, "SIZE", conv->size);
 	else if (!strcasecmp(key, "COUNT")) {
 	    struct dlist *flist = dlist_newlist(item, "COUNT");
 	    fl = fl->next;
@@ -11248,6 +11250,8 @@ static int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    (*sortcrit)[n].key = SORT_CONVMODSEQ;
 	else if (hasconv && !strcmp(criteria.s, "convexists"))
 	    (*sortcrit)[n].key = SORT_CONVEXISTS;
+	else if (hasconv && !strcmp(criteria.s, "convsize"))
+	    (*sortcrit)[n].key = SORT_CONVSIZE;
 	else if (hasconv && !strcmp(criteria.s, "hasconvflag")) {
 	    (*sortcrit)[n].key = SORT_HASCONVFLAG;
 	    if (c != ' ') goto missingarg;

@@ -1653,6 +1653,7 @@ static int is_mutable_sort(struct sortcrit *sortcrit)
 	    case SORT_HASFLAG:
 	    case SORT_CONVMODSEQ:
 	    case SORT_CONVEXISTS:
+	    case SORT_CONVSIZE:
 	    case SORT_HASCONVFLAG:
 		return 1;
 	    default:
@@ -4699,7 +4700,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 	    }
 
 	    if ((label == SORT_HASCONVFLAG || label == SORT_CONVMODSEQ ||
-		label == SORT_CONVEXISTS) && !did_conv) {
+		label == SORT_CONVEXISTS || label == SORT_CONVSIZE) && !did_conv) {
 		if (!cstate) cstate = conversations_get_mbox(state->mailbox->name);
 		assert(cstate);
 		if (conversation_load(cstate, im->record.cid, &conv))
@@ -4778,6 +4779,9 @@ static MsgData **index_msgdata_load(struct index_state *state,
 	    }
 	    case SORT_CONVEXISTS:
 		cur->convexists = conv->exists;
+		break;
+	    case SORT_CONVSIZE:
+		cur->convsize = conv->size;
 		break;
 	    case SORT_CONVMODSEQ:
 		cur->convmodseq = conv->modseq;
@@ -5138,6 +5142,9 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	    break;
 	case SORT_CONVEXISTS:
 	    ret = numcmp(md1->convexists, md2->convexists);
+	    break;
+	case SORT_CONVSIZE:
+	    ret = numcmp(md1->size, md2->convsize);
 	    break;
 	case SORT_HASFLAG:
 	    if (i < 31)
