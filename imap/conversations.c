@@ -812,6 +812,8 @@ EXPORTED int conversation_store(struct conversations_state *state,
 
     dlist_setatom(dl, "SUBJECT", conv->subject);
 
+    dlist_setnum32(dl, "SIZE", conv->size);
+
     buf_printf(&buf, "%d ", version);
     dlist_printbuf(dl, 0, &buf);
     dlist_free(&dl);
@@ -1138,7 +1140,10 @@ EXPORTED int conversation_parse(struct conversations_state *state,
     }
 
     n = dlist_getchildn(dl, 7);
-    conv->subject = xstrdupnull(dlist_cstring(n));
+    if (n) conv->subject = xstrdupnull(dlist_cstring(n));
+
+    n = dlist_getchildn(dl, 8);
+    if (n) conv->size = dlist_num(n);
 
     conv->prev_unseen = conv->unseen;
 
@@ -1448,7 +1453,8 @@ EXPORTED void conversation_update(struct conversations_state *state,
 			 conversation_t *conv, const char *mboxname,
 			 int delta_num_records,
 			 int delta_exists, int delta_unseen,
-			 int *delta_counts, modseq_t modseq)
+			 int delta_size, int *delta_counts,
+			 modseq_t modseq)
 {
     conv_folder_t *folder;
     int number = folder_number(state, mboxname, /*create*/1);
@@ -1468,6 +1474,10 @@ EXPORTED void conversation_update(struct conversations_state *state,
     }
     if (delta_unseen) {
 	_apply_delta(&conv->unseen, delta_unseen);
+	conv->dirty = 1;
+    }
+    if (delta_size) {
+	_apply_delta(&conv->size, delta_size);
 	conv->dirty = 1;
     }
     if (state->counted_flags) {

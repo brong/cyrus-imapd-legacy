@@ -102,6 +102,7 @@ struct conversation {
     uint32_t	    exists;
     uint32_t	    unseen;
     uint32_t	    prev_unseen;
+    uint32_t	    size;
     uint32_t	    *counts;
     conv_folder_t   *folders;
     conv_sender_t   *senders;
@@ -193,6 +194,7 @@ extern void conversation_update(struct conversations_state *state,
 			        int delta_num_records,
 			        int delta_exists,
 			        int delta_unseen,
+			        int delta_size,
 			        int *delta_counts,
 			        modseq_t modseq);
 extern conv_folder_t *conversation_find_folder(struct conversations_state *state,

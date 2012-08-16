@@ -2278,6 +2278,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
     int delta_num_records = 0;
     int delta_exists = 0;
     int delta_unseen = 0;
+    int delta_size = 0;
     int *delta_counts = NULL;
     int i;
     modseq_t modseq = 0;
@@ -2349,6 +2350,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	/* decrease any relevent counts */
 	if (!(old->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists--;
+	    delta_size -= old->size;
 	    /* drafts are never unseen */
 	    if (!(old->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen--;
@@ -2367,6 +2369,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 	/* add any counts */
 	if (!(new->system_flags & FLAG_EXPUNGED)) {
 	    delta_exists++;
+	    delta_size += new->size;
 	    /* drafts are never unseen */
 	    if (!(new->system_flags & (FLAG_SEEN|FLAG_DRAFT)))
 		delta_unseen++;
@@ -2410,7 +2413,7 @@ EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
     conversation_update(cstate, conv, mailbox->name,
 			delta_num_records,
 			delta_exists, delta_unseen,
-			delta_counts, modseq);
+			delta_size, delta_counts, modseq);
 
     r = conversation_save(cstate, record->cid, conv);
 
