@@ -926,9 +926,6 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	fclose(destfile);
     }
 
-    /* Write out index file entry */
-    r = mailbox_append_index_record(mailbox, &record);
-
     if (!r && config_getstring(IMAPOPT_ANNOTATION_CALLOUT)) {
 	if (flags)
 	    newflags = strarray_dup(flags);
@@ -968,6 +965,9 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
     if (!r && flags) {
 	r = append_apply_flags(as, &record, flags);
     }
+
+    /* Write out index file entry */
+    if (!r) r = mailbox_append_index_record(mailbox, &record);
 
 out:
     if (newflags)
