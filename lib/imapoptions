@@ -1429,6 +1429,10 @@ And the notification message will be available on \fIstdin\fR.
    "Håvard".  This is not RFC5051 complient, but it backwards
    compatible, and may be preferred by some sites. */
 
+{ "search_skiphtml", 0, SWITCH }
+/* If enabled, HTML parts of messages are skipped, i.e. not indexed and
+   not searchable.  Otherwise, they're indexed.  */
+
 { "search_whitespace", "merge", ENUM("skip", "merge", "keep") }
 /* When searching, how whitespace should be handled.  Options are:
    "skip" (default in 2.3 and earlier series) - where a search for
