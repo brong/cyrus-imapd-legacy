@@ -138,6 +138,7 @@ user_PROGRAMS += \
 	imap/cyr_expire \
 	imap/cyr_info \
 	imap/cyr_sequence \
+	imap/cyr_sphinxmgr \
 	imap/cyr_synclog \
 	imap/cyr_userseen \
 	imap/deliver \
@@ -701,6 +702,9 @@ imap_cyr_info_LDADD = $(LD_UTILITY_ADD)
 imap_cyr_sequence_SOURCES = imap/cli_fatal.c imap/cyr_sequence.c imap/mutex_fake.c
 imap_cyr_sequence_LDADD = $(LD_UTILITY_ADD)
 
+imap_cyr_sphinxmgr_SOURCES = imap/cyr_sphinxmgr.c imap/mutex_fake.c
+imap_cyr_sphinxmgr_LDADD = $(LD_UTILITY_ADD)
+
 imap_cyr_synclog_SOURCES = imap/cli_fatal.c imap/cyr_synclog.c imap/mutex_fake.c
 imap_cyr_synclog_LDADD = $(LD_UTILITY_ADD)
 
@@ -851,7 +855,9 @@ imap_libcyrus_imap_la_SOURCES += \
 endif
 if USE_SPHINX
 imap_libcyrus_imap_la_SOURCES += \
-	imap/search_sphinx.c
+	imap/search_sphinx.c \
+	imap/sphinxmgr_client.h \
+	imap/sphinxmgr_client.c
 endif
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
