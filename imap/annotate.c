@@ -2363,7 +2363,7 @@ static int write_entry(struct mailbox *mailbox,
     if (!ignorequota && mailbox) {
 	quota_t qdiffs[QUOTA_NUMRESOURCES] =
 		QUOTA_DIFFS_DONTCARE_INITIALIZER;
-	qdiffs[QUOTA_ANNOTSTORAGE] = value->len - oldval.len;
+	qdiffs[QUOTA_ANNOTSTORAGE] = value->len - (quota_t)oldval.len;
 	r = mailbox_quota_check(mailbox, qdiffs);
 	if (r)
 	    goto out;
@@ -2421,7 +2421,7 @@ static int write_entry(struct mailbox *mailbox,
 	    mailbox->i.sync_crc ^= alg->annot(uid, entry, userid, value);
 	}
 
-	mailbox_use_annot_quota(mailbox, value->len - oldval.len);
+	mailbox_use_annot_quota(mailbox, value->len - (quota_t)oldval.len);
     }
     else
 	sync_log_annotation("");
