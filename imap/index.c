@@ -4220,6 +4220,10 @@ static int index_search_evaluate(struct index_state *state,
 	if (!seqset_ismember(seq, im->record.uid)) goto zero;
     }
 
+    for (l = searchargs->folder; l; l = l->next) {
+	if (strcmpsafe(l->s, state->mailbox->name)) goto zero;
+    }
+
     if (searchargs->from || searchargs->to || searchargs->cc ||
 	searchargs->bcc || searchargs->subject || searchargs->messageid) {
 
@@ -4671,6 +4675,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 	cur->msgno = (msgno_list ? msgno_list[i] : (unsigned)(i+1));
 	im = &state->map[cur->msgno-1];
 	cur->uid = im->record.uid;
+	cur->folder = xstrdup(state->mailbox->name);
 	if (found_anchor && im->record.uid == anchor)
 	    *found_anchor = 1;
 
@@ -5169,6 +5174,9 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 		ret = numcmp(md1->hasconvflag & (1<<i),
 			     md2->hasconvflag & (1<<i));
 	    break;
+	case SORT_FOLDER:
+	    ret = strcmpsafe(md1->folder, md2->folder);
+	    break;
 	}
     } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
 
@@ -5204,6 +5212,7 @@ static void index_msgdata_free(MsgData **msgdata, unsigned int n)
 	free(md->msgid);
 	strarray_fini(&md->ref);
 	strarray_fini(&md->annot);
+	free(md->folder);
     }
     free(msgdata);
 }

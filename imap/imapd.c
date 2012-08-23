@@ -9659,6 +9659,7 @@ static int getsearchcriteria(const char *tag, struct searchargs *searchargs,
     time_t start, end, now = time(0);
     int keep_charset = 0;
     int hasconv = config_getswitch(IMAPOPT_CONVERSATIONS);
+    char mboxname[MAX_MAILBOX_NAME];
 
     c = getword(imapd_in, &criteria);
     lcase(criteria.s);
@@ -9785,6 +9786,14 @@ static int getsearchcriteria(const char *tag, struct searchargs *searchargs,
     case 'f':
 	if (!strcmp(criteria.s, "flagged")) {
 	    searchargs->system_flags_set |= FLAG_FLAGGED;
+	}
+	else if (!strcmp(criteria.s, "folder")) {
+	    if (c != ' ') goto missingarg;
+	    c = getastring(imapd_in, imapd_out, &arg);
+	    if (c == EOF) goto missingarg;
+	    imapd_namespace.mboxname_tointernal(&imapd_namespace, arg.s,
+						imapd_userid, mboxname);
+	    appendstrlist(&searchargs->from, mboxname);
 	}
 	else if (!strcmp(criteria.s, "from")) {
 	    if (c != ' ') goto missingarg;		
@@ -11321,6 +11330,8 @@ static int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	    if (c == EOF) goto missingarg;
 	    (*sortcrit)[n].args.flag.name = xstrdup(criteria.s);
 	}
+	else if (!strcmp(criteria.s, "folder"))
+	    (*sortcrit)[n].key = SORT_FOLDER;
 	else {
 	    prot_printf(imapd_out, "%s BAD Invalid Sort criterion %s\r\n",
 			tag, criteria.s);
@@ -11801,6 +11812,7 @@ static void freesearchargs(struct searchargs *s)
     freestrlist(s->text);
     freestrlist(s->header_name);
     freestrlist(s->header);
+    freestrlist(s->folder);
 
     while ((sa = s->annotations)) {
 	s->annotations = sa->next;
