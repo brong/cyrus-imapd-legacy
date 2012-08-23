@@ -161,6 +161,7 @@ typedef struct msgdata {
     bit32 hasflag;		/* hasflag values (up to 32 of them) */
     bit32 hasconvflag;		/* hasconvflag values (up to 32 of them) */
     char *folder;		/* internal mboxname */
+    conversation_id_t cid;	/* conversation id */
 } MsgData;
 
 typedef struct thread {
@@ -225,6 +226,9 @@ extern int index_sort(struct index_state *state, const struct sortcrit *sortcrit
 extern int index_convsort(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
 		      const struct windowargs * windowargs);
+extern int index_convmultisort(struct index_state *state, struct sortcrit *sortcrit,
+			       struct searchargs *searchargs,
+			       const struct windowargs * windowargs);
 extern int index_convupdates(struct index_state *state, struct sortcrit *sortcrit,
 		      struct searchargs *searchargs,
 		      const struct windowargs * windowargs);
