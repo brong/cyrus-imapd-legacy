@@ -1327,7 +1327,9 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry, unsigned int warmup_fl
     }
 
 out:
-    if (r && (r != ENOENT && r != ENOSYS))
+    if (r == ENOENT || r == ENOSYS)
+	r = 0;
+    if (r)
 	syslog(LOG_ERR, "IOERROR: unable to warmup file %s: %s",
 		fname, error_message(r));
     free(tofree1);
