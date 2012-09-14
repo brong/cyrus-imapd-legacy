@@ -2156,9 +2156,11 @@ EXPORTED int index_convupdates(struct index_state *state,
     r = index_expunge(state, NULL, 1);
     if (r) return r;
 
-    cstate = conversations_get_mbox(state->mailbox->name);
-    if (!cstate)
-	return IMAP_INTERNAL;
+    if (windowargs->conversations) {
+	cstate = conversations_get_mbox(state->mailbox->name);
+	if (!cstate)
+	    return IMAP_INTERNAL;
+    }
 
     total = search_predict_total(state, cstate, searchargs,
 				windowargs->conversations,
