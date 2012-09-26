@@ -2809,6 +2809,7 @@ continue2:
     }
 
     /* Update the subject header */
+    free(conv->subject);
     conv->subject = xstrdupnull(msubj);
 
     record->cid = newcid;
