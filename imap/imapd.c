@@ -11671,6 +11671,7 @@ static int parse_windowargs(const char *tag,
 			    int updates)
 {
     struct windowargs windowargs;
+    struct buf ext_folder = BUF_INITIALIZER;
     int c;
 
     memset(&windowargs, 0, sizeof(windowargs));
@@ -11722,6 +11723,30 @@ static int parse_windowargs(const char *tag,
 	    if (c != '(')
 		goto syntax_error;
 	    c = getuint32(imapd_in, &windowargs.anchor);
+	    if (c != ' ')
+		goto syntax_error;
+	    c = getuint32(imapd_in, &windowargs.offset);
+	    if (c != ' ')
+		goto syntax_error;
+	    c = getuint32(imapd_in, &windowargs.limit);
+	    if (c != ')')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	    if (windowargs.anchor == 0)
+		goto syntax_error;
+	}
+	else if (!strcasecmp(arg->s, "MULTIANCHOR")) {
+	    if (updates)
+		goto syntax_error;
+	    if (c != ' ')
+		goto syntax_error;
+	    c = prot_getc(imapd_in);
+	    if (c != '(')
+		goto syntax_error;
+	    c = getuint32(imapd_in, &windowargs.anchor);
+	    if (c != ' ')
+		goto syntax_error;
+	    c = getastring(imapd_in, imapd_out, &ext_folder);
 	    if (c != ' ')
 		goto syntax_error;
 	    c = getuint32(imapd_in, &windowargs.offset);
@@ -11792,10 +11817,24 @@ out:
     if (!!updates != windowargs.changedsince)
 	goto syntax_error;
 
+    if (ext_folder.len) {
+	int r;
+	char int_mboxname[MAX_MAILBOX_PATH+1];
+
+	r = imapd_namespace.mboxname_tointernal(&imapd_namespace,
+						buf_cstring(&ext_folder),
+						imapd_userid, int_mboxname);
+	if (!r)
+	    windowargs.anchorfolder = xstrdup(int_mboxname);
+    }
+
     *wa = xmemdup(&windowargs, sizeof(windowargs));
+    buf_free(&ext_folder);
     return c;
 
 syntax_error:
+    free(windowargs.anchorfolder);
+    buf_free(&ext_folder);
     prot_printf(imapd_out, "%s BAD Syntax error in window arguments\r\n", tag);
     return EOF;
 }
@@ -11804,6 +11843,7 @@ static void free_windowargs(struct windowargs *wa)
 {
     if (!wa)
 	return;
+    free(wa->anchorfolder);
     free(wa);
 }
 
