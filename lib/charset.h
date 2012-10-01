@@ -101,6 +101,7 @@ extern int charset_search_mimeheader(const char *substr, comp_pat *pat, const ch
 #define SEARCH_PART_BODY    7
 #define SEARCH_NUM_PARTS    8
 
+extern const char *search_part_as_string(int part);
 
 /* The functions in search_text_receiver_t get called at least once for each part of every message.
    The invocations form a sequence:
