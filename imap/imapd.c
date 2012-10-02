@@ -5834,7 +5834,6 @@ error:
 static void cmd_xstats(char *tag, int c)
 {
     int metric;
-    int r;
 
     if (backend_current) {
 	/* remote mailbox */
