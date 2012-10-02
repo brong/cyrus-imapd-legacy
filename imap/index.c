@@ -2374,7 +2374,6 @@ struct search_folder {
     unsigned int *msg_list;
     unsigned int msg_count;
     unsigned int alloc;
-    unsigned int msg_orig_count;
     MsgData **msgdata;
 };
 
@@ -2440,7 +2439,6 @@ static void find_uids(struct index_state *state,
 	/* list all messages in the folder */
 	for (msgno = 1; msgno <= state->exists; msgno++)
 	    search_folder_add_uid(sf, msgno);
-	sf->msg_orig_count = sf->msg_count;
 	sf->uidvalidity = state->mailbox->i.uidvalidity;
 	return;
     }
@@ -2452,7 +2450,6 @@ static void find_uids(struct index_state *state,
 	    sf->msg_list[out++] = msgno;
     }
 
-    sf->msg_orig_count = sf->msg_count;
     sf->msg_count = out;
 }
 
@@ -2763,7 +2760,7 @@ out:
     /* free all our temporary data */
     for (fi = 0 ; fi < (unsigned)sr.folders.count ; fi++) {
 	sf = ptrarray_nth(&sr.folders, fi);
-	index_msgdata_free(sf->msgdata, sf->msg_orig_count);
+	index_msgdata_free(sf->msgdata, sf->msg_count);
 	free(sf->mboxname);
 	free(sf->msg_list);
 	free(sf);
