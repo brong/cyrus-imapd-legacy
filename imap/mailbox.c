@@ -108,6 +108,8 @@
 #include "vparse.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
+#include "xstrlcat.h"
+#include "xstats.h"
 
 struct mailboxlist {
     struct mailboxlist *next;
@@ -780,6 +782,7 @@ EXPORTED int mailbox_map_record(struct mailbox *mailbox, struct index_record *re
     size_t len = 0;
 
     fname = mailbox_message_fname(mailbox, record->uid);
+    xstats_inc(MESSAGE_MAP);
 
     msgfd = open(fname, O_RDONLY, 0666);
     if (msgfd == -1) return errno;

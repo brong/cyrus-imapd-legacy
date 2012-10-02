@@ -76,6 +76,7 @@
 #include "statuscache.h"
 #include "strhash.h"
 #include "util.h"
+#include "xstats.h"
 #include "ptrarray.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
@@ -2555,6 +2556,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 	free(usermbox);
 	free(pattern);
 	r = 0;
+	xstats_inc(SEARCH_TRIVIAL);
     }
     if (r) goto out;
 
@@ -2716,6 +2718,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 
     /* Print the resulting list */
 
+    xstats_add(SEARCH_RESULT, results.count);
     if (results.count) {
 	/* The untagged reponse would be XCONVMULTISORT but
 	 * Mail::IMAPTalk has an undocumented hack whereby any untagged
@@ -5060,6 +5063,8 @@ static int index_search_evaluate(struct index_state *state,
     if (index_reload_record(state, msgno, &record))
 	goto zero;
 
+    if (!msgfile) xstats_inc(SEARCH_EVALUATE);
+
     if (!msgfile) msgfile = &localmap;
 
     if ((searchargs->flags & SEARCH_RECENT_SET) && !im->isrecent)
@@ -5313,6 +5318,7 @@ static int index_searchmsg(struct index_record *record,
 {
     struct searchmsg_rock sr;
 
+    xstats_inc(SEARCH_BODY);
     sr.substr = substr;
     sr.pat = pat;
     sr.skipheader = skipheader;
@@ -5330,6 +5336,8 @@ static int index_searchheader(char *name,
 {
     char *p;
     strarray_t header = STRARRAY_INITIALIZER;
+
+    xstats_inc(SEARCH_HEADER);
 
     strarray_append(&header, name);
 
@@ -5358,6 +5366,11 @@ static int index_searchcacheheader(struct index_state *state, uint32_t msgno,
     struct index_record record;
 
     r = index_reload_record(state, msgno, &record);
+    if (r) return 0;
+
+    xstats_inc(SEARCH_CACHE_HEADER);
+
+    r = mailbox_cacherecord(mailbox, &im->record);
     if (r) return 0;
 
     r = mailbox_cacherecord(mailbox, &record);
@@ -5570,6 +5583,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
     /* create an array of MsgData */
     ptrs = (MsgData **) xzmalloc(n * sizeof(MsgData *) + n * sizeof(MsgData));
     md = (MsgData *)(ptrs + n);
+    xstats_add(MSGDATA_LOAD, n);
 
     if (found_anchor)
 	*found_anchor = 0;
