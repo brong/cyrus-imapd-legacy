@@ -108,6 +108,7 @@
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
+#include "xstats.h"
 
 #include "mailbox_update_notifier.h"
 
@@ -826,6 +827,7 @@ EXPORTED int mailbox_map_message(struct mailbox *mailbox, unsigned long uid,
     const char *base = NULL;
     size_t len = 0;
 
+    xstats_inc(MESSAGE_MAP);
     fname = mailbox_message_fname(mailbox, uid);
 
     msgfd = open(fname, O_RDONLY, 0666);

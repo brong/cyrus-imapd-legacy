@@ -800,7 +800,10 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/mailbox_update_notifier.c \
 	imap/mailbox_update_notifier.h \
 	imap/mailbox_update_notifier.pb-c.h \
-	imap/mailbox_update_notifier.pb-c.c
+	imap/mailbox_update_notifier.pb-c.c \
+	imap/xstats.c \
+	imap/xstats.h \
+	imap/xstats_metrics.h
 if MBOXEVENT
 imap_libcyrus_imap_la_SOURCES += imap/mboxevent.c
 endif
