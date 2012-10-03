@@ -272,3 +272,9 @@ EXPORTED int signals_select(int nfds, fd_set *rfds, fd_set *wfds,
     return r;
 #endif
 }
+
+EXPORTED void signals_clear(int sig)
+{
+    if (sig >= 0 && sig < _NSIG)
+	gotsignal[sig] = 0;
+}
