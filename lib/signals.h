@@ -50,5 +50,6 @@ typedef void shutdownfn(int);
 void signals_add_handlers(int alarm);
 void signals_set_shutdown(shutdownfn *s);
 int signals_poll(void);
+void signals_clear(int sig);
 
 #endif /* INCLUDED_SIGNALS_H */
