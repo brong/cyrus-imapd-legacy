@@ -131,3 +131,9 @@ EXPORTED int signals_poll(void)
     }
     return 0;
 }
+
+EXPORTED void signals_clear(int sig)
+{
+    if (sig >= 0 && sig < _NSIG)
+	gotsignal[sig] = 0;
+}
