@@ -1548,8 +1548,7 @@ static int index_prefilter_messages(unsigned* msg_list,
     sr.msg_list = msg_list;
     sr.msg_count = 0;
 
-    bx = search_begin_search(state->mailbox, SEARCH_UNINDEXED,
-			     index_search_hit, &sr);
+    bx = search_begin_search(state->mailbox, SEARCH_UNINDEXED);
     if (!bx) {
 	r = IMAP_TRIVIAL_SEARCH;
 	goto out;
@@ -1557,7 +1556,8 @@ static int index_prefilter_messages(unsigned* msg_list,
 
     build_query(bx, searchargs, 0);
 
-    r = search_end_search(bx);
+    r = bx->run(bx, index_search_hit, &sr);
+    search_end_search(bx);
     /* Note: do not complain if r == IMAP_TRIVIAL_SEARCH */
 
 out:
@@ -2548,8 +2548,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     memset(&sr, 0, sizeof(sr));
     ptrarray_init(&sr.folders);
     construct_hash_table(&sr.folders_by_name, 128, 0);
-    bx = search_begin_search(state->mailbox, SEARCH_MULTIPLE,
-			     index_multi_search_hit, &sr);
+    bx = search_begin_search(state->mailbox, SEARCH_MULTIPLE);
     if (!bx) {
 	r = IMAP_INTERNAL;
 	goto out;
@@ -2568,7 +2567,8 @@ EXPORTED int index_convmultisort(struct index_state *state,
      */
     build_query(bx, searchargs, (searchargs->sublist == NULL));
 
-    r = search_end_search(bx);
+    r = bx->run(bx, index_multi_search_hit, &sr);
+    search_end_search(bx);
     if (r == IMAP_TRIVIAL_SEARCH) {
 	char *usermbox = mboxname_user_mbox(mboxname_to_userid(state->mailbox->name), NULL);
 	char *pattern = strconcat(usermbox, ".*", NULL);
@@ -2846,9 +2846,7 @@ EXPORTED int index_snippets(struct index_state *state,
     int r = 0;
     struct snippet_rock srock;
 
-    bx = search_begin_search(state->mailbox,
-			     SEARCH_DRYRUN|SEARCH_MULTIPLE,
-			     NULL, NULL);
+    bx = search_begin_search(state->mailbox, SEARCH_MULTIPLE);
     if (!bx) {
 	r = IMAP_INTERNAL;
 	goto out;
@@ -2856,8 +2854,8 @@ EXPORTED int index_snippets(struct index_state *state,
 
     build_query(bx, searchargs, 0);
     intquery = bx->get_internalised(bx);
-    r = search_end_search(bx);
-    if (r) goto out;
+    search_end_search(bx);
+    if (!intquery) goto out;
 
     srock.out = state->out;
     srock.namespace = searchargs->namespace;
