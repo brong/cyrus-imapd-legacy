@@ -202,20 +202,20 @@ HIDDEN int mappedfile_readlock(struct mappedfile *mf)
     assert(!mf->dirty);
 
     for (;;) {
-	if (lock_shared(mf->fd) < 0) {
+	if (lock_shared(mf->fd, mf->fname) < 0) {
 	    syslog(LOG_ERR, "IOERROR: lock_shared %s: %m", mf->fname);
 	    return -EIO;
 	}
 
 	if (fstat(mf->fd, &sbuf) == -1) {
 	    syslog(LOG_ERR, "IOERROR: fstat %s: %m", mf->fname);
-	    lock_unlock(mf->fd);
+	    lock_unlock(mf->fd, mf->fname);
 	    return -EIO;
 	}
 
 	if (stat(mf->fname, &sbuffile) == -1) {
 	    syslog(LOG_ERR, "IOERROR: stat %s: %m", mf->fname);
-	    lock_unlock(mf->fd);
+	    lock_unlock(mf->fd, mf->fname);
 	    return -EIO;
 	}
 	if (sbuf.st_ino == sbuffile.st_ino) break;
@@ -223,7 +223,7 @@ HIDDEN int mappedfile_readlock(struct mappedfile *mf)
 	newfd = open(mf->fname, O_RDWR, 0644);
 	if (newfd == -1) {
 	    syslog(LOG_ERR, "IOERROR: open %s: %m", mf->fname);
-	    lock_unlock(mf->fd);
+	    lock_unlock(mf->fd, mf->fname);
 	    return -EIO;
 	}
 
@@ -286,7 +286,7 @@ HIDDEN int mappedfile_unlock(struct mappedfile *mf)
     assert(mf->fd != -1);
     assert(!mf->dirty);
 
-    r = lock_unlock(mf->fd);
+    r = lock_unlock(mf->fd, mf->fname);
     if (r < 0) {
 	syslog(LOG_ERR, "IOERROR: lock_unlock %s: %m", mf->fname);
 	return r;
