@@ -181,7 +181,7 @@ static int abort_txn(struct dbengine *db, struct txn *tid)
     }
 
     /* release lock */
-    r = lock_unlock(db->fd);
+    r = lock_unlock(db->fd, db->fname);
     if (r == -1) {
 	syslog(LOG_ERR, "IOERROR: unlocking db %s: %m", db->fname);
 	r = CYRUSDB_IOERROR;
@@ -515,7 +515,7 @@ static int foreach(struct dbengine *db,
 	/* drop our read lock on the file, since we don't really care
 	 * if it gets replaced out from under us, our mmap stays on the
 	 * old version */
-	lock_unlock(db->fd);
+	lock_unlock(db->fd, db->fname);
     } else {
 	/* use the same variables as in the no transaction case, just to
 	 * get things set up */
@@ -727,7 +727,7 @@ static int mystore(struct dbengine *db,
 	db->fd = writefd;
 
 	/* release lock */
-	r = lock_unlock(db->fd);
+	r = lock_unlock(db->fd, db->fname);
 	if (r == -1) {
 	    syslog(LOG_ERR, "IOERROR: unlocking db %s: %m", db->fname);
 	    r = CYRUSDB_IOERROR;
@@ -806,7 +806,7 @@ static int commit_txn(struct dbengine *db, struct txn *tid)
     } else {
 	/* read-only txn */
 	/* release lock */
-	r = lock_unlock(db->fd);
+	r = lock_unlock(db->fd, db->fname);
 	if (r == -1) {
 	    syslog(LOG_ERR, "IOERROR: unlocking db %s: %m", db->fname);
 	    r = CYRUSDB_IOERROR;

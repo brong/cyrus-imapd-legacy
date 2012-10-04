@@ -217,15 +217,15 @@ EXPORTED int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
 
     switch (locktype) {
     case LOCK_SHARED:
-	r = lock_shared(lockitem->l.lock_fd);
+	r = lock_shared(lockitem->l.lock_fd, fname);
 	if (!r) lockitem->l.locktype = LOCK_SHARED;
 	break;
     case LOCK_EXCLUSIVE:
-	r = lock_blocking(lockitem->l.lock_fd);
+	r = lock_blocking(lockitem->l.lock_fd, fname);
 	if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
 	break;
     case LOCK_NONBLOCKING:
-	r = lock_nonblocking(lockitem->l.lock_fd);
+	r = lock_nonblocking(lockitem->l.lock_fd, fname);
 	if (r == -1) r = IMAP_MAILBOX_LOCKED;
 	else if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
 	break;
@@ -1582,7 +1582,7 @@ static bit64 mboxname_setval(const char *mboxname, const char *metaname,
 	    syslog(LOG_ERR, "IOERROR: failed to create %s: %m", fname);
 	    goto done;
 	}
-	if (lock_blocking(fd)) {
+	if (lock_blocking(fd, fname)) {
 	    syslog(LOG_ERR, "IOERROR: failed to lock %s: %m", fname);
 	    goto done;
 	}
@@ -1595,6 +1595,7 @@ static bit64 mboxname_setval(const char *mboxname, const char *metaname,
 	    goto done;
 	}
 	if (sbuf.st_ino == fbuf.st_ino) break;
+	lock_unlock(fd, fname);
 	close(fd);
 	fd = -1;
     }
@@ -1643,7 +1644,10 @@ static bit64 mboxname_setval(const char *mboxname, const char *metaname,
 
  done:
     if (newfd != -1) close(newfd);
-    if (fd != -1) close(fd);
+    if (fd != -1) {
+	lock_unlock(fd, fname);
+	close(fd);
+    }
     mboxname_free_parts(&parts);
     free(fname);
     return retval;

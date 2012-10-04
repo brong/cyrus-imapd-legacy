@@ -112,7 +112,7 @@ EXPORTED int lock_reopen(int fd, const char *filename,
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_blocking(int fd)
+EXPORTED int lock_blocking(int fd, const char *filename __attribute__((unused)))
 {
     int r;
 
@@ -129,7 +129,7 @@ EXPORTED int lock_blocking(int fd)
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_shared(int fd)
+EXPORTED int lock_shared(int fd, const char *filename __attribute__((unused)))
 {
     int r;
 
@@ -146,7 +146,7 @@ EXPORTED int lock_shared(int fd)
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_nonblocking(int fd)
+EXPORTED int lock_nonblocking(int fd, const char *filename __attribute__((unused)))
 {
     int r;
 
@@ -161,7 +161,7 @@ EXPORTED int lock_nonblocking(int fd)
 /*
  * Release any lock on 'fd'.  Always returns success.
  */
-EXPORTED int lock_unlock(int fd)
+EXPORTED int lock_unlock(int fd, const char *filename __attribute__((unused)))
 {
     int r;
 

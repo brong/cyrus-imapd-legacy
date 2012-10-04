@@ -217,7 +217,7 @@ static int abort_subtxn(const char *fname, struct subtxn *tid)
 
     if (tid->fd != -1) {
 	/* release lock */
-	r = lock_unlock(tid->fd);
+	r = lock_unlock(tid->fd, fname);
 	if (r == -1) {
 	    syslog(LOG_ERR, "IOERROR: unlocking %s: %m", fname);
 	    r = CYRUSDB_IOERROR;
@@ -250,7 +250,7 @@ static int commit_subtxn(const char *fname, struct subtxn *tid)
 	if (fsync(writefd) ||
 	    fstat(writefd, &sbuf) == -1 ||
 	    rename(tid->fnamenew, fname) == -1 ||
-	    lock_unlock(writefd) == -1) {
+	    lock_unlock(writefd, fname) == -1) {
 	    syslog(LOG_ERR, "IOERROR: writing %s: %m", tid->fnamenew);
 	    r = CYRUSDB_IOERROR;
 	}
@@ -269,7 +269,7 @@ static int commit_subtxn(const char *fname, struct subtxn *tid)
 
     /* release lock */
     if (tid->fd != -1) {
-	r = lock_unlock(tid->fd);
+	r = lock_unlock(tid->fd, fname);
 	if (r == -1) {
 	    syslog(LOG_ERR, "IOERROR: unlocking %s: %m", fname);
 	    r = CYRUSDB_IOERROR;
@@ -751,7 +751,7 @@ static int mystore(struct dbengine *db,
 	    }
 
 	    mytid->fdnew = newfd;
-	    r = lock_blocking(newfd);
+	    r = lock_blocking(newfd, new_quota_path);
 	    if (r) {
 		syslog(LOG_ERR, "IOERROR: locking quota file %s: %m",
 		       new_quota_path);
