@@ -46,7 +46,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <syslog.h>
 
 #include "cyr_lock.h"
 
@@ -73,8 +72,6 @@ EXPORTED int lock_reopen(int fd, const char *filename,
     struct flock fl;
     struct stat sbuffile, sbufspare;
     int newfd;
-
-    syslog(LOG_INFO, "auditlock: reopen %d %s", fd, filename);
 
     if (!sbuf) sbuf = &sbufspare;
 
@@ -116,8 +113,6 @@ EXPORTED int lock_reopen(int fd, const char *filename,
 	}
 	dup2(newfd, fd);
 	close(newfd);
-
-	syslog(LOG_INFO, "auditlock: reopen-retry %d %s", fd, filename);
     }
 }
 
@@ -126,12 +121,10 @@ EXPORTED int lock_reopen(int fd, const char *filename,
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_blocking(int fd, const char *filename)
+EXPORTED int lock_blocking(int fd, const char *filename __attribute__((unused)))
 {
     int r;
     struct flock fl;
-
-    syslog(LOG_INFO, "auditlock: blocking %d %s", fd, filename);
 
     for (;;) {
 	fl.l_type= F_WRLCK;
@@ -150,12 +143,10 @@ EXPORTED int lock_blocking(int fd, const char *filename)
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_shared(int fd, const char *filename)
+EXPORTED int lock_shared(int fd, const char *filename __attribute__((unused)))
 {
     int r;
     struct flock fl;
-
-    syslog(LOG_INFO, "auditlock: shared %d %s", fd, filename);
 
     for (;;) {
 	fl.l_type= F_RDLCK;
@@ -174,12 +165,10 @@ EXPORTED int lock_shared(int fd, const char *filename)
  * Returns 0 for success, -1 for failure, with errno set to an
  * appropriate error code.
  */
-EXPORTED int lock_nonblocking(int fd, const char *filename)
+EXPORTED int lock_nonblocking(int fd, const char *filename __attribute__((unused)))
 {
     int r;
     struct flock fl;
-
-    syslog(LOG_INFO, "auditlock: nonblocking %d %s", fd, filename);
 
     for (;;) {
 	fl.l_type= F_WRLCK;
@@ -196,12 +185,10 @@ EXPORTED int lock_nonblocking(int fd, const char *filename)
 /*
  * Release any lock on 'fd'.  Always returns success.
  */
-EXPORTED int lock_unlock(int fd, const char *filename)
+EXPORTED int lock_unlock(int fd, const char *filename __attribute__((unused)))
 { 
     struct flock fl;
     int r;
-
-    syslog(LOG_INFO, "auditlock: unlock %d %s", fd, filename);
 
     fl.l_type= F_UNLCK;
     fl.l_whence = SEEK_SET;
