@@ -61,6 +61,7 @@
 #include <ctype.h>
 
 #include "annotate.h" /* for strlist functionality */
+#include "search_engines.h"
 #include "message_guid.h"
 #include "sequence.h"
 #include "strarray.h"
@@ -294,8 +295,6 @@ void freesequencelist(struct seqset *l);
 extern int index_expunge(struct index_state *state, char *uidsequence,
 			 int need_deleted);
 
-/* See lib/charset.h for the definition of receiver. */
-struct search_text_receiver;
 extern void index_getsearchtext(struct message *,
 				struct search_text_receiver *receiver,
 				int snippet);
