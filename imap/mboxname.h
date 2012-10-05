@@ -193,6 +193,7 @@ char *mboxname_metapath(const char *partition,
 			int metafile, int isnew);
 
 char *mboxname_lockpath(const char *mboxname);
+char *mboxname_lockpath_suffix(const char *mboxname, const char *suffix);
 
 /*
  * Return nonzero if (internal) mailbox 'name' consists of legal characters.
