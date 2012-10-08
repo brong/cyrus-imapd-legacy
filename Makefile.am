@@ -554,6 +554,7 @@ if SIEVE
 cunit_TESTS += cunit/sieve.testc
 endif
 cunit_TESTS += \
+	cunit/sphinx.testc \
 	cunit/spool.testc \
 	cunit/squat.testc \
 	cunit/strarray.testc \
