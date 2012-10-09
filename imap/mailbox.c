@@ -1018,9 +1018,12 @@ EXPORTED int mailbox_open_iwl(const char *name, struct mailbox **mailboxptr)
 				 mailboxptr);
 }
 
-EXPORTED int mailbox_open_iwlnb(const char *name, struct mailbox **mailboxptr)
+EXPORTED int mailbox_open_irlnb(const char *name, struct mailbox **mailboxptr)
 {
-    return mailbox_open_advanced(name, LOCK_NONBLOCKING, LOCK_SHARED,
+    return mailbox_open_advanced(name,
+				 LOCK_SHARED|LOCK_NONBLOCK,
+				 /* cannot do nonblocking lock on index...why? */
+				 LOCK_SHARED,
 				 mailboxptr);
 }
 
@@ -1720,6 +1723,7 @@ restart:
 	r = lock_shared(mailbox->index_fd, index_fname);
     }
     else {
+	/* this function does not support nonblocking locks */
 	fatal("invalid locktype for index", EC_SOFTWARE);
     }
 
