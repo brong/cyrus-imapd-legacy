@@ -1224,6 +1224,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
     struct sync_annot_list *rannots = NULL;
     int r;
     int i;
+    int has_append = 0;
 
     rrecord.uid = 0;
     for (ki = kr->head; ki; ki = ki->next) {
@@ -1339,8 +1340,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		       mailbox->name, recno);
 		goto out;
 	    }
+
+	    has_append = 1;
 	}
     }
+
+    if (has_append)
+	sync_log_append(mailbox->name);
 
     r = 0;
 
