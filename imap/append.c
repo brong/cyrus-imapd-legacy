@@ -66,6 +66,7 @@
 #include "append.h"
 #include "global.h"
 #include "prot.h"
+#include "sync_log.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
@@ -240,12 +241,15 @@ EXPORTED int append_commit(struct appendstate *as,
 	/* the cache will be dirty even if we hand added the records */
 	as->mailbox->cache_dirty = 1;
 
+	/* log the append so rolling squatter can index this mailbox */
+	sync_log_append(as->mailbox->name);
+
 	/* set seen state */
 	if (as->userid[0])
 	    append_addseen(as->mailbox, as->userid, as->seen_seq);
     }
     seqset_free(as->seen_seq);
-    
+
     /* We want to commit here to guarantee mailbox on disk vs
      * duplicate DB consistency */
     r = mailbox_commit(as->mailbox);
