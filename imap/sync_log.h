@@ -65,6 +65,9 @@ void sync_log(const char *fmt, ...);
 #define sync_log_sieve(user) \
     sync_log("META %s\n", user)
 
+#define sync_log_append(name) \
+    sync_log("APPEND %s\n", name)
+
 #define sync_log_mailbox(name) \
     sync_log("MAILBOX %s\n", name)
 
