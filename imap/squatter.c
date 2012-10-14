@@ -109,10 +109,7 @@ static int usage(const char *name)
 	    "       %s [-C <alt_config>] [-v] [-s] [-a] -r mailbox [...]\n",
 	    name);
     fprintf(stderr,
-	    "       %s [-C <alt_config>] [-v] [-r] -e query mailbox [...]\n",
-	    name);
-    fprintf(stderr,
-	    "       %s [-C <alt_config>] [-v] -c (start|stop) mailbox\n",
+	    "       %s [-C <alt_config>] [-v] [-s] [-d] [-n channel] -R\n",
 	    name);
 
     exit(EC_USAGE);
@@ -721,6 +718,7 @@ int main(int argc, char **argv)
 	    mode = ROLLING;
 	    break;
 
+	/* This option is deliberately undocumented, for testing only */
 	case 'c':		/* daemon control mode */
 	    if (mode != UNKNOWN) usage(argv[0]);
 	    if (!strcmp(optarg, "start"))
@@ -731,6 +729,7 @@ int main(int argc, char **argv)
 		usage(argv[0]);
 	    break;
 
+	/* This option is deliberately undocumented, for testing only */
 	case 'e':		/* add a search term */
 	    if (mode != UNKNOWN && mode != SEARCH) usage(argv[0]);
 	    query = optarg;
@@ -741,6 +740,7 @@ int main(int argc, char **argv)
 	    background = 0;
 	    break;
 
+	/* This option is deliberately undocumented, for testing only */
 	case 'm':		/* multi-folder in SEARCH mode */
 	    if (mode != UNKNOWN && mode != SEARCH) usage(argv[0]);
 	    multi_folder = 1;
