@@ -1523,8 +1523,9 @@ static int index_prefilter_messages(unsigned* msg_list,
 				    struct index_state *state,
 				    struct searchargs *searchargs)
 {
-    int r = -1;	    /* we start in error so we can fall back */
     unsigned int msgno;
+#if 0
+    int r = -1;	    /* we start in error so we can fall back */
     search_builder_t *bx;
 
     bx = search_begin_search(state->mailbox, SEARCH_UNINDEXED);
@@ -1556,7 +1557,7 @@ static int index_prefilter_messages(unsigned* msg_list,
 
 	if (!r) return count;
     }
-
+#endif
     xstats_inc(SEARCH_TRIVIAL);
 
     /* Just put in all possible messages. This falls back to Cyrus' default
