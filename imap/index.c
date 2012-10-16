@@ -1491,7 +1491,7 @@ static void build_query(search_builder_t *bx,
 
 static int index_prefilter_messages(unsigned* msg_list,
 				    struct index_state *state,
-				    struct searchargs *searchargs)
+				    struct searchargs *searchargs __attribute((unused)))
 {
     unsigned int msgno;
 
@@ -2329,7 +2329,8 @@ struct update_index_rock {
 
 static int update_index_cb(void *rock,
 			   const char *key, size_t keylen,
-			   const char *val, size_t vallen)
+			   const char *val __attribute__((unused)),
+			    size_t vallen __attribute__((unused)))
 {
     struct update_index_rock *ir = (struct update_index_rock *)rock;
     char *name = xstrndup(key, keylen);
