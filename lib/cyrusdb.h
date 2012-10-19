@@ -114,6 +114,10 @@ struct cyrusdb_backend {
     /* close the specified database */
     int (*close)(struct dbengine *db);
 
+    /* destroy the specified database, closing it and deleting the file
+     * at the same time */
+    int (*destroy)(struct dbengine *db);
+
     /* what are the overall specifications? */
     /* 'mydb': the database to act on
        'key': the key to fetch.

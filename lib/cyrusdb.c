@@ -410,10 +410,12 @@ static int converter_cb(void *rock,
 }
 
 /* convert (just copy every record) from one database to another in possibly
-   a different format.  It's up to the surrounding code to copy the
-   new database over the original if it wants to */
+   a different format.  If the two filenames are identical, it will perform
+   a replace-under-lock where the old database is correctly destroyed before
+   the new database is moved into place.  This is potentially racy, but the
+   risk is kept short and the "open" code supports checking for this case */
 EXPORTED int cyrusdb_convert(const char *fromfname, const char *tofname,
-		    const char *frombackend, const char *tobackend)
+			     const char *frombackend, const char *tobackend)
 {
     char *newfname = NULL;
     struct db *fromdb = NULL;
@@ -423,18 +425,13 @@ EXPORTED int cyrusdb_convert(const char *fromfname, const char *tofname,
     struct txn *totid = NULL;
     int r;
 
-    /* open source database */
-    r = cyrusdb_open(frombackend, fromfname, 0, &fromdb);
-    if (r) goto err;
-
-    /* use a bogus fetch to lock source DB before touching the destination */
-    r = cyrusdb_fetch(fromdb, "_", 1, NULL, NULL, &fromtid);
-    if (r == CYRUSDB_NOTFOUND) r = 0;
-    if (r) goto err;
-
-    /* same file?  Create with a new name */
+    /* same file?  Create with a new name! */
     if (!strcmp(tofname, fromfname))
 	tofname = newfname = strconcat(fromfname, ".NEW", NULL);
+
+    /* open the source database */
+    r = cyrusdb_open(frombackend, fromfname, 0, &fromdb);
+    if (r) goto err;
 
     /* remove any rubbish lying around */
     unlink(tofname);
@@ -458,8 +455,12 @@ EXPORTED int cyrusdb_convert(const char *fromfname, const char *tofname,
 
     /* created a new filename - so it's a replace-in-place */
     if (newfname) {
+	r = cyrusdb_destroy(fromdb, &fromtid);
+	if (r) goto err; /* disaster if this is incomplete! */
 	r = rename(newfname, fromfname);
 	if (r) goto err;
+	free(newfname);
+	return;
     }
 
     /* and close the source database - nothing should have
