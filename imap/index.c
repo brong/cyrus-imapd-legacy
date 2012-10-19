@@ -2389,6 +2389,7 @@ done:
 
 static int update_indexes(struct mailbox *mailbox)
 {
+#if 0
     const char *user = mboxname_to_userid(mailbox->name);
     struct update_index_rock rock;
     int r;
@@ -2401,6 +2402,9 @@ static int update_indexes(struct mailbox *mailbox)
     search_end_update(rock.rx);
 
     return r;
+#else
+    return 0;
+#endif
 }
 
 struct search_folder {
