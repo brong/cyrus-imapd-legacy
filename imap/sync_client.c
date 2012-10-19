@@ -93,6 +93,24 @@
 #include "signals.h"
 #include "cyrusdb.h"
 
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+# define NAMLEN(dirent) strlen((dirent)->d_name)
+#else
+# define dirent direct
+# define NAMLEN(dirent) (dirent)->d_namlen
+# if HAVE_SYS_NDIR_H
+#  include <sys/ndir.h>
+# endif
+# if HAVE_SYS_DIR_H
+#  include <sys/dir.h>
+# endif
+# if HAVE_NDIR_H
+#  include <ndir.h>
+# endif
+#endif
+
+
 /* ====================================================================== */
 
 /* Static global variables and support routines for sync_client */
@@ -112,6 +130,7 @@ static int verbose_logging = 0;
 static int connect_once    = 0;
 static int background      = 0;
 static int do_compress     = 0;
+static int scan_oldlogs    = 1;
 
 #define CAPA_CRC_VERSIONS	    (CAPA_COMPRESS<<1)
 
@@ -2754,30 +2773,22 @@ static int do_daemon_work(const char *sync_log_file, const char *sync_shutdown_f
 	    break;
 	}
 
-	if (stat(work_file_name, &sbuf) == 0) {
-	    /* Existing work log file from our parent < 1 hour old */
-	    /* XXX  Is 60 minutes a resonable timeframe? */
-	    syslog(LOG_NOTICE,
-		   "Reprocessing sync log file %s", work_file_name);
+	/* Check for sync_log file */
+	if (stat(sync_log_file, &sbuf) < 0) {
+	    if (min_delta > 0) {
+		sleep(min_delta);
+	    } else {
+		usleep(100000);    /* 1/10th second */
+	    }
+	    continue;
 	}
-	else {
-	    /* Check for sync_log file */
-	    if (stat(sync_log_file, &sbuf) < 0) {
-		if (min_delta > 0) {
-		    sleep(min_delta);
-		} else {
-		    usleep(100000);    /* 1/10th second */
-		}
-		continue;
-	    }
 
-	    /* Move sync_log to our work file */
-	    if (rename(sync_log_file, work_file_name) < 0) {
-		syslog(LOG_ERR, "Rename %s -> %s failed: %m",
-		       sync_log_file, work_file_name);
-		r = IMAP_IOERROR;
-		break;
-	    }
+	/* Move sync_log to our work file */
+	if (rename(sync_log_file, work_file_name) < 0) {
+	    syslog(LOG_ERR, "Rename %s -> %s failed: %m",
+		   sync_log_file, work_file_name);
+	    r = IMAP_IOERROR;
+	    break;
 	}
 
 	/* Process the work log */
@@ -3047,18 +3058,88 @@ static void replica_disconnect(void)
     backend_disconnect(sync_backend);
 }
 
+static int process_oldlogs(const char *sync_log_file)
+{
+    DIR *dirp;
+    struct dirent *dirent;
+    char *syncdir = xstrdup(sync_log_file);
+    char *p = strrchr(syncdir, '/');
+    strarray_t files = STRARRAY_INITIALIZER;
+    int r = 0;
+    int i;
+
+    assert(p);
+    *p = '\0';
+
+    dirp = opendir(syncdir);
+    if (!dirp) {
+	syslog(LOG_ERR, "Failed to open %s to look for old log files",
+	       syncdir);
+	r = IMAP_IOERROR;
+	goto done;
+    }
+
+    while ((dirent = readdir(dirp)) != NULL) {
+	if (strncmp("log-", dirent->d_name, 4))
+	    continue; /* not a log file */
+	/* if we wanted to be obnoxious about it we would check
+	 * for the exact format, but meh */
+	strarray_add(&files, dirent->d_name);
+    }
+    closedir(dirp);
+
+    for (i = 0; i < files.count; i++) {
+	const char *name = strarray_nth(&files, i);
+	char *work_file_name = strconcat(syncdir, "/", name, (char *)NULL);
+
+	syslog(LOG_NOTICE, "found old log file %s, processing",
+	       work_file_name);
+
+	/* Process the work log */
+	r = do_sync(work_file_name);
+	if (r) {
+	    syslog(LOG_ERR,
+		   "Processing sync log file %s failed: %s",
+		   work_file_name, error_message(r));
+	}
+	/* Remove the work log */
+	else if (unlink(work_file_name) < 0) {
+	    syslog(LOG_ERR, "Unlink %s failed: %m", work_file_name);
+	    r = IMAP_IOERROR;
+	}
+
+	free(work_file_name);
+
+	if (r) break;
+    }
+
+done:
+    free(syncdir);
+
+    return r;
+}
+
 static void do_daemon(const char *sync_log_file, const char *sync_shutdown_file,
 	       const char *channel, unsigned long timeout, unsigned long min_delta)
 {
     int r = 0;
     int restart = 1;
 
+    /* scan for other log files to run at startup.  Worst case if competing
+     * processes ARE running is that a log file gets run twice because the
+     * other process thinks it has the file already, but we rename it
+     * out from underneath.  Oh well */
+
     signal(SIGPIPE, SIG_IGN); /* don't fail on server disconnects */
 
     while (restart) {
 	replica_connect(channel);
-	r = do_daemon_work(sync_log_file, sync_shutdown_file,
-			   timeout, min_delta, &restart);
+	if (scan_oldlogs) {
+	    r = process_oldlogs(sync_log_file);
+	    scan_oldlogs = 0;
+	}
+	if (!r) r = do_daemon_work(sync_log_file, sync_shutdown_file,
+				   timeout, min_delta, &restart);
 	if (r) {
 	    /* See if we're still connected to the server.
 	     * If we are, we had some type of error, so we exit.
