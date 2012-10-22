@@ -1583,7 +1583,7 @@ EXPORTED message_t *index_get_message(struct index_state *state, uint32_t msgno)
     uint32_t indexflags = 0;
     if (im->isseen) indexflags |= MESSAGE_SEEN;
     if (im->isrecent) indexflags |= MESSAGE_RECENT;
-    return message_new_from_index(state->mailbox, &im->record,
+    return message_new_from_index(state->mailbox, &record,
 				  msgno, indexflags);
 }
 
@@ -2322,17 +2322,6 @@ out:
     return r;
 }
 
-struct search_folder {
-    char *mboxname;
-    unsigned int uidvalidity;
-    int id;		    /* index used for formatting output */
-    unsigned int *msg_list;
-    unsigned int msg_count;
-    unsigned int alloc;
-    int is_anchorfolder;
-    MsgData **msgdata;
-};
-
 struct search_multi_rock {
     ptrarray_t folders;
     int include_lowvalue;
@@ -2347,7 +2336,7 @@ static int add_search_folder(void *rock,
     struct search_multi_rock *sr = (struct search_multi_rock *)rock;
     char *name = xstrndup(key, keylen);
     struct mboxname_parts parts;
-    struct search_folder *sf = NULL;
+    SearchFolder *sf = NULL;
     int r = 0;
 
     r = mboxname_to_parts(name, &parts);
@@ -2362,7 +2351,7 @@ static int add_search_folder(void *rock,
 	    goto done;
     }
 
-    sf = (struct search_folder *)xzmalloc(sizeof(struct search_folder));
+    sf = (SearchFolder *)xzmalloc(sizeof(SearchFolder));
     sf->mboxname = xstrdup(name);
     sf->id = -1; /* unassigned */
     ptrarray_append(&sr->folders, sf);
@@ -2398,7 +2387,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     int total = UNPREDICTABLE;
     int r = 0;
     struct conversations_state *cstate = NULL;
-    struct search_folder *sf;
+    SearchFolder *sf = NULL;
     struct search_multi_rock sr;
     struct index_state *state2 = NULL;
     int found_any = 0;
@@ -2497,7 +2486,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 	    if (!found_any)
 		sf->id = next_folder_id++;
 
-	    msg->folderid = sf->id;
+	    msg->folder = sf;
 
 	    ptrarray_append(&merged_msgdata, msg);
 	    found_any = 1;
@@ -2540,7 +2529,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 
 	if (!anchor_pos &&
 	    windowargs->anchor == msg->uid &&
-	    anchor_folderid == msg->folderid) {
+	    anchor_folderid == msg->folder->id) {
 	    /* we've found the anchor's position, rejoice! */
 	    anchor_pos = pos;
 	}
@@ -2609,7 +2598,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 	    MsgData *msg = results.data[i];
 	    if (i)
 		prot_printf(state->out, " ");
-	    prot_printf(state->out, "(%u %u)", msg->folderid, msg->uid);
+	    prot_printf(state->out, "(%u %u)", msg->folder->id, msg->uid);
 	}
 	prot_printf(state->out, ")\r\n");
     }
@@ -5151,9 +5140,6 @@ static int index_searchcacheheader(struct index_state *state, uint32_t msgno,
 
     xstats_inc(SEARCH_CACHE_HEADER);
 
-    r = mailbox_cacherecord(mailbox, &im->record);
-    if (r) return 0;
-
     r = mailbox_cacherecord(mailbox, &record);
     if (r) return 0;
 
@@ -5446,7 +5432,7 @@ static MsgData **index_msgdata_load(struct index_state *state,
 		cur->cc = get_localpart_addr(cacheitem_base(&record, CACHE_CC));
 		break;
 	    case SORT_DATE:
-		cur->date = record.gmtime;
+		cur->sentdate = record.gmtime;
 		/* fall through */
 	    case SORT_ARRIVAL:
 		cur->internaldate = record.internaldate;
@@ -5836,8 +5822,8 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 	    ret = strcmpsafe(md1->cc, md2->cc);
 	    break;
 	case SORT_DATE: {
-	    time_t d1 = md1->date ? md1->date : md1->internaldate;
-	    time_t d2 = md2->date ? md2->date : md2->internaldate;
+	    time_t d1 = md1->sentdate ? md1->sentdate : md1->internaldate;
+	    time_t d2 = md2->sentdate ? md2->sentdate : md2->internaldate;
 	    ret = numcmp(d1, d2);
 	    break;
 	}
@@ -5888,6 +5874,9 @@ static int index_sort_compare(MsgData *md1, MsgData *md2,
 		ret = numcmp(md1->hasconvflag & (1<<i),
 			     md2->hasconvflag & (1<<i));
 	    break;
+	case SORT_FOLDER:
+	    if (md1->folder && md2->folder)
+		ret = strcmpsafe(md1->folder->mboxname, md2->folder->mboxname);
 	}
     } while (!ret && sortcrit[i++].key != SORT_SEQUENCE);
 
