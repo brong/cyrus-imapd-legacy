@@ -1317,6 +1317,36 @@ EXPORTED int buf_findchar(const struct buf *buf, unsigned int off, int c)
     return -1;
 }
 
+/*
+ * Find (the first line in) 'line' in the buffer 'buf'.  The found text
+ * will be a complete line, i.e. bounded by either \n newlines or by the
+ * edges of 'buf'.  Returns the byte index into 'buf' of the found text,
+ * or -1 if not found.
+ */
+EXPORTED int buf_findline(const struct buf *buf, const char *line)
+{
+    int linelen;
+    const char *p;
+
+    if (!line) return -1;
+
+    /* find the length of the first line in the text at 'line' */
+    p = strchr(line, '\n');
+    linelen = (p ? (p - line) : strlen(line));
+    if (linelen == 0) return -1;
+
+    p = (const char *)memmem(buf->s, buf->len, line, linelen);
+    if (!p) return -1;
+
+    /* check the found string is at line boundaries */
+    if (p > buf->s && p[-1] != '\n')
+	return -1;
+    if ((p+linelen) < (buf->s+buf->len) && p[linelen] != '\n')
+	return -1;
+
+    return (p - buf->s);
+}
+
 EXPORTED char *strconcat(const char *s1, ...)
 {
     int sz = 1;	/* 1 byte for the trailing NUL */
