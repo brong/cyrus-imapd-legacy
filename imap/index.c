@@ -2456,11 +2456,10 @@ static struct searchargs *index_copy_search(struct index_state *state,
 					    struct index_state *tostate)
 {
     struct searchargs *out = xzmalloc(sizeof(struct searchargs));
-    struct strlist *l, *h;
+    struct strlist *l;
     struct searchannot *sa;
     struct searchsub *s;
     struct seqset *seq;
-    int i, have_one;
     unsigned flag, flagmask;
 
     out->flags = searchargs->flags;
@@ -2762,7 +2761,6 @@ static void index_format_search(struct dlist *parent,
     struct searchannot *sa;
     struct searchsub *s;
     struct seqset *seq;
-    int i, have_one;
     unsigned flag, flagmask;
 
     if (searchargs->flags & SEARCH_RECENT_SET)
@@ -3333,7 +3331,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
 	    int j;
 	    if (i)
 		prot_printf(state->out, " ");
-	    prot_printf(state->out, "(%lu", item->cid);
+	    prot_printf(state->out, "(" MODSEQ_FMT, item->cid);
 	    /* exemplar item */
 	    prot_printf(state->out, " (%u %u)", item->folderid, item->uid);
 	    /* rest of the items too */
@@ -4677,30 +4675,6 @@ static int index_fetchannotations(struct index_state *state,
 			     0);
 
     return r;
-}
-
-static const char *index_system_flagname(unsigned flagnum)
-{
-    switch (flagnum) {
-	case FLAG_ANSWERED:
-	    return "\\Answered";
-	    break;
-	case FLAG_FLAGGED:
-	    return "\\Flagged";
-	    break;
-	case FLAG_DRAFT:
-	    return "\\Draft";
-	    break;
-	case FLAG_DELETED:
-	    return "\\Deleted";
-	    break;
-	case FLAG_SEEN:
-	    return "\\Seen";
-	    break;
-	default:
-	    break;
-    }
-    fatal("Unknown flag", EC_SOFTWARE);
 }
 
 /*
