@@ -253,7 +253,7 @@ EXPORTED int strcmpsafe(const char *a, const char *b)
 	          (b == NULL ? "" : b));
 }
 
-HIDDEN int strcasecmpsafe(const char *a, const char *b)
+EXPORTED int strcasecmpsafe(const char *a, const char *b)
 {
     return strcasecmp((a == NULL ? "" : a),
 	              (b == NULL ? "" : b));
