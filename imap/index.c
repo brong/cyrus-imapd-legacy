@@ -3201,7 +3201,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     char extname[MAX_MAILBOX_BUFFER];
     modseq_t hms;
     struct multisort_result *sortres = NULL;
-    char *cachekey;
+    char *cachekey = NULL;
 
     assert(windowargs);
     assert(!windowargs->changedsince);
@@ -3386,6 +3386,7 @@ out:
     free(sortres->folders);
     free(sortres->msgs);
     free(sortres);
+    free(cachekey);
 
     return r;
 }
