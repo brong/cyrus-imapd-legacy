@@ -2954,9 +2954,10 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
 
 	if (config_auditlog)
 	    syslog(LOG_NOTICE, "auditlog: expunge sessionid=<%s> "
-		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
+		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s> cid=<%s>",
 		session_id(), mailbox->name, mailbox->uniqueid,
-		record->uid, message_guid_encode(&record->guid));
+		record->uid, message_guid_encode(&record->guid),
+	        conversation_id_encode(record->cid));
     }
 
     return mailbox_refresh_index_map(mailbox);
@@ -3067,9 +3068,10 @@ EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
     mailbox->index_size += INDEX_RECORD_SIZE;
 
     if (config_auditlog)
-	syslog(LOG_NOTICE, "auditlog: append sessionid=<%s> mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
+	syslog(LOG_NOTICE, "auditlog: append sessionid=<%s> mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s> cid=<%s>",
 	    session_id(), mailbox->name, mailbox->uniqueid, record->uid,
-	    message_guid_encode(&record->guid));
+	    message_guid_encode(&record->guid),
+	    conversation_id_encode(record->cid));
 
     /* expunged tracking */
     if (record->system_flags & FLAG_EXPUNGED) {
@@ -3079,9 +3081,10 @@ EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
 
 	if (config_auditlog)
 	    syslog(LOG_NOTICE, "auditlog: expunge sessionid=<%s> "
-		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
+		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s> cid=<%s>",
 		   session_id(), mailbox->name, mailbox->uniqueid,
-		   record->uid, message_guid_encode(&record->guid));
+		   record->uid, message_guid_encode(&record->guid),
+		   conversation_id_encode(record->cid));
     }
 
     /* yep, it could even be pre-unlinked in 'default' expunge mode, joy */
