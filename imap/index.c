@@ -1777,7 +1777,7 @@ static void index_unlock(struct index_state *state)
     mailbox_unlock_index(state->mailbox, NULL);
 }
 
-static int index_calcsearchflags(struct index_state *state, struct searchargs *searchargs)
+static void index_calcsearchflags(struct index_state *state, struct searchargs *searchargs)
 {
     struct strlist *l;
     int flag;
@@ -1806,8 +1806,6 @@ static int index_calcsearchflags(struct index_state *state, struct searchargs *s
 	}
 	searchargs->user_flags_unset[flag/32] |= 1<<(flag&31);
     }
-
-    return 0;
 }
 
 /*
@@ -1826,8 +1824,7 @@ EXPORTED int index_search(struct index_state *state, struct searchargs *searchar
 	return 0;
 
     /* calculate the user flags */
-    if (index_calcsearchflags(state, searchargs))
-	return 0;
+    index_calcsearchflags(state, searchargs);
 
     /* now do the search */
     n = _index_search(&list, state, searchargs, 
@@ -1909,8 +1906,7 @@ EXPORTED int index_sort(struct index_state *state,
 	return 0;
 
     /* calculate the user flags */
-    if (index_calcsearchflags(state, searchargs))
-	return 0;
+    index_calcsearchflags(state, searchargs);
 
     if (searchargs->modseq) modseq = 1;
     else {
@@ -2250,8 +2246,7 @@ EXPORTED int index_convsort(struct index_state *state,
     }
 
     /* calculate the user flags */
-    if (index_calcsearchflags(state, searchargs))
-	return 0;
+    index_calcsearchflags(state, searchargs);
 
     /* this works both with and without conversations */
     total = search_predict_total(state, cstate, searchargs,
@@ -2665,8 +2660,7 @@ static struct multisort_result *multisort_run(struct index_state *state,
 	searchargs2 = index_copy_search(state, searchargs, state2);
 
 	/* calculate the user flags */
-	if (index_calcsearchflags(state2, searchargs2))
-	    continue;
+	index_calcsearchflags(state2, searchargs2);
 
 	/* One pass through the folder's message list */
 	for (msgno = 1 ; msgno <= state2->exists ; msgno++) {
@@ -3524,8 +3518,7 @@ EXPORTED int index_convupdates(struct index_state *state,
 	return IMAP_INTERNAL;
 
     /* calculate the user flags */
-    if (index_calcsearchflags(state, searchargs))
-	return 0;
+    index_calcsearchflags(state, searchargs);
 
     total = search_predict_total(state, cstate, searchargs,
 				windowargs->conversations,
@@ -3705,8 +3698,7 @@ EXPORTED int index_thread(struct index_state *state, int algorithm,
 	return 0;
 
     /* calculate the user flags */
-    if (index_calcsearchflags(state, searchargs))
-	return 0;
+    index_calcsearchflags(state, searchargs);
     
     if(CONFIG_TIMING_VERBOSE)
 	start = clock();
