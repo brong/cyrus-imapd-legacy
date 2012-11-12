@@ -449,7 +449,7 @@ static int getlistretopts(char *tag, struct listargs *args);
 
 static int getsearchreturnopts(struct searchargs *searchargs);
 static struct searchargs *new_searchargs(const char *tag, int state);
-static int getsearchprogram(struct searchargs *searchargs, struct searchargs *base);
+static int get_search_program(struct searchargs *searchargs);
 static int get_search_criterion(struct searchargs *searchargs, struct searchargs *base);
 static int get_snippetargs(struct snippetargs **sap);
 static void free_snippetargs(struct snippetargs **sap);
@@ -5373,7 +5373,7 @@ static void cmd_search(char *tag, int usinguid)
 
     /* local mailbox */
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_KEYWORD|GETSEARCH_RETURN);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
 	freesearchargs(searchargs);
@@ -5431,7 +5431,7 @@ static void cmd_sort(char *tag, int usinguid)
     if (c == EOF) goto error;
 
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5537,7 +5537,7 @@ void cmd_xconvsort(char *tag, int updates)
 
     /* need index loaded to even parse searchargs! */
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5655,7 +5655,7 @@ static void cmd_xconvmultisort(char *tag)
 
     /* need index loaded to even parse searchargs! */
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5731,7 +5731,7 @@ static void cmd_xsnippets(char *tag)
 
     /* need index loaded to even parse searchargs! */
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5844,7 +5844,7 @@ static void cmd_thread(char *tag, int usinguid)
     }
 
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST);
-    c = getsearchprogram(searchargs, NULL);
+    c = get_search_program(searchargs);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
 	freesearchargs(searchargs);
@@ -9948,19 +9948,17 @@ static struct searchargs *new_searchargs(const char *tag, int state)
 /*
  * Parse a search program
  */
-static int getsearchprogram(struct searchargs *searchargs, struct searchargs *base)
+static int get_search_program(struct searchargs *searchargs)
 {
     int c;
 
-    if (base == NULL) base = searchargs;
-
     do {
-	c = get_search_criterion(searchargs, base);
+	c = get_search_criterion(searchargs, searchargs);
     } while (c == ' ');
 
-    base->namespace = &imapd_namespace;
-    base->userid = imapd_userid;
-    base->authstate = imapd_authstate;
+    searchargs->namespace = &imapd_namespace;
+    searchargs->userid = imapd_userid;
+    searchargs->authstate = imapd_authstate;
 
     return c;
 }
@@ -9994,7 +9992,9 @@ static int get_search_criterion(struct searchargs *searchargs, struct searchargs
     switch (criteria.s[0]) {
     case '\0':
 	if (c != '(') goto badcri;
-	c = getsearchprogram(searchargs, base);
+	do {
+	    c = get_search_criterion(searchargs, base);
+	} while (c == ' ');
 	if (c == EOF) return EOF;
 	if (c != ')') {
 	    prot_printf(imapd_out, "%s BAD Missing required close paren in Search command\r\n",
