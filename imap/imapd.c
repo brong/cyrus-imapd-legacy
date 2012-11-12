@@ -450,7 +450,7 @@ static int getlistretopts(char *tag, struct listargs *args);
 static int getsearchreturnopts(struct searchargs *searchargs);
 static struct searchargs *new_searchargs(const char *tag, int state);
 static int getsearchprogram(struct searchargs *searchargs, struct searchargs *base);
-static int getsearchcriteria(struct searchargs *searchargs, struct searchargs *base);
+static int get_search_criterion(struct searchargs *searchargs, struct searchargs *base);
 static int get_snippetargs(struct snippetargs **sap);
 static void free_snippetargs(struct snippetargs **sap);
 static int getsearchdate(time_t *start, time_t *end);
@@ -9955,7 +9955,7 @@ static int getsearchprogram(struct searchargs *searchargs, struct searchargs *ba
     if (base == NULL) base = searchargs;
 
     do {
-	c = getsearchcriteria(searchargs, base);
+	c = get_search_criterion(searchargs, base);
     } while (c == ' ');
 
     base->namespace = &imapd_namespace;
@@ -9966,9 +9966,9 @@ static int getsearchprogram(struct searchargs *searchargs, struct searchargs *ba
 }
 
 /*
- * Parse a search criteria
+ * Parse a single search criterion
  */
-static int getsearchcriteria(struct searchargs *searchargs, struct searchargs *base)
+static int get_search_criterion(struct searchargs *searchargs, struct searchargs *base)
 {
     static struct buf criteria, arg;
     struct searchargs *sub1, *sub2;
@@ -10232,7 +10232,7 @@ static int getsearchcriteria(struct searchargs *searchargs, struct searchargs *b
 	if (!strcmp(criteria.s, "not")) {
 	    if (c != ' ') goto missingarg;		
 	    sub1 = new_searchargs(NULL, 0);
-	    c = getsearchcriteria(sub1, base);
+	    c = get_search_criterion(sub1, base);
 	    if (c == EOF) {
 		freesearchargs(sub1);
 		return EOF;
@@ -10250,14 +10250,14 @@ static int getsearchcriteria(struct searchargs *searchargs, struct searchargs *b
 	if (!strcmp(criteria.s, "or")) {
 	    if (c != ' ') goto missingarg;		
 	    sub1 = new_searchargs(NULL, 0);
-	    c = getsearchcriteria(sub1, base);
+	    c = get_search_criterion(sub1, base);
 	    if (c == EOF) {
 		freesearchargs(sub1);
 		return EOF;
 	    }
 	    if (c != ' ') goto missingarg;		
 	    sub2 = new_searchargs(NULL, 0);
-	    c = getsearchcriteria(sub2, base);
+	    c = get_search_criterion(sub2, base);
 	    if (c == EOF) {
 		freesearchargs(sub1);
 		freesearchargs(sub2);
