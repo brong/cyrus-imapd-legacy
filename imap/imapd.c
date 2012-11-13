@@ -8398,6 +8398,8 @@ static void cmd_status(char *tag, char *name)
     struct statusdata sdata;
     int r = 0;
 
+    memset(&sdata, 0, sizeof(struct statusdata));
+
     r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
 					       imapd_userid, mailboxname);
 
@@ -12349,6 +12351,8 @@ static void list_response(const char *name, int attributes,
     struct statusdata sdata;
 
     if (!name) return;
+
+    memset(&sdata, 0, sizeof(struct statusdata));
 
     /* first convert "INBOX" to "user.<userid>" */
     if (!strncasecmp(name, "inbox", 5)
