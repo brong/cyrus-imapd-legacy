@@ -1332,7 +1332,7 @@ EXPORTED int buf_findline(const struct buf *buf, const char *line)
 
     /* find the length of the first line in the text at 'line' */
     p = strchr(line, '\n');
-    linelen = (p ? (p - line) : strlen(line));
+    linelen = (p ? (size_t)(p - line) : strlen(line));
     if (linelen == 0) return -1;
 
     p = (const char *)memmem(buf->s, buf->len, line, linelen);
