@@ -2295,14 +2295,21 @@ struct multisort_result {
     uint32_t nmsgs;
 };
 
-static struct db *sortcache_db(const char *userid, int create)
+static struct db *sortcache_db(struct index_state *state)
 {
     const char *dbtype = config_getstring(IMAPOPT_SORTCACHE_DB);
-    char *fname = user_hash_meta(userid, "sortcache");
-    int flags = create ? CYRUSDB_CREATE : 0;
+    const char *userid = mboxname_to_userid(state->mailbox->name);
+    char *fname = NULL;
     struct db *db = NULL;
-    int r = cyrusdb_open(dbtype, fname, flags, &db);
+    int r;
 
+    /* we just don't cache if there's no userid.  Alternative would
+     * be to write some global file */
+    if (!userid)
+	return NULL;
+
+    fname = user_hash_meta(userid, "sortcache");
+    r = cyrusdb_open(dbtype, fname, CYRUSDB_CREATE, &db);
     free(fname);
 
     return r ? NULL : db;
@@ -2899,12 +2906,11 @@ static char *multisort_cachekey(struct sortcrit *sortcrit,
     return buf_release(&b);
 }
 
-static struct multisort_result *multisort_cache_load(struct index_state *state,
+static struct multisort_result *multisort_cache_load(struct db *db,
 						     modseq_t hms,
 						     const char *cachekey)
 {
     struct sortcache_cleanup_rock rock;
-    const char *userid = mboxname_to_userid(state->mailbox->name);
     struct multisort_result *sortres = NULL;
     struct buf prefix = BUF_INITIALIZER;
     const char *val = NULL;
@@ -2914,14 +2920,12 @@ static struct multisort_result *multisort_cache_load(struct index_state *state,
     struct dlist *di;
     int i;
 
-    if (!userid) return NULL;
-
-    memset(&rock, 0, sizeof(struct sortcache_cleanup_rock));
-
-    rock.db = sortcache_db(userid, 0);
-    if (!rock.db) goto done;
+    if (!db) goto done;
 
     buf_printf(&prefix, MODSEQ_FMT " ", hms);
+
+    memset(&rock, 0, sizeof(struct sortcache_cleanup_rock));
+    rock.db = db;
     rock.prefix = prefix.s;
     rock.prefixlen = prefix.len;
 
@@ -2967,20 +2971,16 @@ static struct multisort_result *multisort_cache_load(struct index_state *state,
     }
 
 done:
-    if (rock.db)
-	cyrusdb_close(rock.db);
     dlist_free(&dl);
     buf_free(&prefix);
     return sortres;
 }
 
-static void multisort_cache_save(struct index_state *state,
+static void multisort_cache_save(struct db *db,
 				 modseq_t hms,
 				 const char *cachekey,
 				 struct multisort_result *sortres)
 {
-    const char *userid = mboxname_to_userid(state->mailbox->name);
-    struct db *db = NULL;
     struct buf prefix = BUF_INITIALIZER;
     struct buf result = BUF_INITIALIZER;
     struct dlist *dl = NULL;
@@ -2988,9 +2988,6 @@ static void multisort_cache_save(struct index_state *state,
     struct dlist *di;
     int i;
 
-    if (!userid) return;
-
-    db = sortcache_db(userid, 1);
     if (!db) goto done;
 
     buf_printf(&prefix, MODSEQ_FMT " %s", hms, cachekey);
@@ -3018,8 +3015,6 @@ static void multisort_cache_save(struct index_state *state,
 	goto done;
 
 done:
-    if (db)
-	cyrusdb_close(db);
     dlist_free(&dl);
     buf_free(&prefix);
     buf_free(&result);
@@ -3055,6 +3050,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     modseq_t hms;
     struct multisort_result *sortres = NULL;
     char *cachekey = NULL;
+    struct db *db = NULL;
 
     assert(windowargs);
     assert(!windowargs->changedsince);
@@ -3069,11 +3065,13 @@ EXPORTED int index_convmultisort(struct index_state *state,
     hms = mboxname_readmodseq(state->mailbox->name);
     cachekey = multisort_cachekey(sortcrit, state, searchargs);
 
-    sortres = multisort_cache_load(state, hms, cachekey);
+    db = sortcache_db(state);
+
+    sortres = multisort_cache_load(db, hms, cachekey);
     if (!sortres) {
 	sortres = multisort_run(state, sortcrit, searchargs);
 	/* OK if it fails */
-	multisort_cache_save(state, hms, cachekey, sortres);
+	multisort_cache_save(db, hms, cachekey, sortres);
     }
 
     if (windowargs->anchorfolder) {
@@ -3224,6 +3222,9 @@ out:
 	prot_printf(state->out, "* OK [TOTAL %u]\r\n",
 		    total);
     }
+
+    if (db)
+	cyrusdb_close(db);
 
     /* free all our temporary data */
     free_hashu64_table(&seen_cids, NULL);
