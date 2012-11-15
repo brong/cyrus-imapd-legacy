@@ -3029,6 +3029,8 @@ static char *multisort_cachekey(struct sortcrit *sortcrit,
     return buf_release(&b);
 }
 
+#define SORTCACHE_VERSION 0
+
 static struct multisort_result *multisort_cache_load(struct db *db,
 						     modseq_t hms,
 						     const char *cachekey)
@@ -3045,7 +3047,7 @@ static struct multisort_result *multisort_cache_load(struct db *db,
 
     if (!db) goto done;
 
-    buf_printf(&prefix, MODSEQ_FMT " ", hms);
+    buf_printf(&prefix, MODSEQ_FMT " %d ", hms, SORTCACHE_VERSION);
 
     memset(&rock, 0, sizeof(struct sortcache_cleanup_rock));
     rock.db = db;
@@ -3113,7 +3115,7 @@ static void multisort_cache_save(struct db *db,
 
     if (!db) goto done;
 
-    buf_printf(&prefix, MODSEQ_FMT " %s", hms, cachekey);
+    buf_printf(&prefix, MODSEQ_FMT " %d %s", hms, SORTCACHE_VERSION, cachekey);
 
     dl = dlist_newkvlist(NULL, NULL);
     dlist_setnum32(dl, "NFOLDERS", sortres->nfolders);
