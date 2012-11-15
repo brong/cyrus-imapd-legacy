@@ -2806,16 +2806,12 @@ static void index_format_sort(struct dlist *parent,
 {
     int i = 0;
 
-    for (i = 0; ; i++) {
+    for (i = 0; sortcrit[i].key != SORT_SEQUENCE ; i++) {
 	/* determine sort order from reverse flag bit */
 	if (sortcrit[i].flags & SORT_REVERSE)
 	    dlist_setatom(parent, NULL, "REVERSE");
 
 	switch (sortcrit[i].key) {
-	case SORT_SEQUENCE:
-	    /* nothing to say here */
-	    return;
-	    break;
 	case SORT_ARRIVAL:
 	    dlist_setatom(parent, NULL, "ARRIVAL");
 	    break;
@@ -2875,7 +2871,7 @@ static void index_format_sort(struct dlist *parent,
 	    dlist_setatom(parent, NULL, "FOLDER");
 	    break;
 	}
-    };
+    }
 }
 
 static char *multisort_cachekey(struct sortcrit *sortcrit,
