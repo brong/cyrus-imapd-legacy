@@ -1327,6 +1327,7 @@ EXPORTED int buf_findline(const struct buf *buf, const char *line)
 {
     int linelen;
     const char *p;
+    const char *end = buf->s + buf->len;
 
     if (!line) return -1;
 
@@ -1335,16 +1336,20 @@ EXPORTED int buf_findline(const struct buf *buf, const char *line)
     linelen = (p ? (size_t)(p - line) : strlen(line));
     if (linelen == 0) return -1;
 
-    p = (const char *)memmem(buf->s, buf->len, line, linelen);
-    if (!p) return -1;
+    for (p = buf->s ;
+	 (p = (const char *)memmem(p, end-p, line, linelen)) != NULL ;
+	 p++) {
 
-    /* check the found string is at line boundaries */
-    if (p > buf->s && p[-1] != '\n')
-	return -1;
-    if ((p+linelen) < (buf->s+buf->len) && p[linelen] != '\n')
-	return -1;
+	/* check the found string is at line boundaries */
+	if (p > buf->s && p[-1] != '\n')
+	    continue;
+	if ((p+linelen) < end && p[linelen] != '\n')
+	    continue;
 
-    return (p - buf->s);
+	return (p - buf->s);
+    }
+
+    return -1;
 }
 
 EXPORTED char *strconcat(const char *s1, ...)
