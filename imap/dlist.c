@@ -880,7 +880,7 @@ EXPORTED void dlist_splat(struct dlist *parent, struct dlist *child)
      * the now unlinked children */
     child->head = NULL;
     child->tail = NULL;
-    dlist_free(child);
+    dlist_free(&child);
 }
 
 struct dlist *dlist_getkvchild_bykey(struct dlist *dl,
