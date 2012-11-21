@@ -191,6 +191,8 @@ static void index_thread_ref(struct index_state *state,
 
 static struct seqset *_parse_sequence(struct index_state *state,
 				      const char *sequence, int usinguid);
+static void appendsequencelist(struct index_state *state, struct seqset **l,
+			       char *sequence, int usinguid);
 static void massage_header(char *hdr);
 
 /* NOTE: Make sure these are listed in CAPABILITY_STRING */
@@ -1786,7 +1788,10 @@ EXPORTED int index_sort(struct index_state *state, struct sortcrit *sortcrit,
     int mi;
     int nmsg = 0;
     modseq_t highestmodseq = 0;
-    int i, modseq = 0;
+#if 0 /*TODO:gnb*/
+    int i;
+#endif
+    int modseq = 0;
 
     /* update the index */
     if (index_check(state, 0, 0))
@@ -7710,9 +7715,9 @@ static struct seqset *_parse_sequence(struct index_state *state,
     return seqset_parse(sequence, NULL, maxval);
 }
 
-EXPORTED void appendsequencelist(struct index_state *state,
-			struct seqset **l,
-			char *sequence, int usinguid)
+static void appendsequencelist(struct index_state *state,
+			       struct seqset **l,
+			       char *sequence, int usinguid)
 {
     unsigned maxval = usinguid ? state->last_uid : state->exists;
     seqset_append(l, sequence, maxval);
