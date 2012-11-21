@@ -133,7 +133,8 @@ static void index_listflags(struct index_state *state);
 static void index_fetchflags(struct index_state *state, uint32_t msgno);
 static int index_search_evaluate(struct index_state *state,
 				 const struct searchargs *searchargs,
-				 uint32_t msgno, struct buf *msgfile);
+				 uint32_t msgno);
+#if 0 /*TODO:gnb*/
 static int index_searchmsg(struct index_record *, const struct buf *msgfile,
 			   const char *substr, comp_pat *pat, int skipheader);
 static int index_searchheader(char *name, char *substr, comp_pat *pat,
@@ -141,6 +142,7 @@ static int index_searchheader(char *name, char *substr, comp_pat *pat,
 			      int size);
 static int index_searchcacheheader(struct index_state *state, uint32_t msgno, char *name, char *substr,
 				   comp_pat *pat);
+#endif
 static int _index_search(unsigned **msgno_list, struct index_state *state,
 			 struct searchargs *searchargs,
 			 modseq_t *highestmodseq);
@@ -1672,7 +1674,7 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	if (!state->want_expunged && (im->system_flags & FLAG_EXPUNGED))
 	    continue;
 
-	if (index_search_evaluate(state, searchargs, msgno, NULL)) {
+	if (index_search_evaluate(state, searchargs, msgno)) {
 	    (*msgno_list)[n++] = msgno;
 	    if (highestmodseq && im->modseq > *highestmodseq) {
 		*highestmodseq = im->modseq;
@@ -1705,7 +1707,7 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
 	if (!state->want_expunged && (im->system_flags & FLAG_EXPUNGED))
 	    continue;
 
-	if (index_search_evaluate(state, searchargs, msgno, NULL)) {
+	if (index_search_evaluate(state, searchargs, msgno)) {
 	    (*msgno_list)[n++] = msgno;
 	    if (highestmodseq && im->modseq > *highestmodseq) {
 		*highestmodseq = im->modseq;
@@ -1948,6 +1950,7 @@ EXPORTED int index_sort(struct index_state *state,
     if (index_check(state, 0, 0))
 	return 0;
 
+#if 0
     /* calculate the user flags */
     index_calcsearchflags(state, searchargs);
 
@@ -1960,6 +1963,8 @@ EXPORTED int index_sort(struct index_state *state,
 	    }
 	}
     }
+#endif
+    search_expr_internalise(state->mailbox, searchargs->root);
 
     /* Search for messages based on the given criteria */
     nmsg = _index_search(&msgno_list, state, searchargs,
@@ -2326,7 +2331,7 @@ EXPORTED int index_convsort(struct index_state *state,
 	    continue;
 
 	/* run the search program against all messages */
-	if (!index_search_evaluate(state, searchargs, msg->msgno, NULL))
+	if (!index_search_evaluate(state, searchargs, msg->msgno))
 	    continue;
 
 	/* figure out whether this message is an exemplar */
@@ -2724,7 +2729,7 @@ static struct multisort_result *multisort_run(struct index_state *state,
 		continue;
 
 	    /* run the search program */
-	    if (!index_search_evaluate(state2, searchargs2, msgno, NULL))
+	    if (!index_search_evaluate(state2, searchargs2, msgno))
 		continue;
 
 	    msgs[count++] = msgno;
@@ -3686,7 +3691,7 @@ EXPORTED int index_convupdates(struct index_state *state,
 	int is_changed = 0;
 	int in_search = 0;
 
-	in_search = index_search_evaluate(state, searchargs, msg->msgno, NULL);
+	in_search = index_search_evaluate(state, searchargs, msg->msgno);
 	is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
 	is_new = (record->uid >= windowargs->uidnext);
 	is_changed = (record->modseq > windowargs->modseq);
@@ -5584,6 +5589,7 @@ out:
 }
 
 
+#if 0 /*TODO:gnb*/
 static int _search_searchbuf(char *s, comp_pat *p, struct buf *b)
 {
     if (!b->len)
@@ -5672,6 +5678,7 @@ out:
     strarray_fini(&attribs);
     return r;
 }
+#endif
 
 static int _search_contenttype(const char *str, struct buf *bodystructure)
 {
@@ -5708,14 +5715,12 @@ static int _search_contenttype(const char *str, struct buf *bodystructure)
 
 /*
  * Evaluate a searchargs structure on a msgno
- *
- * Note: msgfile argument must be 0 if msg is not mapped in.
  */
 static int index_search_evaluate(struct index_state *state,
 				 const struct searchargs *searchargs,
-				 uint32_t msgno,
-				 struct buf *msgfile)
+				 uint32_t msgno)
 {
+#if 0
     unsigned i;
     struct strlist *l, *h;
     struct searchsub *s;
@@ -5954,8 +5959,24 @@ zero:
     buf_free(&localmap);
 
     return retval;
+#else
+    struct index_map *im = &state->map[msgno-1];
+    int r;
+    message_t *m;
+
+    xstats_inc(SEARCH_EVALUATE);
+
+    m = message_new_from_index(state->mailbox, &im->record, msgno,
+			       (im->isrecent ? MESSAGE_RECENT : 0) |
+			       (im->isseen ? MESSAGE_SEEN : 0));
+    r = search_expr_evaluate(m, searchargs->root);
+    message_unref(&m);
+
+    return r;
+#endif
 }
 
+#if 0 /*TODO:gnb*/
 /*
  * Search part of a message for a substring.
  */
@@ -5989,8 +6010,10 @@ static int searchmsg_cb(int partno, int charset, int encoding,
 				  charset, encoding, charset_flags);
     }
 }
+#endif
 
 
+#if 0 /*TODO:gnb*/
 static int index_searchmsg(struct index_record *record,
 			   const struct buf *msgfile,
 			   const char *substr,
@@ -6005,7 +6028,9 @@ static int index_searchmsg(struct index_record *record,
     sr.skipheader = skipheader;
     return message_foreach_part(record, msgfile, searchmsg_cb, &sr);
 }
+#endif
 
+#if 0 /*TODO:gnb*/
 /*
  * Search named header of a message for a substring
  */
@@ -6075,6 +6100,7 @@ static int index_searchcacheheader(struct index_state *state, uint32_t msgno,
 
     return charset_search_mimeheader(substr, pat, strchr(buf, ':') + 1, charset_flags);
 }
+#endif
 
 
 struct getsearchtext_rock
