@@ -9700,7 +9700,6 @@ out_noprint:
     buf_free(&arg);
 }
 
-#if 0 /*TODO:gnb*/
 /*
  * Parse a ANNOTATION item for SEARCH (RFC5257) into a struct
  * searchannot and append it to the chain of such structures at *lp.
@@ -9730,8 +9729,8 @@ static int parse_search_annotation(int c, struct searchannot **lp)
 	goto out;
     }
     if (strcmp(attrib.s, "value") &&
-        strcmp(attrib.s, "value.shared") &&
-        strcmp(attrib.s, "value.priv")) {
+	strcmp(attrib.s, "value.shared") &&
+	strcmp(attrib.s, "value.priv")) {
 	c = EOF;
 	goto out;
     }
@@ -9750,10 +9749,6 @@ static int parse_search_annotation(int c, struct searchannot **lp)
     sa->auth_state = imapd_authstate;
     buf_move(&sa->value, &value);
 
-    /* append to *lp: move lp along the chain until
-     * it points to the last ->next pointer */
-    while (*lp && (*lp)->next)
-	lp = &(*lp)->next;
     *lp = sa;
 
 out:
@@ -9762,7 +9757,6 @@ out:
     buf_free(&value);
     return c;
 }
-#endif
 
 /*
  * Parse search return options
@@ -9958,13 +9952,15 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 	    search_expr_new(parent, SEOP_TRUE);
 	    break;
 	}
-#if 0 /*TODO:gnb*/
 	else if (!strcmp(criteria.s, "annotation")) {
-	    c = parse_search_annotation(c, &searchargs->annotations);
+	    struct searchannot *annot = NULL;
+	    c = parse_search_annotation(c, &annot);
 	    if (c == EOF)
 		goto badcri;
+	    e = search_expr_new(parent, SEOP_MATCH);
+	    e->attr = search_attr_find("annotation");
+	    e->value.annot = annot;
 	}
-#endif
 	else goto badcri;
 	break;
 
