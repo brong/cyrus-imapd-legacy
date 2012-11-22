@@ -10027,7 +10027,7 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 #if 0 /*TODO:gnb*/
     case 'b':
 	if (!strcmp(criteria.s, "before")) {
-	    if (c != ' ') goto missingarg;		
+	    if (c != ' ') goto missingarg;
 	    c = getsearchdate(&start, &end);
 	    if (c == EOF) goto baddate;
 	    if (!searchargs->before || searchargs->before > start) {
@@ -10091,6 +10091,16 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 	    base->charset = charset_lookupname(arg.s);
 	    if (base->charset == -1) goto badcharset;
 	}
+	else if (!strcmp(criteria.s, "cid")) {
+	    conversation_id_t cid;
+	    if (c != ' ') goto missingarg;
+	    c = getword(imapd_in, &arg);
+	    if (c == EOF) goto badnumber;
+	    if (!conversation_id_decode(&cid, arg.s)) goto badnumber;
+	    e = search_expr_new(parent, SEOP_MATCH);
+	    e->attr = search_attr_find("cid");
+	    e->value.u = cid;
+	}
 	else goto badcri;
 	break;
 
@@ -10129,7 +10139,7 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
     case 'h':
 	if (!strcmp(criteria.s, "header")) {
 
-	    if (c != ' ') goto missingarg;		
+	    if (c != ' ') goto missingarg;
 	    c = getastring(imapd_in, imapd_out, &arg);
 	    if (c != ' ') goto missingarg;
 	    lcase(arg.s);
@@ -10197,9 +10207,11 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 	}
 	else goto badcri;
 	break;
+#endif
 
     case 'm':
 	if (!strcmp(criteria.s, "modseq")) {
+	    modseq_t modseq;
 	    if (c != ' ') goto missingarg;
 	    /* Check for optional search-modseq-ext */
 	    c = getqstring(imapd_in, imapd_out, &arg);
@@ -10208,12 +10220,14 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 		c = getword(imapd_in, &arg);
 		if (c != ' ') goto missingarg;
 	    }
-	    c = getmodseq(imapd_in, &searchargs->modseq);
+	    c = getmodseq(imapd_in, &modseq);
 	    if (c == EOF) goto badnumber;
+	    e = search_expr_new(parent, SEOP_MATCH);
+	    e->attr = search_attr_find("modseq");
+	    e->value.u = modseq;
 	}
 	else goto badcri;
 	break;
-#endif
 
     case 'n':
 	if (!strcmp(criteria.s, "not")) {
@@ -10457,6 +10471,7 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 		base->tag, arg.s);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
+
 #if 0 /*TODO:gnb*/
 
  baddate:
@@ -10464,6 +10479,7 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
 		base->tag);
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
+#endif
 
  badnumber:
     prot_printf(imapd_out, "%s BAD Invalid number in Search command\r\n",
@@ -10471,6 +10487,7 @@ static int get_search_criterion(search_expr_t *parent, struct searchargs *base)
     if (c != EOF) prot_ungetc(c, imapd_in);
     return EOF;
 
+#if 0 /*TODO:gnb*/
  badinterval:
     prot_printf(imapd_out, "%s BAD Invalid interval in Search command\r\n",
 		base->tag);
