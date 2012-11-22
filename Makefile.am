@@ -1410,7 +1410,7 @@ valgrind:
 	$(MAKE) VG=yes check
 
 tags cscope:
-	find $(DIST_SUBDIRS) -type f -name '*.[ch]' > cs.files
+	find $(DIST_SUBDIRS) -type f -name '*.[ch]' | fgrep -v '/debian/' > cs.files
 	cscope -b -k -i cs.files
 	$(RM) cs.files
 
