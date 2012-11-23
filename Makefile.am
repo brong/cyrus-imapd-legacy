@@ -802,6 +802,11 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/xstats.c \
 	imap/xstats.h \
 	imap/xstats_metrics.h
+
+imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
+imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
+imap_libcyrus_imap_la_CXXFLAGS =
+
 if USE_SQUAT
 imap_libcyrus_imap_la_SOURCES += \
 	imap/search_squat.c \
@@ -815,8 +820,14 @@ if USE_SPHINX
 imap_libcyrus_imap_la_SOURCES += \
 	imap/search_sphinx.c
 endif
-imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
-imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
+if USE_XAPIAN
+imap_libcyrus_imap_la_SOURCES += \
+	imap/search_xapian.c \
+	imap/xapian_wrap.h \
+	imap/xapian_wrap.cpp
+imap_libcyrus_imap_la_LIBADD += $(XAPIAN_LIBS)
+imap_libcyrus_imap_la_CXXFLAGS += $(XAPIAN_CXXFLAGS)
+endif
 
 imap_lmtpd_SOURCES = \
 	imap/lmtpd.c \
