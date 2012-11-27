@@ -1414,3 +1414,7 @@ tags cscope:
 
 libtool: $(LIBTOOL_DEPS)
 	$(SHELL) ./config.status libtool
+
+# Install for Cassandane
+cassandane:
+	$(MAKE) DESTDIR=`cd ../inst ; /bin/pwd` install
