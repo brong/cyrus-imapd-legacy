@@ -1810,7 +1810,7 @@ EXPORTED int index_copy_remote(struct index_state *state, char *sequence,
  * If no message with UID 'uid', returns the message with
  * the higest UID not greater than 'uid'.
  */
-EXPORTED unsigned index_finduid(struct index_state *state, unsigned uid)
+EXPORTED uint32_t index_finduid(struct index_state *state, uint32_t uid)
 {
     unsigned low = 1;
     unsigned high = state->exists;
@@ -1828,6 +1828,11 @@ EXPORTED unsigned index_finduid(struct index_state *state, unsigned uid)
 	    low = mid + 1;
     }
     return high;
+}
+
+EXPORTED uint32_t index_uid(struct index_state *state, uint32_t msgno)
+{
+    return state->map[msgno-1].record.uid;
 }
 
 /* Helper function to determine domain of data */
