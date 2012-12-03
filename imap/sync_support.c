@@ -1413,6 +1413,7 @@ int sync_mailbox(struct mailbox *mailbox,
 	uint32_t recno;
 	int send_file;
 	uint32_t prevuid = 0;
+	int skipexpunge = config_getswitch(IMAPOPT_SYNC_SKIP_EXPUNGED);
 
 	for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	    /* we can't send bogus records */
@@ -1442,6 +1443,12 @@ int sync_mailbox(struct mailbox *mailbox,
 
 	    /* if we're not uploading messages... don't send file */
 	    if (!part_list || !kupload)
+		send_file = 0;
+
+	    /* if we're skipping expunged files, just pretend that we
+	     * don't have it, but still send the EXPUNGED data, because
+	     * that's useful for QRESYNC and cheap. */
+	    if (skipexpunge && (record.system_flags & FLAG_EXPUNGED))
 		send_file = 0;
 
 	    /* if we don't HAVE the file we can't send it */

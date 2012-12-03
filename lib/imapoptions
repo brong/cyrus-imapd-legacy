@@ -1291,6 +1291,10 @@ product version in the capabilities */
    next opportunity. Safer than sending signals to running processes.
    Prefix with a channel name to only apply for that channel */
 
+{ "sync_skip_expunged", 0, SWITCH }
+/* If set, skip appending expunged messages to the replica if they
+   haven't been sent yet */
+
 { "syslog_prefix", NULL, STRING }
 /* String to be prepended to the process name in syslog entries. */
 
