@@ -956,7 +956,8 @@ static void message_parse_charset(const struct body *body,
     if (!body->type || !strcmp(body->type, "TEXT")) {
 	for (param = body->params; param; param = param->next) {
 	    if (!strcasecmp(param->attribute, "charset")) {
-		charset = charset_lookupname(param->value);
+		if (param->value && *param->value)
+		    charset = charset_lookupname(param->value);
 		break;
 	    }
 	}
@@ -4284,6 +4285,8 @@ static void handle_mime_fields(part_t *part,
 	t = rfc822tok_next(&tok, &val);
 	if (t != RFC822_ATOM && t != RFC822_QSTRING)
 	    goto defaults;
+	if (!val || !*val)
+	    continue;
 	if (param == P_BOUNDARY) {
 	    /* RFC2045 says "multipart boundaries are case-sensitive" */
 	    free(part->boundary);
