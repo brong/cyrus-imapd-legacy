@@ -7867,6 +7867,7 @@ EXPORTED void freesearchargs(struct searchargs *s)
 	freesearchargs(sub->sub2);
 	free(sub);
     }
+    search_expr_free(s->root);
     free(s);
 }
 
