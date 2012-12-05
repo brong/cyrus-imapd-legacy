@@ -5595,7 +5595,7 @@ out:
 }
 
 
-#if 0 /*TODO:gnb*/
+#if 0
 static int _search_searchbuf(char *s, comp_pat *p, struct buf *b)
 {
     if (!b->len)
@@ -5603,7 +5603,6 @@ static int _search_searchbuf(char *s, comp_pat *p, struct buf *b)
 
     return charset_searchstring(s, p, b->s, b->len, charset_flags);
 }
-#endif
 
 static int _search_contenttype(const char *str, struct buf *bodystructure)
 {
@@ -5637,6 +5636,7 @@ static int _search_contenttype(const char *str, struct buf *bodystructure)
     buf_free(&xstr);
     return r;
 }
+#endif
 
 /*
  * Evaluate a searchargs structure on a msgno
