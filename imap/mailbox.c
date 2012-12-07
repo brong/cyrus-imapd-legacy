@@ -109,7 +109,9 @@
 #include "xstrlcat.h"
 #include "xstats.h"
 
+#ifdef HAVE_PUSH
 #include "mailbox_update_notifier.h"
+#endif
 
 struct mailboxlist {
     struct mailboxlist *next;
@@ -1903,8 +1905,10 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
 		session_id(), mailbox->name, mailbox->uniqueid,
 		mailbox->i.highestmodseq);
 
+#ifdef HAVE_PUSH
 	if (config_getstring(IMAPOPT_MAILBOX_UPDATE_NOTIFIER_SOCKET))
 	    send_push_notification(mailbox);
+#endif
 
 	mailbox->has_changed = 0;
     }

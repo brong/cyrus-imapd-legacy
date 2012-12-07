@@ -1101,6 +1101,36 @@ if test "$enable_murder" != no; then
 	# for master/slave auto-selection
 	AC_CHECK_HEADERS(sys/sockio.h)
 fi
+dnl
+dnl see if we're compiling with push support
+dnl
+AC_ARG_ENABLE(push,
+	[AS_HELP_STRING([--disable-push], [disable IMAP push support])])
+PROTOBUF_C_LIBS=
+PROTOC_C=
+if test "$enable_push" != no; then
+    # for master/slave auto-selection
+    AC_CHECK_HEADERS([google/protobuf-c/protobuf-c.h],
+		     [
+			have_protobuf_hdr=yes
+		     ],[
+			have_protobuf_hdr=no
+		     ])
+    AC_CHECK_LIB(protobuf-c, protobuf_c_message_pack_to_buffer,
+		     [
+			have_protobuf_lib=yes
+			PROTOBUF_C_LIBS="-lprotobuf-c"
+		     ],[
+			have_protobuf_lib=no
+		     ])
+    AC_CHECK_PROG(PROTOC_C, protoc-c)
+    if test "x$PROTOC_C" = "x" -o "$have_protobuf_hdr" != "yes" -o "$have_protobuf_lib" != "yes" ; then
+	AC_MSG_ERROR([parts of the C development environment for Google Protocol buffers are missing, use --disable-push to disable])
+    fi
+    AC_DEFINE(HAVE_PUSH, [], [Are mailbox push notifications enabled?])
+fi
+AM_CONDITIONAL([HAVE_PUSH], [test "$enable_push" != "no"])
+AC_SUBST(PROTOBUF_C_LIBS)
 
 dnl
 dnl see if we're compiling replication support programs

@@ -91,12 +91,7 @@ BUILT_SOURCES += \
 	lib/htmlchar.c \
 	lib/htmlchar.h \
 	imap/rfc822_header.c \
-	imap/rfc822_header.h \
-	imap/mailbox_update_notifier.pb-c.h \
-	imap/mailbox_update_notifier.pb-c.c
-CLEANFILES += \
-	imap/mailbox_update_notifier.pb-c.h \
-	imap/mailbox_update_notifier.pb-c.c
+	imap/rfc822_header.h
 lib_LTLIBRARIES += imap/libcyrus_imap.la
 service_PROGRAMS += \
 	imap/arbitron \
@@ -447,8 +442,10 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 	@${top_srcdir}/com_err/et/config_script ${top_srcdir}/com_err/et/compile_et.sh ${AWK} ${SED} > $@
 	@chmod 755 $@
 
+if HAVE_PUSH
 imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c: imap/mailbox_update_notifier.proto
-	cd imap && protoc-c --c_out=. mailbox_update_notifier.proto
+	cd imap && $(PROTOC_C) --c_out=. mailbox_update_notifier.proto
+endif
 
 # ---- Libraries ----
 
@@ -458,7 +455,7 @@ imap/mailbox_update_notifier.pb-c.h imap/mailbox_update_notifier.pb-c.c: imap/ma
 # Note that several places in the code use -lcrypto, e.g. for SHA1 or
 # MD5 algorithms, without needing SSL.  Currently we have no way of
 # minimally linking such code.
-LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS} -lprotobuf-c
+LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS} $(PROTOBUF_C_LIBS)
 
 # UTILITY is the libraries that utility programs which use Cyrus'
 # mailbox and message handling code need to link with.
@@ -797,10 +794,6 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/version.c \
 	imap/version.h \
 	imap/conversations.c \
-	imap/mailbox_update_notifier.c \
-	imap/mailbox_update_notifier.h \
-	imap/mailbox_update_notifier.pb-c.h \
-	imap/mailbox_update_notifier.pb-c.c \
 	imap/xstats.c \
 	imap/xstats.h \
 	imap/xstats_metrics.h
@@ -829,6 +822,19 @@ imap_libcyrus_imap_la_SOURCES += \
 	imap/xapian_wrap.cpp
 imap_libcyrus_imap_la_LIBADD += $(XAPIAN_LIBS)
 imap_libcyrus_imap_la_CXXFLAGS += $(XAPIAN_CXXFLAGS)
+endif
+if HAVE_PUSH
+imap_libcyrus_imap_la_SOURCES += \
+	imap/mailbox_update_notifier.c \
+	imap/mailbox_update_notifier.h \
+	imap/mailbox_update_notifier.pb-c.h \
+	imap/mailbox_update_notifier.pb-c.c
+BUILT_SOURCES += \
+	imap/mailbox_update_notifier.pb-c.h \
+	imap/mailbox_update_notifier.pb-c.c
+CLEANFILES += \
+	imap/mailbox_update_notifier.pb-c.h \
+	imap/mailbox_update_notifier.pb-c.c
 endif
 
 imap_lmtpd_SOURCES = \
