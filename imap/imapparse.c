@@ -771,7 +771,7 @@ static int get_search_criterion(struct protstream *pin,
 	    if (c != ' ') goto missingarg;
 	    c = getmodseq(pin, &ms);
 	    if (c == EOF) goto badnumber;
-	    e = search_expr_new(parent, SEOP_MATCH);
+	    e = search_expr_new(parent, SEOP_GE);
 	    e->attr = search_attr_find("convmodseq");
 	    e->value.u = ms;
 	}
@@ -886,7 +886,7 @@ static int get_search_criterion(struct protstream *pin,
 	    }
 	    c = getmodseq(pin, &modseq);
 	    if (c == EOF) goto badnumber;
-	    e = search_expr_new(parent, SEOP_MATCH);
+	    e = search_expr_new(parent, SEOP_GE);
 	    e->attr = search_attr_find("modseq");
 	    e->value.u = modseq;
 	}
