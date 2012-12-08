@@ -219,6 +219,13 @@ enum {
 			     SEARCH_SEEN_SET|SEARCH_SEEN_UNSET|\
 			     SEARCH_CONVSEEN_SET|SEARCH_CONVSEEN_UNSET)
 
+/* Flags for searchargs.state */
+enum {
+    GETSEARCH_CHARSET_KEYWORD = 0x01,
+    GETSEARCH_RETURN = 0x02,
+    GETSEARCH_CHARSET_FIRST = 0x04,
+};
+
 
 /* Bitmasks for search return options */
 enum {
@@ -273,6 +280,7 @@ struct searchargs {
     struct namespace *namespace;
     const char *userid;
     struct auth_state *authstate;
+    int isadmin;
 };
 
 /* Sort criterion */
