@@ -39,7 +39,7 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: signals.c,v 1.15 2008/03/24 17:09:19 murch Exp $
+ * $Id: signals.c,v 1.17 2010/01/06 17:01:40 murch Exp $
  */
 
 #include <config.h>
@@ -52,7 +52,7 @@
 #include "xmalloc.h"
 #include "exitcodes.h"
 
-static int gotsignal = 0;
+static volatile sig_atomic_t gotsignal = 0;
 
 static void sighandler(int sig)
 {
@@ -60,7 +60,8 @@ static void sighandler(int sig)
     gotsignal = sig;
 }
 
-static const int catch[] = { SIGHUP, SIGINT, 0 };
+static const int catch_norestart[] = { SIGALRM, SIGUSR1, SIGUSR2, 0 };
+static const int catch_restartable[] = { SIGHUP, SIGINT, SIGQUIT, 0 };
 
 void signals_add_handlers(int alarm)
 {
@@ -70,38 +71,40 @@ void signals_add_handlers(int alarm)
     sigemptyset(&action.sa_mask);
 
     action.sa_flags = 0;
-#ifdef SA_RESETHAND
-    action.sa_flags |= SA_RESETHAND;
-#endif
 
     action.sa_handler = sighandler;
 
-    /* SIGALRM used as a syscall timeout, so we don't set SA_RESTART */
-    if (alarm && sigaction(SIGALRM, &action, NULL) < 0) {
-	fatal("unable to install signal handler for %d: %m", SIGALRM);
-    }
-
-    /* no restartable SIGQUIT thanks */
-    if (sigaction(SIGQUIT, &action, NULL) < 0) {
-	fatal("unable to install signal handler for %d: %m", SIGQUIT);
+    for (i = 0; catch_norestart[i] != 0; i++) {
+	if (sigaction(catch_norestart[i], &action, NULL) < 0) {
+	    fatal("unable to install signal handler for %d: %m",
+		  catch_norestart[i]);
+	}
     }
 
 #ifdef SA_RESTART
     action.sa_flags |= SA_RESTART;
 #endif
-    
-    for (i = 0; catch[i] != 0; i++) {
-	if (catch[i] != SIGALRM && sigaction(catch[i], &action, NULL) < 0) {
-	    fatal("unable to install signal handler for %d: %m", catch[i]);
+
+    for (i = 0; catch_restartable[i] != 0; i++) {
+	if (sigaction(catch_restartable[i], &action, NULL) < 0) {
+	    fatal("unable to install signal handler for %d: %m",
+		  catch_restartable[i]);
 	}
     }
 }
 
-static shutdownfn *shutdown_cb = NULL;
+static signalsfn *shutdown_cb = NULL;
 
-void signals_set_shutdown(shutdownfn *s)
+void signals_set_shutdown(signalsfn *s)
 {
     shutdown_cb = s;
+}
+
+static signalsfn *idle_cb = NULL;
+
+void signals_set_idle(signalsfn *s)
+{
+    idle_cb = s;
 }
 
 int signals_poll(void)
@@ -112,9 +115,14 @@ int signals_poll(void)
 	if (shutdown_cb) shutdown_cb(EC_TEMPFAIL);
 	else exit(EC_TEMPFAIL);
 	break;
-    default:
-	return gotsignal;
+    case SIGALRM:
+    case SIGUSR1:
+    case SIGUSR2:
+	if (!idle_cb) return gotsignal;
+	idle_cb(gotsignal);
+	gotsignal = 0;
 	break;
     }
-    return 0; /* compiler warning stupidity */
+
+    return gotsignal;
 }

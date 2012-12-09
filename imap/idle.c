@@ -59,6 +59,7 @@
 #include "idle.h"
 #include "idled.h"
 #include "global.h"
+#include "signals.h"
 
 const char *idle_method_desc = "no";
 
@@ -206,26 +207,7 @@ int idle_init(idle_updateproc_t *proc)
 
     idle_update = proc;
 
-    /* We don't want recursive calls to idle_update() */
-    sigemptyset(&action.sa_mask);
-    sigaddset(&action.sa_mask, SIGUSR1);
-    sigaddset(&action.sa_mask, SIGUSR2);
-    action.sa_flags = 0;
-#ifdef SA_RESTART
-    action.sa_flags |= SA_RESTART;
-#endif
-    action.sa_handler = idle_handler;
-
-    /* Setup the signal handlers */
-    if ((sigaction(SIGUSR1, &action, NULL) < 0) ||
-	(sigaction(SIGUSR2, &action, NULL) < 0) ||
-	(sigaction(SIGALRM, &action, NULL) < 0)) {
-	syslog(LOG_ERR, "sigaction: %m");
-
-	/* Cancel receiving signals */
-	idle_done(NULL);
-	return 0;
-    }
+    signals_set_idle(idle_handler);
 
     return 1;
 }
@@ -249,10 +231,8 @@ void idle_done(const char *mboxname)
     /* Cancel alarm */
     alarm(0);
 
-    /* Remove the signal handlers */
-    signal(SIGUSR1, SIG_IGN);
-    signal(SIGUSR2, SIG_IGN);
-    signal(SIGALRM, SIG_IGN);
+    /* remove the handler */
+    signals_set_idle(NULL);
 
     idle_update = NULL;
     idle_started = 0;

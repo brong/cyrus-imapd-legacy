@@ -39,16 +39,17 @@
  * AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING
  * OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
- * $Id: signals.h,v 1.3 2008/03/24 17:09:19 murch Exp $
+ * $Id: signals.h,v 1.4 2010/01/06 17:01:40 murch Exp $
  */
 
 #ifndef INCLUDED_SIGNALS_H
 #define INCLUDED_SIGNALS_H
 
-typedef void shutdownfn(int);
+typedef void signalsfn(int);
 
 void signals_add_handlers(int alarm);
-void signals_set_shutdown(shutdownfn *s);
+void signals_set_shutdown(signalsfn *s);
+void signals_set_idle(signalsfn *s);
 int signals_poll(void);
 
 #endif /* INCLUDED_SIGNALS_H */
