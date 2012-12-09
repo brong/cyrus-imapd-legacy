@@ -81,6 +81,7 @@ extern unsigned seqset_getnext(struct seqset *set);
 extern unsigned seqset_first(const struct seqset *set);
 extern unsigned seqset_last(const struct seqset *set);
 extern char *seqset_cstring(const struct seqset *set);
+extern struct seqset *seqset_dup(const struct seqset *);
 extern void seqset_free(struct seqset *l);
 
 #endif /* SEQUENCE_H */
