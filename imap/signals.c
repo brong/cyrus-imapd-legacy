@@ -52,21 +52,21 @@
 #include "xmalloc.h"
 #include "exitcodes.h"
 
-static volatile sig_atomic_t gotsignal = 0;
+
+static volatile sigset_t gotsignals;
 
 static void sighandler(int sig)
 {
     /* syslog(LOG_DEBUG, "got signal %d", sig); */
-    gotsignal = sig;
+    sigaddset(&gotsignals, sig);
 }
 
-static const int catch[] = { SIGHUP, SIGINT, SIGQUIT, 0 };
+static const int catch[] = { SIGHUP, SIGINT, SIGQUIT, SIGALRM, SIGUSR1, SIGUSR2, 0 };
 
-void signals_add_handlers(int alarm)
+static void signals_handle(int sig)
 {
     struct sigaction action;
-    int i;
-    
+
     sigemptyset(&action.sa_mask);
 
     action.sa_flags = 0;
@@ -76,19 +76,23 @@ void signals_add_handlers(int alarm)
 
     action.sa_handler = sighandler;
 
-    /* SIGALRM used as a syscall timeout, so we don't set SA_RESTART */
-    if (alarm && sigaction(SIGALRM, &action, NULL) < 0) {
-	fatal("unable to install signal handler for %d: %m", SIGALRM);
-    }
-
+    /* otherwise what?  We're going to break idle pretty hard */
 #ifdef SA_RESTART
     action.sa_flags |= SA_RESTART;
 #endif
     
+    if (sigaction(sig, &action, NULL) < 0)
+	fatal("unable to install signal handler for %d: %m", sig);
+}
+
+void signals_add_handlers(int alarm)
+{
+    int i;
+
+    sigemptyset(&gotsignals);
+    
     for (i = 0; catch[i] != 0; i++) {
-	if (catch[i] != SIGALRM && sigaction(catch[i], &action, NULL) < 0) {
-	    fatal("unable to install signal handler for %d: %m", catch[i]);
-	}
+	signals_handle(catch[i]);
     }
 }
 
@@ -99,17 +103,41 @@ void signals_set_shutdown(shutdownfn *s)
     shutdown_cb = s;
 }
 
+/* this is a dodgy type reuse */
+static shutdownfn *idle_cb = NULL;
+
+void signals_set_idle(shutdownfn *s)
+{
+    idle_cb = s;
+}
+
 int signals_poll(void)
 {
-    switch (gotsignal) {
-    case SIGINT:
-    case SIGQUIT:
-	if (shutdown_cb) shutdown_cb(EC_TEMPFAIL);
-	else exit(EC_TEMPFAIL);
-	break;
-    default:
-	return gotsignal;
-	break;
+    int i;
+    
+    for (i = 0; catch[i] != 0; i++) {
+	int sig = catch[i];
+	if (sigismember(&gotsignals, sig)) {
+	    switch(sig) {
+	    case SIGINT:
+	    case SIGQUIT:
+		if (shutdown_cb) shutdown_cb(EC_TEMPFAIL);
+		else exit(EC_TEMPFAIL);
+		break;
+	    case SIGUSR1:
+	    case SIGUSR2:
+	    case SIGALRM:
+		if (!idle_cb) return sig;
+		idle_cb(sig);
+		sigdelset(&gotsignals, sig);
+		break;
+	    default:
+		return sig;
+		break;
+	    }
+	}
     }
-    return 0; /* compiler warning stupidity */
+
+    /* no unhandled signal found */
+    return 0;
 }
