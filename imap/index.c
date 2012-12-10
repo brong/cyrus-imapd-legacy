@@ -1549,7 +1549,6 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
     int listindex;
     int listcount;
     struct searchargs searchargs;
-    struct strlist strlist;
     unsigned long length;
     struct mailbox *mailbox = state->mailbox;
     struct index_map *im;
@@ -1564,13 +1563,14 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
     length = strlen(contents);
 
     memset(&searchargs, 0, sizeof(struct searchargs));
-    searchargs.text = &strlist;
+    searchargs.root = search_expr_new(NULL, SEOP_MATCH);
+    searchargs.root->attr = search_attr_find("text");
 
     /* Use US-ASCII to emulate fgrep */
-    strlist.s = charset_convert(contents, charset_lookupname("US-ASCII"),
+    searchargs.root->value.s = charset_convert(contents, charset_lookupname("US-ASCII"),
 				charset_flags);
-    strlist.p = charset_compilepat(strlist.s);
-    strlist.next = NULL;
+
+    search_expr_internalise(mailbox, searchargs.root);
 
     msgno_list = (unsigned *) xmalloc(state->exists * sizeof(unsigned));
 
@@ -1589,8 +1589,7 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
 	buf_free(&msgfile);
     }
 
-    free(strlist.s);
-    free(strlist.p);
+    search_expr_free(searchargs.root);
     free(msgno_list);
 
     return n;
