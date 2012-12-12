@@ -5374,7 +5374,7 @@ static void cmd_search(char *tag, int usinguid)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_KEYWORD|GETSEARCH_RETURN,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
 	freesearchargs(searchargs);
@@ -5434,7 +5434,7 @@ static void cmd_sort(char *tag, int usinguid)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5542,7 +5542,7 @@ void cmd_xconvsort(char *tag, int updates)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5662,7 +5662,7 @@ static void cmd_xconvmultisort(char *tag)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5740,7 +5740,7 @@ static void cmd_xsnippets(char *tag)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) goto error;
 
     if (c == '\r') c = prot_getc(imapd_in);
@@ -5855,7 +5855,7 @@ static void cmd_thread(char *tag, int usinguid)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
-    c = get_search_program(imapd_in, searchargs);
+    c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
 	freesearchargs(searchargs);
