@@ -148,7 +148,8 @@ user_PROGRAMS += \
 	imap/mbtool \
 	imap/message_test \
 	imap/quota \
-	imap/reconstruct
+	imap/reconstruct \
+	imap/search_test
 if USE_SQUAT
 service_PROGRAMS += imap/squat_dump
 endif
@@ -1037,6 +1038,9 @@ imap_reconstruct_LDADD = $(LD_UTILITY_ADD)
 
 imap_dav_reconstruct_SOURCES = imap/cli_fatal.c imap/mutex_fake.c imap/dav_reconstruct.c
 imap_dav_reconstruct_LDADD = $(LD_UTILITY_ADD)
+
+imap_search_test_SOURCES = imap/search_test.c imap/mutex_fake.c
+imap_search_test_LDADD = $(LD_UTILITY_ADD)
 
 imap_smmapd_SOURCES = imap/mutex_fake.c imap/proxy.c imap/smmapd.c master/service.c
 imap_smmapd_LDADD = $(LD_SERVER_ADD)
