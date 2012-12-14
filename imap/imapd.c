@@ -292,6 +292,7 @@ static struct capa_struct base_capabilities[] = {
     { "CATENATE",              2 },
     { "CONDSTORE",             2 },
     { "ESEARCH",               2 },
+    { "SEARCH=FUZZY",	       2 }, /* RFC 6203 */
     { "SORT",                  2 },
     { "SORT=MODSEQ",           2 },
     { "SORT=DISPLAY",          2 },
@@ -10969,6 +10970,8 @@ static int getsortcriteria(char *tag, struct sortcrit **sortcrit)
 	}
 	else if (!strcmp(criteria.s, "folder"))
 	    (*sortcrit)[n].key = SORT_FOLDER;
+	else if (!strcmp(criteria.s, "relevancy"))
+	    (*sortcrit)[n].key = SORT_RELEVANCY;
 	else {
 	    prot_printf(imapd_out, "%s BAD Invalid Sort criterion %s\r\n",
 			tag, criteria.s);
