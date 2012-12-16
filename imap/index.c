@@ -311,6 +311,109 @@ EXPORTED int index_expunge(struct index_state *state, char *sequence,
     return r;
 }
 
+/* this should really be a mailbox function I guess, it's not using anything
+ * of the index map */
+EXPORTED int index_unexpunge(struct index_state *state, const char *sequence,
+			     char **copyuidp)
+{
+    int r;
+    uint32_t recno;
+    struct index_record record;
+    struct index_record newrecord;
+    struct seqset *seq = NULL;
+    struct seqset *srcseq = NULL;
+    struct seqset *dstseq = NULL;
+    struct mailbox *mailbox = state->mailbox;
+    int nummsgs = 0;
+    char oldfname[MAX_MAILBOX_PATH];
+    const char *fname;
+    annotate_state_t *astate = NULL;
+
+    *copyuidp = NULL;
+
+    r = index_lock(state);
+    if (r) return r;
+
+    seq = _parse_sequence(state, sequence, 1);
+    srcseq = seqset_init(0, SEQ_SPARSE);
+    dstseq = seqset_init(0, SEQ_SPARSE);
+
+    for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+	if (mailbox_read_index_record(mailbox, recno, &record))
+	    continue;
+
+	/* are we restoring? */
+	if (!seqset_ismember(seq, record.uid))
+	    continue;
+	/* still active */
+	if (!(record.system_flags & FLAG_EXPUNGED))
+	    continue;
+	/* no file, unrescuable */
+	if (record.system_flags & FLAG_UNLINKED)
+	    continue;
+
+	/* copy the record */
+	newrecord = record;
+
+	/* duplicate the old filename */
+	fname = mailbox_message_fname(mailbox, record.uid);
+	strncpy(oldfname, fname, MAX_MAILBOX_PATH);
+
+	/* bump the UID, strip the flags */
+	newrecord.uid = mailbox->i.last_uid + 1;
+	newrecord.system_flags &= ~FLAG_EXPUNGED;
+	newrecord.system_flags &= ~FLAG_DELETED;
+
+	/* copy the message file */
+	fname = mailbox_message_fname(mailbox, newrecord.uid);
+	r = mailbox_copyfile(oldfname, fname, 0);
+	if (r) goto done;
+
+	/* and append the new record */
+	r = mailbox_append_index_record(mailbox, &newrecord);
+	if (r) goto done;
+
+	/* ensure we have an astate connected to the destination
+	 * mailbox, so that the annotation txn will be committed
+	 * when we close the mailbox */
+	r = mailbox_get_annotate_state(mailbox, newrecord.uid, &astate);
+	if (r) goto done;
+
+	/* and copy over any annotations */
+	r = annotate_msg_copy(mailbox, record.uid,
+			      mailbox, newrecord.uid,
+			      state->userid);
+	if (r) goto done;
+
+	/* mark the old one unlinked so we don't see it again */
+	record.system_flags |= FLAG_UNLINKED;
+	r = mailbox_rewrite_index_record(mailbox, &record);
+	if (r) goto done;
+
+	seqset_add(srcseq, record.uid, 1);
+	seqset_add(dstseq, newrecord.uid, 1);
+	nummsgs++;
+    }
+
+    if (nummsgs) {
+	struct buf b = BUF_INITIALIZER;
+	char *src = seqset_cstring(srcseq);
+	char *dst = seqset_cstring(dstseq);
+	buf_printf(&b, "%u %s %s", mailbox->i.uidvalidity, src, dst);
+	*copyuidp = buf_release(&b);
+	index_refresh(state);
+    }
+
+    index_unlock(state);
+
+done:
+    seqset_free(seq);
+    seqset_free(srcseq);
+    seqset_free(dstseq);
+
+    return 0;
+}
+
 static char *index_buildseen(struct index_state *state, const char *oldseenuids)
 {
     struct seqset *outlist;

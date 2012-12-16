@@ -349,6 +349,7 @@ static void cmd_sort(char *tag, int usinguid);
 static void cmd_thread(char *tag, int usinguid);
 static void cmd_copy(char *tag, char *sequence, char *name, int usinguid, int ismove);
 static void cmd_expunge(char *tag, char *sequence);
+static void cmd_unexpunge(const char *tag, const char *sequence);
 static void cmd_create(char *tag, char *name, struct dlist *extargs, int localonly);
 static void cmd_delete(char *tag, char *name, int localonly, int force);
 static void cmd_dump(char *tag, char *name, int uid_start);
@@ -2042,6 +2043,13 @@ static void cmdloop(void)
 		    cmd_expunge(tag.s, arg1.s);
 
 		    snmp_increment(EXPUNGE_COUNT, 1);
+		}
+		else if (!strcmp(arg1.s, "unexpunge")) {
+		    c = getword(imapd_in, &arg1);
+		    if (!imparse_issequence(arg1.s)) goto badsequence;
+		    if (c == '\r') c = prot_getc(imapd_in);
+		    if (c != '\n') goto extraargs;
+		    cmd_unexpunge(tag.s, arg1.s);
 		}
 		else if (!strcmp(arg1.s, "xrunannotator")) {
 		    goto xrunannotator;
@@ -6056,6 +6064,47 @@ static void cmd_expunge(char *tag, char *sequence)
     prot_printf(imapd_out, "%s OK ", tag);
     if (new > old)
 	prot_printf(imapd_out, "[HIGHESTMODSEQ " MODSEQ_FMT "] ", new);
+    prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
+}
+
+static void cmd_unexpunge(const char *tag, const char *sequence)
+{
+    modseq_t old;
+    modseq_t new;
+    char *copyuid;
+    int r = 0;
+
+    if (backend_current) {
+	/* remote mailbox */
+	prot_printf(backend_current->out, "%s UID Unexpunge %s\r\n", tag,
+		    sequence);
+	pipe_including_tag(backend_current, tag, 0);
+	return;
+    }
+
+    /* local mailbox */
+    if (!(imapd_index->myrights & ACL_INSERT)) {
+	r = IMAP_PERMISSION_DENIED;
+    }
+
+    old = index_highestmodseq(imapd_index);
+
+    if (!r) r = index_unexpunge(imapd_index, sequence, &copyuid);
+    /* tell expunges */
+    if (!r) index_tellchanges(imapd_index, 1, 1, 0);
+    
+    if (r) {
+	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+	return;
+    }
+
+    new = index_highestmodseq(imapd_index);
+
+    prot_printf(imapd_out, "%s OK ", tag);
+    if (new > old)
+	prot_printf(imapd_out, "[HIGHESTMODSEQ " MODSEQ_FMT "] ", new);
+    if (copyuid)
+	prot_printf(imapd_out, "[COPYUID %s] ", copyuid);
     prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
 }
 
