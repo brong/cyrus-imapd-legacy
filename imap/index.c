@@ -1393,8 +1393,9 @@ EXPORTED message_t *index_get_message(struct index_state *state, uint32_t msgno)
 				  msgno, indexflags);
 }
 
-EXPORTED unsigned index_getuid(struct index_state *state, uint32_t msgno) {
-  return state->map[msgno-1].record.uid;
+EXPORTED unsigned index_getuid(struct index_state *state, uint32_t msgno)
+{
+    return state->map[msgno-1].record.uid;
 }
 
 /* 'uid_list' is malloc'd string representing the hits from searchargs;
