@@ -153,10 +153,6 @@ static char *index_extract_subject(const char *subj, size_t len, int *is_refwd);
 static char *_index_extract_subject(char *s, int *is_refwd);
 static void index_get_ids(MsgData *msgdata,
 			  char *envtokens[], const char *headers, unsigned size);
-static MsgData **index_msgdata_load(struct index_state *state, unsigned *msgno_list, int n,
-				    const struct sortcrit *sortcrit,
-				    unsigned int anchor, int *found_anchor);
-static void index_msgdata_free(MsgData **, unsigned int);
 
 static int index_sort_compare(MsgData *md1, MsgData *md2,
 			      const struct sortcrit *call_data);
@@ -1946,8 +1942,7 @@ EXPORTED int index_sort(struct index_state *state,
 	free(msgno_list);
 
 	/* Sort the messages based on the given criteria */
-	the_sortcrit = sortcrit;
-	qsort(msgdata, nmsg, sizeof(MsgData *), index_sort_compare_qsort);
+	index_msgdata_sort(msgdata, nmsg, sortcrit);
 
 	/* Output the sorted messages */
 	for (mi = 0 ; mi < nmsg ; mi++) {
@@ -2127,8 +2122,7 @@ EXPORTED int index_convsort(struct index_state *state,
     }
 
     /* Sort the messages based on the given criteria */
-    the_sortcrit = sortcrit;
-    qsort(msgdata, state->exists, sizeof(MsgData *), index_sort_compare_qsort);
+    index_msgdata_sort(msgdata, state->exists, sortcrit);
 
     /* One pass through the message list */
     for (mi = 0 ; mi < state->exists ; mi++) {
@@ -2484,9 +2478,7 @@ static struct multisort_result *multisort_run(struct index_state *state,
     }
 
     /* Sort the merged messages based on the given criteria */
-    the_sortcrit = sortcrit;
-    qsort(merged_msgdata.data, merged_msgdata.count,
-	  sizeof(MsgData *), index_sort_compare_qsort);
+    index_msgdata_sort(merged_msgdata.data, merged_msgdata.count, sortcrit);
 
     /* convert the result for caching */
     result = xzmalloc(sizeof(struct multisort_result));
@@ -3074,8 +3066,7 @@ EXPORTED int index_convupdates(struct index_state *state,
     msgdata = index_msgdata_load(state, NULL, state->exists, sortcrit, 0, NULL);
 
     /* Sort the messages based on the given criteria */
-    the_sortcrit = sortcrit;
-    qsort(msgdata, state->exists, sizeof(MsgData *), index_sort_compare_qsort);
+    index_msgdata_sort(msgdata, state->exists, sortcrit);
 
     /* Discover exemplars */
     for (mi = 0 ; mi < state->exists ; mi++) {
@@ -5235,10 +5226,10 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
  * We fill these structs with the processed info that will be needed
  * by the specified sort criteria.
  */
-static MsgData **index_msgdata_load(struct index_state *state,
-				    unsigned *msgno_list, int n,
-				    const struct sortcrit *sortcrit,
-				    unsigned int anchor, int *found_anchor)
+MsgData **index_msgdata_load(struct index_state *state,
+			     unsigned *msgno_list, int n,
+			     const struct sortcrit *sortcrit,
+			     unsigned int anchor, int *found_anchor)
 {
     MsgData **ptrs, *md, *cur;
     int i, j;
@@ -5797,10 +5788,16 @@ static int index_sort_compare_qsort(const void *v1, const void *v2)
     return index_sort_compare(md1, md2, the_sortcrit);
 }
 
+void index_msgdata_sort(MsgData **msgdata, int n, const struct sortcrit *sortcrit)
+{
+    the_sortcrit = (struct sortcrit *)sortcrit;
+    qsort(msgdata, n, sizeof(MsgData *), index_sort_compare_qsort);
+}
+
 /*
  * Free an array of MsgData* as built by index_msgdata_load()
  */
-static void index_msgdata_free(MsgData **msgdata, unsigned int n)
+void index_msgdata_free(MsgData **msgdata, unsigned int n)
 {
     unsigned int i;
 
@@ -5900,8 +5897,7 @@ static void index_thread_orderedsubj(struct index_state *state,
     msgdata = index_msgdata_load(state, msgno_list, nmsg, sortcrit, 0, NULL);
 
     /* Sort messages by subject and date */
-    the_sortcrit = sortcrit;
-    qsort(msgdata, nmsg, sizeof(MsgData *), index_sort_compare_qsort);
+    index_msgdata_sort(msgdata, nmsg, sortcrit);
 
     /* create an array of Thread to use as nodes of thread tree
      *
