@@ -404,9 +404,8 @@ EXPORTED int index_unexpunge(struct index_state *state, const char *sequence,
 	index_refresh(state);
     }
 
-    index_unlock(state);
-
 done:
+    index_unlock(state);
     seqset_free(seq);
     seqset_free(srcseq);
     seqset_free(dstseq);
