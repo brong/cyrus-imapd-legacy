@@ -6071,7 +6071,7 @@ static void cmd_unexpunge(const char *tag, const char *sequence)
 {
     modseq_t old;
     modseq_t new;
-    char *copyuid;
+    char *copyuid = NULL;
     int r = 0;
 
     if (backend_current) {
@@ -6095,6 +6095,7 @@ static void cmd_unexpunge(const char *tag, const char *sequence)
     
     if (r) {
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(r));
+	free(copyuid);
 	return;
     }
 
@@ -6106,6 +6107,7 @@ static void cmd_unexpunge(const char *tag, const char *sequence)
     if (copyuid)
 	prot_printf(imapd_out, "[COPYUID %s] ", copyuid);
     prot_printf(imapd_out, "%s\r\n", error_message(IMAP_OK_COMPLETED));
+    free(copyuid);
 }
 
 /*
