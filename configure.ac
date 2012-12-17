@@ -1123,7 +1123,7 @@ if test "$enable_push" != no; then
 		     ],[
 			have_protobuf_lib=no
 		     ])
-    AC_CHECK_PROG(PROTOC_C, protoc-c)
+    AC_PATH_PROG(PROTOC_C, protoc-c)
     if test "x$PROTOC_C" = "x" -o "$have_protobuf_hdr" != "yes" -o "$have_protobuf_lib" != "yes" ; then
 	AC_MSG_ERROR([parts of the C development environment for Google Protocol buffers are missing, use --disable-push to disable])
     fi
