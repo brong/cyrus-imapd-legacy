@@ -1603,8 +1603,6 @@ EXPORTED int index_sort(struct index_state *state, struct sortcrit *sortcrit,
     folder = search_query_find_folder(query, state->mailbox->name);
 
     if (folder) {
-	if (!usinguid)
-	    search_folder_use_msn(folder, state);
 	if (highestmodseq)
 	    highestmodseq = search_folder_get_highest_modseq(folder);
 	nmsg = search_folder_get_count(folder);
@@ -1616,7 +1614,8 @@ EXPORTED int index_sort(struct index_state *state, struct sortcrit *sortcrit,
 	/* Output the sorted messages */
 	for (i = 0 ; i < query->merged_msgdata.count ; i++) {
 	    MsgData *md = ptrarray_nth(&query->merged_msgdata, i);
-	    prot_printf(state->out, " %u", md->uid);
+	    prot_printf(state->out, " %u",
+			(usinguid ? md->uid : md->msgno));
 	}
     }
 
