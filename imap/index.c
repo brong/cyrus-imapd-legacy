@@ -92,7 +92,7 @@
 #include "sync_log.h"
 
 /* Forward declarations */
-static void index_refresh(struct index_state *state);
+static void index_refresh_locked(struct index_state *state);
 static void index_tellexists(struct index_state *state);
 static int index_lock(struct index_state *state);
 static void index_unlock(struct index_state *state);
@@ -235,7 +235,7 @@ EXPORTED int index_open(const char *name, struct index_init *init,
     }
 
     /* initialise the index_state */
-    index_refresh(state);
+    index_refresh_locked(state);
 
     /* have to get the vanished list while we're still locked */
     if (init)
@@ -451,7 +451,7 @@ static struct seqset *_readseen(struct index_state *state, unsigned *recentuid)
     return seenlist;
 }
 
-void index_refresh(struct index_state *state)
+static void index_refresh_locked(struct index_state *state)
 {
     struct mailbox *mailbox = state->mailbox;
     uint32_t recno;
@@ -686,7 +686,7 @@ EXPORTED int index_check(struct index_state *state, int usinguid, int printuid)
 
     /* if highestmodseq has changed, read updates */
     if (state->highestmodseq != mailbox->i.highestmodseq)
-	index_refresh(state);
+	index_refresh_locked(state);
 
     index_tellchanges(state, usinguid, printuid, 0);
 
@@ -1429,7 +1429,7 @@ static int index_lock(struct index_state *state)
 
     /* if highestmodseq has changed, read updates */
     if (state->highestmodseq != state->mailbox->i.highestmodseq)
-	index_refresh(state);
+	index_refresh_locked(state);
 
     return 0;
 }
@@ -1440,6 +1440,16 @@ EXPORTED int index_status(struct index_state *state, struct statusdata *sdata)
 		STATUS_HIGHESTMODSEQ | STATUS_RECENT | STATUS_UNSEEN;
     statuscache_fill(sdata, state->userid, state->mailbox, items,
 		     state->numrecent, state->numunseen);
+    return 0;
+}
+
+EXPORTED int index_refresh(struct index_state *state)
+{
+    int r;
+
+    r = index_lock(state);  /* calls index_refresh_locked */
+    if (r) return r;
+    index_unlock(state);
     return 0;
 }
 
@@ -1938,6 +1948,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     query = search_query_new(state, searchargs);
     query->multiple = 1;
     query->need_ids = 1;
+    query->need_expunge = 1;
     query->sortcrit = sortcrit;
     r = search_query_run(query);
 
