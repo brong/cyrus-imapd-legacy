@@ -250,20 +250,14 @@ struct list_rock {
     struct listargs *listargs;
     char *last_name;
     int last_attributes;
+    strarray_t *sublist;
+    int subpos;
 };
 
 /* Information about one mailbox name that LIST returns */
 struct list_entry {
     const char *name;
     int attributes; /* bitmap of MBOX_ATTRIBUTE_* */
-};
-
-/* structure that list_data_recursivematch passes its callbacks */
-struct list_rock_recursivematch {
-    struct listargs *listargs;
-    struct hash_table table;    /* maps mailbox names to attributes (int *) */
-    int count;                  /* # of entries in table */
-    struct list_entry *array;
 };
 
 /* CAPABILITIES are defined here, not including TLS/SASL ones,
@@ -454,8 +448,6 @@ static int set_haschildren(char *name, int matchlen, int maycreate,
 			   int *attributes);
 static void list_response(const char *name, int attributes,
 			  struct listargs *listargs);
-static int set_subscribed(char *name, int matchlen, int maycreate,
-			  void *rock);
 static char *canonical_list_pattern(const char *reference,
 				    const char *pattern);
 static void canonical_list_patterns(const char *reference,
@@ -11183,19 +11175,6 @@ done:
     mboxlist_entry_free(&mbentry);
 }
 
-static int set_subscribed(char *name, int matchlen,
-			  int maycreate __attribute__((unused)),
-			  void *rock)
-{
-    int *attributes = (int *)rock;
-    list_callback_calls++;
-    if (!name[matchlen])
-	*attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
-    else
-	*attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
-    return 0;
-}
-
 static void perform_output(const char *name, size_t matchlen,
 			   struct list_rock *rock)
 {
@@ -11241,13 +11220,26 @@ static int list_cb(char *name, int matchlen, int maycreate,
     else if (name[matchlen] == '.')
 	rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
 
-    /* XXX: is there a cheaper way to figure out \Subscribed? */
-    if (rock->listargs->ret & LIST_RET_SUBSCRIBED)
-	mboxlist_findsub(&imapd_namespace, name, imapd_userisadmin,
-			 imapd_userid, imapd_authstate, set_subscribed,
-			 &rock->last_attributes, 0);
+    if (rock->sublist) {
+	for (; rock->subpos < rock->sublist.count; rock->subpos++) {
+	    /* XXX - gotta fix this */
+	    const char *str = strarray_nth(rock->sublist, rock->subpos);
+	    perform_output(str, strlen(str), &rock);
+
+	    if (!strcmp(src, name))
+		rock->last_attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
+	    else if (!strncmp(src, name, matchlen))
+		rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+	}
+    }
 
     return 0;
+}
+
+static int sublist_cb(const char *name, int matchlen, int maycreate,
+		      struct list_rock *rock)
+{
+    strarray_appendm(rock->sublist, xstrndup(name, matchlen));
 }
 
 /* callback for mboxlist_findsub
@@ -11341,102 +11333,11 @@ static void canonical_list_patterns(const char *reference,
     }
 }
 
-/* callback for mboxlist_findsub
- * used by list_data_recursivematch */
-static int recursivematch_cb(char *name, int matchlen, int maycreate,
-			     struct list_rock_recursivematch *rock) {
-    list_callback_calls++;
-
-    if (name[matchlen]) {
-	char c = name[matchlen];
-	if (c == '.' || c == imapd_namespace.hier_sep) {
-	    int *parent_info;
-	    name[matchlen] = '\0';
-	    parent_info = hash_lookup(name, &rock->table);
-	    if (!parent_info) {
-		parent_info = xzmalloc(sizeof(int));
-		if (!maycreate) *parent_info |= MBOX_ATTRIBUTE_NOINFERIORS;
-		hash_insert(name, parent_info, &rock->table);
-		rock->count++;
-	    }
-	    *parent_info |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
-	    name[matchlen] = c;
-	}
-    } else {
-	int *list_info = hash_lookup(name, &rock->table);
-	if (!list_info) {
-	    list_info = xzmalloc(sizeof(int));
-	    *list_info |= MBOX_ATTRIBUTE_SUBSCRIBED;
-	    if (!maycreate) *list_info |= MBOX_ATTRIBUTE_NOINFERIORS;
-	    hash_insert(name, list_info, &rock->table);
-	    rock->count++;
-	}
-    }
-
-    return 0;
-}
-
-/* callback for hash_enumerate */
-static void copy_to_array(const char *key, void *data, void *void_rock)
-{
-    int *attributes = (int *)data;
-    struct list_rock_recursivematch *rock =
-	(struct list_rock_recursivematch *)void_rock;
-    assert(rock->count > 0);
-    rock->array[--rock->count].name = key;
-    rock->array[rock->count].attributes = *attributes;
-}
-
-/* Comparator for reverse-sorting an array of struct list_entry by mboxname. */
-static int list_entry_comparator(const void *p1, const void *p2) {
-    const struct list_entry *e1 = (struct list_entry *)p1;
-    const struct list_entry *e2 = (struct list_entry *)p2;
-
-    return bsearch_compare_mbox(e2->name, e1->name);
-}
-
-static void list_data_recursivematch(struct listargs *listargs,
-				     int (*findsub)(struct namespace *,
-					 const char *, int, const char *,
-					 struct auth_state *, int (*)(),
-					 void *, int)) {
-    char **pattern;
-    struct list_rock_recursivematch rock;
-
-    rock.count = 0;
-    rock.listargs = listargs;
-    construct_hash_table(&rock.table, 100, 1);
-
-    /* find */
-    for (pattern = listargs->pat.data ; *pattern ; pattern++) {
-	findsub(&imapd_namespace, *pattern, imapd_userisadmin, imapd_userid,
-		imapd_authstate, recursivematch_cb, &rock, 1);
-    }
-
-    if (rock.count) {
-	/* sort */
-	int entries = rock.count;
-	rock.array = xmalloc(entries * (sizeof(struct list_entry)));
-	hash_enumerate(&rock.table, copy_to_array, &rock);
-	qsort(rock.array, entries, sizeof(struct list_entry),
-	      list_entry_comparator);
-	assert(rock.count == 0);
-
-	/* print */
-	for (entries--; entries >= 0; entries--)
-	    list_response(rock.array[entries].name,
-		    rock.array[entries].attributes,
-		    rock.listargs);
-
-	free(rock.array);
-    }
-
-    free_hash_table(&rock.table, free);
-}
-
 /* Retrieves the data and prints the untagged responses for a LIST command. */
 static void list_data(struct listargs *listargs)
 {
+    char **pattern;
+    struct list_rock rock;
     int (*findall)(struct namespace *namespace,
 		   const char *pattern, int isadmin, const char *userid,
 		   struct auth_state *auth_state, int (*proc)(),
@@ -11460,34 +11361,41 @@ static void list_data(struct listargs *listargs)
 	findall = imapd_namespace.mboxlist_findall;
     }
 
-    if (listargs->sel & LIST_SEL_RECURSIVEMATCH) {
-	list_data_recursivematch(listargs, findsub);
-    } else {
-	char **pattern;
-	struct list_rock rock;
-	memset(&rock, 0, sizeof(struct list_rock));
-	rock.listargs = listargs;
+    memset(&rock, 0, sizeof(struct list_rock));
+    rock.listargs = listargs;
 
-	if (listargs->sel & LIST_SEL_SUBSCRIBED) {
-	    for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
-		findsub(&imapd_namespace, *pattern, imapd_userisadmin,
-			imapd_userid, imapd_authstate, subscribed_cb, &rock, 1);
-		perform_output(NULL, 0, &rock);
-	    }
-	} else {
-	    if (listargs->scan) {
-		construct_hash_table(&listargs->server_table, 10, 1);
-	    }
-
-	    for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
-		findall(&imapd_namespace, *pattern, imapd_userisadmin,
-			imapd_userid, imapd_authstate, list_cb, &rock);
-		perform_output(NULL, 0, &rock);
-	    }
-
-	    if (listargs->scan)
-		free_hash_table(&listargs->server_table, NULL);
+    if (listargs->sel & LIST_SEL_SUBSCRIBED && !(listargs->sel & LIST_SEL_RECURSIVEMATCH)) {
+	for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
+	    findsub(&imapd_namespace, *pattern, imapd_userisadmin,
+		    imapd_userid, imapd_authstate, subscribed_cb, &rock, 1);
+	    perform_output(NULL, 0, &rock);
 	}
+    } else {
+	if (listargs->scan) {
+	    construct_hash_table(&listargs->server_table, 10, 1);
+	}
+
+	for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
+	    if (listargs->sel & LIST_SEL_RECURSIVEMATCH || listargs->ret & LIST_RET_SUBSCRIBED) {
+		rock.sublist = strarray_new();
+		findsub(&imapd_namespace, *pattern, imapd_userisadmin,
+			imapd_userid, imapd_authstate, sublist_cb, &rock, 1);
+	    }
+	    findall(&imapd_namespace, *pattern, imapd_userisadmin,
+		    imapd_userid, imapd_authstate, list_cb, &rock);
+	    if (rock.sublist) {
+		for (; rock.subpos < rock.sublist.count; rock.subpos++) {
+		    const char *str = strarray_nth(rock.sublist, rock.subpos);
+		    perform_output(str, strlen(str), &rock);
+		}
+		strarray_free(rock.sublist);
+		rock.sublist = NULL;
+	    }
+	    perform_output(NULL, 0, &rock);
+	}
+
+	if (listargs->scan)
+	    free_hash_table(&listargs->server_table, NULL);
     }
 }
 

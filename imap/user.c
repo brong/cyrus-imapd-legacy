@@ -322,7 +322,7 @@ EXPORTED int user_renamedata(char *olduser, char *newuser,
     struct namespace namespace;
     char oldinbox[MAX_MAILBOX_BUFFER], newinbox[MAX_MAILBOX_BUFFER];
     char *olddomain, *newdomain;
-    struct rename_rock rrock;
+    struct rename_rock rrock;*
     char pat[MAX_MAILBOX_BUFFER];
     int r;
 
@@ -361,6 +361,7 @@ EXPORTED int user_renamedata(char *olduser, char *newuser,
     if (!r) {
 	/* copy/rename subscriptions - we're using the internal names here */
 	strcpy(pat, "*");
+	XXX replace findsub here
 	mboxlist_findsub(NULL, pat, 1, olduser, authstate, user_renamesub,
 			 &rrock, 1);
     }

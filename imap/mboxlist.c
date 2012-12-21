@@ -2837,181 +2837,24 @@ mboxlist_opensubs(const char *userid,
     return r;
 }
 
-/*
- * Close a subscription file
- */
-static void mboxlist_closesubs(struct db *sub)
+static struct strlist_t *mboxlist_readsubs(const char *userid)
 {
-    cyrusdb_close(sub);
-}
-
-/*
- * Find subscribed mailboxes that match 'pattern'.
- * 'isadmin' is nonzero if user is a mailbox admin.  'userid'
- * is the user's login id.  For each matching mailbox, calls
- * 'proc' with the name of the mailbox.
- */
-EXPORTED int mboxlist_findsub(struct namespace *namespace,
-		     const char *pattern, int isadmin __attribute__((unused)),
-		     const char *userid, struct auth_state *auth_state, 
-		     int (*proc)(), void *rock, int force)
-{
+    struct txn *txn = NULL;
     struct db *subs = NULL;
-    struct find_rock cbrock;
-    char usermboxname[MAX_MAILBOX_BUFFER];
-    size_t usermboxnamelen = 0;
-    const char *data;
-    size_t datalen;
-    int r = 0;
-    char *p;
-    size_t prefixlen;
-    size_t userlen = userid ? strlen(userid) : 0, domainlen = 0;
-    char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
-    char *pat = NULL;
-
-    if (!namespace) namespace = mboxname_get_adminnamespace();
-
-    if (config_virtdomains && userid && (p = strchr(userid, '@'))) {
-	userlen = p - userid;
-	domainlen = strlen(p); /* includes separator */
-	snprintf(domainpat, sizeof(domainpat), "%s!%s", p+1, pattern);
-    }
-    else
-	strncpy(domainpat, pattern, sizeof(domainpat));
-
-    cbrock.g = glob_init(pattern, GLOB_HIERARCHY|GLOB_INBOXCASE);
-    cbrock.namespace = NULL;
-    cbrock.domainlen = domainlen;
-    cbrock.inboxcase = glob_inboxcase(cbrock.g);
-    cbrock.isadmin = 1;		/* user can always see their subs */
-    cbrock.auth_state = auth_state;
-    cbrock.checkmboxlist = !force;
-    cbrock.checkshared = 0;
-    cbrock.proc = proc;
-    cbrock.procrock = rock;
-    cbrock.prev = NULL;
-    cbrock.prevlen = 0;
+    struct strarray_t *sublist = NULL;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
-    if ((r = mboxlist_opensubs(userid, &subs)) != 0) {
-	goto done;
-    }
+    if (mboxlist_opensubs(userid, &subs))
+	return NULL;
 
-    cbrock.db = subs;
+    sublist = strarray_new();
 
-    /* Build usermboxname */
-    if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > (int)userlen)) &&
-	strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
-	if (domainlen)
-	    snprintf(usermboxname, sizeof(usermboxname),
-		     "%s!", userid+userlen+1);
-	snprintf(usermboxname+domainlen, sizeof(usermboxname)-domainlen,
-		 "user.%.*s", (int)userlen, userid);
-	usermboxnamelen = strlen(usermboxname);
-    }
-    else {
-	userid = 0;
-    }
+    if (cyrusdb_foreach(subs, "", 0, NULL, &sublist_cb, sublist, &txn));
 
-    /* Check for INBOX first of all */
-    if (userid) {
-	if (GLOB_TEST(cbrock.g, "INBOX") != -1) {
-	    r = cyrusdb_fetch(subs, usermboxname, usermboxnamelen,
-			     &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(cbrock.inboxcase, 5, 1, rock);
-	}
-	else if (!strncmp(pattern,
-			  usermboxname+domainlen, usermboxnamelen-domainlen) &&
-		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1) {
-	    r = cyrusdb_fetch(subs, usermboxname, usermboxnamelen,
-			     &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(usermboxname, usermboxnamelen, 1, rock);
-	}
-	strlcat(usermboxname, ".", sizeof(usermboxname));
-	usermboxnamelen++;
+    cyrusdb_close(subs);
 
-	cbrock.usermboxname = usermboxname;
-	cbrock.usermboxnamelen = usermboxnamelen;
-    }
-
-    if (r) goto done;
-
-    /* Make a working copy of pattern */
-    pattern = pat = xstrdup(pattern);
-
-    /* Find fixed-string pattern prefix */
-    for (p = pat; *p; p++) {
-	if (*p == '*' || *p == '%' || *p == '?' || *p == '@') break;
-    }
-    prefixlen = p - pattern;
-    *p = '\0';
-
-    /*
-     * If user.X.* or INBOX.* can match pattern,
-     * search for those mailboxes next
-     */
-    if (userid &&
-	(!strncmp(usermboxname+domainlen, pattern, usermboxnamelen-domainlen-1) ||
-	 !strncasecmp("inbox.", pattern, prefixlen < 6 ? prefixlen : 6))) {
-
-	if (!strncmp(usermboxname+domainlen, pattern, usermboxnamelen-domainlen-1)) {
-	    /* switch to pattern with domain prepended */
-	    glob_free(&cbrock.g);
-	    cbrock.g = glob_init(domainpat, GLOB_HIERARCHY);
-	    cbrock.inboxoffset = 0;
-	}
-	else {
-	    cbrock.inboxoffset = strlen(userid);
-	}
-
-	cbrock.find_namespace = NAMESPACE_INBOX;
-	/* iterate through prefixes matching usermboxname */
-	cyrusdb_foreach(subs,
-			usermboxname, usermboxnamelen,
-			&find_p, &find_cb, &cbrock,
-			NULL);
-	free(cbrock.prev);
-	cbrock.prev = NULL;
-	cbrock.prevlen = 0;
-
-	cbrock.usermboxname = usermboxname;
-	cbrock.usermboxnamelen = usermboxnamelen;
-    } else {
-	cbrock.usermboxname = NULL;
-	cbrock.usermboxnamelen = 0;
-    }
-
-    if (isadmin || namespace->accessible[NAMESPACE_USER]) {
-	cbrock.find_namespace = NAMESPACE_USER;
-	/* switch to pattern with domain prepended */
-	glob_free(&cbrock.g);
-	cbrock.g = glob_init(domainpat, GLOB_HIERARCHY);
-	cbrock.inboxoffset = 0;
-	if (usermboxnamelen) {
-	    usermboxname[--usermboxnamelen] = '\0';
-	    cbrock.usermboxname = usermboxname;
-	    cbrock.usermboxnamelen = usermboxnamelen;
-	}
-	/* search for all remaining mailboxes.
-	   just bother looking at the ones that have the same pattern prefix. */
-	cyrusdb_foreach(subs, domainpat, domainlen + prefixlen,
-			&find_p, &find_cb, &cbrock, NULL);
-	free(cbrock.prev);
-	cbrock.prev = NULL;
-	cbrock.prevlen = 0;
-   }
-
-  done:
-    if (subs) mboxlist_closesubs(subs);
-    glob_free(&cbrock.g);
-    if (pat) free(pat);
-
-    return r;
+    return sublist;
 }
 
 EXPORTED int mboxlist_allsubs(const char *userid, foreach_cb *proc, void *rock)
@@ -3025,7 +2868,7 @@ EXPORTED int mboxlist_allsubs(const char *userid, foreach_cb *proc, void *rock)
 
     r = cyrusdb_foreach(subs, "", 0, NULL, proc, rock, 0);
 
-    mboxlist_closesubs(subs);
+    cyrusdb_close(subs);
 
     return r;
 }

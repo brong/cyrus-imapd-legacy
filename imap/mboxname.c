@@ -683,7 +683,6 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
 	namespace->mboxname_tointernal = mboxname_tointernal_alt;
 	namespace->mboxname_toexternal = mboxname_toexternal_alt;
 	namespace->mboxlist_findall = mboxlist_findall_alt;
-	namespace->mboxlist_findsub = mboxlist_findsub_alt;
     }
 
     else {
@@ -697,7 +696,6 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
 	namespace->mboxname_tointernal = mboxname_tointernal;
 	namespace->mboxname_toexternal = mboxname_toexternal;
 	namespace->mboxlist_findall = mboxlist_findall;
-	namespace->mboxlist_findsub = mboxlist_findsub;
     }
 
     return 0;
