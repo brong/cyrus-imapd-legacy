@@ -259,14 +259,6 @@ struct list_entry {
     int attributes; /* bitmap of MBOX_ATTRIBUTE_* */
 };
 
-/* structure that list_data_recursivematch passes its callbacks */
-struct list_rock_recursivematch {
-    struct listargs *listargs;
-    struct hash_table table;    /* maps mailbox names to attributes (int *) */
-    int count;                  /* # of entries in table */
-    struct list_entry *array;
-};
-
 /* CAPABILITIES are defined here, not including TLS/SASL ones,
    and those that are configurable */
 
@@ -11393,99 +11385,6 @@ static void canonical_list_patterns(const char *reference,
 				    config_virtdomains ?
 				    strcspn(p, "@") : 0);
     }
-}
-
-/* callback for mboxlist_findsub
- * used by list_data_recursivematch */
-static int recursivematch_cb(char *name, int matchlen, int maycreate,
-			     struct list_rock_recursivematch *rock) {
-    list_callback_calls++;
-
-    if (name[matchlen]) {
-	char c = name[matchlen];
-	if (c == '.' || c == imapd_namespace.hier_sep) {
-	    int *parent_info;
-	    name[matchlen] = '\0';
-	    parent_info = hash_lookup(name, &rock->table);
-	    if (!parent_info) {
-		parent_info = xzmalloc(sizeof(int));
-		if (!maycreate) *parent_info |= MBOX_ATTRIBUTE_NOINFERIORS;
-		hash_insert(name, parent_info, &rock->table);
-		rock->count++;
-	    }
-	    *parent_info |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
-	    name[matchlen] = c;
-	}
-    } else {
-	int *list_info = hash_lookup(name, &rock->table);
-	if (!list_info) {
-	    list_info = xzmalloc(sizeof(int));
-	    *list_info |= MBOX_ATTRIBUTE_SUBSCRIBED;
-	    if (!maycreate) *list_info |= MBOX_ATTRIBUTE_NOINFERIORS;
-	    hash_insert(name, list_info, &rock->table);
-	    rock->count++;
-	}
-    }
-
-    return 0;
-}
-
-/* callback for hash_enumerate */
-static void copy_to_array(const char *key, void *data, void *void_rock)
-{
-    int *attributes = (int *)data;
-    struct list_rock_recursivematch *rock =
-	(struct list_rock_recursivematch *)void_rock;
-    assert(rock->count > 0);
-    rock->array[--rock->count].name = key;
-    rock->array[rock->count].attributes = *attributes;
-}
-
-/* Comparator for reverse-sorting an array of struct list_entry by mboxname. */
-static int list_entry_comparator(const void *p1, const void *p2) {
-    const struct list_entry *e1 = (struct list_entry *)p1;
-    const struct list_entry *e2 = (struct list_entry *)p2;
-
-    return bsearch_compare_mbox(e2->name, e1->name);
-}
-
-static void list_data_recursivematch(struct listargs *listargs,
-				     int (*findsub)(struct namespace *,
-					 const char *, int, const char *,
-					 struct auth_state *, int (*)(),
-					 void *, int)) {
-    char **pattern;
-    struct list_rock_recursivematch rock;
-
-    rock.count = 0;
-    rock.listargs = listargs;
-    construct_hash_table(&rock.table, 100, 1);
-
-    /* find */
-    for (pattern = listargs->pat.data ; *pattern ; pattern++) {
-	findsub(&imapd_namespace, *pattern, imapd_userisadmin, imapd_userid,
-		imapd_authstate, recursivematch_cb, &rock, 1);
-    }
-
-    if (rock.count) {
-	/* sort */
-	int entries = rock.count;
-	rock.array = xmalloc(entries * (sizeof(struct list_entry)));
-	hash_enumerate(&rock.table, copy_to_array, &rock);
-	qsort(rock.array, entries, sizeof(struct list_entry),
-	      list_entry_comparator);
-	assert(rock.count == 0);
-
-	/* print */
-	for (entries--; entries >= 0; entries--)
-	    list_response(rock.array[entries].name,
-		    rock.array[entries].attributes,
-		    rock.listargs);
-
-	free(rock.array);
-    }
-
-    free_hash_table(&rock.table, free);
 }
 
 /* Retrieves the data and prints the untagged responses for a LIST command. */
