@@ -1883,6 +1883,8 @@ struct find_rock {
     int prevlen;
     int (*proc)(char *, int, int, void *rock);
     void *procrock;
+    strarray_t *sublist;
+    int subpos;
 };
 
 /* return non-zero if we like this one */
@@ -1994,7 +1996,7 @@ static int check_name(struct find_rock *rock,
 
 static int find_cb(void *rockp, 
 		   const char *key, size_t keylen,
-		   const char *data __attribute__((unused)),
+		   const char *data,
 		   size_t datalen __attribute__((unused)))
 {
     char namebuf[MAX_MAILBOX_BUFFER];
@@ -2002,6 +2004,22 @@ static int find_cb(void *rockp,
     int r = 0;
     long minmatch;
     struct glob *g = rock->g;
+
+    /* we use the presence of "data" as a hack to tell if we're
+     * processing the mailboxes.db and need to deal with the
+     * sublist as well, maybe */
+    if (data && rock->sublist) {
+	for (; rock->subpos < rock->sublist->count; rock->subpos++) {
+	    const char *name = strarray_nth(rock->sublist, rock->subpos);
+	    size_t namelen = strlen(name);
+	    int cmp = cyrusdb_compar(rock->db, name, namelen, key, keylen);
+	    if (cmp >= 0) {
+		if (cmp == 0) rock->subpos++;
+		break;
+	    }
+	    find_cb(rock, name, namelen, NULL, 0);
+	}
+    }
 
     /* foreach match, do this test */
     minmatch = 0;
@@ -2097,6 +2115,35 @@ EXPORTED int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock)
     return r;
 }
 
+static int addsublist_cb(void *rockp,
+			 const char *key, size_t keylen,
+			 const char *val __attribute__((unused)),
+			 size_t vallen __attribute__((unused)))
+{
+    struct find_rock *rock = (struct find_rock *)rockp;
+
+    if (!rock->sublist) rock->sublist = strarray_new();
+    strarray_appendm(rock->sublist, xstrndup(key, keylen));
+
+    return 0;
+}
+
+static void finishsublist(struct find_rock *rock)
+{
+    if (rock->sublist) {
+	for (; rock->subpos < rock->sublist->count; rock->subpos++) {
+	    const char *name = strarray_nth(rock->sublist, rock->subpos);
+	    size_t namelen = strlen(name);
+	    find_cb(rock, name, namelen, NULL, 0);
+	}
+	strarray_free(rock->sublist);
+    }
+    
+    /* ready for the next time */
+    rock->sublist = NULL;
+    rock->subpos = 0;
+}
+
 /*
  * Find all mailboxes that match 'pattern'.
  * 'isadmin' is nonzero if user is a mailbox admin.  'userid'
@@ -2108,9 +2155,10 @@ EXPORTED int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock)
  */
 /* Find all mailboxes that match 'pattern'. */
 EXPORTED int mboxlist_findall(struct namespace *namespace,
-		     const char *pattern, int isadmin, const char *userid, 
+		     const char *pattern, int flags, const char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock)
 {
+    struct db *subs = NULL;
     struct find_rock cbrock;
     char usermboxname[MAX_MAILBOX_BUFFER];
     size_t usermboxnamelen = 0;
@@ -2122,6 +2170,8 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
     int userlen = userid ? strlen(userid) : 0, domainlen = 0;
     char domainpat[MAX_MAILBOX_BUFFER] = ""; /* do intra-domain fetches only */
     char *pat = NULL;
+    int isadmin = (flags & MBOX_ISADMIN);
+    int alsosub = (flags & MBOX_ALSOSUB);
 
     if (!namespace) namespace = mboxname_get_adminnamespace();
 
@@ -2177,6 +2227,12 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
     cbrock.db = mbdb;
+
+    /* open the subscription file that contains the mailboxes the 
+       user is subscribed to */
+    if (alsosub && (r = mboxlist_opensubs(userid, &subs)) != 0) {
+	goto done;
+    }
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > userlen)) &&
@@ -2252,10 +2308,14 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
 
 	cbrock.find_namespace = NAMESPACE_INBOX;
 	/* iterate through prefixes matching usermboxname */
-	r = cyrusdb_foreach(mbdb,
-			    usermboxname, usermboxnamelen,
-			    &find_p, &find_cb, &cbrock,
-			    NULL);
+	if (!r && alsosub)
+	    r = cyrusdb_foreach(subs, usermboxname, usermboxnamelen,
+				NULL, &addsublist_cb, &cbrock, NULL);
+	if (!r) r = cyrusdb_foreach(mbdb,
+				    usermboxname, usermboxnamelen,
+				    &find_p, &find_cb, &cbrock,
+				    NULL);
+	finishsublist(&cbrock);
 
 	free(cbrock.prev);
 	cbrock.prev = NULL;
@@ -2276,10 +2336,14 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
 	/* search for all remaining mailboxes.
 	   just bother looking at the ones that have the same pattern
 	   prefix. */
+	if (!r && alsosub)
+	    r = cyrusdb_foreach(subs, domainpat, domainlen + prefixlen,
+				NULL, &addsublist_cb, &cbrock, NULL);
 	r = cyrusdb_foreach(mbdb,
 			    domainpat, domainlen + prefixlen,
 			    &find_p, &find_cb, &cbrock,
 			    NULL);
+	finishsublist(&cbrock);
 
 	free(cbrock.prev);
 	cbrock.prev = NULL;
@@ -2294,10 +2358,11 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
 }
 
 HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
-			 const char *pattern, int isadmin, const char *userid,
+			 const char *pattern, int flags, const char *userid,
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock)
 {
+    struct db *subs = NULL;
     struct find_rock cbrock;
     char usermboxname[MAX_MAILBOX_BUFFER], patbuf[MAX_MAILBOX_BUFFER];
     size_t usermboxnamelen = 0;
@@ -2309,6 +2374,8 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
     size_t userlen = userid ? strlen(userid) : 0, domainlen = 0;
     char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
+    int isadmin = (flags & MBOX_ISADMIN);
+    int alsosub = (flags & MBOX_ALSOSUB);
 
     if (!namespace) namespace = mboxname_get_adminnamespace();
 
@@ -2333,6 +2400,12 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
     cbrock.db = mbdb;
+
+    /* open the subscription file that contains the mailboxes the 
+       user is subscribed to */
+    if (alsosub && (r = mboxlist_opensubs(userid, &subs)) != 0) {
+	goto done;
+    }
 
     /* Build usermboxname */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > (int)userlen)) &&
@@ -2394,10 +2467,14 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
 	cbrock.find_namespace = NAMESPACE_INBOX;
 
 	/* iterate through prefixes matching usermboxname */
-	cyrusdb_foreach(mbdb,
-			usermboxname, usermboxnamelen,
-			&find_p, &find_cb, &cbrock,
-			NULL);
+	if (!r && alsosub)
+	    r = cyrusdb_foreach(subs, usermboxname, usermboxnamelen,
+				NULL, &addsublist_cb, &cbrock, NULL);
+	if (!r) r = cyrusdb_foreach(mbdb,
+				    usermboxname, usermboxnamelen,
+				    &find_p, &find_cb, &cbrock,
+				    NULL);
+	finishsublist(&cbrock);
 
 	free(cbrock.prev);
 	cbrock.prev = NULL;
@@ -2438,10 +2515,14 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
 
 	    /* iterate through prefixes matching usermboxname */
 	    strlcpy(domainpat+domainlen, "user", sizeof(domainpat)-domainlen);
-	    cyrusdb_foreach(mbdb,
-			    domainpat, strlen(domainpat),
-			    &find_p, &find_cb, &cbrock,
-			    NULL);
+	    if (!r && alsosub)
+		r = cyrusdb_foreach(subs, domainpat, strlen(domainpat),
+				    NULL, &addsublist_cb, &cbrock, NULL);
+	    if (!r) r = cyrusdb_foreach(mbdb,
+					domainpat, strlen(domainpat),
+					&find_p, &find_cb, &cbrock,
+					NULL);
+	    finishsublist(&cbrock);
 
 	    glob_free(&cbrock.g);
 	    free(cbrock.prev);
@@ -2491,20 +2572,28 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
 		}
 
 		domainpat[domainlen] = '\0';
-		cyrusdb_foreach(mbdb,
-				domainpat, domainlen,
-				&find_p, &find_cb, &cbrock,
-				NULL);
+		if (!r && alsosub)
+		    r = cyrusdb_foreach(subs, domainpat, domainlen,
+					NULL, &addsublist_cb, &cbrock, NULL);
+		if (!r) r = cyrusdb_foreach(mbdb,
+					    domainpat, domainlen,
+					    &find_p, &find_cb, &cbrock,
+					    NULL);
+		finishsublist(&cbrock);
 	    }
 	    else if (pattern[len] == '.') {
 		strlcpy(domainpat+domainlen, pattern+len+1,
 			sizeof(domainpat)-domainlen);
 		cbrock.g = glob_init(domainpat, GLOB_HIERARCHY);
 
-		cyrusdb_foreach(mbdb,
-				domainpat, domainlen+prefixlen-(len+1),
-				&find_p, &find_cb, &cbrock,
-				NULL);
+		if (!r && alsosub)
+		    r = cyrusdb_foreach(subs, domainpat, domainlen+prefixlen-(len+1),
+					NULL, &addsublist_cb, &cbrock, NULL);
+		if (!r) r = cyrusdb_foreach(mbdb,
+					    domainpat, domainlen+prefixlen-(len+1),
+					    &find_p, &find_cb, &cbrock,
+					    NULL);
+		finishsublist(&cbrock);
 	    }
 	    free(cbrock.prev);
 	    cbrock.prev = NULL;
@@ -2940,7 +3029,7 @@ static void mboxlist_closesubs(struct db *sub)
  * 'proc' with the name of the mailbox.
  */
 EXPORTED int mboxlist_findsub(struct namespace *namespace,
-		     const char *pattern, int isadmin __attribute__((unused)),
+		     const char *pattern, int flags,
 		     const char *userid, struct auth_state *auth_state, 
 		     int (*proc)(), void *rock, int force)
 {
@@ -2956,6 +3045,7 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
     size_t userlen = userid ? strlen(userid) : 0, domainlen = 0;
     char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
+    int isadmin = flags & MBOX_ISADMIN;
 
     if (!namespace) namespace = mboxname_get_adminnamespace();
 
@@ -3119,7 +3209,7 @@ EXPORTED int mboxlist_allsubs(const char *userid, foreach_cb *proc, void *rock)
 }
 
 HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
-			 const char *pattern, int isadmin __attribute__((unused)),
+			 const char *pattern, int flags,
 			 const char *userid, struct auth_state *auth_state, 
 			 int (*proc)(), void *rock, int force)
 {
@@ -3135,6 +3225,7 @@ HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
     size_t userlen = userid ? strlen(userid) : 0, domainlen = 0;
     char domainpat[MAX_MAILBOX_BUFFER]; /* do intra-domain fetches only */
     char *pat = NULL;
+    int isadmin = flags & MBOX_ISADMIN;
 
     if (!namespace) namespace = mboxname_get_adminnamespace();
 

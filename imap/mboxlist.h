@@ -181,12 +181,16 @@ int mboxlist_sync_setacls(const char *name, const char *acl);
 /* TODO: this takes a mailbox* so it doesn't really belong here */
 int mboxlist_setspecialuse(struct mailbox *, const char *specialuse);
 
+/* flags for mboxlist lookups */
+#define MBOX_ISADMIN (1<<0)
+#define MBOX_ALSOSUB (1<<1)
+
 /* Find all mailboxes that match 'pattern'. */
 int mboxlist_findall(struct namespace *namespace,
-		     const char *pattern, int isadmin, const char *userid, 
+		     const char *pattern, int flags, const char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock);
 int mboxlist_findall_alt(struct namespace *namespace,
-			 const char *pattern, int isadmin, const char *userid, 
+			 const char *pattern, int flags, const char *userid, 
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock);
 
@@ -196,11 +200,11 @@ int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock);
 
 /* Find subscribed mailboxes that match 'pattern'. */
 int mboxlist_findsub(struct namespace *namespace,
-		     const char *pattern, int isadmin, const char *userid, 
+		     const char *pattern, int flags, const char *userid, 
 		     struct auth_state *auth_state, int (*proc)(), void *rock,
 		     int force);
 int mboxlist_findsub_alt(struct namespace *namespace,
-			 const char *pattern, int isadmin, char const *userid, 
+			 const char *pattern, int flags, char const *userid, 
 			 struct auth_state *auth_state, int (*proc)(),
 			 void *rock, int force);
 
