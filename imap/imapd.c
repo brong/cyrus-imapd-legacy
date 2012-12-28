@@ -11492,13 +11492,17 @@ static void list_data_recursivematch(struct listargs *listargs,
 static void list_data(struct listargs *listargs)
 {
     int (*findall)(struct namespace *namespace,
-		   const char *pattern, int isadmin, const char *userid,
+		   const char *pattern, int flags, const char *userid,
 		   struct auth_state *auth_state, int (*proc)(),
 		   void *rock);
     int (*findsub)(struct namespace *namespace,
-		   const char *pattern, int isadmin, const char *userid,
+		   const char *pattern, int flags, const char *userid,
 		   struct auth_state *auth_state, int (*proc)(),
 		   void *rock, int force);
+    char **pattern;
+    struct list_rock rock;
+    memset(&rock, 0, sizeof(struct list_rock));
+    rock.listargs = listargs;
 
     canonical_list_patterns(listargs->ref, &listargs->pat);
 
@@ -11514,33 +11518,29 @@ static void list_data(struct listargs *listargs)
 	findall = imapd_namespace.mboxlist_findall;
     }
 
-    if (listargs->sel & LIST_SEL_RECURSIVEMATCH) {
-	list_data_recursivematch(listargs, findsub);
+    if (listargs->sel & LIST_SEL_SUBSCRIBED && !(listargs->sel & LIST_SEL_RECURSIVEMATCH)) {
+	for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
+	    findsub(&imapd_namespace, *pattern, imapd_userisadmin,
+		    imapd_userid, imapd_authstate, subscribed_cb, &rock, 1);
+	    perform_output(NULL, 0, &rock);
+	}
     } else {
-	char **pattern;
-	struct list_rock rock;
-	memset(&rock, 0, sizeof(struct list_rock));
-	rock.listargs = listargs;
+	int flags = 0;
+	if (imapd_userisadmin) flags |= MBOX_ISADMIN;
+	if (listargs->ret & LIST_RET_SUBSCRIBED || listargs->sel & LIST_SEL_RECURSIVEMATCH) flags |= MBOX_ALSOSUB;
 
-	if (listargs->sel & LIST_SEL_SUBSCRIBED) {
-	    for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
-		findsub(&imapd_namespace, *pattern, imapd_userisadmin,
-			imapd_userid, imapd_authstate, subscribed_cb, &rock, 1);
-		perform_output(NULL, 0, &rock);
-	    }
-	} else {
-	    if (listargs->scan) {
-		construct_hash_table(&listargs->server_table, 10, 1);
-	    }
+	if (listargs->scan) {
+	    construct_hash_table(&listargs->server_table, 10, 1);
+	}
 
-	    for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
-		findall(&imapd_namespace, *pattern, imapd_userisadmin,
-			imapd_userid, imapd_authstate, list_cb, &rock);
-		perform_output(NULL, 0, &rock);
-	    }
+	for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
+	    findall(&imapd_namespace, *pattern, flags,
+		    imapd_userid, imapd_authstate, list_cb, &rock);
+	    perform_output(NULL, 0, &rock);
+	}
 
-	    if (listargs->scan)
-		free_hash_table(&listargs->server_table, NULL);
+	if (listargs->scan) {
+	    free_hash_table(&listargs->server_table, NULL);
 	}
     }
 }

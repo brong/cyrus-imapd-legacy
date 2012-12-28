@@ -2227,6 +2227,8 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
     cbrock.db = mbdb;
+    cbrock.sublist = NULL;
+    cbrock.subpos = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -2400,6 +2402,8 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
     cbrock.db = mbdb;
+    cbrock.sublist = NULL;
+    cbrock.subpos = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -3069,6 +3073,8 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
     cbrock.procrock = rock;
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
+    cbrock.sublist = NULL;
+    cbrock.subpos = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -3249,6 +3255,8 @@ HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
     cbrock.procrock = rock;
     cbrock.prev = NULL;
     cbrock.prevlen = 0;
+    cbrock.sublist = NULL;
+    cbrock.subpos = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
