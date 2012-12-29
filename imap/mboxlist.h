@@ -184,6 +184,8 @@ int mboxlist_setspecialuse(struct mailbox *, const char *specialuse);
 /* flags for mboxlist lookups */
 #define MBOX_ISADMIN (1<<0)
 #define MBOX_ALSOSUB (1<<1)
+/* direct access to mailboxes DB */
+int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock);
 
 /* Find all mailboxes that match 'pattern'. */
 int mboxlist_findall(struct namespace *namespace,
@@ -195,8 +197,8 @@ int mboxlist_findall_alt(struct namespace *namespace,
 			 void *rock);
 
 /* direct access to subs DB */
-int mboxlist_allsubs(const char *userid, foreach_cb *proc, void *rock);
-int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock);
+int mboxlist_allsubs(const char *userid, const char *prefix,
+		     foreach_cb *proc, void *rock);
 
 /* Find subscribed mailboxes that match 'pattern'. */
 int mboxlist_findsub(struct namespace *namespace,

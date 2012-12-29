@@ -1717,7 +1717,7 @@ static int user_sub(const char *userid)
     struct sync_name *item;
     struct dlist *kl;
 
-    mboxlist_allsubs(userid, addmbox_sub, list);
+    mboxlist_allsubs(userid, NULL, addmbox_sub, list);
 
     kl = dlist_newlist(NULL, "LSUB");
     for (item = list->head; item; item = item->next) {
@@ -2085,7 +2085,7 @@ static int do_unuser(struct dlist *kin)
     int r = 0;
 
     /* Nuke subscriptions */
-    mboxlist_allsubs(userid, addmbox_sub, list);
+    mboxlist_allsubs(userid, NULL, addmbox_sub, list);
 
     /* ignore failures here - the subs file gets deleted soon anyway */
     for (item = list->head; item; item = item->next) {

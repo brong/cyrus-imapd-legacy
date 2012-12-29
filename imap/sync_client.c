@@ -2060,7 +2060,7 @@ static int do_user_sub(const char *userid, struct sync_name_list *replica_subs)
     int r = 0;
 
     /* Includes subsiduary nodes automatically */
-    r = mboxlist_allsubs(userid, addmbox_sub, master_subs);
+    r = mboxlist_allsubs(userid, NULL, addmbox_sub, master_subs);
     if (r) goto bail;
 
     /* add any folders that need adding, and mark any which

@@ -3198,16 +3198,19 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
     return r;
 }
 
-EXPORTED int mboxlist_allsubs(const char *userid, foreach_cb *proc, void *rock)
+EXPORTED int mboxlist_allsubs(const char *userid, const char *prefix,
+			      foreach_cb *proc, void *rock)
 {
     struct db *subs = NULL;
     int r;
+
+    if (!prefix) prefix = "";
 
     /* open subs DB */
     r = mboxlist_opensubs(userid, &subs);
     if (r) return r;
 
-    r = cyrusdb_foreach(subs, "", 0, NULL, proc, rock, 0);
+    r = cyrusdb_foreach(subs, prefix, strlen(prefix), NULL, proc, rock, 0);
 
     mboxlist_closesubs(subs);
 

@@ -142,7 +142,7 @@ static int reset_single(const char *userid)
 
     /* Nuke subscriptions */
     list = sync_name_list_create();
-    r = mboxlist_allsubs(userid, addmbox_sub, list);
+    r = mboxlist_allsubs(userid, NULL, addmbox_sub, list);
     if (r) goto fail;
 
     /* ignore failures here - the subs file gets deleted soon anyway */
