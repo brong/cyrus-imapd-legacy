@@ -11107,7 +11107,7 @@ static void list_response(const char *name, int attributes,
     /* no inferiors means no children (this basically means the INBOX
      * in alt namespace mode */
     if (attributes & MBOX_ATTRIBUTE_NOINFERIORS)
-	attributes &= ~MBOX_ATTRIBUTE_HASCHILDREN;
+	assert(!(attributes & MBOX_ATTRIBUTE_HASCHILDREN));
 
     /* \Noselect has a special second meaning with (R)LSUB */
     if (listargs->cmd & LIST_CMD_LSUB) {
@@ -11117,25 +11117,33 @@ static void list_response(const char *name, int attributes,
 	attributes &= ~MBOX_ATTRIBUTE_SUBSCRIBED;
     }
 
-    /* remove redundant flags */
-    if (listargs->cmd & LIST_CMD_EXTENDED) {
-	/* \NoInferiors implies \HasNoChildren */
+    /* RFC5258: 3.4: Additional Requirements on LIST-EXTENDED Clients
+     *          +--------------------+-------------------+
+     *          | returned attribute | implied attribute |
+     *          +--------------------+-------------------+
+     *          |    \NoInferiors    |   \HasNoChildren  |
+     *          |    \NonExistent    |     \NoSelect     |
+     *          +--------------------+-------------------+
+     */
+    else if (listargs->cmd & LIST_CMD_EXTENDED) {
 	if (attributes & MBOX_ATTRIBUTE_NOINFERIORS)
 	    attributes &= ~MBOX_ATTRIBUTE_HASNOCHILDREN;
-	/* \NonExistent implies \Noselect */
 	if (attributes & MBOX_ATTRIBUTE_NONEXISTENT)
 	    attributes &= ~MBOX_ATTRIBUTE_NOSELECT;
     }
+
+    /* we output \Noselect for non-extended clients */
     else if (attributes & MBOX_ATTRIBUTE_NONEXISTENT) {
-	/* we output \Noselect for non-extended clients */
 	attributes |= MBOX_ATTRIBUTE_NOSELECT;
 	attributes &= ~MBOX_ATTRIBUTE_NONEXISTENT;
     }
 
-    /* ignore childinfo response unless recursivematch requested */
-    if (!(listargs->sel & LIST_SEL_RECURSIVEMATCH)) {
+    /* RFC5258: 3.5: CHILDINFO Extended Data Item
+     *    The CHILDINFO extended data item MUST NOT be returned unless the
+     *    client has specified the RECURSIVEMATCH selection option.
+     */
+    if (!(listargs->sel & LIST_SEL_RECURSIVEMATCH))
 	attributes &= ~MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
-    }
 
     switch (listargs->cmd) {
     case LIST_CMD_LSUB:
@@ -11173,10 +11181,9 @@ static void list_response(const char *name, int attributes,
  
     prot_printastring(imapd_out, mboxname);
 
-    if (listargs->cmd & LIST_CMD_EXTENDED &&
-	attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED) {
-	prot_printf(imapd_out, " (childinfo (\"subscribed\"))");
-    }
+    /* childinfo is the final item */
+    if (attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED)
+	prot_printf(imapd_out, " (CHILDINFO (SUBSCRIBED))");
 
     prot_printf(imapd_out, "\r\n");
 
