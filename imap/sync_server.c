@@ -1606,7 +1606,7 @@ static int do_getquota(struct dlist *kin)
 
 static int mailbox_cb(char *name,
 		      int matchlen __attribute__((unused)),
-		      int maycreate __attribute__((unused)),
+		      int flags __attribute__((unused)),
 		      void *rock)
 {
     struct sync_name_list *qrl = (struct sync_name_list *)rock;

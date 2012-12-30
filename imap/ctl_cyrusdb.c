@@ -123,7 +123,7 @@ static void usage(void)
 /* Callback for use by recover_reserved */
 static int fixmbox(char *name,
 		   int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)),
+		   int flags __attribute__((unused)),
 		   void *rock __attribute__((unused)))
 {
     struct mboxlist_entry *mbentry = NULL;

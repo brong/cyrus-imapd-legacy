@@ -397,7 +397,7 @@ struct dlist *sync_parseline(struct protstream *in);
 
 /* ====================================================================== */
 
-int addmbox(char *name, int matchlen, int maycreate, void *rock);
+int addmbox(char *name, int matchlen, int flags, void *rock);
 int addmbox_sub(void *rockp, const char *key, size_t keylen,
 		const char *data __attribute__((unused)),
 		size_t datalen __attribute__((unused)));

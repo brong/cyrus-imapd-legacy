@@ -532,7 +532,7 @@ bail:
 
 /* This is called once for each mailbox we're told to index. */
 static int index_me(char *name, int matchlen __attribute__((unused)),
-		    int maycreate __attribute__((unused)),
+		    int flags __attribute__((unused)),
 		    void *rock) {
     struct mboxlist_entry *mbentry = NULL;
     struct index_state *state = NULL;
@@ -648,7 +648,7 @@ static int index_me(char *name, int matchlen __attribute__((unused)),
 
 static int addmbox(char *name,
 		   int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)),
+		   int flags __attribute__((unused)),
 		   void *rock)
 {
     strarray_t *sa = (strarray_t *) rock;

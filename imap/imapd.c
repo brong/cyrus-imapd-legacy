@@ -443,20 +443,14 @@ static void appendsearchargs(struct searchargs *s, struct searchargs *s1,
 static void freesearchargs(struct searchargs *s);
 static void freesortcrit(struct sortcrit *s);
 
-static int set_haschildren(char *name, int matchlen, int maycreate,
-			   int *attributes);
 static void list_response(const char *name, int attributes,
 			  struct listargs *listargs);
-static int set_subscribed(char *name, int matchlen, int maycreate,
-			  void *rock);
 static char *canonical_list_pattern(const char *reference,
 				    const char *pattern);
 static void canonical_list_patterns(const char *reference,
 				    strarray_t *patterns);
-static int list_cb(char *name, int matchlen, int maycreate,
+static int list_cb(char *name, int matchlen, int flags,
 		  struct list_rock *rock);
-static int subscribed_cb(const char *name, int matchlen, int maycreate,
-			 struct list_rock *rock);
 static void list_data(struct listargs *listargs);
 static int list_data_remote(char *tag, struct listargs *listargs);
 
@@ -5524,7 +5518,7 @@ static void cmd_create(char *tag, char *name, struct dlist *extargs, int localon
 /* Callback for use by cmd_delete */
 static int delmbox(char *name,
 		   int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)),
+		   int flags __attribute__((unused)),
 		   void *rock __attribute__((unused)))
 {
     int r;
@@ -5696,7 +5690,7 @@ struct renrock
 /* Callback for use by cmd_rename */
 static int checkmboxname(char *name,
 			 int matchlen __attribute__((unused)),
-			 int maycreate __attribute__((unused)),
+			 int flags __attribute__((unused)),
 			 void *rock)
 {
     struct renrock *text = (struct renrock *)rock;
@@ -5719,7 +5713,7 @@ static int checkmboxname(char *name,
 /* Callback for use by cmd_rename */
 static int renmbox(char *name,
 		   int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)),
+		   int flags __attribute__((unused)),
 		   void *rock)
 {
     char oldextname[MAX_MAILBOX_BUFFER];
@@ -6883,7 +6877,7 @@ static void print_quota_limits(struct protstream *o, const struct quota *q)
  * submailboxes are on the same server.
  */
 static int quota_cb(char *name, int matchlen __attribute__((unused)),
-		    int maycreate __attribute__((unused)), void *rock) 
+		    int flags __attribute__((unused)), void *rock) 
 {
     const char *servername = (const char *)rock;
     struct mboxlist_entry *mbentry = NULL;
@@ -7562,7 +7556,7 @@ void cmd_netscrape(char *tag)
  */
 static int namespacedata(char *name,
 			 int matchlen __attribute__((unused)),
-			 int maycreate __attribute__((unused)),
+			 int flags __attribute__((unused)),
 			 void *rock)
 {
     int* sawone = (int*) rock;
@@ -8226,7 +8220,7 @@ struct apply_rock {
 };
 
 static int apply_cb(char *name, int matchlen,
-		    int maycreate __attribute__((unused)), void* rock)
+		    int flags __attribute__((unused)), void* rock)
 {
     struct apply_rock *arock = (struct apply_rock *)rock;
     annotate_state_t *state = arock->state;
@@ -10188,7 +10182,7 @@ static void xfer_recover(struct xfer_header *xfer)
 
 static int xfer_user_cb(char *name,
 			int matchlen __attribute__((unused)),
-			int maycreate __attribute__((unused)),
+			int flags __attribute__((unused)),
 			void *rock) 
 {
     struct xfer_header *xfer = (struct xfer_header *)rock;
@@ -10950,18 +10944,6 @@ static void freesortcrit(struct sortcrit *s)
     free(s);
 }
 
-static int set_haschildren(char *name, int matchlen,
-			   int maycreate __attribute__((unused)),
-			   int *attributes)
-{
-    list_callback_calls++;
-    if (name[matchlen]) {
-	*attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
-	return CYRUSDB_DONE;
-    }
-    return 0;
-}
-
 static void specialuse_flags(struct mboxlist_entry *mbentry, const char *sep,
 			     int isxlist)
 {
@@ -10997,37 +10979,18 @@ static void list_response(const char *name, int attributes,
 			  struct listargs *listargs)
 {
     const struct mbox_name_attribute *attr;
-    char internal_name[MAX_MAILBOX_PATH+1];
+    struct mboxlist_entry *mbentry = NULL;
     int r;
     char mboxname[MAX_MAILBOX_PATH+1];
     const char *sep;
     const char *cmd;
-    struct mboxlist_entry *mbentry = NULL;
     struct statusdata sdata;
 
     if (!name) return;
 
-    /* first convert "INBOX" to "user.<userid>" */
-    if (!strncasecmp(name, "inbox", 5)
-	&& (!name[5] || name[5] == '.') ) {
-	(*imapd_namespace.mboxname_tointernal)(&imapd_namespace, "INBOX",
-					       imapd_userid, internal_name);
-	strlcat(internal_name, name+5, sizeof(internal_name));
-    }
-    else
-	strlcpy(internal_name, name, sizeof(internal_name));
-
-    /* get info and set flags */
-    r = mboxlist_lookup(internal_name, &mbentry, NULL);
-
-    if (r == IMAP_MAILBOX_NONEXISTENT) {
-	attributes |= (listargs->cmd & LIST_CMD_EXTENDED) ?
-		       MBOX_ATTRIBUTE_NONEXISTENT : MBOX_ATTRIBUTE_NOSELECT;
-    }
-    else if (r) return;
-
-    else if (listargs->scan) {
+    if (listargs->scan) {
 	/* SCAN mailbox for content */
+	r = mboxlist_lookup(name, &mbentry, 0);
 
 	if ((mbentry->mbtype & MBTYPE_REMOTE) &&
 	    !hash_lookup(mbentry->partition, &listargs->server_table)) {
@@ -11056,7 +11019,7 @@ static void list_response(const char *name, int attributes,
 
 	    goto done;
 	}
-	else if (imapd_index && !strcmp(internal_name, imapd_index->mailbox->name)) {
+	else if (imapd_index && !strcmp(name, imapd_index->mailbox->name)) {
 	    /* currently selected mailbox */
 	    if (!index_scan(imapd_index, listargs->scan))
 		goto done; /* no matching messages */
@@ -11072,7 +11035,7 @@ static void list_response(const char *name, int attributes,
             init.authstate = imapd_authstate;
 	    init.out = imapd_out;
 
-	    r = index_open(internal_name, &init, &state);
+	    r = index_open(name, &init, &state);
 
 	    if (!r)
 		doclose = 1;
@@ -11094,20 +11057,7 @@ static void list_response(const char *name, int attributes,
 	}
     }
 
-    /* figure out \Has(No)Children if necessary
-       This is mainly used for LIST (SUBSCRIBED) RETURN (CHILDREN)
-    */
-    if (listargs->ret & LIST_RET_CHILDREN
-	&& ! (attributes & MBOX_ATTRIBUTE_HASCHILDREN)
-	&& ! (attributes & MBOX_ATTRIBUTE_HASNOCHILDREN) ) {
-	mboxlist_findall(&imapd_namespace, name,
-			 imapd_userisadmin, imapd_userid, imapd_authstate,
-			 set_haschildren, &attributes);
-	if ( ! (attributes & MBOX_ATTRIBUTE_HASCHILDREN) )
-	    attributes |= MBOX_ATTRIBUTE_HASNOCHILDREN;
-    }
-
-    if (attributes & (MBOX_ATTRIBUTE_NONEXISTENT | MBOX_ATTRIBUTE_NOSELECT)) {
+    if (attributes & MBOX_ATTRIBUTE_NONEXISTENT) {
 	int keep = 0;
 	/* extended get told everything */
 	if (listargs->cmd & LIST_CMD_EXTENDED) {
@@ -11130,19 +11080,42 @@ static void list_response(const char *name, int attributes,
 
 	if (!keep) goto done;
     }
+    /* exists! */
+    else {
+	/* are we a special use folder? */
+	if (listargs->sel & LIST_SEL_SPECIALUSE) {
+	    r = mboxlist_lookup(name, &mbentry, 0);
+	    if (r || !mbentry) goto done;
+	    /* check that this IS a specialuse folder */
+	    if (!mbentry->specialuse) goto done;
+	    /* and owned by the user as well */
+	    if (!mboxname_userownsmailbox(imapd_userid, mbentry->name))
+		goto done;
+	}
 
-    if (listargs->cmd & LIST_CMD_LSUB) {
-	/* \Noselect has a special second meaning with (R)LSUB */
-	if ( !(attributes & MBOX_ATTRIBUTE_SUBSCRIBED)
-	     && attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED)
-	    attributes |= MBOX_ATTRIBUTE_NOSELECT | MBOX_ATTRIBUTE_HASCHILDREN;
-	attributes &= ~MBOX_ATTRIBUTE_SUBSCRIBED;
+	/* can we read the status data ? */
+	if (listargs->ret & LIST_RET_STATUS) {
+	    r = imapd_statusdata(name, listargs->statusitems, &sdata);
+	    if (r) {
+		/* RFC 5819: the STATUS response MUST NOT be returned and the
+		 * LIST response MUST include the \NoSelect attribute. */
+		attributes |= MBOX_ATTRIBUTE_NOSELECT;
+	    }
+	}
     }
 
     /* no inferiors means no children (this basically means the INBOX
      * in alt namespace mode */
     if (attributes & MBOX_ATTRIBUTE_NOINFERIORS)
 	attributes &= ~MBOX_ATTRIBUTE_HASCHILDREN;
+
+    /* \Noselect has a special second meaning with (R)LSUB */
+    if (listargs->cmd & LIST_CMD_LSUB) {
+	if ( !(attributes & MBOX_ATTRIBUTE_SUBSCRIBED)
+	     && attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED)
+	    attributes |= MBOX_ATTRIBUTE_NOSELECT | MBOX_ATTRIBUTE_HASCHILDREN;
+	attributes &= ~MBOX_ATTRIBUTE_SUBSCRIBED;
+    }
 
     /* remove redundant flags */
     if (listargs->cmd & LIST_CMD_EXTENDED) {
@@ -11153,25 +11126,10 @@ static void list_response(const char *name, int attributes,
 	if (attributes & MBOX_ATTRIBUTE_NONEXISTENT)
 	    attributes &= ~MBOX_ATTRIBUTE_NOSELECT;
     }
-
-    if (listargs->sel & LIST_SEL_SPECIALUSE) {
-	if (!mbentry) goto done;
-	/* check that this IS a specialuse folder */
-	if (!mbentry->specialuse) goto done;
-	/* and owned by the user as well */
-	if (!mboxname_userownsmailbox(imapd_userid, mbentry->name))
-	    goto done;
-    }
-
-    /* can we read the status data ? */
-    if ((listargs->ret & LIST_RET_STATUS) &&
-	!(attributes & MBOX_ATTRIBUTE_NOSELECT)) {
-	r = imapd_statusdata(internal_name, listargs->statusitems, &sdata);
-	if (r) {
-	    /* RFC 5819: the STATUS response MUST NOT be returned and the
-	     * LIST response MUST include the \NoSelect attribute. */
-	    attributes |= MBOX_ATTRIBUTE_NOSELECT;
-	}
+    else if (attributes & MBOX_ATTRIBUTE_NONEXISTENT) {
+	/* we output \Noselect for non-extended clients */
+	attributes |= MBOX_ATTRIBUTE_NOSELECT;
+	attributes &= ~MBOX_ATTRIBUTE_NONEXISTENT;
     }
 
     switch (listargs->cmd) {
@@ -11185,6 +11143,7 @@ static void list_response(const char *name, int attributes,
 	cmd = "LIST";
 	break;
     }
+
     prot_printf(imapd_out, "* %s (", cmd);
     for (sep = "", attr = mbox_name_attributes; attr->id; attr++) {
 	if (attributes & attr->flag) {
@@ -11229,19 +11188,6 @@ done:
     mboxlist_entry_free(&mbentry);
 }
 
-static int set_subscribed(char *name, int matchlen,
-			  int maycreate __attribute__((unused)),
-			  void *rock)
-{
-    int *attributes = (int *)rock;
-    list_callback_calls++;
-    if (!name[matchlen])
-	*attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
-    else
-	*attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
-    return 0;
-}
-
 static void perform_output(const char *name, size_t matchlen,
 			   struct list_rock *rock)
 {
@@ -11260,10 +11206,9 @@ static void perform_output(const char *name, size_t matchlen,
     }
 }
 
-/* callback for mboxlist_findall
- * used when the SUBSCRIBED selection option is NOT given */
-static int list_cb(char *name, int matchlen, int maycreate,
-		  struct list_rock *rock)
+/* callback for mboxlist_findall */
+static int list_cb(char *name, int matchlen, int flags,
+		   struct list_rock *rock)
 {
     int last_len;
     int last_name_is_ancestor =
@@ -11272,62 +11217,44 @@ static int list_cb(char *name, int matchlen, int maycreate,
 	&& (name[last_len] == '.' || name[last_len] == imapd_namespace.hier_sep)
 	&& !(rock->last_attributes & MBOX_ATTRIBUTE_NOINFERIORS)
 	&& !memcmp(rock->last_name, name, last_len);
+    int maycreate = flags & MBOX_MAYCREATE;
+    int exists = flags & MBOX_EXISTS;
+    int subscribed = flags & MBOX_SUBSCRIBED;
+    int matches = (name[matchlen] == '\0');
 
     list_callback_calls++;
 
-    if (last_name_is_ancestor)
-	rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
+    if (last_name_is_ancestor) {
+	if (subscribed)
+	    rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+	if (exists)
+	    rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
+    }
 
     /* tidy up flags */
     if (!(rock->last_attributes & MBOX_ATTRIBUTE_HASCHILDREN))
 	rock->last_attributes |= MBOX_ATTRIBUTE_HASNOCHILDREN;
+
+    /* output the actual record */
     perform_output(name, matchlen, rock);
+
+    /* some facts we already know */
+    if (subscribed) {
+	if (matches)
+	    rock->last_attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
+	else
+	    rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+    }
+
     if (!maycreate)
 	rock->last_attributes |= MBOX_ATTRIBUTE_NOINFERIORS;
-    else if (name[matchlen] == '.')
+
+    if (!exists)
+	rock->last_attributes |= MBOX_ATTRIBUTE_NONEXISTENT;
+
+    if (!matches) {
+	rock->last_attributes |= MBOX_ATTRIBUTE_NONEXISTENT;
 	rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
-
-    /* XXX: is there a cheaper way to figure out \Subscribed? */
-    if (rock->listargs->ret & LIST_RET_SUBSCRIBED)
-	mboxlist_findsub(&imapd_namespace, name, imapd_userisadmin,
-			 imapd_userid, imapd_authstate, set_subscribed,
-			 &rock->last_attributes, 0);
-
-    return 0;
-}
-
-/* callback for mboxlist_findsub
- * used when SUBSCRIBED but not RECURSIVEMATCH is given */
-static int subscribed_cb(const char *name, int matchlen, int maycreate,
-			 struct list_rock *rock)
-{
-    int last_len;
-    int last_name_is_ancestor =
-	rock->last_name
-	&& matchlen >= (last_len = strlen(rock->last_name))
-	&& name[last_len] == '.'
-	&& !(rock->last_attributes & MBOX_ATTRIBUTE_NOINFERIORS)
-	&& !memcmp(rock->last_name, name, last_len);
-
-    list_callback_calls++;
-
-    if (last_name_is_ancestor)
-	rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
-
-    if (!name[matchlen]) {
-	perform_output(name, matchlen, rock);
-	rock->last_attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
-	if (!maycreate)
-	    rock->last_attributes |= MBOX_ATTRIBUTE_NOINFERIORS;
-    }
-    else if (name[matchlen] == '.' &&
-	     rock->listargs->cmd & LIST_CMD_LSUB) {
-	/* special case: for LSUB,
-	 * mailbox names that match the pattern but aren't subscribed
-	 * must also be returned if they have a child mailbox that is
-	 * subscribed */
-	perform_output(name, matchlen, rock);
-	rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
     }
 
     return 0;
@@ -11420,7 +11347,7 @@ static void list_data(struct listargs *listargs)
     if (listargs->sel & LIST_SEL_SUBSCRIBED && !(listargs->sel & LIST_SEL_RECURSIVEMATCH)) {
 	for (pattern = listargs->pat.data ; pattern && *pattern ; pattern++) {
 	    findsub(&imapd_namespace, *pattern, imapd_userisadmin,
-		    imapd_userid, imapd_authstate, subscribed_cb, &rock, 1);
+		    imapd_userid, imapd_authstate, list_cb, &rock, 1);
 	    perform_output(NULL, 0, &rock);
 	}
     } else {

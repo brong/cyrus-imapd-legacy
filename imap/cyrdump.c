@@ -69,7 +69,7 @@
 
 static int verbose = 0;
 
-static int dump_me(char *name, int matchlen, int maycreate, void *rock);
+static int dump_me(char *name, int matchlen, int flags, void *rock);
 static void print_seq(const char *tag, const char *attrib, 
 		      unsigned *seq, int n);
 static int usage(const char *name);
@@ -158,7 +158,7 @@ static void generate_boundary(char *boundary, size_t size)
 }
 
 static int dump_me(char *name, int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)), void *rock)
+		   int flags __attribute__((unused)), void *rock)
 {
     int r;
     char boundary[128];

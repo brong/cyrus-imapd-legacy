@@ -102,8 +102,8 @@ extern char *optarg;
 static struct namespace recon_namespace;
 
 /* forward declarations */
-static int do_examine(char *name, int matchlen, int maycreate, void *rock);
-static int do_quota(char *name, int matchlen, int maycreate, void *rock);
+static int do_examine(char *name, int matchlen, int flags, void *rock);
+static int do_quota(char *name, int matchlen, int flags, void *rock);
 static void usage(void);
 void shut_down(int code);
 
@@ -206,7 +206,7 @@ static void print_rec(const char *name, const struct buf *citem)
  */
 static int do_examine(char *name,
 		      int matchlen __attribute__((unused)),
-		      int maycreate __attribute__((unused)),
+		      int flags __attribute__((unused)),
 		      void *rock __attribute__((unused)))
 {
     unsigned i, msgno, recno;
@@ -358,7 +358,7 @@ static int do_examine(char *name,
  */
 static int do_quota(char *name,
 		    int matchlen __attribute__((unused)),
-		    int maycreate __attribute__((unused)),
+		    int flags __attribute__((unused)),
 		    void *rock __attribute__((unused)))
 {
     uint32_t recno;

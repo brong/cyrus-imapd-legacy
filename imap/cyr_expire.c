@@ -220,7 +220,7 @@ static unsigned userflag_cb(struct mailbox *mailbox __attribute__((unused)),
  * - and perform a cleanup of expunged messages
  */
 static int expire(char *name, int matchlen __attribute__((unused)),
-		  int maycreate __attribute__((unused)), void *rock)
+		  int flags __attribute__((unused)), void *rock)
 {
     struct mboxlist_entry *mbentry = NULL;
     struct expire_rock *erock = (struct expire_rock *) rock;
@@ -335,7 +335,7 @@ static int expire(char *name, int matchlen __attribute__((unused)),
 
 static int delete(char *name,
 		  int matchlen __attribute__((unused)),
-		  int maycreate __attribute__((unused)),
+		  int flags __attribute__((unused)),
 		  void *rock)
 {
     struct mboxlist_entry *mbentry = NULL;

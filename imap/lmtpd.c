@@ -388,7 +388,7 @@ struct fuzz_rock {
 
 static int fuzzy_match_cb(char *name,
 			  int matchlen __attribute__((unused)),
-			  int maycreate __attribute__((unused)),
+			  int flags __attribute__((unused)),
 			  void *rock)
 {
     struct fuzz_rock *frock = (struct fuzz_rock *) rock;

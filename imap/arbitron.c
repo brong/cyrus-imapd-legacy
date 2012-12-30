@@ -109,7 +109,7 @@ static void run_users(void);
 static void make_report(const char *key, void *data, void *rock);
 static void process_seen(const char *path, const char *user);
 static void process_subs(const char *path, const char *user);
-static int do_mailbox(const char *name, int matchlen, int maycreate, void *rock);
+static int do_mailbox(const char *name, int matchlen, int flags, void *rock);
 
 int main(int argc,char **argv)
 {
@@ -256,7 +256,7 @@ static void usage(void)
 }    
 
 static int do_mailbox(const char *name, int matchlen __attribute__((unused)),
-		      int maycreate __attribute__((unused)),
+		      int flags __attribute__((unused)),
 		      void *rock __attribute__((unused)))
 {
     int r;

@@ -99,9 +99,9 @@ static int mboxlist_dbopen = 0;
 static int mboxlist_opensubs(const char *userid, struct db **ret);
 static void mboxlist_closesubs(struct db *sub);
 
-static int mboxlist_rmquota(const char *name, int matchlen, int maycreate,
+static int mboxlist_rmquota(const char *name, int matchlen, int flags,
 			    void *rock);
-static int mboxlist_changequota(const char *name, int matchlen, int maycreate,
+static int mboxlist_changequota(const char *name, int matchlen, int flags,
 				void *rock);
 
 EXPORTED struct mboxlist_entry *mboxlist_entry_create(void)
@@ -1874,7 +1874,7 @@ struct find_rock {
     const char *inboxcase;
     const char *usermboxname;
     size_t usermboxnamelen;
-    int checkmboxlist;
+    int force;
     int checkshared;
     struct db *db;
     int isadmin;
@@ -1885,6 +1885,7 @@ struct find_rock {
     void *procrock;
     strarray_t *sublist;
     int subpos;
+    int issubs;
 };
 
 /* return non-zero if we like this one */
@@ -2004,6 +2005,7 @@ static int find_cb(void *rockp,
     int r = 0;
     long minmatch;
     struct glob *g = rock->g;
+    int flags = MBOX_MAYCREATE;
 
     /* we use the presence of "data" as a hack to tell if we're
      * processing the mailboxes.db and need to deal with the
@@ -2014,12 +2016,20 @@ static int find_cb(void *rockp,
 	    size_t namelen = strlen(name);
 	    int cmp = cyrusdb_compar(rock->db, name, namelen, key, keylen);
 	    if (cmp >= 0) {
-		if (cmp == 0) rock->subpos++;
+		if (cmp == 0) {
+		    flags |= MBOX_SUBSCRIBED;
+		    rock->subpos++;
+		}
 		break;
 	    }
 	    find_cb(rock, name, namelen, NULL, 0);
 	}
     }
+
+    if (rock->issubs)
+	flags |= MBOX_SUBSCRIBED;
+    else
+	flags |= MBOX_EXISTS;
 
     /* foreach match, do this test */
     minmatch = 0;
@@ -2043,11 +2053,13 @@ static int find_cb(void *rockp,
 	}
 
 	/* make sure it's in the mailboxes db */
-	if (rock->checkmboxlist) {
+	r = 0;
+	if (rock->issubs) {
+	    /* always check to have exists flag correct */
 	    r = mboxlist_lookup(namebuf, NULL, NULL);
-	} else {
-	    r = 0;		/* don't bother checking */
+	    if (!r) flags |= MBOX_EXISTS;
 	}
+	if (rock->force) r = 0; /* force anyway */
 
 	if (!r && rock->inboxoffset) {
 	    namebuf[rock->inboxoffset] = rock->inboxcase[0];
@@ -2067,13 +2079,16 @@ static int find_cb(void *rockp,
 
 	switch (r) {
 	case 0:
+	    /* assume it exists */
+	    flags |= MBOX_EXISTS;
+
 	    /* found the entry; output it */
 	    if (rock->find_namespace == NAMESPACE_SHARED &&
 		rock->checkshared && rock->namespace) {
 		/* special case:  LIST "" *% -- output prefix */
 		r = (*rock->proc)(rock->namespace->prefix[NAMESPACE_SHARED],
 				  strlen(rock->namespace->prefix[NAMESPACE_SHARED])-1,
-				  1, rock->procrock);
+				  MBOX_MAYCREATE, rock->procrock);
 
 		if (rock->checkshared > 1) {
 		    /* special case:  LIST "" % -- output prefix only */
@@ -2086,7 +2101,7 @@ static int find_cb(void *rockp,
 
 	    if (check_name(rock, namebuf+rock->inboxoffset, matchlen))
 		r = (*rock->proc)(namebuf+rock->inboxoffset, matchlen,
-				  1, rock->procrock);
+				  flags, rock->procrock);
 
 	    break;
 
@@ -2220,7 +2235,7 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
     cbrock.inboxcase = glob_inboxcase(cbrock.g);
     cbrock.isadmin = isadmin;
     cbrock.auth_state = auth_state;
-    cbrock.checkmboxlist = 0;	/* don't duplicate work */
+    cbrock.force = 0;
     cbrock.checkshared = 0;
     cbrock.proc = proc;
     cbrock.procrock = rock;
@@ -2229,6 +2244,7 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
     cbrock.db = mbdb;
     cbrock.sublist = NULL;
     cbrock.subpos = 0;
+    cbrock.issubs = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -2395,7 +2411,7 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
     cbrock.inboxcase = glob_inboxcase(cbrock.g);
     cbrock.isadmin = isadmin;
     cbrock.auth_state = auth_state;
-    cbrock.checkmboxlist = 0;	/* don't duplicate work */
+    cbrock.force = 0;
     cbrock.checkshared = 0;
     cbrock.proc = proc;
     cbrock.procrock = rock;
@@ -2404,6 +2420,7 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
     cbrock.db = mbdb;
     cbrock.sublist = NULL;
     cbrock.subpos = 0;
+    cbrock.issubs = 0;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -2614,7 +2631,7 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
 
 static int child_cb(char *name,
 		    int matchlen __attribute__((unused)),
-		    int maycreate __attribute__((unused)),
+		    int flags __attribute__((unused)),
 		    void *rock)
 {
     if (!name) return 0;
@@ -2837,7 +2854,7 @@ EXPORTED int mboxlist_ensureOwnerRights(void *rock, const char *identifier,
  */
 static int mboxlist_rmquota(const char *name,
 			    int matchlen __attribute__((unused)),
-			    int maycreate __attribute__((unused)),
+			    int flags __attribute__((unused)),
 			    void *rock)
 {
     int r = 0;
@@ -2876,7 +2893,7 @@ static int mboxlist_rmquota(const char *name,
  */
 static int mboxlist_changequota(const char *name,
 				int matchlen __attribute__((unused)),
-				int maycreate __attribute__((unused)),
+				int flags __attribute__((unused)),
 				void *rock)
 {
     int r = 0;
@@ -3067,7 +3084,7 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
     cbrock.inboxcase = glob_inboxcase(cbrock.g);
     cbrock.isadmin = 1;		/* user can always see their subs */
     cbrock.auth_state = auth_state;
-    cbrock.checkmboxlist = !force;
+    cbrock.force = force;
     cbrock.checkshared = 0;
     cbrock.proc = proc;
     cbrock.procrock = rock;
@@ -3075,6 +3092,7 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
     cbrock.prevlen = 0;
     cbrock.sublist = NULL;
     cbrock.subpos = 0;
+    cbrock.issubs = 1;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */
@@ -3252,7 +3270,7 @@ HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
     cbrock.inboxcase = glob_inboxcase(cbrock.g);
     cbrock.isadmin = 1;		/* user can always see their subs */
     cbrock.auth_state = auth_state;
-    cbrock.checkmboxlist = !force;
+    cbrock.force = force;
     cbrock.checkshared = 0;
     cbrock.proc = proc;
     cbrock.procrock = rock;
@@ -3260,6 +3278,7 @@ HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
     cbrock.prevlen = 0;
     cbrock.sublist = NULL;
     cbrock.subpos = 0;
+    cbrock.issubs = 1;
 
     /* open the subscription file that contains the mailboxes the 
        user is subscribed to */

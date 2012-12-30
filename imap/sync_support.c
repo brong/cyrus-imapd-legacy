@@ -1255,7 +1255,7 @@ unsigned sync_mailbox_finduid(struct mailbox *mailbox, unsigned uid)
 
 int addmbox(char *name,
 	    int matchlen __attribute__((unused)),
-	    int maycreate __attribute__((unused)),
+	    int flags __attribute__((unused)),
 	    void *rock)
 {
     struct sync_name_list *list = (struct sync_name_list *) rock;

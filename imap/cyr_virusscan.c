@@ -335,7 +335,7 @@ int usage(char *name)
 /* we don't check what comes in on matchlen and maycreate, should we? */
 int scan_me(char *name,
 	    int matchlen __attribute__((unused)),
-	    int maycreate __attribute__((unused)),
+	    int flags __attribute__((unused)),
 	    void *rock __attribute__((unused)))
 {
     struct mailbox *mailbox;

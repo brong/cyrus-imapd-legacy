@@ -3558,7 +3558,7 @@ static void mailbox_delete_files(char *path)
 /* Callback for use by cmd_delete */
 static int chkchildren(char *name,
 		       int matchlen __attribute__((unused)),
-		       int maycreate __attribute__((unused)),
+		       int flags __attribute__((unused)),
 		       void *rock)
 {
     const char *part = (const char *)rock;

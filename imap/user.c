@@ -88,7 +88,7 @@
 #define FNAME_SUBSSUFFIX "sub"
 
 #if 0
-static int user_deleteacl(char *name, int matchlen, int maycreate, void* rock)
+static int user_deleteacl(char *name, int matchlen, int flags, void* rock)
 {
     /* deleting all references to the user is too slow right now */
 
@@ -221,7 +221,7 @@ struct rename_rock {
 };
 
 static int user_renamesub(char *name, int matchlen __attribute__((unused)),
-			  int maycreate __attribute__((unused)), void* rock)
+			  int flags __attribute__((unused)), void* rock)
 {
     struct rename_rock *rrock = (struct rename_rock *) rock;
     char newname[MAX_MAILBOX_BUFFER];

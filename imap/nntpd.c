@@ -2454,7 +2454,7 @@ struct list_rock {
  * mboxlist_findall() callback function to LIST
  */
 static int list_cb(char *name, int matchlen,
-		   int maycreate __attribute__((unused)), void *rock)
+		   int flags __attribute__((unused)), void *rock)
 {
     static char lastname[MAX_MAILBOX_BUFFER];
     struct list_rock *lrock = (struct list_rock *) rock;

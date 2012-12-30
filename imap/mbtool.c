@@ -103,7 +103,7 @@ extern char *optarg;
 static struct namespace recon_namespace;
 
 /* forward declarations */
-static int do_cmd(char *name, int matchlen, int maycreate, void *rock);
+static int do_cmd(char *name, int matchlen, int flags, void *rock);
 
 static void usage(void);
 void shut_down(int code);
@@ -235,7 +235,7 @@ static int do_timestamp(char *name)
 
 int do_cmd(char *name,
 	   int matchlen __attribute__((unused)),
-	   int maycreate __attribute__((unused)),
+	   int flags __attribute__((unused)),
 	   void *rock)
 {
     int *valp = (int *)rock;

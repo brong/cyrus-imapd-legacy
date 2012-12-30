@@ -182,8 +182,14 @@ int mboxlist_sync_setacls(const char *name, const char *acl);
 int mboxlist_setspecialuse(struct mailbox *, const char *specialuse);
 
 /* flags for mboxlist lookups */
-#define MBOX_ISADMIN (1<<0)
-#define MBOX_ALSOSUB (1<<1)
+#define MBOX_ISADMIN    (1<<0)
+#define MBOX_ALSOSUB    (1<<1)
+
+/* flags for mboxlist responses */
+#define MBOX_MAYCREATE  (1<<0)
+#define MBOX_EXISTS     (1<<1)
+#define MBOX_SUBSCRIBED (1<<2)
+
 /* direct access to mailboxes DB */
 int mboxlist_allmbox(const char *prefix, foreach_cb *proc, void *rock);
 
