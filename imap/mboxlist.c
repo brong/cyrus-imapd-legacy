@@ -2268,21 +2268,21 @@ EXPORTED int mboxlist_findall(struct namespace *namespace,
 
     /* Check for INBOX first of all */
     if (userid) {
-	if (GLOB_TEST(cbrock.g, "INBOX") != -1) {
+	if ((GLOB_TEST(cbrock.g, "INBOX") != -1) || (!strncmp(pattern,
+		 usermboxname+domainlen, usermboxnamelen-domainlen) &&
+		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1)) {
+	    int flags = MBOX_MAYCREATE;
 	    r = cyrusdb_fetch(mbdb, usermboxname, usermboxnamelen,
 			      &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(cbrock.inboxcase, 5, 1, rock);
-	}
-	else if (!strncmp(pattern,
-			  usermboxname+domainlen, usermboxnamelen-domainlen) &&
-		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1) {
-	    r = cyrusdb_fetch(mbdb, usermboxname, usermboxnamelen,
-			      &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(usermboxname, usermboxnamelen, 1, rock);
+	    if (r == 0)
+		flags |= MBOX_EXISTS;
+	    if (r == CYRUSDB_NOTFOUND)
+		r = 0;
+	    if (!r) {
+		if (alsosub && !cyrusdb_fetch(subs, usermboxname, usermboxnamelen, NULL, 0, NULL))
+		    flags |= MBOX_SUBSCRIBED;
+		r = (*proc)(usermboxname, usermboxnamelen, flags, rock);
+	    }
 	}
 	strlcat(usermboxname, ".", sizeof(usermboxname));
 	usermboxnamelen++;
@@ -2444,14 +2444,22 @@ HIDDEN int mboxlist_findall_alt(struct namespace *namespace,
 
     /* Check for INBOX first of all */
     if (userid) {
-	if (GLOB_TEST(cbrock.g, "INBOX") != -1) {
+	if ((GLOB_TEST(cbrock.g, "INBOX") != -1) || (!strncmp(pattern,
+		 usermboxname+domainlen, usermboxnamelen-domainlen) &&
+		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1)) {
+	    int flags = 0;
 	    r = cyrusdb_fetch(mbdb, usermboxname, usermboxnamelen,
 			      &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(cbrock.inboxcase, 5, 0, rock);
+	    if (r == 0)
+		flags |= MBOX_EXISTS;
+	    if (r == CYRUSDB_NOTFOUND)
+		r = 0;
+	    if (!r) {
+		if (alsosub && !cyrusdb_fetch(subs, usermboxname, usermboxnamelen, NULL, 0, NULL))
+		    flags |= MBOX_SUBSCRIBED;
+		r = (*proc)(usermboxname, usermboxnamelen, flags, rock);
+	    }
 	}
-
 	strlcat(usermboxname, ".", sizeof(usermboxname));
 	usermboxnamelen++;
 
@@ -3118,21 +3126,19 @@ EXPORTED int mboxlist_findsub(struct namespace *namespace,
 
     /* Check for INBOX first of all */
     if (userid) {
-	if (GLOB_TEST(cbrock.g, "INBOX") != -1) {
+	if ((GLOB_TEST(cbrock.g, "INBOX") != -1) || (!strncmp(pattern,
+		 usermboxname+domainlen, usermboxnamelen-domainlen) &&
+		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1)) {
+	    int flags = MBOX_MAYCREATE;
 	    r = cyrusdb_fetch(subs, usermboxname, usermboxnamelen,
-			     &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(cbrock.inboxcase, 5, 1, rock);
-	}
-	else if (!strncmp(pattern,
-			  usermboxname+domainlen, usermboxnamelen-domainlen) &&
-		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1) {
-	    r = cyrusdb_fetch(subs, usermboxname, usermboxnamelen,
-			     &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(usermboxname, usermboxnamelen, 1, rock);
+			      &data, &datalen, NULL);
+	    if (r == 0)
+		flags |= MBOX_SUBSCRIBED;
+	    if (r == CYRUSDB_NOTFOUND)
+		r = 0;
+	    if (!r) {
+		r = (*proc)(usermboxname, usermboxnamelen, flags, rock);
+	    }
 	}
 	strlcat(usermboxname, ".", sizeof(usermboxname));
 	usermboxnamelen++;
@@ -3304,12 +3310,19 @@ HIDDEN int mboxlist_findsub_alt(struct namespace *namespace,
 
     /* Check for INBOX first of all */
     if (userid) {
-	if (GLOB_TEST(cbrock.g, "INBOX") != -1) {
+	if ((GLOB_TEST(cbrock.g, "INBOX") != -1) || (!strncmp(pattern,
+		 usermboxname+domainlen, usermboxnamelen-domainlen) &&
+		 GLOB_TEST(cbrock.g, usermboxname+domainlen) != -1)) {
+	    int flags = 0;
 	    r = cyrusdb_fetch(subs, usermboxname, usermboxnamelen,
 			      &data, &datalen, NULL);
-	    if (r == CYRUSDB_NOTFOUND) r = 0;
-	    else if (!r)
-		r = (*proc)(cbrock.inboxcase, 5, 0, rock);
+	    if (r == 0)
+		flags |= MBOX_SUBSCRIBED;
+	    if (r == CYRUSDB_NOTFOUND)
+		r = 0;
+	    if (!r) {
+		r = (*proc)(usermboxname, usermboxnamelen, flags, rock);
+	    }
 	}
 	strlcat(usermboxname, ".", sizeof(usermboxname));
 	usermboxnamelen++;

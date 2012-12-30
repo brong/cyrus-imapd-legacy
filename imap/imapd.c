@@ -11132,6 +11132,11 @@ static void list_response(const char *name, int attributes,
 	attributes &= ~MBOX_ATTRIBUTE_NONEXISTENT;
     }
 
+    /* ignore childinfo response unless recursivematch requested */
+    if (!(listargs->sel & LIST_SEL_RECURSIVEMATCH)) {
+	attributes &= ~MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+    }
+
     switch (listargs->cmd) {
     case LIST_CMD_LSUB:
 	cmd = "LSUB";
