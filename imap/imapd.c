@@ -11175,10 +11175,7 @@ static void list_response(const char *name, int attributes,
 
     if (listargs->cmd & LIST_CMD_EXTENDED &&
 	attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED) {
-	prot_printf(imapd_out, " (CHILDINFO (");
-	if (attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED)
-	    prot_printf(imapd_out, "SUBSCRIBED");
-	prot_printf(imapd_out, "))");
+	prot_printf(imapd_out, " (childinfo (\"subscribed\"))");
     }
 
     prot_printf(imapd_out, "\r\n");
@@ -11197,8 +11194,8 @@ static void perform_output(const char *name, size_t matchlen,
 			   struct list_rock *rock)
 {
     if (rock->last_name) {
-	if (strlen(rock->last_name) == matchlen && name &&
-	    !strncmp(rock->last_name, name, matchlen))
+	size_t lastlen = strlen(rock->last_name);
+	if (lastlen == matchlen && name && !strncmp(rock->last_name, name, matchlen))
 	    return; /* skip duplicate calls */
 	list_response(rock->last_name, rock->last_attributes, rock->listargs);
 	free(rock->last_name);
@@ -11209,6 +11206,14 @@ static void perform_output(const char *name, size_t matchlen,
 	rock->last_name = xstrndup(name, matchlen);
 	rock->last_attributes = 0;
     }
+}
+
+static void skip_output(const char *name, size_t matchlen,
+			struct list_rock *rock)
+{
+    free(rock->last_name);
+    rock->last_name = xstrndup(name, matchlen);
+    rock->last_attributes = 0;
 }
 
 /* callback for mboxlist_findall */
@@ -11226,6 +11231,7 @@ static int list_cb(char *name, int matchlen, int flags,
     int exists = flags & MBOX_EXISTS;
     int subscribed = flags & MBOX_SUBSCRIBED;
     int matches = (name[matchlen] == '\0');
+    int skip_previous = 0;
 
     list_callback_calls++;
 
@@ -11234,14 +11240,32 @@ static int list_cb(char *name, int matchlen, int flags,
 	    rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
 	if (exists)
 	    rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
+	/* if the parent only cares about subscribed, and this
+	 * record is outputtable, then we can just tell about this one.
+	 */
+	if (rock->listargs->sel & LIST_SEL_SUBSCRIBED) {
+	    if (subscribed && !(rock->last_attributes & MBOX_ATTRIBUTE_SUBSCRIBED))
+		skip_previous = 1;
+	}
+	else {
+	    if (exists && rock->last_attributes & MBOX_ATTRIBUTE_NONEXISTENT &&
+		(subscribed || !(rock->last_attributes & MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED)))
+		skip_previous = 1;
+	}
     }
 
     /* tidy up flags */
     if (!(rock->last_attributes & MBOX_ATTRIBUTE_HASCHILDREN))
 	rock->last_attributes |= MBOX_ATTRIBUTE_HASNOCHILDREN;
 
-    /* output the actual record */
-    perform_output(name, matchlen, rock);
+    if (skip_previous) {
+	/* don't output, but advance the pointer */
+	skip_output(name, matchlen, rock);
+    }
+    else {
+	/* output the actual record */
+	perform_output(name, matchlen, rock);
+    }
 
     /* some facts we already know */
     if (subscribed) {
@@ -11357,8 +11381,11 @@ static void list_data(struct listargs *listargs)
 	}
     } else {
 	int flags = 0;
-	if (imapd_userisadmin) flags |= MBOX_ISADMIN;
-	if (listargs->ret & LIST_RET_SUBSCRIBED || listargs->sel & LIST_SEL_RECURSIVEMATCH) flags |= MBOX_ALSOSUB;
+	if (imapd_userisadmin)
+	    flags |= MBOX_ISADMIN;
+	if (listargs->ret & LIST_RET_SUBSCRIBED ||
+	    listargs->sel & LIST_SEL_RECURSIVEMATCH)
+	    flags |= MBOX_ALSOSUB;
 
 	if (listargs->scan) {
 	    construct_hash_table(&listargs->server_table, 10, 1);

@@ -2079,9 +2079,6 @@ static int find_cb(void *rockp,
 
 	switch (r) {
 	case 0:
-	    /* assume it exists */
-	    flags |= MBOX_EXISTS;
-
 	    /* found the entry; output it */
 	    if (rock->find_namespace == NAMESPACE_SHARED &&
 		rock->checkshared && rock->namespace) {
