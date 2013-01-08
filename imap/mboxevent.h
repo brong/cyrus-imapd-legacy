@@ -82,8 +82,6 @@ enum event_type {
     EVENT_MAILBOX_UNSUBSCRIBE = (1<<19)
 };
 
-#define MAX_PARAM 21 /* messageContent number that is always the last */
-
 /*
  * event parameters defined in RFC 5423 - Internet Message Store Events
  *
@@ -111,8 +109,13 @@ enum event_param {
     EVENT_USER,
     EVENT_MESSAGE_SIZE,
     EVENT_BODYSTRUCTURE,
+    EVENT_CLIENT_ID,
+    EVENT_SESSION_ID,
     EVENT_MESSAGE_CONTENT
 };
+
+/* messageContent number that is always the last */
+#define MAX_PARAM EVENT_MESSAGE_CONTENT
 
 enum event_param_type {
     EVENT_PARAM_INT,
@@ -267,4 +270,11 @@ void mboxevent_extract_mailbox(struct mboxevent *event, struct mailbox *mailbox)
  */
 void mboxevent_extract_old_mailbox(struct mboxevent *event,
                                    const struct mailbox *mailbox);
+
+
+/*
+ * set the client tag used by vnd.fastmail.clientTagj
+ */
+void mboxevent_set_client_id(const char *);
+
 #endif /* _MBOXEVENT_H */
