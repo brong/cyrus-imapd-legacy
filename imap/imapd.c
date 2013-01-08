@@ -2840,6 +2840,11 @@ static void cmd_id(char *tag)
 
 	for (pptr = params; pptr; pptr = pptr->next) {
 	    const char *val = buf_cstring(&pptr->value);
+
+	    if (!strcmp(pptr->attrib, "x_me_ajax_client_id")) {
+		mboxevent_set_client_id(val);
+	    }
+
 	    /* should we check for and format literals here ??? */
 	    snprintf(logbuf + strlen(logbuf), MAXIDLOGLEN - strlen(logbuf),
 		     " \"%s\" ", pptr->attrib);
