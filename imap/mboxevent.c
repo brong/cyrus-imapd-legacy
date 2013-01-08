@@ -62,7 +62,7 @@
 #include "mboxevent.h"
 #include "mboxname.h"
 #include "notify.h"
-
+#include "global.h"
 
 #define MESSAGE_EVENTS (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_EXPIRE|\
 			EVENT_MESSAGE_EXPUNGE|EVENT_MESSAGE_NEW|\
@@ -90,6 +90,8 @@
 
 static const char *notifier = NULL;
 static struct namespace namespace;
+
+static const char *client_id = NULL;
 
 static strarray_t *excluded_flags;
 static strarray_t *excluded_specialuse;
@@ -123,6 +125,8 @@ static struct mboxevent event_template =
     { EVENT_MESSAGE_SIZE, "messageSize", EVENT_PARAM_INT, 0, 0 },
     /* always at end to let the parser to easily truncate this part */
     { EVENT_BODYSTRUCTURE, "bodyStructure", EVENT_PARAM_STRING, 0, 0 },
+    { EVENT_CLIENT_ID, "vnd.fastmail.clientId", EVENT_PARAM_STRING, 0, 0 },
+    { EVENT_SESSION_ID, "vnd.fastmail.sessionId", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_MESSAGE_CONTENT, "messageContent", EVENT_PARAM_STRING, 0, 0 }
   },
   STRARRAY_INITIALIZER, { 0, 0 }, NULL, STRARRAY_INITIALIZER, NULL, NULL, NULL
@@ -245,6 +249,12 @@ EXPORTED struct mboxevent *mboxevent_new(enum event_type type)
     if (mboxevent_expected_param(type, EVENT_TIMESTAMP))
 	gettimeofday(&mboxevent->timestamp, NULL);
 
+    if (mboxevent_expected_param(type, EVENT_CLIENT_ID) && client_id)
+	FILL_STRING_PARAM(mboxevent, EVENT_CLIENT_ID, xstrdup(client_id));
+
+    if (mboxevent_expected_param(type, EVENT_SESSION_ID))
+	FILL_STRING_PARAM(mboxevent, EVENT_SESSION_ID, xstrdup(session_id()));
+
     return mboxevent;
 }
 
@@ -341,6 +351,10 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
 	return (type & (EVENT_FLAGS_SET|EVENT_FLAGS_CLEAR)) ||
 	       ((extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_FLAGNAMES) &&
 		(type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW)));
+    case EVENT_CLIENT_ID:
+	return extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_CLIENTID;
+    case EVENT_SESSION_ID:
+	return extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_SESSIONID;
     case EVENT_MAILBOX_ID:
 	return (type & MAILBOX_EVENTS);
     case EVENT_MAX_MESSAGES:
@@ -945,6 +959,13 @@ void mboxevent_extract_old_mailbox(struct mboxevent *event,
     FILL_STRING_PARAM(event, EVENT_OLD_MAILBOX_ID, xstrdup(url));
 }
 
+EXPORTED void mboxevent_set_client_id(const char *id)
+{
+    if (client_id)
+	free((char *)client_id);
+    client_id = xstrdupnull(id);
+}
+
 static const char *event_to_name(enum event_type type)
 {
     switch (type) {
@@ -1113,6 +1134,10 @@ static int filled_params(enum event_type type, struct mboxevent *event)
 		if (!event->uidset || (seqset_first(event->uidset) == seqset_last(event->uidset)))
 		    buf_appendcstr(&missing, " modseq");
 		break;
+	    case EVENT_CLIENT_ID:
+		return event->params[EVENT_CLIENT_ID].filled;
+	    case EVENT_SESSION_ID:
+		return event->params[EVENT_SESSION_ID].filled;
 	    default:
 		buf_appendcstr(&missing, " ");
 		buf_appendcstr(&missing, event->params[param].name);
@@ -1219,6 +1244,10 @@ EXPORTED void mboxevent_set_numunseen(struct mboxevent *event __attribute__((unu
 
 EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event __attribute__((unused)),
 					struct mailbox *mailbox __attribute__((unused)))
+{
+}
+
+EXPORTED void mboxevent_set_client_id(const char *id)
 {
 }
 
