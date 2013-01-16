@@ -9711,6 +9711,7 @@ static void cmd_xwarmup(const char *tag)
     if (c != ' ') {
 syntax_error:
 	prot_printf(imapd_out, "%s BAD syntax error in %s\r\n", tag, cmd);
+	eatline(imapd_in, c);
 	goto out_noprint;
     }
 
@@ -9718,6 +9719,7 @@ syntax_error:
 					    imapd_userid, mboxname);
     if (r) {
 	prot_printf(imapd_out, "%s BAD Invalid mboxname in %s\r\n", tag, cmd);
+	eatline(imapd_in, c);
 	goto out_noprint;
     }
 
@@ -9813,8 +9815,6 @@ out:
 		    error_message(IMAP_OK_COMPLETED), mytime);
 
 out_noprint:
-    if (r)
-	eatline(imapd_in, c);
     mboxlist_entry_free(&mbentry);
     buf_free(&arg);
     if (uids) seqset_free(uids);
