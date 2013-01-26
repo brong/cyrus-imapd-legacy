@@ -798,10 +798,11 @@ EXPORTED void index_select(struct index_state *state, struct index_init *init)
  */
 EXPORTED int index_check(struct index_state *state, int usinguid, int printuid)
 {
-    struct mailbox *mailbox = state->mailbox;
     int r;
 
-    r = mailbox_lock_index(mailbox, LOCK_EXCLUSIVE);
+    if (!state) return 0;
+
+    r = index_lock(state);
 
     /* Check for deleted mailbox  */
     if (r == IMAP_MAILBOX_NONEXISTENT) {
@@ -809,7 +810,7 @@ EXPORTED int index_check(struct index_state *state, int usinguid, int printuid)
 	if (config_getswitch(IMAPOPT_DISCONNECT_ON_VANISHED_MAILBOX)) {
 	    syslog(LOG_WARNING,
 		   "Mailbox %s has been (re)moved out from under client",
-		   mailbox->name);
+		   state->mboxname);
 	    fatal("Mailbox has been (re)moved", EC_IOERR);
 	}
 
@@ -830,20 +831,16 @@ EXPORTED int index_check(struct index_state *state, int usinguid, int printuid)
 
     if (r) return r;
 
-    /* if highestmodseq has changed, read updates */
-    if (state->highestmodseq != mailbox->i.highestmodseq)
-	index_refresh(state);
-
     index_tellchanges(state, usinguid, printuid, 0);
 
 #if TOIMSP
     if (state->firstnotseen) {
-	toimsp(mailbox->name, mailbox->i.uidvalidity, "SEENsnn", state->userid,
-	       0, mailbox->i.recenttime, 0);
+	toimsp(state->mboxname, state->mailbox->i.uidvalidity, "SEENsnn", state->userid,
+	       0, state->mailbox->i.recenttime, 0);
     }
     else {
-	toimsp(mailbox->name, mailbox->i.uidvalidity, "SEENsnn", state->userid,
-	       mailbox->last_uid, mailbox->i.recenttime, 0);
+	toimsp(state->mboxname, state->mailbox->i.uidvalidity, "SEENsnn", state->userid,
+	       state->mailbox->last_uid, state->mailbox->i.recenttime, 0);
     }
 #endif
 
