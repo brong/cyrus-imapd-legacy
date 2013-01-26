@@ -202,9 +202,17 @@ static int index_reload_record(struct index_state *state,
 			       struct index_record *recordp)
 {
     struct index_map *im = &state->map[msgno-1];;
-    int r = mailbox_read_index_record(state->mailbox, im->recno, recordp);
+    int r = 0;
     int i;
 
+    if (!im->recno) {
+	/* doh, gotta just fill in what we know */
+	memset(recordp, 0, sizeof(struct index_record));
+	recordp->uid = im->uid;
+    }
+    else {
+	r = mailbox_read_index_record(state->mailbox, im->recno, recordp);
+    }
     /* NOTE: we have released the cyrus.index lock at this point, but are
      * still holding the mailbox name relock.  This means nobody can rewrite
      * the file under us - so the offsets are still guaranteed to be correct,
@@ -220,6 +228,7 @@ static int index_reload_record(struct index_state *state,
     /* but other errors are still bad */
     if (r) return r;
 
+    /* better be! */
     assert(recordp->uid == im->uid);
 
     /* restore mutable fields */
@@ -565,9 +574,9 @@ void index_refresh(struct index_state *state)
     struct seqset *seenlist;
     int i;
 
-    if (state->num_records) {
-	need_records = mailbox->i.num_records -
-		       state->num_records + state->exists;
+    if (state->last_uid) {
+	need_records = mailbox->i.last_uid -
+		       state->last_uid + state->exists;
     }
     else {
 	/* init case */
@@ -584,20 +593,47 @@ void index_refresh(struct index_state *state)
     seenlist = _readseen(state, &recentuid);
 
     /* already known records - flag updates */
-    for (msgno = 1; msgno <= state->exists; msgno++) {
-	im = &state->map[msgno-1];
-	if (mailbox_read_index_record(mailbox, im->recno, &record))
+    for (recno = 1; recno <= mailbox->i.num_records; recno++) {
+	if (mailbox_read_index_record(mailbox, recno, &record))
 	    continue; /* bogus read... should probably be fatal */
 
-	assert(record.uid == im->uid);
+	/* skip over map records where the mailbox doesn't have any
+	 * data at all for the record any more (after a repack) */
+	im = &state->map[msgno-1];
+	while (msgno <= state->exists && im->uid < record.uid) {
+	    if (!(im->system_flags & FLAG_EXPUNGED)) {
+		/* we don't even know the modseq of when it was wiped,
+		 * but we can be sure it's since the last given highestmodseq,
+		 * so simulate the lowest possible value */
+		im->modseq = state->highestmodseq + 1;
+	    }
+	    if (!delayed_modseq || im->modseq < delayed_modseq)
+		delayed_modseq = im->modseq - 1;
+	    im->recno = 0;
+	    im->system_flags |= FLAG_EXPUNGED | FLAG_UNLINKED;
+	    im = &state->map[msgno++];
+	}
+
+	/* expunged record not in map, can skip immediately */
+	if ((msgno > state->exists || record.uid < im->uid)
+	    && (record.system_flags & FLAG_EXPUNGED))
+	    continue;
+
+	if (msgno <= state->exists) {
+	    assert(im->uid == record.uid);
+	}
+	else {
+	    im->uid = record.uid;
+	}
 
 	/* copy all mutable fields */
+	im->recno = recno;
 	im->modseq = record.modseq;
 	im->system_flags = record.system_flags;
 	for (i = 0; i < MAX_USER_FLAGS/32; i++)
 	    im->user_flags[i] = record.user_flags[i];
 
-	/* ignore expunged messages */
+	/* for expunged records, just track the modseq */
 	if (im->system_flags & FLAG_EXPUNGED) {
 	    /* http://www.rfc-editor.org/errata_search.php?rfc=5162
 	     * Errata ID: 1809 - if there are expunged records we
@@ -605,35 +641,40 @@ void index_refresh(struct index_state *state)
 	     * be one lower so the client can safely resync */
 	    if (!delayed_modseq || im->modseq < delayed_modseq)
 		delayed_modseq = im->modseq - 1;
-	    continue;
+	}
+	else {
+	    /* re-calculate seen flags */
+	    if (state->internalseen)
+		im->isseen = (im->system_flags & FLAG_SEEN) ? 1 : 0;
+	    else
+		im->isseen = seqset_ismember(seenlist, im->uid) ? 1 : 0;
+
+	    if (msgno > state->exists) {
+		/* don't auto-tell new records */
+		im->told_modseq = im->modseq;
+		if (im->uid > recentuid) {
+		    /* mark recent if it's newly being added to the index and also
+		     * greater than the recentuid - ensures only one session gets
+		     * the \Recent flag for any one message */
+		    im->isrecent = 1;
+		    state->seen_dirty = 1;
+		}
+		else
+		    im->isrecent = 0;
+	    }
+
+	    /* track select values */
+	    if (!im->isseen) {
+		numunseen++;
+		if (!firstnotseen)
+		    firstnotseen = msgno;
+	    }
+	    if (im->isrecent) {
+		numrecent++;
+	    }
 	}
 
-	/* re-calculate seen flags */
-	if (state->internalseen)
-	    im->isseen = (im->system_flags & FLAG_SEEN) ? 1 : 0;
-	else
-	    im->isseen = seqset_ismember(seenlist, im->uid) ? 1 : 0;
-
-	/* track select values */
-	if (!im->isseen) {
-	    numunseen++;
-	    if (!firstnotseen)
-		firstnotseen = msgno;
-	}
-	if (im->isrecent) {
-	    /* we don't need to dirty seen here, it's a refresh */
-	    numrecent++;
-	}
-    }
-
-    /* new records? */
-    for (recno = state->num_records + 1; recno <= mailbox->i.num_records; recno++) {
-	im = &state->map[msgno-1];
-	if (mailbox_read_index_record(mailbox, recno, &record))
-	    continue; /* bogus read... should probably be fatal */
-
-	if (record.system_flags & FLAG_EXPUNGED)
-	    continue;
+	msgno++;
 
 	/* make sure we don't overflow the memory we mapped */
 	if (msgno >= state->mapsize) {
@@ -642,38 +683,24 @@ void index_refresh(struct index_state *state)
 		    state->mapsize, mailbox->i.exists, mailbox->i.num_records);
 	    fatal(buf, EC_IOERR);
 	}
+    }
 
-	/* need to initialise entire map */
-	im->recno = recno;
-	im->uid = record.uid;
-	im->system_flags = record.system_flags;
-	for (i = 0; i < MAX_USER_FLAGS/32; i++)
-	    im->user_flags[i] = record.user_flags[i];
-	im->modseq = record.modseq;
-
-	im->isrecent = (im->uid > recentuid) ? 1 : 0;
-
-	/* calculate seen flags */
-	if (state->internalseen)
-	    im->isseen = (im->system_flags & FLAG_SEEN) ? 1 : 0;
-	else
-	    im->isseen = seqset_ismember(seenlist, im->uid) ? 1 : 0;
-
-	/* track select values */
-	if (!im->isseen) {
-	    numunseen++;
-	    if (!firstnotseen)
-		firstnotseen = msgno;
+    /* may be trailing records which need to be considered for
+     * delayed_modseq purposes, and to get the count right for
+     * later expunge processing */
+    im = &state->map[msgno-1];
+    while (msgno <= state->exists) {
+	if (!(im->system_flags & FLAG_EXPUNGED)) {
+	    /* we don't even know the modseq of when it was wiped,
+	     * but we can be sure it's since the last given highestmodseq,
+	     * so simulate the lowest possible value */
+	    im->modseq = state->highestmodseq + 1;
 	}
-	if (im->isrecent) {
-	    numrecent++;
-	    state->seen_dirty = 1;
-	}
-
-	/* don't auto-tell */
-	im->told_modseq = im->modseq;
-
-	msgno++;
+	if (!delayed_modseq || im->modseq < delayed_modseq)
+	    delayed_modseq = im->modseq - 1;
+	im->recno = 0;
+	im->system_flags |= FLAG_EXPUNGED | FLAG_UNLINKED;
+	im = &state->map[msgno++];
     }
 
     seqset_free(seenlist);
@@ -1772,7 +1799,7 @@ index_copy(struct index_state *state,
     uint32_t msgno, checkval;
     long docopyuid;
     struct seqset *seq;
-    struct mailbox *mailbox = state->mailbox;
+    struct mailbox *mailbox;
     struct mailbox *destmailbox = NULL;
     struct index_map *im;
 
@@ -1782,6 +1809,8 @@ index_copy(struct index_state *state,
 
     r = index_check(state, usinguid, usinguid);
     if (r) return r;
+
+    mailbox = state->mailbox;
 
     seq = _parse_sequence(state, sequence, usinguid);
 
@@ -2849,6 +2878,10 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 
     /* Check the modseq against changedsince */
     if (fetchargs->changedsince && im->modseq <= fetchargs->changedsince)
+	return 0;
+
+    /* skip missing records entirely */
+    if (!im->recno)
 	return 0;
 
     r = index_reload_record(state, msgno, &record);
