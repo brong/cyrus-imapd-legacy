@@ -2825,8 +2825,12 @@ out:
 
     if (r)
 	conversation_free(conv);
-    else
+    else if (convp)
 	*convp = conv;
+    else {
+	r = conversation_save(state, record->cid, conv);
+	conversation_free(conv);
+    }
 
     return r;
 }
