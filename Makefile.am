@@ -751,6 +751,8 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/mailbox.h \
 	imap/mbdump.c \
 	imap/mbdump.h \
+	imap/mboxevent.c \
+	imap/mboxevent.h \
 	imap/mboxkey.c \
 	imap/mboxkey.h \
 	imap/mboxlist.c \
@@ -806,9 +808,6 @@ imap_libcyrus_imap_la_SOURCES = \
 	imap/xstats.c \
 	imap/xstats.h \
 	imap/xstats_metrics.h
-if MBOXEVENT
-imap_libcyrus_imap_la_SOURCES += imap/mboxevent.c
-endif
 
 imap_libcyrus_imap_la_LIBADD = $(COM_ERR_LIBS) $(LIB_UUID) lib/libcyrus_min.la lib/libcyrus.la
 imap_libcyrus_imap_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
