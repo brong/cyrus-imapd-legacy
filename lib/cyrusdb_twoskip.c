@@ -1781,6 +1781,13 @@ static int mycheckpoint(struct dbengine *db)
     r = opendb(newfname, db->open_flags | CYRUSDB_CREATE, &cr.db);
     if (r) return r;
 
+    r = newtxn(cr.db, &cr.tid);
+    if (r) return r;
+
+    /* pre-allocate the old DB size */
+    r = mappedfile_fallocate(cr.db->mf, 0, mappedfile_size(db->mf));
+    if (r) goto err;
+
     r = myforeach(db, NULL, 0, NULL, copy_cb, &cr, &db->current_txn);
     if (r) goto err;
 
@@ -1796,6 +1803,10 @@ static int mycheckpoint(struct dbengine *db)
 
     /* increase the generation count */
     cr.db->header.generation = db->header.generation + 1;
+
+    /* truncate any excess */
+    r = mappedfile_truncate(cr.db->mf, mappedfile_size(cr.db->mf));
+    if (r) goto err;
 
     r = mycommit(cr.db, cr.tid);
     if (r) goto err;
