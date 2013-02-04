@@ -295,8 +295,9 @@ EXPORTED void free_hashu64_table(hashu64_table *table, void (*func)(void *))
 ** node in the table, passing it the key, the associated data and 'rock'.
 */
 
-void hashu64_enumerate(hashu64_table *table, void (*func)(uint64_t, void *, void *),
-		    void *rock)
+EXPORTED void hashu64_enumerate(hashu64_table *table, 
+				void (*func)(uint64_t, void *, void *),
+				void *rock)
 {
       unsigned i;
       bucketu64 *temp, *temp_next;
