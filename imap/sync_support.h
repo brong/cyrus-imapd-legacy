@@ -437,11 +437,6 @@ int diff_annotations(const struct sync_annot_list *local_annots,
 int sync_crc_setup(unsigned minv, unsigned maxv, int strict);
 uint32_t sync_crc_calc(struct mailbox *mailbox, int force);
 
-int sync_rename_cid(struct mailbox *mailbox,
-                    struct index_record *mrecord,
-                    struct index_record *rrecord);
-
-
 /* ====================================================================== */
 
 #endif /* INCLUDED_SYNC_SUPPORT_H */
