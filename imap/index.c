@@ -201,7 +201,7 @@ static int index_reload_record(struct index_state *state,
 			       uint32_t msgno,
 			       struct index_record *recordp)
 {
-    struct index_map *im = &state->map[msgno-1];;
+    struct index_map *im = &state->map[msgno-1];
     int r = 0;
     int i;
 
