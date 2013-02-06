@@ -595,8 +595,7 @@ void index_refresh(struct index_state *state)
      * end */
 
     if (state->last_uid) {
-	need_records = state->exists +
-		       mailbox->i.last_uid - state->last_uid;
+	need_records = state->exists + (mailbox->i.last_uid - state->last_uid);
     }
     else {
 	/* init case */
