@@ -4034,7 +4034,7 @@ EXPORTED int mailbox_add_dav(struct mailbox *mailbox)
     }
 }
 
-EXPORTED int mailbox_add_conversations(struct mailbox *mailbox)
+EXPORTED int mailbox_add_conversations(struct mailbox *mailbox, int silent)
 {
     struct index_record record;
     uint32_t recno;
@@ -4050,6 +4050,8 @@ EXPORTED int mailbox_add_conversations(struct mailbox *mailbox)
 	/* not assigned, skip */
 	if (!record.cid)
 	    continue;
+
+	record.silent = silent;
 
 	r = mailbox_update_conversations(mailbox, NULL, &record);
 	if (r) return r;
@@ -4403,7 +4405,7 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
 	if (oldcstate)
 	    r = mailbox_delete_conversations(oldmailbox);
 	if (newcstate)
-	    r = mailbox_add_conversations(newmailbox);
+	    r = mailbox_add_conversations(newmailbox, /*silent*/0);
     }
     if (r) goto fail;
 
