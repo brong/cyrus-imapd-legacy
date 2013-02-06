@@ -237,10 +237,9 @@ extern int index_status(struct index_state *state, struct statusdata *sdata);
 extern void index_release(struct index_state *state);
 extern void index_close(struct index_state **stateptr);
 extern uint32_t index_finduid(struct index_state *state, uint32_t uid);
-extern uint32_t index_uid(struct index_state *state, uint32_t msgno);
+extern uint32_t index_getuid(struct index_state *state, uint32_t msgno);
 extern void index_tellchanges(struct index_state *state, int canexpunge,
 			      int printuid, int printmodseq);
-extern unsigned index_getuid(struct index_state *state, uint32_t msgno);
 extern modseq_t index_highestmodseq(struct index_state *state);
 extern int index_check(struct index_state *state, int usinguid, int printuid);
 extern int index_urlfetch(struct index_state *state, uint32_t msgno,

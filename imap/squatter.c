@@ -407,7 +407,7 @@ static int squat_single(struct index_state *state, int incremental)
 
     uid_item = uid_info.list;
     for (msgno = 1; msgno <= state->exists; msgno++) {
-	uid_item_init(&uid_item[msgno - 1], index_uid(state, msgno));
+	uid_item_init(&uid_item[msgno - 1], index_getuid(state, msgno));
     }
     /* Add zero UID as an end of list marker: uid_info_init() assigned space */
     uid_item_init(&uid_item[state->exists], 0);
@@ -466,7 +466,7 @@ static int squat_single(struct index_state *state, int incremental)
 
     uid_item = uid_info.list;
     for (msgno = 1; msgno <= state->exists; msgno++) {
-	uint32_t uid = index_uid(state, msgno);
+	uint32_t uid = index_getuid(state, msgno);
 	/* Scan uid_item list for matching UID (ascending order, 0 termination) */
 	while (uid_item->uid && (uid_item->uid < uid))
 	    uid_item++;

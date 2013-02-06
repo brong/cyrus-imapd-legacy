@@ -1554,8 +1554,10 @@ static int _index_search(unsigned **msgno_list, struct index_state *state,
     return n;
 }
 
-EXPORTED unsigned index_getuid(struct index_state *state, uint32_t msgno) {
-  return state->map[msgno-1].uid;
+EXPORTED uint32_t index_getuid(struct index_state *state, uint32_t msgno)
+{
+    assert(msgno <= state->exists);
+    return state->map[msgno-1].uid;
 }
 
 /* 'uid_list' is malloc'd string representing the hits from searchargs;
@@ -2071,11 +2073,6 @@ EXPORTED uint32_t index_finduid(struct index_state *state, uint32_t uid)
 	    low = mid + 1;
     }
     return high;
-}
-
-EXPORTED uint32_t index_uid(struct index_state *state, uint32_t msgno)
-{
-    return state->map[msgno-1].uid;
 }
 
 /* Helper function to determine domain of data */
