@@ -587,9 +587,16 @@ void index_refresh(struct index_state *state)
     struct seqset *seenlist;
     int i;
 
+    /* need to start by having enough space for the entire index state
+     * before telling of any expunges (which happens after this refresh
+     * if the command allows it).  In the update case, where there's
+     * already a map, we have to theoretically fit the number that existed
+     * last time plus however many new records might be unEXPUNGEd on the
+     * end */
+
     if (state->last_uid) {
-	need_records = mailbox->i.last_uid -
-		       state->last_uid + state->exists;
+	need_records = state->exists +
+		       mailbox->i.last_uid - state->last_uid;
     }
     else {
 	/* init case */
@@ -605,33 +612,47 @@ void index_refresh(struct index_state *state)
 
     seenlist = _readseen(state, &recentuid);
 
-    /* already known records - flag updates */
+    /* walk through all records */
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	if (mailbox_read_index_record(mailbox, recno, &record))
 	    continue; /* bogus read... should probably be fatal */
 
 	/* skip over map records where the mailbox doesn't have any
-	 * data at all for the record any more (after a repack) */
+	 * data at all for the record any more (this can only happen
+	 * after a repack), otherwise there will still be a readable
+	 * record, which is handled below */
 	im = &state->map[msgno-1];
 	while (msgno <= state->exists && im->uid < record.uid) {
+	    /* NOTE: this same logic is repeated below for messages
+	     * past the end of recno (repack removing the trailing
+	     * records).  Make sure to keep them in sync */
 	    if (!(im->system_flags & FLAG_EXPUNGED)) {
 		/* we don't even know the modseq of when it was wiped,
 		 * but we can be sure it's since the last given highestmodseq,
-		 * so simulate the lowest possible value */
+		 * so simulate the lowest possible value.  This is fine for
+		 * our told_modseq logic, and doesn't have to be exact because
+		 * QRESYNC/CONDSTORE clients will see deletedmodseq and fall
+		 * back to the inefficient codepath anyway */
 		im->modseq = state->highestmodseq + 1;
 	    }
 	    if (!delayed_modseq || im->modseq < delayed_modseq)
 		delayed_modseq = im->modseq - 1;
 	    im->recno = 0;
+	    /* simulate expunged flag so we get an EXPUNGE response and
+	     * tell about unlinked so we don't get IO errors trying to
+	     * find the file */
 	    im->system_flags |= FLAG_EXPUNGED | FLAG_UNLINKED;
 	    im = &state->map[msgno++];
 	}
 
-	/* expunged record not in map, can skip immediately */
+	/* expunged record not in map, can skip immediately.  It's
+	 * never been told to this connection, so it doesn't need to
+	 * get its own msgno */
 	if ((msgno > state->exists || record.uid < im->uid)
 	    && (record.system_flags & FLAG_EXPUNGED))
 	    continue;
 
+	/* make sure our UID map is consistent */
 	if (msgno <= state->exists) {
 	    assert(im->uid == record.uid);
 	}
@@ -703,12 +724,11 @@ void index_refresh(struct index_state *state)
      * later expunge processing */
     im = &state->map[msgno-1];
     while (msgno <= state->exists) {
-	if (!(im->system_flags & FLAG_EXPUNGED)) {
-	    /* we don't even know the modseq of when it was wiped,
-	     * but we can be sure it's since the last given highestmodseq,
-	     * so simulate the lowest possible value */
+	/* this is the same logic as the block above in the main loop,
+	 * see comments up there, and make sure the blocks are kept
+	 * in sync! */
+	if (!(im->system_flags & FLAG_EXPUNGED))
 	    im->modseq = state->highestmodseq + 1;
-	}
 	if (!delayed_modseq || im->modseq < delayed_modseq)
 	    delayed_modseq = im->modseq - 1;
 	im->recno = 0;
