@@ -743,6 +743,7 @@ void index_refresh(struct index_state *state)
     state->delayed_modseq = delayed_modseq;
     state->highestmodseq = mailbox->i.highestmodseq;
     state->generation = mailbox->i.generation_no;
+    state->uidvalidity = mailbox->i.uidvalidity;
     state->last_uid = mailbox->i.last_uid;
     state->num_records = mailbox->i.num_records;
     state->firstnotseen = firstnotseen;
@@ -1607,6 +1608,12 @@ static int index_lock(struct index_state *state)
 	    r = mailbox_open_iwl(state->mboxname, &state->mailbox);
 	    if (r) return r;
 	}
+    }
+
+    /* if the UIDVALIDITY has changed, treat as a delete */
+    if (state->mailbox->i.uidvalidity != state->uidvalidity) {
+	mailbox_close(&state->mailbox);
+	return IMAP_MAILBOX_NONEXISTENT;
     }
 
     /* if highestmodseq has changed or file is repacked, read updates */
