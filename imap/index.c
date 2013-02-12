@@ -1597,9 +1597,12 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
 EXPORTED message_t *index_get_message(struct index_state *state, uint32_t msgno)
 {
     struct index_map *im = &state->map[msgno-1];
+    struct index_record record;
     uint32_t indexflags = 0;
     if (im->isseen) indexflags |= MESSAGE_SEEN;
     if (im->isrecent) indexflags |= MESSAGE_RECENT;
+    if (index_reload_record(state, msgno, &record))
+	return NULL;
     return message_new_from_index(state->mailbox, &record,
 				  msgno, indexflags);
 }
@@ -2045,10 +2048,10 @@ EXPORTED int index_convsort(struct index_state *state,
     /* One pass through the message list */
     for (mi = 0 ; mi < state->exists ; mi++) {
 	MsgData *msg = msgdata[mi];
-	struct index_record *record = &state->map[msg->msgno-1].record;
+	struct index_map *im = &state->map[msg->msgno-1];
 
 	/* can happen if we didn't "tellchanges" yet */
-	if (record->system_flags & FLAG_EXPUNGED)
+	if (im->system_flags & FLAG_EXPUNGED)
 	    continue;
 
 	/* run the search program against all messages */
@@ -2059,16 +2062,16 @@ EXPORTED int index_convsort(struct index_state *state,
 	if (windowargs->conversations) {
 	    /* in conversations mode => only the first message seen
 	     * with each unique CID is an exemplar */
-	    if (hashu64_lookup(record->cid, &seen_cids))
+	    if (hashu64_lookup(msg->cid, &seen_cids))
 		continue;
-	    hashu64_insert(record->cid, (void *)1, &seen_cids);
+	    hashu64_insert(msg->cid, (void *)1, &seen_cids);
 	}
 	/* else not in conversations mode => all messages are exemplars */
 
 	pos++;
 
 	if (!anchor_pos &&
-	    windowargs->anchor == record->uid) {
+	    windowargs->anchor == msg->uid) {
 	    /* we've found the anchor's position, rejoice! */
 	    anchor_pos = pos;
 	}
@@ -2095,7 +2098,7 @@ EXPORTED int index_convsort(struct index_state *state,
 
 	if (!first_pos)
 	    first_pos = pos;
-	ptrarray_push(&results, record);
+	ptrarray_append(&results, msg);
     }
 
     if (total == UNPREDICTABLE) {
@@ -2118,8 +2121,8 @@ EXPORTED int index_convsort(struct index_state *state,
     if (results.count) {
 	prot_printf(state->out, "* SORT");  /* uids */
 	for (i = 0 ; i < results.count ; i++) {
-	    struct index_record *record = results.data[i];
-	    prot_printf(state->out, " %u", record->uid);
+	    MsgData *msg = results.data[i];
+	    prot_printf(state->out, " %u", msg->uid);
 	}
 	prot_printf(state->out, "\r\n");
     }
@@ -2458,16 +2461,16 @@ out:
     return r;
 }
 
-static modseq_t get_modseq_of(struct index_record *record,
+static modseq_t get_modseq_of(MsgData *msg,
 			      struct conversations_state *cstate)
 {
     modseq_t modseq = 0;
 
     if (cstate) {
-	conversation_get_modseq(cstate, record->cid, &modseq);
+	conversation_get_modseq(cstate, msg->cid, &modseq);
 	/* TODO: error handling dammit */
     } else {
-	modseq = record->modseq;
+	modseq = msg->modseq;
     }
     return modseq;
 }
@@ -2534,7 +2537,7 @@ EXPORTED int index_convupdates(struct index_state *state,
     /* Discover exemplars */
     for (mi = 0 ; mi < state->exists ; mi++) {
 	MsgData *msg = msgdata[mi];
-	struct index_record *record = &state->map[msg->msgno-1].record;
+	struct index_map *im = &state->map[msg->msgno-1];
 	int was_old_exemplar = 0;
 	int is_new_exemplar = 0;
 	int is_deleted = 0;
@@ -2544,19 +2547,19 @@ EXPORTED int index_convupdates(struct index_state *state,
 	int in_search = 0;
 
 	in_search = index_search_evaluate(state, searchargs->root, msg->msgno);
-	is_deleted = !!(record->system_flags & FLAG_EXPUNGED);
-	is_new = (record->uid >= windowargs->uidnext);
-	is_changed = (record->modseq > windowargs->modseq);
+	is_deleted = !!(im->system_flags & FLAG_EXPUNGED);
+	is_new = (im->uid >= windowargs->uidnext);
+	is_changed = (im->modseq > windowargs->modseq);
 	was_deleted = is_deleted && !is_changed;
 
 	/* is this message a current exemplar? */
 	if (!is_deleted &&
 	    in_search &&
-	    (!windowargs->conversations || !hashu64_lookup(record->cid, &seen_cids))) {
+	    (!windowargs->conversations || !hashu64_lookup(msg->cid, &seen_cids))) {
 	    is_new_exemplar = 1;
 	    pos++;
 	    if (windowargs->conversations)
-		hashu64_insert(record->cid, (void *)1, &seen_cids);
+		hashu64_insert(msg->cid, (void *)1, &seen_cids);
 	}
 
 	/* optimisation for when the total is
@@ -2569,28 +2572,28 @@ EXPORTED int index_convupdates(struct index_state *state,
 	if (!is_new &&
 	    !was_deleted &&
 	    (in_search || search_is_mutable) &&
-	    (!windowargs->conversations || !hashu64_lookup(record->cid, &old_seen_cids))) {
+	    (!windowargs->conversations || !hashu64_lookup(msg->cid, &old_seen_cids))) {
 	    was_old_exemplar = 1;
 	    if (windowargs->conversations)
-		hashu64_insert(record->cid, (void *)1, &old_seen_cids);
+		hashu64_insert(msg->cid, (void *)1, &old_seen_cids);
 	}
 
 	if (was_old_exemplar && !is_new_exemplar) {
-	    ptrarray_push(&removed, record);
+	    ptrarray_push(&removed, msg);
 	} else if (!was_old_exemplar && is_new_exemplar) {
 	    msg->msgno = pos;   /* hacky: reuse ->msgno for pos */
 	    ptrarray_push(&added, msg);
 	} else if (was_old_exemplar && is_new_exemplar) {
-	    modseq_t modseq = get_modseq_of(record,
+	    modseq_t modseq = get_modseq_of(msg,
 				windowargs->conversations ? cstate : NULL);
 	    if (modseq > windowargs->modseq) {
-		ptrarray_push(&changed, record);
+		ptrarray_push(&changed, msg);
 		if (search_is_mutable) {
 		    /* is the search is mutable, we're in a whole world of
 		     * uncertainty about the client's state, so we just
 		     * report the exemplar in all three lists and let the
 		     * client sort it out. */
-		    ptrarray_push(&removed, record);
+		    ptrarray_push(&removed, msg);
 		    msg->msgno = pos;   /* hacky: reuse ->msgno for pos */
 		    ptrarray_push(&added, msg);
 		}
@@ -2631,8 +2634,8 @@ EXPORTED int index_convupdates(struct index_state *state,
     if (removed.count) {
 	prot_printf(state->out, "* REMOVED");	/* uids */
 	for (i = 0 ; i < removed.count ; i++) {
-	    struct index_record *record = removed.data[i];
-	    prot_printf(state->out, " %u", record->uid);
+	    MsgData *msg = removed.data[i];
+	    prot_printf(state->out, " %u", msg->uid);
 	}
 	prot_printf(state->out, "\r\n");
     }
@@ -2640,12 +2643,12 @@ EXPORTED int index_convupdates(struct index_state *state,
     if (changed.count) {
 	prot_printf(state->out, "* CHANGED");	/* cids or uids */
 	for (i = 0 ; i < changed.count ; i++) {
-	    struct index_record *record = changed.data[i];
+	    MsgData *msg = changed.data[i];
 	    if (windowargs->conversations)
 		prot_printf(state->out, " %s",
-			conversation_id_encode(record->cid));
+			conversation_id_encode(msg->cid));
 	    else
-		prot_printf(state->out, " %u", record->uid);
+		prot_printf(state->out, " %u", msg->uid);
 	}
 	prot_printf(state->out, "\r\n");
     }
@@ -2761,7 +2764,7 @@ index_copy(struct index_state *state,
     uint32_t msgno, checkval;
     long docopyuid;
     struct seqset *seq;
-    struct mailbox *mailbox;
+    struct mailbox *srcmailbox = NULL;
     struct mailbox *destmailbox = NULL;
     struct index_map *im;
     int is_same_user;
@@ -2770,14 +2773,14 @@ index_copy(struct index_state *state,
 
     copyargs.nummsg = 0;
 
-    is_same_user = mboxname_same_userid(mailbox->name, name);
+    is_same_user = mboxname_same_userid(index_mboxname(state), name);
     if (is_same_user < 0)
 	return is_same_user;
 
     r = index_check(state, usinguid, usinguid);
     if (r) return r;
 
-    mailbox = state->mailbox;
+    srcmailbox = state->mailbox;
 
     seq = _parse_sequence(state, sequence, usinguid);
 
@@ -2797,7 +2800,7 @@ index_copy(struct index_state *state,
     if (r) return r;
 
     /* not moving or different quota root - need to check quota */
-    if (!ismove || strcmpsafe(mailbox->quotaroot, destmailbox->quotaroot)) {
+    if (!ismove || strcmpsafe(srcmailbox->quotaroot, destmailbox->quotaroot)) {
 	for (i = 0; i < copyargs.nummsg; i++)
 	    qdiffs[QUOTA_STORAGE] += copyargs.copymsg[i].size;
 	qdiffs[QUOTA_MESSAGE] = copyargs.nummsg;
@@ -2812,7 +2815,7 @@ index_copy(struct index_state *state,
 
     docopyuid = (appendstate.myrights & ACL_READ);
 
-    r = append_copy(mailbox, &appendstate, copyargs.nummsg,
+    r = append_copy(srcmailbox, &appendstate, copyargs.nummsg,
 		    copyargs.copymsg, nolink);
     if (r) {
 	append_abort(&appendstate);
@@ -2860,7 +2863,7 @@ index_copy(struct index_state *state,
 
     /* we log the first name to get GUID-copy magic */
     if (!r)
-	sync_log_mailbox_double(mailbox->name, name);
+	sync_log_mailbox_double(index_mboxname(state), name);
 
 done:
     mailbox_close(&destmailbox);
@@ -3187,8 +3190,8 @@ static int index_fetchsection(struct index_state *state, const char *resp,
 	size_t newsize;
 
 	/* check that the offset isn't corrupt */
-	if (offset + size > msg_size) {
-	    syslog(LOG_ERR, "invalid part offset in %s", state_mboxname(state));
+	if (offset + size > msg.len) {
+	    syslog(LOG_ERR, "invalid part offset in %s", index_mboxname(state));
 	    return IMAP_IOERROR;
 	}
 
@@ -4797,7 +4800,6 @@ MsgData **index_msgdata_load(struct index_state *state,
     int label;
     struct mailbox *mailbox = state->mailbox;
     struct index_record record;
-    struct index_map *im;
     struct conversations_state *cstate = NULL;
     conversation_t *conv = NULL;
 
@@ -4821,7 +4823,6 @@ MsgData **index_msgdata_load(struct index_state *state,
 	if (index_reload_record(state, cur->msgno, &record))
 	    continue;
 
-	/* useful for convupdates */
 	cur->modseq = record.modseq;
 
 	im = &state->map[cur->msgno-1];
