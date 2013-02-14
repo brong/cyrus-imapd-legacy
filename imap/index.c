@@ -1658,9 +1658,15 @@ static int index_lock(struct index_state *state)
 EXPORTED int index_status(struct index_state *state, struct statusdata *sdata)
 {
     int items = STATUS_MESSAGES | STATUS_UIDNEXT | STATUS_UIDVALIDITY |
-		STATUS_HIGHESTMODSEQ | STATUS_RECENT | STATUS_UNSEEN;
-    statuscache_fill(sdata, state->userid, state->mailbox, items,
-		     state->numrecent, state->numunseen);
+		STATUS_HIGHESTMODSEQ;
+
+    int r = status_lookup(index_mboxname(state), state->userid, items, sdata);
+    if (r) return r;
+
+    /* copy in local details */
+    sdata->unseen = state->numunseen;
+    sdata->recent = state->numrecent;
+
     return 0;
 }
 
