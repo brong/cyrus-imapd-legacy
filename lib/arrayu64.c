@@ -241,7 +241,7 @@ EXPORTED uint64_t arrayu64_max(const arrayu64_t *au)
     return max;
 }
 
-static int _numeric_sort(void *a, void *b)
+static int _numeric_sort(const void *a, const void *b)
 {
     uint64_t *av = (uint64_t *)a;
     uint64_t *bv = (uint64_t *)b;
