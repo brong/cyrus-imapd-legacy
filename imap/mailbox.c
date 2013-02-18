@@ -5391,8 +5391,6 @@ int mailbox_cid_rename(struct mailbox *mailbox,
 	    return r;
 	}
 
-	if (record.system_flags & FLAG_EXPUNGED)
-	    continue;
 	if (record.cid != from_cid)
 	    continue;
 
