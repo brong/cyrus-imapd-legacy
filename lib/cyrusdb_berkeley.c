@@ -393,7 +393,35 @@ static int mbox_compar(DB *db __attribute__((unused)),
 				 (const char *) b->data, b->size);
 }
 
-static int myopen(const char *fname, DBTYPE type, int flags, struct dbengine **ret)
+static int gettid(struct txn **mytid, DB_TXN **tid, const char *where)
+{
+    int r;
+
+    if (mytid) {
+	if (*mytid) {
+  	    assert((txn_id((DB_TXN *)*mytid) != 0));
+	    *tid = (DB_TXN *) *mytid;
+	    if (CONFIG_DB_VERBOSE)
+		syslog(LOG_DEBUG, "%s: reusing txn %lu", where,
+		       (unsigned long) txn_id(*tid));
+	} else {
+	    r = txn_begin(dbenv, NULL, tid, 0);
+	    if (r != 0) {
+		syslog(LOG_ERR, "DBERROR: error beginning txn (%s): %s", where,
+		       db_strerror(r));
+		return CYRUSDB_IOERROR;
+	    }
+	    if (CONFIG_DB_VERBOSE)
+		syslog(LOG_DEBUG, "%s: starting txn %lu", where,
+		       (unsigned long) txn_id(*tid));
+	}
+	*mytid = (struct txn *) *tid;
+    }
+
+    return 0;
+}
+
+static int myopen(const char *fname, DBTYPE type, int flags, struct dbengine **ret, struct txn **mytid)
 {
     DB *db = NULL;
     int r;
@@ -429,17 +457,23 @@ static int myopen(const char *fname, DBTYPE type, int flags, struct dbengine **r
 
     *ret = (struct dbengine *) db;
 
-    return r;
+    if (mytid) {
+	DB_TXN *tid = NULL;
+	r = gettid(mytid, &tid, "myopen");
+	if (r) return CYRUSDB_IOERROR;
+    }
+
+    return 0;
 }
 
-static int open_btree(const char *fname, int flags, struct dbengine **ret)
+static int open_btree(const char *fname, int flags, struct dbengine **ret, struct txn **mytid)
 {
-    return myopen(fname, DB_BTREE, flags, ret);
+    return myopen(fname, DB_BTREE, flags, ret, mytid);
 }
 
-static int open_hash(const char *fname, int flags, struct dbengine **ret)
+static int open_hash(const char *fname, int flags, struct dbengine **ret, struct txn **mytid)
 {
-    return myopen(fname, DB_HASH, flags, ret);
+    return myopen(fname, DB_HASH, flags, ret, mytid);
 }
 
 static int myclose(struct dbengine *db)
@@ -457,34 +491,6 @@ static int myclose(struct dbengine *db)
     }
 
     return r;
-}
-
-static int gettid(struct txn **mytid, DB_TXN **tid, const char *where)
-{
-    int r;
-
-    if (mytid) {
-	if (*mytid) {
-  	    assert((txn_id((DB_TXN *)*mytid) != 0));
-	    *tid = (DB_TXN *) *mytid;
-	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "%s: reusing txn %lu", where,
-		       (unsigned long) txn_id(*tid));
-	} else {
-	    r = txn_begin(dbenv, NULL, tid, 0);
-	    if (r != 0) {
-		syslog(LOG_ERR, "DBERROR: error beginning txn (%s): %s", where,
-		       db_strerror(r));
-		return CYRUSDB_IOERROR;
-	    }
-	    if (CONFIG_DB_VERBOSE)
-		syslog(LOG_DEBUG, "%s: starting txn %lu", where,
-		       (unsigned long) txn_id(*tid));
-	}
-	*mytid = (struct txn *) *tid;
-    }
-
-    return 0;
 }
 
 static int myfetch(struct dbengine *mydb, 

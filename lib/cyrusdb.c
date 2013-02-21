@@ -119,8 +119,8 @@ static struct cyrusdb_backend *cyrusdb_fromname(const char *name)
     return db;
 }
 
-EXPORTED int cyrusdb_open(const char *backend, const char *fname,
-		 int flags, struct db **ret)
+static int _open(const char *backend, const char *fname,
+		 int flags, struct db **ret, struct txn **tid)
 {
     const char *realname;
     struct db *db = xzmalloc(sizeof(struct db));
@@ -139,7 +139,7 @@ EXPORTED int cyrusdb_open(const char *backend, const char *fname,
      */
 
     /* check if it opens normally.  Horray */
-    r = db->backend->open(fname, flags, &db->engine);
+    r = db->backend->open(fname, flags, &db->engine, tid);
     if (r == CYRUSDB_NOTFOUND) goto done; /* no open flags */
     if (!r) goto done;
 
@@ -174,7 +174,7 @@ EXPORTED int cyrusdb_open(const char *backend, const char *fname,
 	}
     }
     
-    r = db->backend->open(fname, flags, &db->engine);
+    r = db->backend->open(fname, flags, &db->engine, tid);
 
 done:
 
@@ -182,6 +182,18 @@ done:
     else *ret = db;
 
     return r;
+}
+
+EXPORTED int cyrusdb_open(const char *backend, const char *fname,
+			  int flags, struct db **ret)
+{
+    return _open(backend, fname, flags, ret, NULL);
+}
+
+EXPORTED int cyrusdb_lockopen(const char *backend, const char *fname,
+			      int flags, struct db **ret, struct txn **tid)
+{
+    return _open(backend, fname, flags, ret, tid);
 }
 
 EXPORTED int cyrusdb_close(struct db *db)
