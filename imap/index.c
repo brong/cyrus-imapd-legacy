@@ -4744,6 +4744,9 @@ MsgData **index_msgdata_load(struct index_state *state,
 	if (found_anchor && record.uid == anchor)
 	    *found_anchor = 1;
 
+	/* useful for convupdates */
+	cur->modseq = record.modseq;
+
 	did_cache = did_env = did_conv = 0;
 	tmpenv = NULL;
 	conv = NULL; /* XXX: use a hash to avoid re-reading? */
@@ -4806,7 +4809,7 @@ MsgData **index_msgdata_load(struct index_state *state,
 		cur->from = get_localpart_addr(cacheitem_base(&record, CACHE_FROM));
 		break;
 	    case SORT_MODSEQ:
-		cur->modseq = record.modseq;
+		/* already copied above */
 		break;
 	    case SORT_SIZE:
 		cur->size = record.size;
