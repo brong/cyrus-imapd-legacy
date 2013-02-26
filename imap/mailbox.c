@@ -1582,6 +1582,172 @@ HIDDEN int mailbox_buf_to_index_record(const char *buf,
     return 0;
 }
 
+static struct index_change *_find_change(struct mailbox *mailbox, uint32_t recno)
+{
+    uint32_t changeno = mailbox->index_change_map[recno % 256];
+
+    while (changeno) {
+	if (mailbox->index_changes[changeno-1].record.recno == recno)
+	    return &mailbox->index_changes[changeno-1];
+	changeno = mailbox->index_changes[changeno-1].mapnext;
+    }
+
+    return NULL;
+}
+
+static void _store_change(struct mailbox *mailbox, struct index_record *record, int flags)
+{
+    struct index_change *change = _find_change(mailbox, record->recno);
+
+    if (!change) {
+	mailbox->index_change_count++;
+
+	/* allocate a space if required */
+	if (mailbox->index_change_count > mailbox->index_change_alloc) {
+	    mailbox->index_change_alloc += 30;
+	    mailbox->index_changes = xrealloc(mailbox->index_changes, sizeof(struct index_change) * mailbox->index_change_alloc);
+	}
+
+	/* stitch into place */
+	mailbox->index_changes[mailbox->index_change_count].mapnext = mailbox->index_change_map[record->recno % 256];
+	mailbox->index_change_map[record->recno % 256] = mailbox->index_change_count; /* always non-zero */
+	change = &mailbox->index_changes[mailbox->index_change_count-1];
+    }
+
+    /* finally always copy the data into place */
+    change->record = *record;
+    change->flags = flags;
+}
+
+/*
+ * Put an index record into a buffer suitable for writing to a file.
+ */
+static bit32 mailbox_index_record_to_buf(struct index_record *record,
+				  unsigned char *buf)
+{
+    int n;
+    bit32 crc;
+
+    *((bit32 *)(buf+OFFSET_UID)) = htonl(record->uid);
+    *((bit32 *)(buf+OFFSET_INTERNALDATE)) = htonl(record->internaldate);
+    *((bit32 *)(buf+OFFSET_SENTDATE)) = htonl(record->sentdate);
+    *((bit32 *)(buf+OFFSET_SIZE)) = htonl(record->size);
+    *((bit32 *)(buf+OFFSET_HEADER_SIZE)) = htonl(record->header_size);
+    *((bit32 *)(buf+OFFSET_GMTIME)) = htonl(record->gmtime);
+    *((bit32 *)(buf+OFFSET_CACHE_OFFSET)) = htonl(record->cache_offset);
+    *((bit32 *)(buf+OFFSET_LAST_UPDATED)) = htonl(record->last_updated);
+    *((bit32 *)(buf+OFFSET_SYSTEM_FLAGS)) = htonl(record->system_flags);
+    for (n = 0; n < MAX_USER_FLAGS/32; n++) {
+	*((bit32 *)(buf+OFFSET_USER_FLAGS+4*n)) = htonl(record->user_flags[n]);
+    }
+    *((bit32 *)(buf+OFFSET_CONTENT_LINES)) = htonl(record->content_lines);
+    *((bit32 *)(buf+OFFSET_CACHE_VERSION)) = htonl(record->cache_version);
+    message_guid_export(&record->guid, buf+OFFSET_MESSAGE_GUID);
+    *((bit64 *)(buf+OFFSET_MODSEQ)) = htonll(record->modseq);
+    *((bit64 *)(buf+OFFSET_CID)) = htonll(record->cid);
+    *((bit32 *)(buf+OFFSET_CACHE_CRC)) = htonl(record->cache_crc);   
+
+    /* calculate the checksum */
+    crc = crc32_map((char *)buf, OFFSET_RECORD_CRC);
+    *((bit32 *)(buf+OFFSET_RECORD_CRC)) = htonl(crc);
+
+    return crc;
+}
+
+static int _commit_one(struct mailbox *mailbox, struct index_change *change)
+{
+    indexbuffer_t ibuf;
+    unsigned char *buf = ibuf.buf;
+    size_t offset; 
+    struct index_record *record = &change->record;
+    uint32_t recno = record->recno;
+
+    mailbox_index_record_to_buf(&change->record, buf);
+
+    offset = mailbox->i.start_offset + ((recno-1) * mailbox->i.record_size);
+
+    /* any failure here is a disaster! */
+    if (lseek(mailbox->index_fd, offset, SEEK_SET) == -1) {
+	syslog(LOG_ERR, "IOERROR: seeking index record %u for %s: %m",
+	       recno, mailbox->name);
+	return IMAP_IOERROR;
+    }
+
+    if (retry_write(mailbox->index_fd, buf, INDEX_RECORD_SIZE) != INDEX_RECORD_SIZE) {
+	syslog(LOG_ERR, "IOERROR: writing index record %u for %s: %m",
+	       recno, mailbox->name);
+	return IMAP_IOERROR;
+    }
+
+    /* audit logging */
+    if (config_auditlog) {
+	if (change->flags & CHANGE_ISAPPEND)
+	    syslog(LOG_NOTICE, "auditlog: append sessionid=<%s> mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
+		session_id(), mailbox->name, mailbox->uniqueid, record->uid,
+		message_guid_encode(&record->guid));
+
+	if ((record->system_flags & FLAG_EXPUNGED) && !(change->flags & CHANGE_WASEXPUNGED))
+	    syslog(LOG_NOTICE, "auditlog: expunge sessionid=<%s> "
+		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
+		session_id(), mailbox->name, mailbox->uniqueid,
+		record->uid, message_guid_encode(&record->guid));
+
+	if ((record->system_flags & FLAG_UNLINKED) && !(change->flags & CHANGE_WASUNLINKED))
+	    syslog(LOG_NOTICE, "auditlog: unlink sessionid=<%s> "
+		   "mailbox=<%s> uniqueid=<%s> uid=<%u>",
+		   session_id(), mailbox->name, mailbox->uniqueid,
+		   record->uid);
+    }
+
+    return 0;
+}
+
+static void _cleanup_changes(struct mailbox *mailbox)
+{
+    free(mailbox->index_changes);
+    mailbox->index_changes = NULL;
+    mailbox->index_change_count = 0;
+    mailbox->index_change_alloc = 0;
+    memset(mailbox->index_change_map, 0, sizeof(uint32_t)*256);
+}
+
+/* qsort function for changes */
+static int change_compar(const void *a, const void *b)
+{
+    struct index_change *ac = (struct index_change *)a;
+    struct index_change *bc = (struct index_change *)b;
+
+    if (ac->record.recno > bc->record.recno)
+	return 1;
+    if (ac->record.recno < bc->record.recno)
+	return -1;
+    return 0;
+}
+
+static int _commit_changes(struct mailbox *mailbox)
+{
+    uint32_t i;
+    int r;
+
+    if (!mailbox->index_change_count) return 0;
+    mailbox->i.dirty = 1;
+
+    /* in which we throw away all our next pointers, but we don't care any more.
+     * we just want to write in sensible order.  Otherwise, there's no need to
+     * do this sort at all */
+    qsort(mailbox->index_changes, mailbox->index_change_count,
+	  sizeof(struct index_change), change_compar);
+
+    for (i = 1; i <= mailbox->index_change_count; i++) {
+	r = _commit_one(mailbox, &mailbox->index_changes[i-1]);
+	if (r) return r; /* DAMN, we're screwed */
+    }
+
+    _cleanup_changes(mailbox);
+
+    return 0;
+}
+
 /*
  * Read an index record from a mailbox
  */
@@ -1592,6 +1758,12 @@ EXPORTED int mailbox_read_index_record(struct mailbox *mailbox,
     const char *buf;
     unsigned offset;
     int r;
+    struct index_change *change = _find_change(mailbox, recno);
+
+    if (change) {
+	*record = change->record;
+	return 0;
+    }
 
     offset = mailbox->i.start_offset + (recno-1) * mailbox->i.record_size;
 
@@ -1635,16 +1807,14 @@ int mailbox_find_index_record(struct mailbox *mailbox, uint32_t uid,
     const char *mem, *base = mailbox->index_base + mailbox->i.start_offset;
     size_t num_records = mailbox->i.num_records;
     size_t size = mailbox->i.record_size;
-    int r;
+    uint32_t recno;
 
-    mem =  bsearch(&uid, base, num_records, size, rec_compar);
+    mem = bsearch(&uid, base, num_records, size, rec_compar);
     if (!mem) return CYRUSDB_NOTFOUND;
 
-    if ((r = mailbox_buf_to_index_record(mem, record))) return r;
+    recno = ((mem - base) / size) + 1;
 
-    record->recno = ((mem - base) / size) + 1;
-
-    return 0;
+    return mailbox_read_index_record(mailbox, recno, record);
 }
 
 /*
@@ -2040,6 +2210,8 @@ EXPORTED int mailbox_commit(struct mailbox *mailbox)
     r = mailbox_commit_header(mailbox);
     if (r) return r;
 
+    r = _commit_changes(mailbox);
+
     if (!mailbox->i.dirty)
 	return 0;
 
@@ -2068,42 +2240,6 @@ EXPORTED int mailbox_commit(struct mailbox *mailbox)
 
     return 0;
 }
-
-/*
- * Put an index record into a buffer suitable for writing to a file.
- */
-static bit32 mailbox_index_record_to_buf(struct index_record *record,
-				  unsigned char *buf)
-{
-    int n;
-    bit32 crc;
-
-    *((bit32 *)(buf+OFFSET_UID)) = htonl(record->uid);
-    *((bit32 *)(buf+OFFSET_INTERNALDATE)) = htonl(record->internaldate);
-    *((bit32 *)(buf+OFFSET_SENTDATE)) = htonl(record->sentdate);
-    *((bit32 *)(buf+OFFSET_SIZE)) = htonl(record->size);
-    *((bit32 *)(buf+OFFSET_HEADER_SIZE)) = htonl(record->header_size);
-    *((bit32 *)(buf+OFFSET_GMTIME)) = htonl(record->gmtime);
-    *((bit32 *)(buf+OFFSET_CACHE_OFFSET)) = htonl(record->cache_offset);
-    *((bit32 *)(buf+OFFSET_LAST_UPDATED)) = htonl(record->last_updated);
-    *((bit32 *)(buf+OFFSET_SYSTEM_FLAGS)) = htonl(record->system_flags);
-    for (n = 0; n < MAX_USER_FLAGS/32; n++) {
-	*((bit32 *)(buf+OFFSET_USER_FLAGS+4*n)) = htonl(record->user_flags[n]);
-    }
-    *((bit32 *)(buf+OFFSET_CONTENT_LINES)) = htonl(record->content_lines);
-    *((bit32 *)(buf+OFFSET_CACHE_VERSION)) = htonl(record->cache_version);
-    message_guid_export(&record->guid, buf+OFFSET_MESSAGE_GUID);
-    *((bit64 *)(buf+OFFSET_MODSEQ)) = htonll(record->modseq);
-    *((bit64 *)(buf+OFFSET_CID)) = htonll(record->cid);
-    *((bit32 *)(buf+OFFSET_CACHE_CRC)) = htonl(record->cache_crc);   
-
-    /* calculate the checksum */
-    crc = crc32_map((char *)buf, OFFSET_RECORD_CRC);
-    *((bit32 *)(buf+OFFSET_RECORD_CRC)) = htonl(crc);
-
-    return crc;
-}
-
 
 static void mailbox_quota_dirty(struct mailbox *mailbox)
 {
@@ -2583,17 +2719,14 @@ out:
  * necessary tracking fields automatically.
  */
 EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
-				 struct index_record *record)
+					  struct index_record *record)
 {
-    int n;
     int r;
     struct index_record oldrecord;
-    indexbuffer_t ibuf;
-    unsigned char *buf = ibuf.buf;
-    size_t offset;
     int expunge_mode = config_getenum(IMAPOPT_EXPUNGE_MODE);
     int immediate = (expunge_mode == IMAP_ENUM_EXPUNGE_MODE_IMMEDIATE ||
 		     expunge_mode == IMAP_ENUM_EXPUNGE_MODE_DEFAULT);
+    int changeflags = 0;
 
     assert(mailbox_index_islocked(mailbox, 1));
     assert(record->recno > 0 &&
@@ -2605,6 +2738,11 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
 	       mailbox->name, record->uid);
 	return r;
     }
+
+    if (oldrecord.system_flags & FLAG_EXPUNGED)
+	changeflags |= CHANGE_WASEXPUNGED;
+    if (oldrecord.system_flags & FLAG_UNLINKED)
+	changeflags |= CHANGE_WASUNLINKED;
 
     /* the UID has to match, of course, for it to be the same
      * record.  XXX - test fields like "internaldate", etc here
@@ -2656,43 +2794,19 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
     mailbox_index_update_counts(mailbox, &oldrecord, 0);
     mailbox_index_update_counts(mailbox, record, 1);
 
-    mailbox_index_record_to_buf(record, buf);
-
-    offset = mailbox->i.start_offset +
-	     (record->recno-1) * mailbox->i.record_size;
-
-    n = lseek(mailbox->index_fd, offset, SEEK_SET);
-    if (n == -1) {
-	syslog(LOG_ERR, "IOERROR: seeking index record %u for %s: %m",
-	       record->recno, mailbox->name);
-	return IMAP_IOERROR;
+    if ((record->system_flags & FLAG_EXPUNGED) && !(changeflags & CHANGE_WASEXPUNGED)) {
+	if (!mailbox->i.first_expunged || mailbox->i.first_expunged > record->last_updated)
+	    mailbox->i.first_expunged = record->last_updated;
+	mailbox_annot_update_counts(mailbox, &oldrecord, 0);
     }
 
-    n = retry_write(mailbox->index_fd, buf, INDEX_RECORD_SIZE);
-    if (n != INDEX_RECORD_SIZE) {
-	syslog(LOG_ERR, "IOERROR: writing index record %u for %s: %m",
-	       record->recno, mailbox->name);
-	return IMAP_IOERROR;
-    }
+    _store_change(mailbox, record, changeflags);
 
     /* expunged tracking */
-    if ((record->system_flags & FLAG_EXPUNGED) && 
-	!(oldrecord.system_flags & FLAG_EXPUNGED)) {
+    if (record->system_flags & FLAG_EXPUNGED && (!mailbox->i.first_expunged || mailbox->i.first_expunged > record->last_updated))
+	mailbox->i.first_expunged = record->last_updated;
 
-	if (!mailbox->i.first_expunged ||
-	    mailbox->i.first_expunged > record->last_updated)
-	    mailbox->i.first_expunged = record->last_updated;
-
-	mailbox_annot_update_counts(mailbox, &oldrecord, 0);
-
-	if (config_auditlog)
-	    syslog(LOG_NOTICE, "auditlog: expunge sessionid=<%s> "
-		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
-		session_id(), mailbox->name, mailbox->uniqueid,
-		record->uid, message_guid_encode(&record->guid));
-    }
-
-    return mailbox_refresh_index_map(mailbox);
+    return 0;
 }
 
 /* append a single message to a mailbox - also updates everything
@@ -2701,13 +2815,9 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
 EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
 				struct index_record *record)
 {
-    indexbuffer_t ibuf;
-    unsigned char *buf = ibuf.buf;
-    size_t offset;
     int r;
-    int n;
     struct utimbuf settime;
-    uint32_t recno;
+    uint32_t changeflags = CHANGE_ISAPPEND;
 
     assert(mailbox_index_islocked(mailbox, 1));
 
@@ -2771,59 +2881,19 @@ EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
     /* add counts */
     mailbox_index_update_counts(mailbox, record, 1);
 
-    mailbox_index_record_to_buf(record, buf);
-    
-    recno = mailbox->i.num_records + 1;
+    record->recno = mailbox->i.num_records + 1;
 
-    offset = mailbox->i.start_offset +
-	     ((recno - 1) * mailbox->i.record_size);
-
-    n = lseek(mailbox->index_fd, offset, SEEK_SET);
-    if (n == -1) {
-	syslog(LOG_ERR, "IOERROR: seeking to append for %s: %m",
-	       mailbox->name);
-	return IMAP_IOERROR;
-    }
-
-    n = retry_write(mailbox->index_fd, buf, INDEX_RECORD_SIZE);
-    if (n != INDEX_RECORD_SIZE) {
-	syslog(LOG_ERR, "IOERROR: appending index record for %s: %m",
-	       mailbox->name);
-	return IMAP_IOERROR;
-    }
+    _store_change(mailbox, record, changeflags);
 
     mailbox->i.last_uid = record->uid;
-    mailbox->i.num_records = recno;
+    mailbox->i.num_records = record->recno;
     mailbox->index_size += INDEX_RECORD_SIZE;
 
-    if (config_auditlog)
-	syslog(LOG_NOTICE, "auditlog: append sessionid=<%s> mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
-	    session_id(), mailbox->name, mailbox->uniqueid, record->uid,
-	    message_guid_encode(&record->guid));
-
     /* expunged tracking */
-    if (record->system_flags & FLAG_EXPUNGED) {
-	if (!mailbox->i.first_expunged ||
-	    mailbox->i.first_expunged > record->last_updated)
-	    mailbox->i.first_expunged = record->last_updated;
+    if (record->system_flags & FLAG_EXPUNGED && (!mailbox->i.first_expunged || mailbox->i.first_expunged > record->last_updated))
+	mailbox->i.first_expunged = record->last_updated;
 
-	if (config_auditlog)
-	    syslog(LOG_NOTICE, "auditlog: expunge sessionid=<%s> "
-		   "mailbox=<%s> uniqueid=<%s> uid=<%u> guid=<%s>",
-		   session_id(), mailbox->name, mailbox->uniqueid,
-		   record->uid, message_guid_encode(&record->guid));
-    }
-
-    /* yep, it could even be pre-unlinked in 'default' expunge mode, joy */
-    if (record->system_flags & FLAG_UNLINKED) {
-	if (config_auditlog)
-	    syslog(LOG_NOTICE, "auditlog: unlink sessionid=<%s> "
-		   "mailbox=<%s> uniqueid=<%s> uid=<%u>",
-		   session_id(), mailbox->name, mailbox->uniqueid,
-		   record->uid);
-    }
-
-    return mailbox_refresh_index_map(mailbox);
+    return 0;
 }
 
 static void mailbox_message_unlink(struct mailbox *mailbox, uint32_t uid)
