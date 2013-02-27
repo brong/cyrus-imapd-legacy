@@ -64,7 +64,6 @@ extern ssize_t mappedfile_pwrite(struct mappedfile *mf,
 extern ssize_t mappedfile_pwritev(struct mappedfile *mf,
 				  const struct iovec *iov, int nio,
 				  off_t offset);
-extern int mappedfile_fallocate(struct mappedfile *mf, off_t offset, off_t len);
 extern int mappedfile_truncate(struct mappedfile *mf, off_t offset);
 
 extern int mappedfile_rename(struct mappedfile *mf, const char *newname);
