@@ -407,27 +407,6 @@ HIDDEN ssize_t mappedfile_pwritev(struct mappedfile *mf,
     return written;
 }
 
-HIDDEN int mappedfile_fallocate(struct mappedfile *mf, off_t offset, off_t len)
-{
-    int r;
-
-    assert(mf->lock_status == MF_WRITELOCKED);
-    assert(mf->fd != -1);
-
-    mf->dirty++;
-
-    r = posix_fallocate(mf->fd, offset, len);
-    if (r < 0) {
-	syslog(LOG_ERR, "IOERROR: fallocate %s: %m", mf->fname);
-	return r;
-    }
-
-    _ensure_mapped(mf, offset+len);
-    mf->was_resized = 1;
-
-    return 0;
-}
-
 HIDDEN int mappedfile_truncate(struct mappedfile *mf, off_t offset)
 {
     int r;
