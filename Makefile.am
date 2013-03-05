@@ -451,7 +451,7 @@ com_err/et/compile_et: com_err/et/compile_et.sh com_err/et/config_script \
 # Note that several places in the code use -lcrypto, e.g. for SHA1 or
 # MD5 algorithms, without needing SSL.  Currently we have no way of
 # minimally linking such code.
-LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS}
+LD_BASIC_ADD = lib/libcyrus.la lib/libcyrus_min.la ${LIBS} -lcrypto -lsasl2 -lssl
 
 # UTILITY is the libraries that utility programs which use Cyrus'
 # mailbox and message handling code need to link with.
