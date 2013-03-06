@@ -937,8 +937,6 @@ int main(int argc, char **argv)
 	    break;
 
 	case 'T':		/* temporary root directory for search */
-	    if (mode != UNKNOWN && mode != INDEXER) usage(argv[0]);
-	    mode = INDEXER;
 	    temp_root_dir = optarg;
 	    break;
 
@@ -999,9 +997,7 @@ int main(int argc, char **argv)
 	    break;
 
 	case 'i':		/* incremental mode */
-	    if (mode != UNKNOWN && mode != INDEXER) usage(argv[0]);
 	    incremental_mode = 1;
-	    mode = INDEXER;
 	    break;
 
 	case 'a':		/* use /squat annotation */
