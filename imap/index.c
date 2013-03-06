@@ -1781,7 +1781,8 @@ EXPORTED int index_search(struct index_state *state,
 {
     search_query_t *query = NULL;
     search_folder_t *folder;
-    int i, n;
+    int nmsg = 0;
+    int i;
     modseq_t highestmodseq = 0;
     int r;
 
@@ -1801,10 +1802,10 @@ EXPORTED int index_search(struct index_state *state,
 	    search_folder_use_msn(folder, state);
 	if (highestmodseq)
 	    highestmodseq = search_folder_get_highest_modseq(folder);
-	n = search_folder_get_count(folder);
+	nmsg = search_folder_get_count(folder);
     }
     else
-	n = 0;
+	nmsg = 0;
 
     if (searchargs->returnopts) {
 	/*
@@ -1814,7 +1815,7 @@ EXPORTED int index_search(struct index_state *state,
 	if (searchargs->tag) {
 	    prot_printf(state->out, " (TAG \"%s\")", searchargs->tag);
 	}
-	if (n) {
+	if (nmsg) {
 	    if (usinguid) prot_printf(state->out, " UID");
 	    if (searchargs->returnopts & SEARCH_RETURN_MIN)
 		prot_printf(state->out, " MIN %u", search_folder_get_min(folder));
@@ -1835,7 +1836,7 @@ EXPORTED int index_search(struct index_state *state,
 	    }
 	    if (searchargs->returnopts & SEARCH_RETURN_RELEVANCY) {
 		prot_printf(state->out, " RELEVANCY (");
-		for (i = 0; i < n; i++) {
+		for (i = 0; i < nmsg; i++) {
 		    if (i) prot_putc(' ', state->out);
 		    /* for now all messages have relevancy=100 */
 		    prot_printf(state->out, "%u", 100);
@@ -1844,13 +1845,13 @@ EXPORTED int index_search(struct index_state *state,
 	    }
 	}
 	if (searchargs->returnopts & SEARCH_RETURN_COUNT) {
-	    prot_printf(state->out, " COUNT %u", n);
+	    prot_printf(state->out, " COUNT %u", nmsg);
 	}
     }
     else {
 	prot_printf(state->out, "* SEARCH");
 
-	if (n) {
+	if (nmsg) {
 	    search_folder_foreach(folder, i) {
 		prot_printf(state->out, " %u", i);
 	    }
@@ -1864,7 +1865,7 @@ EXPORTED int index_search(struct index_state *state,
 
 out:
     search_query_free(query);
-    return n;
+    return nmsg;
 }
 
 /*
