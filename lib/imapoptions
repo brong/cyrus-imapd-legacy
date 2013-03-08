@@ -1661,12 +1661,8 @@ product version in the capabilities */
 /* Send mail to mailboxes, which do not exists, to this user. NOTE: This must
    be an existing local mailbox name. NOT an email address! */
 
-{ "xapian_tiers", NULL, STRING }
-/* Space-separated list of names of tiered search databases.  Each
-   tier will be used to lookup <tier>searchpartition-default in
-   imapd.conf to find a root directory for search indexes.  All
-   the tiers are queried, only the first one is written when
-   indexing. */
+{ "defaultsearchtier", "", STRING }
+/* Name of the default tier that messages will be indexed to */
 
 /*
 .SH SEE ALSO
