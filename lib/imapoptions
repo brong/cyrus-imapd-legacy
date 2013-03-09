@@ -1280,7 +1280,7 @@ And the notification message will be available on \fIstdin\fR.
  * headers can still be searched, the searches will just be slower.
  */
 
-{ "search_latest_db", "twoskip", STRINGLIST("flat", "berkeley", "berkeley-hash", "skiplist", "twoskip")}
+{ "search_indexed_db", "twoskip", STRINGLIST("flat", "berkeley", "berkeley-hash", "skiplist", "twoskip")}
 /* The cyrusdb backend to use for the search latest indexed uid state. */
 
 { "search_skipdiacrit", 1, SWITCH }
