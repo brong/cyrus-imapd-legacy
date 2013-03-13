@@ -412,3 +412,20 @@ EXPORTED int strarray_size(const strarray_t *sa)
 {
     return sa->count;
 }
+
+EXPORTED int strarray_cmp(const strarray_t *a, const strarray_t *b)
+{
+    int as = strarray_size(a);
+    int bs = strarray_size(b);
+    int i;
+
+    /* test size first */
+    if (a != b) return a - b;
+
+    for (i = 0; i < as; i++) {
+	int res = strcmpsafe(strarray_nth(a, i), strarray_nth(b, i));
+	if (res) return res;
+    }
+
+    return 0;
+}
