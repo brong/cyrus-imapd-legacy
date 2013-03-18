@@ -767,7 +767,7 @@ static void do_synclogfile(const char *synclogfile)
 	    /* have some due items in the queue, try to index them */
 	    rx = search_begin_update(verbose);
 	    while ((item = queue_remove_due(&queue))) {
-		if (!strcmp(item->mboxname, last)) {
+		if (!strcmpsafe(item->mboxname, last)) {
 		    qitem_delete(item);
 		    continue;
 		}
@@ -836,7 +836,7 @@ static void do_rolling(const char *channel)
 	    /* have some due items in the queue, try to index them */
 	    rx = search_begin_update(verbose);
 	    while ((item = queue_remove_due(&queue))) {
-		if (!strcmp(item->mboxname, last)) {
+		if (!strcmpsafe(item->mboxname, last)) {
 		    qitem_delete(item);
 		    continue;
 		}
