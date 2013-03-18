@@ -65,6 +65,7 @@
 
 #include "annotate.h"
 #include "assert.h"
+#include "bsearch.h"
 #include "mboxlist.h"
 #include "global.h"
 #include "exitcodes.h"
@@ -589,7 +590,7 @@ static strarray_t *read_sync_log_items(sync_log_reader_t *slr)
 
     /* sort the mailboxes to get locality of reference
      * for indexing */
-    strarray_sort(folders, NULL);
+    strarray_sort(folders, cmpstringp_raw);
 
     return folders;
 }
