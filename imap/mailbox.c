@@ -3486,6 +3486,8 @@ static int chkchildren(char *name,
     int r;
 
     r = mboxlist_lookup(name, &mbentry, 0);
+    /* deleted mailboxes don't count as children */
+    if (r == IMAP_MAILBOX_NONEXISTENT) return 0;
     if (r) return r;
 
     if (!strcmp(part, mbentry->partition))
