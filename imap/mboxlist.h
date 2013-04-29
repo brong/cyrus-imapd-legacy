@@ -87,6 +87,8 @@ struct mboxlist_entry {
     char *acl;
     /* extra fields */
     char *uniqueid;
+    /* legacy upgrade support */
+    char *legacy_specialuse;
 };
 
 typedef struct mboxlist_entry mbentry_t;
