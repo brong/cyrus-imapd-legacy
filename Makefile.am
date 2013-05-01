@@ -548,7 +548,6 @@ cunit_TESTS = \
 	cunit/mboxname.testc \
 	cunit/md5.testc \
 	cunit/message.testc \
-	cunit/message2.testc \
 	cunit/msgid.testc \
 	cunit/parseaddr.testc \
 	cunit/parse.testc \
@@ -562,7 +561,6 @@ if SIEVE
 cunit_TESTS += cunit/sieve.testc
 endif
 cunit_TESTS += \
-	cunit/sphinx.testc \
 	cunit/spool.testc \
 	cunit/squat.testc \
 	cunit/strarray.testc \
