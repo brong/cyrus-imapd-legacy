@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "assert.h"
 #include "charset.h"
 #include "xmalloc.h"
 #include "chartable.h"
