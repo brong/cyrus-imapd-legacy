@@ -67,6 +67,7 @@
 #include "mailbox.h"
 #include "seen.h"
 #include "util.h"
+#include "xmalloc.h"
 #include "xstrlcpy.h"
 
 #include "statuscache.h"
