@@ -239,9 +239,9 @@ int main(int argc, char *argv[])
     int use_stdin = 0;
     int db_flags = 0;
     struct txn *tid = NULL;
-    struct txn **tidp = &tid;
+    struct txn **tidp = NULL;
 
-    while ((opt = getopt(argc, argv, "C:nt")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:ntT")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
@@ -249,8 +249,12 @@ int main(int argc, char *argv[])
 	case 'n': /* create new */
 	    db_flags |= CYRUSDB_CREATE;
 	    break;
-	case 't':
+	case 't': /* legacy - now the default, but don't break existing users */
 	    tidp = NULL;
+	    break;
+	case 'T':
+	    tidp = &tid;
+	    break;
 	}
     }
 
