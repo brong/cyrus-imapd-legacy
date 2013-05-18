@@ -283,6 +283,42 @@ static void do_lint(void)
     }
 }
 
+static void do_reid(const char *mboxname)
+{
+    struct mailbox *mailbox = NULL;
+    mbentry_t *mbentry = NULL;
+    int r;
+
+    annotate_init(NULL, NULL);
+    annotatemore_open();
+
+    mboxlist_init(0);
+    mboxlist_open(NULL);
+
+    r = mailbox_open_iwl(mboxname, &mailbox);
+    if (r) return;
+
+    mailbox_make_uniqueid(mailbox);
+
+    r = mboxlist_lookup(mboxname, &mbentry, NULL);
+    if (r) return;
+
+    free(mbentry->uniqueid);
+    mbentry->uniqueid = xstrdup(mailbox->uniqueid);
+
+    mboxlist_update(mbentry, 0);
+
+    mailbox_close(&mailbox);
+
+    mboxlist_close();
+    mboxlist_done();
+
+    annotatemore_close();
+    annotate_done();
+
+    printf("did reid %s\n", mboxname);
+}
+
 int main(int argc, char *argv[])
 {
     extern char *optarg;
@@ -327,6 +363,11 @@ int main(int argc, char *argv[])
 	do_conf(1);
     else if (!strcmp(argv[optind], "lint"))
 	do_lint();
+    else if (!strcmp(argv[optind], "reid")) {
+	if (optind + 1 >= argc)
+	    usage();
+	do_reid(argv[optind+1]);
+    }
     else
 	usage();
 
