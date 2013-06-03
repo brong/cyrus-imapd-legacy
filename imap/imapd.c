@@ -7566,6 +7566,7 @@ static int printmyrights(const char *extname, mbentry_t *mbentry)
     prot_printastring(imapd_out, extname);
     prot_printf(imapd_out, " ");
     prot_printastring(imapd_out, cyrus_acl_masktostr(rights, str));
+    prot_printf(imapd_out, "\r\n");
 
     return 0;
 }
@@ -7596,7 +7597,7 @@ static void cmd_myrights(const char *tag, const char *name)
 	return;
     }
 
-    prot_printf(imapd_out, "\r\n%s OK %s\r\n", tag,
+    prot_printf(imapd_out, "%s OK %s\r\n", tag,
 		error_message(IMAP_OK_COMPLETED));
 }
 
