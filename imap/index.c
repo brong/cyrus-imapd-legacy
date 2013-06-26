@@ -1284,51 +1284,6 @@ out:
     return r;
 }
 
-/*
- * Warm up a file, by beginning background readahead.  @offset and
- * @length define a subset of the file to be warmed; @length = 0 means
- * to the end of the file.  Returns a UNIX errno or 0 on success.  No
- * error is reported if the file is missing or the kernel doesn't have
- * the magic system call.
- *
- * Returns zero on success or an error code (system error code).
- */
-static int warmup_file(const char *filename,
-		       off_t offset, off_t length,
-		       int verbose)
-{
-    int fd;
-    int r;
-    struct timeval start, end;
-
-    gettimeofday(&start, NULL);
-
-    fd = open(filename, O_RDONLY, 0);
-    if (fd < 0) return errno;
-
-    if (verbose)
-	syslog(LOG_INFO, "Warming up %s", filename);
-
-    /* Note, posix_fadvise() returns it's error code rather than
-     * setting errno.  Unlike every other system call including
-     * others defined in the same standard by the same committee. */
-    r = posix_fadvise(fd, offset, length, POSIX_FADV_WILLNEED);
-
-    /* posix_fadvise(WILLNEED) on Linux will return an EINVAL error
-     * if the file is on tmpfs, even though this effectively means
-     * the file's bytes are all already available in RAM.  Duh. */
-    if (r == EINVAL) r = 0;
-
-    close(fd);
-
-    gettimeofday(&end, NULL);
-    if (verbose)
-	syslog(LOG_INFO, "Warmed up %s in %.3f sec",
-		filename, timesub(&start, &end));
-
-    return r;
-}
-
 static void prefetch_messages(struct index_state *state,
 			      struct seqset *seq,
 			      int usinguid)
@@ -1349,7 +1304,7 @@ static void prefetch_messages(struct index_state *state,
 	if (!fname)
 	    continue;
 
-	warmup_file(fname, 0, 16384, /*verbose*/0);
+	warmup_file(fname, 0, 16384);
     }
 }
 
@@ -1440,25 +1395,25 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry,
 
     if (warmup_flags & WARMUP_INDEX) {
 	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_INDEX, 0);
-	r = warmup_file(fname, 0, 0, /*verbose*/0);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
     if (warmup_flags & WARMUP_CONVERSATIONS) {
 	if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    fname = tofree1 = conversations_getmboxpath(mbentry->name);
-	    r = warmup_file(fname, 0, 0, /*verbose*/0);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
     if (warmup_flags & WARMUP_ANNOTATIONS) {
 	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_ANNOTATIONS, 0);
-	r = warmup_file(fname, 0, 0, /*verbose*/0);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
     if (warmup_flags & WARMUP_FOLDERSTATUS) {
 	if (config_getswitch(IMAPOPT_STATUSCACHE)) {
 	    fname = tofree2 = statuscache_filename();
-	    r = warmup_file(fname, 0, 0, /*verbose*/0);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
@@ -1468,13 +1423,13 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry,
 	if (r) goto out;
 	for (i = 0 ; i < files.count ; i++) {
 	    fname = strarray_nth(&files, i);
-	    r = warmup_file(fname, 0, 0, /*verbose*/1);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
     while ((uid = seqset_getnext(uids))) {
 	fname = mboxname_datapath(mbentry->partition, mbentry->name, uid);
-	r = warmup_file(fname, 0, 0, /*verbose*/1);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
 
