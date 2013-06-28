@@ -2875,7 +2875,7 @@ EXPORTED int mailbox_get_xconvmodseq(struct mailbox *mailbox, modseq_t *modseqp)
 }
 
 /* Used in replication */
-EXPORTED int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmodseq)
+EXPORTED int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmodseq, int force)
 {
     conv_status_t status = CONV_STATUS_INIT;
     int r;
@@ -2889,7 +2889,7 @@ EXPORTED int mailbox_update_xconvmodseq(struct mailbox *mailbox, modseq_t newmod
     r = conversation_getstatus(mailbox->local_cstate, mailbox->name, &status);
     if (r) return r;
 
-    if (newmodseq > status.modseq) {
+    if (newmodseq > status.modseq || (force && newmodseq < status.modseq)) {
 	status.modseq = newmodseq;
 	r = conversation_setstatus(mailbox->local_cstate, mailbox->name, &status);
     }

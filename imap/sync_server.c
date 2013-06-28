@@ -133,6 +133,8 @@ static int sync_logfd = -1;
 static int sync_starttls_done = 0;
 static int sync_compress_done = 0;
 
+static int opt_force = 0;
+
 /* commands that have specific names */
 static void cmdloop(void);
 static void cmd_authenticate(char *mech, char *resp);
@@ -256,10 +258,13 @@ int service_init(int argc __attribute__((unused)),
     /* load the SASL plugins */
     global_sasl_init(1, 1, mysasl_cb);
 
-    while ((opt = getopt(argc, argv, "p:")) != EOF) {
+    while ((opt = getopt(argc, argv, "p:f")) != EOF) {
 	switch(opt) {
 	case 'p': /* external protection */
 	    extprops_ssf = atoi(optarg);
+	    break;
+	case 'f':
+	    opt_force = 1;
 	    break;
 	default:
 	    usage();
@@ -1252,10 +1257,16 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	if (rrecord.uid == mrecord.uid) {
 	    /* higher modseq on the replica is an error */
 	    if (rrecord.modseq > mrecord.modseq) {
-		syslog(LOG_ERR, "SYNCERROR: higher modseq on replica %s %u",
-		       mailbox->name, mrecord.uid);
-		r = IMAP_SYNC_CHECKSUM;
-		goto out;
+		if (opt_force) {
+		    syslog(LOG_NOTICE, "forcesync: higher modseq on replica %s %u (" MODSEQ_FMT " > " MODSEQ_FMT ")",
+			   mailbox->name, mrecord.uid, rrecord.modseq, mrecord.modseq);
+		}
+		else {
+		    syslog(LOG_ERR, "SYNCERROR: higher modseq on replica %s %u (" MODSEQ_FMT " > " MODSEQ_FMT ")",
+			   mailbox->name, mrecord.uid, rrecord.modseq, mrecord.modseq);
+		    r = IMAP_SYNC_CHECKSUM;
+		    goto out;
+		}
 	    }
 
 	    /* everything else only matters if we're not expunged */
@@ -1420,7 +1431,7 @@ static int do_mailbox(struct dlist *kin)
     dlist_getnum64(kin, "XCONVMODSEQ", &xconvmodseq);
 
     options = sync_parse_options(options_str);
- 
+
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	r = mboxlist_createsync(mboxname, 0, partition,
@@ -1444,35 +1455,63 @@ static int do_mailbox(struct dlist *kin)
     annotate_state_begin(astate);
 
     if (strcmp(mailbox->uniqueid, uniqueid)) {
-	syslog(LOG_ERR, "Mailbox uniqueid changed %s (%s => %s) - retry",
-	       mboxname, mailbox->uniqueid, uniqueid);
-	r = IMAP_MAILBOX_MOVED;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: fixing uniqueid %s (%s => %s)",
+		   mboxname, mailbox->uniqueid, uniqueid);
+	    free(mailbox->uniqueid);
+	    mailbox->uniqueid = xstrdup(uniqueid);
+	    mailbox->header_dirty = 1;
+	}
+	else {
+	    syslog(LOG_ERR, "Mailbox uniqueid changed %s (%s => %s) - retry",
+		   mboxname, mailbox->uniqueid, uniqueid);
+	    r = IMAP_MAILBOX_MOVED;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (highestmodseq < mailbox->i.highestmodseq) {
-	syslog(LOG_ERR, "higher modseq on replica %s - "
-	       MODSEQ_FMT " < " MODSEQ_FMT,
-	       mboxname, highestmodseq, mailbox->i.highestmodseq);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher modseq on replica %s - "
+		   MODSEQ_FMT " < " MODSEQ_FMT,
+		   mboxname, highestmodseq, mailbox->i.highestmodseq);
+	}
+	else {
+	    syslog(LOG_ERR, "higher modseq on replica %s - "
+		   MODSEQ_FMT " < " MODSEQ_FMT,
+		   mboxname, highestmodseq, mailbox->i.highestmodseq);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (uidvalidity < mailbox->i.uidvalidity) {
-	syslog(LOG_ERR, "higher uidvalidity on replica %s - %u < %u",
-	       mboxname, uidvalidity, mailbox->i.uidvalidity);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher uidvalidity on replica %s - %u < %u",
+		   mboxname, uidvalidity, mailbox->i.uidvalidity);
+	}
+	else {
+	    syslog(LOG_ERR, "higher uidvalidity on replica %s - %u < %u",
+		   mboxname, uidvalidity, mailbox->i.uidvalidity);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (last_uid < mailbox->i.last_uid) {
-	syslog(LOG_ERR, "higher last_uid on replica %s - %u < %u",
-	       mboxname, last_uid, mailbox->i.last_uid);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher last_uid on replica %s - %u < %u",
+		   mboxname, last_uid, mailbox->i.last_uid);
+	}
+	else {
+	    syslog(LOG_ERR, "higher last_uid on replica %s - %u < %u",
+		   mboxname, last_uid, mailbox->i.last_uid);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     /* NOTE - this is optional */
@@ -1488,10 +1527,16 @@ static int do_mailbox(struct dlist *kin)
 
 	/* skip out now, it's going to mismatch for sure! */
 	if (xconvmodseq < ourxconvmodseq) {
-	    syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
-		   mboxname, xconvmodseq, ourxconvmodseq);
-	    r = IMAP_SYNC_CHECKSUM;
-	    goto done;
+	    if (opt_force) {
+		syslog(LOG_NOTICE, "forcesync: higher xconvmodseq on replica %s - %llu < %llu",
+		       mboxname, xconvmodseq, ourxconvmodseq);
+	    }
+	    else {
+		syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
+		       mboxname, xconvmodseq, ourxconvmodseq);
+		r = IMAP_SYNC_CHECKSUM;
+		goto done;
+	    }
 	}
     }
 
@@ -1531,7 +1576,9 @@ static int do_mailbox(struct dlist *kin)
     }
 
     mailbox_index_dirty(mailbox);
-    assert(mailbox->i.last_uid <= last_uid);
+    if (!opt_force) {
+	assert(mailbox->i.last_uid <= last_uid);
+    }
     mailbox->i.last_uid = last_uid;
     mailbox->i.recentuid = recentuid;
     mailbox->i.recenttime = recenttime;
@@ -1543,14 +1590,14 @@ static int do_mailbox(struct dlist *kin)
 			 (mailbox->i.options & ~MAILBOX_OPTIONS_MASK);
 
     /* this happens all the time! */
-    if (mailbox->i.highestmodseq < highestmodseq) {
+    if (mailbox->i.highestmodseq != highestmodseq) {
 	mboxname_setmodseq(mailbox->name, highestmodseq);
 	mailbox->i.highestmodseq = highestmodseq;
     }
 
     /* this happens rarely, so let us know */
-    if (mailbox->i.uidvalidity < uidvalidity) {
-	syslog(LOG_ERR, "%s uidvalidity higher on master, updating %u => %u",
+    if (mailbox->i.uidvalidity != uidvalidity) {
+	syslog(LOG_NOTICE, "%s uidvalidity changed, updating %u => %u",
 	       mailbox->name, mailbox->i.uidvalidity, uidvalidity);
 	/* make sure nothing new gets created with a lower value */
 	mboxname_setuidvalidity(mailbox->name, uidvalidity);
@@ -1558,7 +1605,7 @@ static int do_mailbox(struct dlist *kin)
     }
 
     if (mailbox_has_conversations(mailbox)) {
-	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq);
+	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq, opt_force);
     }
 
 done:
