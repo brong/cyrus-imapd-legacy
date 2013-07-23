@@ -556,8 +556,6 @@ int service_main(int argc __attribute__((unused)),
 	saslprops.ipremoteport = xstrdup(remoteip);
     }
 
-    proc_register("pop3d", popd_clienthost, NULL, NULL);
-
     /* Set inactivity timer */
     popd_timeout = config_getint(IMAPOPT_POPTIMEOUT);
     if (popd_timeout < 10) popd_timeout = 10;
@@ -901,6 +899,9 @@ static void cmdloop(void)
     for (;;) {
 	signals_poll();
 
+	/* register process */
+	proc_register(config_ident, popd_clienthost, popd_userid, popd_mailbox ? popd_mailbox->name : NULL, NULL);
+
 	if (backend) {
 	    /* create a pipe from client to backend */
 	    bitpipe();
@@ -974,6 +975,9 @@ static void cmdloop(void)
 
 	if (config_getswitch(IMAPOPT_CHATTY))
 	    syslog(LOG_NOTICE, "command: %s", inputbuf);
+
+	/* register process */
+	proc_register(config_ident, popd_clienthost, popd_userid, popd_mailbox ? popd_mailbox->name : NULL, inputbuf);
 
 	if (!strcmp(inputbuf, "quit")) {
 	    if (!arg) {
@@ -1969,9 +1973,6 @@ int openinbox(void)
 	mailbox_close(&popd_mailbox);
 	goto fail;
     }
-
-    /* register process */
-    proc_register("pop3d", popd_clienthost, proxy_userid, inboxname);
 
     /* Create telemetry log */
     popd_logfd = telemetry_log(proxy_userid, popd_in, popd_out, 0);
