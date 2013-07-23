@@ -1043,3 +1043,9 @@ EXPORTED const char *get_clienthost(int s, const char **localip, const char **re
 
     return buf_cstring(&clientbuf);
 }
+
+EXPORTED int cmd_cancelled()
+{
+    if (signals_cancelled())
+	return IMAP_CANCELLED;
+}
