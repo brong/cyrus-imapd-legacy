@@ -103,6 +103,8 @@ EXPORTED void signals_add_handlers(int alarm)
 	fatal("unable to install signal handler for SIGINT", EC_TEMPFAIL);
     if (sigaction(SIGTERM, &action, NULL) < 0)
 	fatal("unable to install signal handler for SIGTERM", EC_TEMPFAIL);
+    if (sigaction(SIGUSR2, &action, NULL) < 0)
+	fatal("unable to install signal handler for SIGTERM", EC_TEMPFAIL);
 
     signals_reset_sighup_handler(1);
 }
