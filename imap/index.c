@@ -2191,6 +2191,7 @@ EXPORTED int index_convmultisort(struct index_state *state,
     query->need_expunge = 1;
     query->sortcrit = sortcrit;
     r = search_query_run(query);
+    if (r) return r;
 
     if (windowargs->anchorfolder) {
 	anchor_folder = search_query_find_folder(query, windowargs->anchorfolder);
