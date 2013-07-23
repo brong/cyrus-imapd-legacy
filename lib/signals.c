@@ -203,6 +203,7 @@ static int signals_poll_mask(sigset_t *oldmaskp)
 	else exit(EC_TEMPFAIL);
     }
     for (sig = 1 ; sig < _NSIG ; sig++) {
+	if (sig == SIGUSR2) continue; /* only ever polled explicitly */
 	if (gotsignal[sig])
 	    return sig;
     }
@@ -279,4 +280,14 @@ EXPORTED void signals_clear(int sig)
 {
     if (sig >= 0 && sig < _NSIG)
 	gotsignal[sig] = 0;
+}
+
+EXPORTED int signals_cancelled()
+{
+    if (gotsignal[SIGUSR2]) {
+	gotsignal[SIGUSR2] = 0;
+	return 1;
+    }
+
+    return 0;
 }
