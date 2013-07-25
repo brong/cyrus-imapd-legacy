@@ -1557,6 +1557,8 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
 
 	/* log the rename */
 	sync_log_mailbox_double(oldname, newname);
+	/* and log an append so that squatter indexes it */
+	sync_log_append(newname);
     }
 
     /* free memory */
