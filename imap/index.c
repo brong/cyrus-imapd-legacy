@@ -1309,7 +1309,8 @@ static void prefetch_messages(struct index_state *state,
     struct mailbox *mailbox = state->mailbox;
     struct index_map *im;
     uint32_t msgno;
-    char *fname;
+    const char *fname;
+    struct index_record record;
 
     syslog(LOG_ERR, "Prefetching initial parts of messages\n");
 
@@ -1318,7 +1319,10 @@ static void prefetch_messages(struct index_state *state,
 	if (!seqset_ismember(seq, usinguid ? im->uid : msgno))
 	    continue;
 
-	fname = mailbox_message_fname(mailbox, im->uid);
+	if (index_reload_record(state, msgno, &record))
+	    continue;
+
+	fname = mailbox_record_fname(mailbox, &record);
 	if (!fname)
 	    continue;
 
@@ -1557,7 +1561,6 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
     struct searchargs searchargs;
     unsigned long length;
     struct mailbox *mailbox = state->mailbox;
-    struct index_map *im;
 
     if (!(contents && contents[0])) return(0);
 
@@ -1584,10 +1587,12 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
 
     for (listindex = 0; !n && listindex < listcount; listindex++) {
 	struct buf msgfile = BUF_INITIALIZER;
+	struct index_record record;
 	msgno = msgno_list[listindex];
-	im = &state->map[msgno-1];
+	if (index_reload_record(state, msgno, &record))
+	    continue;
 
-	if (mailbox_map_message(mailbox, im->uid, &msgfile))
+	if (mailbox_map_record(mailbox, &record, &msgfile))
 	    continue;
 
 	n += index_scan_work(msgfile.s, msgfile.len, contents, length);
@@ -2911,7 +2916,7 @@ static int index_appendremote(struct index_state *state, uint32_t msgno,
     if (r) return r;
 
     /* Open the message file */
-    if (mailbox_map_message(mailbox, record.uid, &msg))
+    if (mailbox_map_record(mailbox, &record, &msg))
 	return IMAP_NO_MSGGONE;
 
     /* start the individual append */
@@ -3884,7 +3889,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
 	fetchargs->cache_atleast > record.cache_version || 
 	fetchargs->binsections || fetchargs->sizesections ||
 	fetchargs->bodysections) {
-	if (mailbox_map_message(mailbox, record.uid, &msg)) {
+	if (mailbox_map_record(mailbox, &record, &msg)) {
 	    prot_printf(state->out, "* OK ");
 	    prot_printf(state->out, error_message(IMAP_NO_MSGGONE), msgno);
 	    prot_printf(state->out, "\r\n");
@@ -3943,7 +3948,7 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     if (fetchitems & FETCH_FILESIZE) {
 	unsigned int msg_size = msg.len;
 	if (!msg.s) {
-	    char *fname = mailbox_message_fname(mailbox, record.uid);
+	    const char *fname = mailbox_record_fname(mailbox, &record);
 	    struct stat sbuf;
 	    /* Find the size of the message file */
 	    if (stat(fname, &sbuf) == -1)
@@ -4203,7 +4208,7 @@ EXPORTED int index_urlfetch(struct index_state *state, uint32_t msgno,
     if (r) return r;
 
     /* Open the message file */
-    if (mailbox_map_message(mailbox, record.uid, &msg))
+    if (mailbox_map_record(mailbox, &record, &msg))
 	return IMAP_NO_MSGGONE;
 
     data = msg.s;
@@ -6393,7 +6398,7 @@ EXPORTED char *index_getheader(struct index_state *state, uint32_t msgno,
     }
     else {
 	/* uncached header */
-	if (mailbox_map_message(mailbox, record.uid, &msg))
+	if (mailbox_map_record(mailbox, &record, &msg))
 	    return NULL;
 
 	buf = index_readheader(msg.s, msg.len, 0, record.header_size);
