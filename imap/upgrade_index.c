@@ -126,7 +126,7 @@ static void upgrade_index_record(struct mailbox *mailbox,
 	/* CRC failed, drop through */
     }
 
-    fname = mailbox_message_fname(mailbox, record->uid);
+    fname = mailbox_record_fname(mailbox, record);
 
     if (message_parse(fname, record)) {
 	/* failed to create, don't try to write */
@@ -198,7 +198,7 @@ HIDDEN int upgrade_index(struct mailbox *mailbox)
      * something isn't correctly mounted.  We don't want to wipe out
      * all the index records due to IOERRORs just because the admin
      * made a temporary mistake */
-    datadirname = mailbox_message_fname(mailbox, 0);
+    datadirname = mailbox_datapath(mailbox);
     if (stat(datadirname, &sbuf)) {
 	syslog(LOG_ERR, "IOERROR: unable to find data directory %s "
 			"for mailbox %s, refusing to upgrade",
