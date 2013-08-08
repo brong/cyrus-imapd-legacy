@@ -148,7 +148,7 @@ struct storeargs {
     int silent;
     int seen;
     /* for STORE_*_FLAGS */
-    bit32 system_flags;
+    uint32_t system_flags;
     /* Note that we must pass the user flags as names because the
      * lookup of user flag names must proceed under the index lock */
     strarray_t flags;

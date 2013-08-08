@@ -1089,7 +1089,8 @@ static int compare_one_record(struct mailbox *mailbox,
 	    if (rp->modseq > mp->modseq &&
 		rp->last_updated >= mp->last_updated) {
 		/* then copy all the flag data over from the replica */
-		mp->system_flags = rp->system_flags;
+		mp->system_flags = (rp->system_flags & FLAGS_GLOBAL) |
+				   (mp->system_flags & FLAGS_LOCAL);
 		mp->cid = rp->cid;
 		for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		    mp->user_flags[i] = rp->user_flags[i];
