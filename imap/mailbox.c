@@ -781,8 +781,6 @@ EXPORTED int mailbox_map_record(struct mailbox *mailbox, struct index_record *re
     int msgfd;
     const char *fname;
     struct stat sbuf;
-    const char *base = NULL;
-    size_t len = 0;
 
     xstats_inc(MESSAGE_MAP);
     fname = mailbox_record_fname(mailbox, record);
@@ -804,8 +802,7 @@ EXPORTED int mailbox_map_record(struct mailbox *mailbox, struct index_record *re
 	fatal("can't fstat message file", EC_OSFILE);
     }
     buf_free(data);
-    map_refresh(msgfd, 1, &base, &len, sbuf.st_size, fname, mailbox->name);
-    buf_init_mmap(data, base, len);
+    buf_init_mmap(data, /*onceonly*/1, msgfd, fname, sbuf.st_size, mailbox->name);
     close(msgfd);
 
     return 0;
