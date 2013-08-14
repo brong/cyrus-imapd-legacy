@@ -5515,6 +5515,7 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
 	    if (have_file) {
 		/* we can just unlink this one, already processed one copy */
 		const char *fname = mboxname_archivepath(mailbox->part, mailbox->name, record.uid);
+		printf("Removing duplicate archive file %s", fname);
 		unlink(fname);
 	    }
 	    else {
@@ -5522,6 +5523,7 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
 		    if (!(record.system_flags & FLAG_ARCHIVED)) {
 			/* oops, it's really archived - let's fix that right now */
 			record.system_flags |= FLAG_ARCHIVED;
+			printf("Marking file as archived %s %u", mailbox->name, record.uid);
 			mailbox_rewrite_index_record(mailbox, &record);
 		    }
 		}
@@ -5529,6 +5531,7 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
 		    if (record.system_flags & FLAG_ARCHIVED) {
 			/* oops, non-archived copy exists, let's use that */
 			record.system_flags &= ~FLAG_ARCHIVED;
+			printf("Marking file as not archived %s %u", mailbox->name, record.uid);
 			mailbox_rewrite_index_record(mailbox, &record);
 		    }
 		}
