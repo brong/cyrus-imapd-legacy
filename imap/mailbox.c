@@ -636,9 +636,14 @@ EXPORTED int mailbox_cacherecord(struct mailbox *mailbox,
     if (record->crec.len)
 	return 0;
 
-    /* no such record? */
-    if (!record->cache_offset)
-	return IMAP_MAILBOX_NONEXISTENT;
+    if (!record->cache_offset) {
+	/* parse directly into the cache for this record */
+	const char *fname = mailbox_record_fname(mailbox, record);
+	syslog(LOG_ERR, "IOERROR: no cache for %s %u, re-parsing",
+	       mailbox->name, record->uid);
+	/* XXX - force add? */
+	return message_parse(fname, record);
+    }
 
     cachefile = mailbox_cachefile(mailbox, record);
     if (!cachefile) {
@@ -3136,6 +3141,11 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
 	if (expunge_mode == IMAP_ENUM_EXPUNGE_MODE_IMMEDIATE)
 	    mailbox->i.options |= OPT_MAILBOX_NEEDS_REPACK;
 	mailbox->i.options |= OPT_MAILBOX_NEEDS_UNLINK;
+    }
+    else {
+	/* rewrite the cache record if required anyway */
+	r = mailbox_append_cache(mailbox, record);
+	if (r) return r;
     }
 
     r = mailbox_update_indexes(mailbox, &oldrecord, record);
