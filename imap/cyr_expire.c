@@ -238,9 +238,12 @@ static unsigned archive_cb(struct mailbox *mailbox __attribute__((unused)),
     return 0;
 }
 
-static int archive(char *name, int matchlen __attribute__((unused)),
-		   int maycreate __attribute__((unused)), void *rock)
+static int archive(void *rock,
+		  const char *key, size_t keylen,
+		  const char *data __attribute__((unused)),
+		  size_t datalen __attribute__((unused)))
 {
+    char *name = xstrndup(key, keylen);
     int r;
     mbentry_t *mbentry = NULL;
     struct mailbox *mailbox = NULL;
@@ -284,9 +287,12 @@ static int archive(char *name, int matchlen __attribute__((unused)),
  * - build a hash table of mailboxes in which we expired messages,
  * - and perform a cleanup of expunged messages
  */
-static int expire(char *name, int matchlen __attribute__((unused)),
-		  int maycreate __attribute__((unused)), void *rock)
+static int expire(void *rock,
+		  const char *key, size_t keylen,
+		  const char *data __attribute__((unused)),
+		  size_t datalen __attribute__((unused)))
 {
+    char *name = xstrndup(key, keylen);
     mbentry_t *mbentry = NULL;
     struct expire_rock *erock = (struct expire_rock *) rock;
     char *buf;
@@ -404,12 +410,13 @@ static int expire(char *name, int matchlen __attribute__((unused)),
     return 0;
 }
 
-static int delete(char *name,
-		  int matchlen __attribute__((unused)),
-		  int maycreate __attribute__((unused)),
-		  void *rock)
+static int delete(void *rock,
+		  const char *key, size_t keylen,
+		  const char *data __attribute__((unused)),
+		  size_t datalen __attribute__((unused)))
 {
     mbentry_t *mbentry = NULL;
+    char *name = xstrndup(key, keylen);
     struct delete_rock *drock = (struct delete_rock *) rock;
     int r;
     time_t timestamp;
@@ -446,11 +453,12 @@ static int delete(char *name,
     return(0);
 }
 
-static int expire_conversations(char *name,
-				int matchlen __attribute__((unused)),
-				int maycreate __attribute__((unused)),
-				void *rock)
+static int expire_conversations(void *rock,
+		  const char *key, size_t keylen,
+		  const char *data __attribute__((unused)),
+		  size_t datalen __attribute__((unused)))
 {
+    char *name = xstrndup(key, keylen);
     struct conversations_rock *crock = (struct conversations_rock *)rock;
     char *filename = conversations_getmboxpath(name);
     struct conversations_state *state = NULL;
@@ -497,7 +505,7 @@ int main(int argc, char *argv[])
     int cid_expire_seconds;
     int do_cid_expire = -1;
     char *alt_config = NULL;
-    const char *find_prefix = "*";
+    const char *find_prefix = NULL;
     const char *do_user = NULL;
     struct expire_rock erock;
     struct delete_rock drock;
@@ -633,7 +641,7 @@ int main(int argc, char *argv[])
 	if (do_user)
 	    mboxlist_allusermbox(do_user, archive, &archive_mark, /*include_deleted*/1);
 	else
-	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, archive, &archive_mark);
+	    mboxlist_allmbox(find_prefix, archive, &archive_mark, /*include_deleted*/1);
 	/* XXX - add syslog? */
     }
 
@@ -659,7 +667,7 @@ int main(int argc, char *argv[])
 	if (do_user)
 	    mboxlist_allusermbox(do_user, expire, &erock, /*include_deleted*/1);
 	else
-	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, expire, &erock);
+	    mboxlist_allmbox(find_prefix, expire, &erock, /*include_deleted*/1);
 
 	syslog(LOG_NOTICE, "Expired %lu and expunged %lu out of %lu "
 			    "messages from %lu mailboxes",
@@ -698,7 +706,7 @@ int main(int argc, char *argv[])
 	if (do_user)
 	    mboxlist_allusermbox(do_user, expire_conversations, &crock, /*include_deleted*/1);
 	else
-	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, expire_conversations, &crock);
+	    mboxlist_allmbox(find_prefix, expire_conversations, &crock, /*include_deleted*/1);
 
 	syslog(LOG_NOTICE, "Expired %lu entries of %lu entries seen "
 			    "in %lu conversation databases",
@@ -733,7 +741,7 @@ int main(int argc, char *argv[])
 	if (do_user)
 	    mboxlist_allusermbox(do_user, delete, &drock, /*include_deleted*/1);
 	else
-	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, delete, &drock);
+	    mboxlist_allmbox(find_prefix, delete, &drock, /*include_deleted*/1);
 
 	for (i = 0 ; i < drock.to_delete.count ; i++) {
 	    char *name = drock.to_delete.data[i];
