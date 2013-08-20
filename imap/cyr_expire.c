@@ -498,6 +498,7 @@ int main(int argc, char *argv[])
     int do_cid_expire = -1;
     char *alt_config = NULL;
     const char *find_prefix = "*";
+    const char *do_user = NULL;
     struct expire_rock erock;
     struct delete_rock drock;
     struct conversations_rock crock;
@@ -546,8 +547,7 @@ int main(int argc, char *argv[])
 	    break;
 
 	case 'u':
-	    /* leaks, we don't care about them */
-	    find_prefix = strconcat(mboxname_user_mbox(optarg, NULL), "*", NULL);
+	    do_user = optarg;
 	    break;
 
 	case 'v':
@@ -630,7 +630,10 @@ int main(int argc, char *argv[])
 
     if (archive_seconds >= 0) {
 	time_t archive_mark = time(0) - archive_seconds;
-	mboxlist_findall(NULL, find_prefix, 1, 0, 0, archive, &archive_mark);
+	if (do_user)
+	    mboxlist_allusermbox(do_user, archive, &archive_mark, /*include_deleted*/1);
+	else
+	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, archive, &archive_mark);
 	/* XXX - add syslog? */
     }
 
@@ -653,7 +656,10 @@ int main(int argc, char *argv[])
 	    }
 	}
 
-	mboxlist_findall(NULL, find_prefix, 1, 0, 0, expire, &erock);
+	if (do_user)
+	    mboxlist_allusermbox(do_user, expire, &erock, /*include_deleted*/1);
+	else
+	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, expire, &erock);
 
 	syslog(LOG_NOTICE, "Expired %lu and expunged %lu out of %lu "
 			    "messages from %lu mailboxes",
@@ -689,8 +695,10 @@ int main(int argc, char *argv[])
 		    "Removing conversation entries older than %0.2f days\n",
 		    (double)(cid_expire_seconds/86400));
 
-	mboxlist_findall(NULL, find_prefix, 1, 0, 0,
-			 expire_conversations, &crock);
+	if (do_user)
+	    mboxlist_allusermbox(do_user, expire_conversations, &crock, /*include_deleted*/1);
+	else
+	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, expire_conversations, &crock);
 
 	syslog(LOG_NOTICE, "Expired %lu entries of %lu entries seen "
 			    "in %lu conversation databases",
@@ -722,7 +730,10 @@ int main(int argc, char *argv[])
 
 	drock.delete_mark = time(0) - delete_seconds;
 
-	mboxlist_findall(NULL, find_prefix, 1, 0, 0, delete, &drock);
+	if (do_user)
+	    mboxlist_allusermbox(do_user, delete, &drock, /*include_deleted*/1);
+	else
+	    mboxlist_findall(NULL, find_prefix, 1, 0, 0, delete, &drock);
 
 	for (i = 0 ; i < drock.to_delete.count ; i++) {
 	    char *name = drock.to_delete.data[i];
