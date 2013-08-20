@@ -545,6 +545,11 @@ int main(int argc, char *argv[])
 	    find_prefix = optarg;
 	    break;
 
+	case 'u':
+	    /* leaks, we don't care about them */
+	    find_prefix = strconcat(mboxname_user_mbox(optarg, NULL), "*", NULL);
+	    break;
+
 	case 'v':
 	    verbose++;
 	    break;
