@@ -515,7 +515,7 @@ int main(int argc, char *argv[])
     memset(&crock, 0, sizeof(crock));
     construct_hash_table(&crock.seen, 100, 1);
 
-    while ((opt = getopt(argc, argv, "C:D:E:X:A:p:vaxtc")) != EOF) {
+    while ((opt = getopt(argc, argv, "C:D:E:X:A:p:u:vaxtc")) != EOF) {
 	switch (opt) {
 	case 'C': /* alt config file */
 	    alt_config = optarg;
