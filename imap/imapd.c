@@ -178,9 +178,11 @@ static void *imapd_tls_comp = NULL; /* TLS compression method, if any */
 static int imapd_compress_done = 0; /* have we done a successful compress? */
 static const char *plaintextloginalert = NULL;
 
+#define QUIRK_SEARCHFUZZY (1<<0)
 static struct id_data {
     struct attvaluelist *params;
     int did_id;
+    int quirks;
 } imapd_id;
 
 #ifdef HAVE_SSL
@@ -2768,6 +2770,7 @@ static void clear_id() {
 static void cmd_id(char *tag)
 {
     int c = EOF, npair = 0;
+    int is_ios = 0;
     static struct buf arg, field;
 
     /* check if we've already had an ID in non-authenticated state */
@@ -2839,6 +2842,13 @@ static void cmd_id(char *tag)
 			    tag, MAXIDPAIRS);
 		eatline(imapd_in, c);
 		return;
+	    }
+
+	    if (!strcmp(field.s, "os") && !strcmp(arg.s, "iOS")) {
+		is_ios = 1;
+	    }
+	    if (is_ios && !strcmp(field.s, "os-version") && arg.s[0] == '7') {
+		imapd_id.quirks |= QUIRK_SEARCHFUZZY;
 	    }
 
 	    /* ok, we're happy enough */
@@ -5412,6 +5422,8 @@ static void cmd_search(char *tag, int usinguid)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_KEYWORD|GETSEARCH_RETURN,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
+    if (imapd_id.quirks & QUIRK_SEARCHFUZZY)
+	searchargs->fuzzy_depth++;
     c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) {
 	eatline(imapd_in, ' ');
@@ -5472,6 +5484,8 @@ static void cmd_sort(char *tag, int usinguid)
     searchargs = new_searchargs(tag, GETSEARCH_CHARSET_FIRST,
 				&imapd_namespace, imapd_userid, imapd_authstate,
 				imapd_userisadmin || imapd_userisproxyadmin);
+    if (imapd_id.quirks & QUIRK_SEARCHFUZZY)
+	searchargs->fuzzy_depth++;
     c = get_search_program(imapd_in, imapd_out, searchargs);
     if (c == EOF) goto error;
 
