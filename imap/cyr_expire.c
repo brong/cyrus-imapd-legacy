@@ -328,7 +328,7 @@ static int expire(void *rock,
 	if (verbose) {
 	    printf("error looking up %s: %s\n", name, error_message(r));
 	}
-	syslog(LOG_ERR, "error looking up %s: %s\n", name, error_message(r));
+	syslog(LOG_ERR, "IOERROR: error looking up %s: %s\n", name, error_message(r));
 	return 0; /* still keep going */
     }
 
