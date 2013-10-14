@@ -1322,7 +1322,7 @@ static void prefetch_messages(struct index_state *state,
 	if (!fname)
 	    continue;
 
-	warmup_file(fname, 0, 16384, /*verbose*/0);
+	warmup_file(fname, 0, 16384);
     }
 }
 
@@ -1413,25 +1413,25 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry,
 
     if (warmup_flags & WARMUP_INDEX) {
 	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_INDEX, 0);
-	r = warmup_file(fname, 0, 0, /*verbose*/0);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
     if (warmup_flags & WARMUP_CONVERSATIONS) {
 	if (config_getswitch(IMAPOPT_CONVERSATIONS)) {
 	    fname = tofree1 = conversations_getmboxpath(mbentry->name);
-	    r = warmup_file(fname, 0, 0, /*verbose*/0);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
     if (warmup_flags & WARMUP_ANNOTATIONS) {
 	fname = mboxname_metapath(mbentry->partition, mbentry->name, META_ANNOTATIONS, 0);
-	r = warmup_file(fname, 0, 0, /*verbose*/0);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
     if (warmup_flags & WARMUP_FOLDERSTATUS) {
 	if (config_getswitch(IMAPOPT_STATUSCACHE)) {
 	    fname = tofree2 = statuscache_filename();
-	    r = warmup_file(fname, 0, 0, /*verbose*/0);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
@@ -1441,13 +1441,13 @@ EXPORTED int index_warmup(struct mboxlist_entry *mbentry,
 	if (r) goto out;
 	for (i = 0 ; i < files.count ; i++) {
 	    fname = strarray_nth(&files, i);
-	    r = warmup_file(fname, 0, 0, /*verbose*/1);
+	    r = warmup_file(fname, 0, 0);
 	    if (r) goto out;
 	}
     }
     while ((uid = seqset_getnext(uids))) {
 	fname = mboxname_datapath(mbentry->partition, mbentry->name, uid);
-	r = warmup_file(fname, 0, 0, /*verbose*/1);
+	r = warmup_file(fname, 0, 0);
 	if (r) goto out;
     }
 
