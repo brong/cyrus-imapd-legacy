@@ -360,6 +360,7 @@ static void my_carddav_auth(const char *userid)
 		    config_getstring(IMAPOPT_ADDRESSBOOKPREFIX));
     r = mboxlist_lookup(mailboxname, &mbentry, NULL);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
+	r = 0;
 	if (config_mupdate_server) {
 	    /* Find location of INBOX */
 	    char inboxname[MAX_MAILBOX_BUFFER];

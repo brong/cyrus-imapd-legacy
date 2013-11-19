@@ -443,6 +443,7 @@ static void my_caldav_auth(const char *userid)
     caldav_mboxname(NULL, userid, mailboxname);
     r = mboxlist_lookup(mailboxname, &mbentry, NULL);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
+	r = 0;
 	if (config_mupdate_server) {
 	    /* Find location of INBOX */
 	    char inboxname[MAX_MAILBOX_BUFFER];
