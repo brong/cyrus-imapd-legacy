@@ -1761,6 +1761,13 @@ product version in the capabilities */
 /* Send mail to mailboxes, which do not exists, to this user. NOTE: This must
    be an existing local mailbox name. NOT an email address! */
 
+{ "zoneinfo_db", "skiplist", STRINGLIST("flat", "berkeley", "berkeley-hash", "skiplist")}
+/* The cyrusdb backend to use for zoneinfo. */
+
+{ "zoneinfo_db_path", NULL, STRING }
+/* The absolute path to the zoneinfo db file.  If not specified,
+   will be confdir/zoneinfo.db */
+
 /*
 .SH SEE ALSO
 .PP

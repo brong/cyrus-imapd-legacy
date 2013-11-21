@@ -183,6 +183,7 @@ extern const char *config_tlscache_db;
 extern const char *config_ptscache_db;
 extern const char *config_statuscache_db;
 extern const char *config_userdeny_db;
+extern const char *config_zoneinfo_db;
 extern int charset_flags;
 
 /* Session ID */
