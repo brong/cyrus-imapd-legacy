@@ -5341,6 +5341,16 @@ static void cmd_create(char *tag, char *name, struct dlist *extargs, int localon
 
     dlist_getatom(extargs, "PARTITION", &partition);
     dlist_getatom(extargs, "SERVER", &server);
+
+    const char *type = NULL;
+
+    dlist_getatom(extargs, "PARTITION", &partition);
+    dlist_getatom(extargs, "SERVER", &server);
+    if (dlist_getatom(extargs, "TYPE", &type)) {
+	if (!strcasecmp(type, "CALENDAR")) mbtype |= MBTYPE_CALENDAR;
+	else if (!strcasecmp(type, "ADDRESSBOOK")) mbtype |= MBTYPE_ADDRESSBOOK;
+	else r = IMAP_MAILBOX_BADTYPE;
+    }
     use = dlist_getchild(extargs, "USE");
     if (use) {
 	struct dlist *item;
@@ -5363,7 +5373,7 @@ static void cmd_create(char *tag, char *name, struct dlist *extargs, int localon
 	}
     }
 
-    if (partition && !imapd_userisadmin) {
+    if (!r && partition && !imapd_userisadmin) {
 	r = IMAP_PERMISSION_DENIED;
     }
 
