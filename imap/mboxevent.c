@@ -122,6 +122,8 @@ static struct mboxevent event_template =
     { EVENT_MAX_MESSAGES, "maxMessages", EVENT_PARAM_INT, 0, 0 },
     { EVENT_MESSAGES, "messages", EVENT_PARAM_INT, 0, 0 },
     { EVENT_UNSEEN_MESSAGES, "vnd.cmu.unseenMessages", EVENT_PARAM_INT, 0, 0 },
+    { EVENT_CONVEXISTS, "vnd.fastmail.convExists", EVENT_PARAM_INT, 0, 0 },
+    { EVENT_CONVUNSEEN, "vnd.fastmail.convUnseen", EVENT_PARAM_INT, 0, 0 },
     { EVENT_UIDNEXT, "uidnext", EVENT_PARAM_INT, 0, 0 },
     { EVENT_UIDSET, "uidset", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_MIDSET, "vnd.cmu.midset", EVENT_PARAM_STRING, 0, 0 },
@@ -432,6 +434,10 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
 	if (!(extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_UNSEENMESSAGES))
 	    return 0;
 	break;
+    case EVENT_CONVEXISTS:
+	return extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_CONVEXISTS;
+    case EVENT_CONVUNSEEN:
+	return extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_CONVUNSEEN;
     case EVENT_OLD_UIDSET:
 	return type & (EVENT_MESSAGE_COPY|EVENT_MESSAGE_MOVE);
     }
@@ -1001,6 +1007,20 @@ EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event,
      */
     if (mboxevent_expected_param(event->type, EVENT_MESSAGES)) {
 	FILL_UNSIGNED_PARAM(event, EVENT_MESSAGES, mailbox->i.exists);
+    }
+
+    if (mboxevent_expected_param(event->type, EVENT_CONVEXISTS) ||
+	mboxevent_expected_param(event->type, EVENT_CONVUNSEEN)) {
+	conv_status_t status = CONV_STATUS_INIT;
+
+	if (mailbox->local_cstate)
+	    conversation_getstatus(mailbox->local_cstate, mailbox->name, &status);
+
+	if (mboxevent_expected_param(event->type, EVENT_CONVEXISTS))
+	    FILL_UNSIGNED_PARAM(event, EVENT_CONVEXISTS, status.exists);
+
+	if (mboxevent_expected_param(event->type, EVENT_CONVUNSEEN))
+	    FILL_UNSIGNED_PARAM(event, EVENT_CONVUNSEEN, status.unseen);
     }
 }
 
