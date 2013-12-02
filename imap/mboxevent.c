@@ -971,16 +971,16 @@ EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event,
 	imapurl.user = user;
     }
 
-    /* all events needs uri parameter */
-    imapurl_toURL(url, &imapurl);
-    FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
-
     if (event->type & (EVENT_MESSAGE_NEW|EVENT_MESSAGE_APPEND) && event->uidset) {
 	imapurl.uid = seqset_first(event->uidset);
 	/* don't add uidset parameter to MessageNew and MessageAppend events */
 	seqset_free(event->uidset);
 	event->uidset = NULL;
     }
+
+    /* all events needs uri parameter */
+    imapurl_toURL(url, &imapurl);
+    FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
 
     FILL_STRING_PARAM(event, EVENT_MBTYPE,
 	xstrdup(mboxlist_mbtype_to_string(mailbox->mbtype)));
