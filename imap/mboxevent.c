@@ -134,6 +134,7 @@ static struct mboxevent event_template =
     { EVENT_MBTYPE, "vnd.cmu.mbtype", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_DAV_FILENAME, "vnd.cmu.davFilename", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_DAV_UID, "vnd.cmu.davUid", EVENT_PARAM_STRING, 0, 0 },
+    { EVENT_MESSAGE_CID, "vnd.fastmail.cid", EVENT_PARAM_STRING, 0, 0 },
     /* always at end to let the parser to easily truncate this part */
     { EVENT_ENVELOPE, "vnd.cmu.envelope", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_BODYSTRUCTURE, "bodyStructure", EVENT_PARAM_STRING, 0, 0 },
@@ -393,6 +394,9 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
     case EVENT_DAV_UID:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_DAVUID) &&
 	       (type & EVENT_CALENDAR);
+    case EVENT_MESSAGE_CID:
+	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_CLIENTID) &&
+	       (type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW));
     case EVENT_MESSAGES:
 	if (type & (EVENT_QUOTA_EXCEED|EVENT_QUOTA_WITHIN))
 	    return 1;
@@ -716,6 +720,12 @@ EXPORTED void mboxevent_extract_record(struct mboxevent *event, struct mailbox *
     /* add message size */
     if (mboxevent_expected_param(event->type, EVENT_MESSAGE_SIZE)) {
 	FILL_UNSIGNED_PARAM(event, EVENT_MESSAGE_SIZE, record->size);
+    }
+
+    /* add message CID */
+    if (mboxevent_expected_param(event->type, EVENT_MESSAGE_CID)) {
+	FILL_STRING_PARAM(event, EVENT_MESSAGE_CID,
+			  xstrdup(conversation_id_encode(record->cid)));
     }
 
     /* add vnd.cmu.envelope */
