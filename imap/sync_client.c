@@ -1029,7 +1029,7 @@ static int compare_one_record(struct mailbox *mailbox,
 	diff = 1;
     else if (mp->internaldate != rp->internaldate)
 	diff = 1;
-    else if (mp->system_flags != rp->system_flags)
+    else if ((mp->system_flags & FLAGS_GLOBAL) != rp->system_flags)
 	diff = 1;
     else if (!message_guid_equal(&mp->guid, &rp->guid))
 	diff = 1;
