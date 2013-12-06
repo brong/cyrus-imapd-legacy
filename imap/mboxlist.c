@@ -315,9 +315,9 @@ EXPORTED uint32_t mboxlist_string_to_mbtype(const char *string)
  *  T: _t_ype
  *  V: uid_v_alidity
  */
-static int mboxlist_parse_entry(mbentry_t **mbentryptr,
-				const char *name, size_t namelen,
-				const char *data, size_t datalen)
+EXPORTED int mboxlist_parse_entry(mbentry_t **mbentryptr,
+				  const char *name, size_t namelen,
+				  const char *data, size_t datalen)
 {
     int r = IMAP_MAILBOX_BADFORMAT;
     char *freeme = NULL;
