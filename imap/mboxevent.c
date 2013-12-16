@@ -53,6 +53,8 @@
 
 #include "annotate.h"
 #include "assert.h"
+#include "caldav_db.h"
+#include "carddav_db.h"
 #include "exitcodes.h"
 #include "imapurl.h"
 #include "libconfig.h"
@@ -124,6 +126,9 @@ static struct mboxevent event_template =
     { EVENT_PID, "pid", EVENT_PARAM_INT, 0, 0 },
     { EVENT_USER, "user", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_MESSAGE_SIZE, "messageSize", EVENT_PARAM_INT, 0, 0 },
+    { EVENT_MBTYPE, "vnd.cmu.mbtype", EVENT_PARAM_STRING, 0, 0 },
+    { EVENT_DAV_FILENAME, "vnd.cmu.davFilename", EVENT_PARAM_STRING, 0, 0 },
+    { EVENT_DAV_UID, "vnd.cmu.davUid", EVENT_PARAM_STRING, 0, 0 },
     /* always at end to let the parser to easily truncate this part */
     { EVENT_ENVELOPE, "vnd.cmu.envelope", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_BODYSTRUCTURE, "bodyStructure", EVENT_PARAM_STRING, 0, 0 },
@@ -355,6 +360,8 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
 		(type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW)));
     case EVENT_MAILBOX_ID:
 	return (type & MAILBOX_EVENTS);
+    case EVENT_MBTYPE:
+	return (type & MAILBOX_EVENTS);
     case EVENT_MAX_MESSAGES:
 	return type & QUOTA_EVENTS;
     case EVENT_MESSAGE_CONTENT:
@@ -363,6 +370,12 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
     case EVENT_MESSAGE_SIZE:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_MESSAGESIZE) &&
 	       (type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW));
+    case EVENT_DAV_FILENAME:
+	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_DAVFILENAME) &&
+	       (type & EVENT_CALENDAR);
+    case EVENT_DAV_UID:
+	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_DAVUID) &&
+	       (type & EVENT_CALENDAR);
     case EVENT_MESSAGES:
 	if (type & (EVENT_QUOTA_EXCEED|EVENT_QUOTA_WITHIN))
 	    return 1;
@@ -953,6 +966,9 @@ EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event,
     imapurl_toURL(url, &imapurl);
     FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
 
+    FILL_STRING_PARAM(event, EVENT_MBTYPE,
+	xstrdup(mboxlist_mbtype_to_string(mailbox->mbtype)));
+
     /* mailbox related events also require mailboxID */
     if (event->type & MAILBOX_EVENTS) {
 	FILL_STRING_PARAM(event, EVENT_MAILBOX_ID, xstrdup(url));
@@ -1012,6 +1028,9 @@ void mboxevent_extract_old_mailbox(struct mboxevent *event,
 
 static const char *event_to_name(enum event_type type)
 {
+    if (type == (EVENT_MESSAGE_NEW|EVENT_CALENDAR))
+	return "MessageNew";
+
     switch (type) {
     case EVENT_MESSAGE_APPEND:
 	return "MessageAppend";

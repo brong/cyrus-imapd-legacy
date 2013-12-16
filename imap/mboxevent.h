@@ -79,7 +79,8 @@ enum event_type {
     EVENT_MAILBOX_DELETE      = (1<<16),
     EVENT_MAILBOX_RENAME      = (1<<17),
     EVENT_MAILBOX_SUBSCRIBE   = (1<<18),
-    EVENT_MAILBOX_UNSUBSCRIBE = (1<<19)
+    EVENT_MAILBOX_UNSUBSCRIBE = (1<<19),
+    EVENT_CALENDAR            = (1<<20)
 };
 
 /* The number representing the last available position in
@@ -114,6 +115,9 @@ enum event_param {
     EVENT_PID,
     EVENT_USER,
     EVENT_MESSAGE_SIZE,
+    EVENT_MBTYPE,
+    EVENT_DAV_FILENAME,
+    EVENT_DAV_UID,
     EVENT_ENVELOPE,
     EVENT_BODYSTRUCTURE,
     EVENT_MESSAGE_CONTENT
