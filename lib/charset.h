@@ -87,6 +87,8 @@ extern char *charset_encode_mimebody(const char *msg_base, size_t len,
 extern char *charset_to_utf8(const char *msg_base, size_t len, charset_index charset, int encoding);
 extern int charset_search_mimeheader(const char *substr, comp_pat *pat, const char *s, int flags);
 
+extern char *charset_encode_mimeheader(const char *header, size_t len);
+
 /* Definitions for charset_extract */
 
 /* Extract the body text for the message denoted by 'uid', convert its
