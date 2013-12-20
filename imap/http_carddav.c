@@ -59,6 +59,7 @@
 #include "acl.h"
 #include "append.h"
 #include "carddav_db.h"
+#include "charset.h"
 #include "global.h"
 #include "hash.h"
 #include "httpd.h"
@@ -984,6 +985,7 @@ static int store_resource(struct transaction_t *txn, VObject *vcard,
     struct stagemsg *stage;
     const char *version = NULL, *uid = NULL, *fullname = NULL, *nickname = NULL;
     uquota_t size;
+    char *header;
     uint32_t expunge_uid = 0;
     time_t now = time(NULL);
     char datestr[80];
@@ -1062,9 +1064,13 @@ static int store_resource(struct transaction_t *txn, VObject *vcard,
     /* Create iMIP header for resource */
 
     /* XXX  This needs to be done via an LDAP/DB lookup */
-    fprintf(f, "From: %s <>\r\n", proxy_userid);
+    header = charset_encode_mimeheader(proxy_userid, 0);
+    fprintf(f, "From: %s <>\r\n", header);
+    free(header);
 
-    fprintf(f, "Subject: %s\r\n", fullname);
+    header = charset_encode_mimeheader(fullname, 0);
+    fprintf(f, "Subject: %s\r\n", header);
+    free(header);
 
     rfc822date_gen(datestr, sizeof(datestr), now);  /* Use REV? */
 
