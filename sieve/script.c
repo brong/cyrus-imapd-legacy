@@ -350,8 +350,8 @@ static int sieve_removeflag(strarray_t *imapflags, const char *flag)
 }
 
 static int send_notify_callback(sieve_interp_t *interp,
-				void *message_context, 
-				void * script_context, notify_list_t *notify, 
+				void *message_context,
+				void *script_context, notify_list_t *notify,
 				char *actions_string __attribute__((unused)),
 				const char **errmsg)
 {
@@ -380,12 +380,15 @@ static int send_notify_callback(sieve_interp_t *interp,
     /* buf_appendcstr(&out, actions_string); */
 
     nc.message = buf_cstring(&out);
+    nc.fname = NULL;
+    if (interp->getfname)
+	interp->getfname(message_context, &nc.fname);
 
     ret = interp->notify(&nc,
 			 interp->interp_context,
 			 script_context,
 			 message_context,
-			 errmsg);    
+			 errmsg);
 
     buf_free(&out);
 
