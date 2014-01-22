@@ -1372,3 +1372,8 @@ static int append_addseen(struct mailbox *mailbox,
     seen_close(&seendb);
     return r;
 }
+
+EXPORTED const char *append_stagefname(struct stagemsg *stage)
+{
+    return strarray_nth(&stage->parts, 0);
+}
