@@ -2498,8 +2498,8 @@ EXPORTED int annotate_state_write(annotate_state_t *state,
 static int annotate_canon_value(struct buf *value, int type)
 {
     char *p = NULL;
-    unsigned long uwhatever;
-    long whatever;
+    unsigned long uwhatever = 0;
+    long whatever = 0;
 
     /* check for NIL */
     if (value->s == NULL)
