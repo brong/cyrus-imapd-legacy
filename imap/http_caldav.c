@@ -1546,13 +1546,6 @@ static int caldav_put(struct transaction_t *txn,
 	    struct caldav_data *cdata;
 	    struct sched_param sparam;
 	    icalcomponent *oldical = NULL;
-	if ((namespace_calendar.allow & ALLOW_CAL_SCHED) && organizer &&
-	     icalcomponent_get_first_property(comp, ICAL_ATTENDEE_PROPERTY)) {
-	    /* Scheduling object resource */
-	    const char *userid;
-	    struct caldav_data *cdata;
-	    struct sched_param sparam;
-	    icalcomponent *oldical = NULL;
 
 	    /* Construct userid corresponding to mailbox */
 	    userid = mboxname_to_userid(txn->req_tgt.mboxname);
