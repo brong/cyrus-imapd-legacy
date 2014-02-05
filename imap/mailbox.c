@@ -3112,14 +3112,11 @@ static int mailbox_update_indexes(struct mailbox *mailbox,
 {
     int r = 0;
 
-    if (mailbox->mbtype & MBTYPES_DAV) {
-	r = mailbox_update_dav(mailbox, old, new);
-	if (r) return r;
-    }
-    else {
-	r = mailbox_update_conversations(mailbox, old, new);
-	if (r) return r;
-    }
+    r = mailbox_update_dav(mailbox, old, new);
+    if (r) return r;
+
+    r = mailbox_update_conversations(mailbox, old, new);
+    if (r) return r;
 
     /* NOTE - we do these last, once the counts are updated */
 
@@ -4256,6 +4253,8 @@ EXPORTED int mailbox_add_dav(struct mailbox *mailbox)
 	r = mailbox_update_dav(mailbox, NULL, &record);
 	if (r) return r;
     }
+
+    return 0;
 }
 
 EXPORTED int mailbox_add_conversations(struct mailbox *mailbox)
