@@ -4530,6 +4530,8 @@ EXPORTED int mailbox_add_dav(struct mailbox *mailbox)
 	r = mailbox_update_dav(mailbox, NULL, &record);
 	if (r) return r;
     }
+
+    return 0;
 }
 
 EXPORTED int mailbox_add_conversations(struct mailbox *mailbox)
