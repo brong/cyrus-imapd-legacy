@@ -1635,8 +1635,14 @@ EXPORTED int propfind_curprin(const xmlChar *name, xmlNsPtr ns,
 
     if (fctx->userid) {
 	buf_reset(&fctx->buf);
-	buf_printf(&fctx->buf, "%s/user/%s/",
-		   namespace_principal.prefix, fctx->userid);
+	if (strchr(fctx->userid, '@')) {
+	    buf_printf(&fctx->buf, "%s/user/%s/",
+		    namespace_principal.prefix, fctx->userid);
+	}
+	else {
+	    buf_printf(&fctx->buf, "%s/user/%s@%s/",
+		    namespace_principal.prefix, fctx->userid, httpd_extradomain);
+	}
 	xml_add_href(node, NULL, buf_cstring(&fctx->buf));
     }
     else {
