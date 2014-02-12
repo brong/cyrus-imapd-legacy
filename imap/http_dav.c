@@ -2211,7 +2211,7 @@ int meth_acl(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open mailbox for writing */
-    r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_EXCLUSIVE);
+    r = mailbox_open_iwl(txn->req_tgt.mboxname, &mailbox);
     if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
@@ -2441,7 +2441,7 @@ int meth_acl(struct transaction_t *txn, void *params)
   done:
     buf_free(&acl);
     if (indoc) xmlFreeDoc(indoc);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
 
     return ret;
 }
@@ -2602,7 +2602,8 @@ int meth_copy(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open dest mailbox for reading */
-    if ((r = mailbox_open_irl(dest_tgt.mboxname, &dest_mbox))) {
+    r = mailbox_open_irl(dest_tgt.mboxname, &dest_mbox);
+    if (r) {
 	syslog(LOG_ERR, "mailbox_open_irl(%s) failed: %s",
 	       dest_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -2634,7 +2635,8 @@ int meth_copy(struct transaction_t *txn, void *params)
     }
 
     /* Open source mailbox for reading */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &src_mbox, LOCK_SHARED))) {
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &src_mbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -2746,9 +2748,9 @@ int meth_copy(struct transaction_t *txn, void *params)
     }
 
     if (dest_davdb) cparams->davdb.close_db(dest_davdb);
-    if (dest_mbox) mailbox_close(&dest_mbox);
+    mailbox_close(&dest_mbox);
     if (src_davdb) cparams->davdb.close_db(src_davdb);
-    if (src_mbox) mailbox_unlock_index(src_mbox, NULL);
+    mailbox_close(&src_mbox);
 
     return ret;
 }
@@ -2825,7 +2827,8 @@ int meth_delete(struct transaction_t *txn, void *params)
 	/* DELETE collection */
 
 	/* Open mailbox for reading */
-	if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED))) {
+	r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
+	if (r) {
 	    syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 		   txn->req_tgt.mboxname, error_message(r));
 	    txn->error.desc = error_message(r);
@@ -2860,7 +2863,8 @@ int meth_delete(struct transaction_t *txn, void *params)
     /* DELETE resource */
 
     /* Open mailbox for writing */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_EXCLUSIVE))) {
+    r = mailbox_open_iwl(txn->req_tgt.mboxname, &mailbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -2940,7 +2944,7 @@ int meth_delete(struct transaction_t *txn, void *params)
 
   done:
     if (davdb) dparams->davdb.close_db(davdb);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
 
     if (!r)
 	mboxevent_notify(mboxevent);
@@ -3027,7 +3031,7 @@ int meth_get_dav(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open mailbox for reading */
-    r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED);
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
     if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
@@ -3127,7 +3131,7 @@ int meth_get_dav(struct transaction_t *txn, void *params)
 	txn->error.desc = error_message(r);
 	ret = HTTP_SERVER_ERROR;
     }
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
     free(freeme);
 
     return ret;
@@ -3213,7 +3217,8 @@ int meth_lock(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open mailbox for reading */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED))) {
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -3389,7 +3394,7 @@ int meth_lock(struct transaction_t *txn, void *params)
 
   done:
     if (davdb) lparams->davdb.close_db(davdb);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
     if (outdoc) xmlFreeDoc(outdoc);
     if (indoc) xmlFreeDoc(indoc);
     if (owner) xmlFree(owner);
@@ -4266,7 +4271,8 @@ int meth_put(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open mailbox for reading */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED))) {
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -4371,7 +4377,7 @@ int meth_put(struct transaction_t *txn, void *params)
 
   done:
     if (davdb) pparams->davdb.close_db(davdb);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
 
     return ret;
 }
@@ -4408,7 +4414,8 @@ int report_sync_col(struct transaction_t *txn,
     istate.map = NULL;
 
     /* Open mailbox for reading */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED))) {
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -4588,7 +4595,7 @@ int report_sync_col(struct transaction_t *txn,
 
   done:
     if (istate.map) free(istate.map);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
 
     return ret;
 }
@@ -4871,7 +4878,8 @@ int meth_unlock(struct transaction_t *txn, void *params)
     /* Local Mailbox */
 
     /* Open mailbox for reading */
-    if ((r = http_mailbox_open(txn->req_tgt.mboxname, &mailbox, LOCK_SHARED))) {
+    r = mailbox_open_irl(txn->req_tgt.mboxname, &mailbox);
+    if (r) {
 	syslog(LOG_ERR, "http_mailbox_open(%s) failed: %s",
 	       txn->req_tgt.mboxname, error_message(r));
 	txn->error.desc = error_message(r);
@@ -4964,7 +4972,7 @@ int meth_unlock(struct transaction_t *txn, void *params)
 
   done:
     if (davdb) lparams->davdb.close_db(davdb);
-    if (mailbox) mailbox_unlock_index(mailbox, NULL);
+    mailbox_close(&mailbox);
 
     return ret;
 }
