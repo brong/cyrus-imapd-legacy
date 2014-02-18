@@ -921,7 +921,7 @@ static int mailbox_open_advanced(const char *name,
 	    return IMAP_MAILBOX_LOCKED;
 	/* can't reuse an already locked index */
 	if (listitem->m.index_locktype)
-	    return IMAP_MAILBOX_LOCKED;   
+	    return IMAP_MAILBOX_LOCKED;
 
 	listitem->nopen++;
 	mailbox = &listitem->m;
@@ -970,19 +970,7 @@ static int mailbox_open_advanced(const char *name,
     }
 
 lockindex:
-    /* this will open, map and parse the header file */
-    r = mailbox_lock_index_internal(mailbox, index_locktype);
-    if (r) {
-	syslog(LOG_ERR, "IOERROR: locking index %s: %s",
-	       mailbox->name, error_message(r));
-	goto done;
-    }
-
-    /* oops, a race, it got deleted meanwhile.  That's OK */
-    if (mailbox->i.options & OPT_MAILBOX_DELETED) {
-	r = IMAP_MAILBOX_NONEXISTENT;
-	goto done;
-    }
+    r = mailbox_lock_index(mailbox, index_locktype);
 
 done:
     if (r) mailbox_close(&mailbox);
@@ -1723,9 +1711,6 @@ restart:
 	    mailbox->is_readonly = 0;
 	    r = mailbox_open_index(mailbox);
 	}
-	/* XXX - this could be handled out a layer, but we always
-	 * need to have a locked conversations DB */
-	if (!r) r = mailbox_lock_conversations(mailbox);
 	if (!r) r = lock_blocking(mailbox->index_fd, index_fname);
     }
     else if (locktype == LOCK_SHARED) {
@@ -1846,7 +1831,16 @@ restart:
 
 EXPORTED int mailbox_lock_index(struct mailbox *mailbox, int locktype)
 {
-    int r = mailbox_lock_index_internal(mailbox, locktype);
+    int r = 0;
+
+    /* XXX: only lock convdb if we're in read-write mode.  This is kinda
+     * bogus really, but there's no way to get a read lock on convdb */
+    if (locktype != LOCK_SHARED) {
+	r = mailbox_lock_conversations(mailbox);
+	if (r) return r;
+    }
+
+    r = mailbox_lock_index_internal(mailbox, locktype);
     if (r) return r;
 
     /* otherwise, sanity checks for regular use, but not for internal
