@@ -898,7 +898,12 @@ static int caldav_delete_sched(struct transaction_t *txn,
 	prop = icalcomponent_get_first_property(comp, ICAL_ORGANIZER_PROPERTY);
 	organizer = icalproperty_get_organizer(prop);
 
-	if (caladdress_lookup(organizer, &sparam)) {
+	r = caladdress_lookup(organizer, &sparam);
+	if (r == HTTP_NOT_FOUND) {
+	    r = 0;
+	    goto done;
+	}
+	if (r) {
 	    syslog(LOG_ERR,
 		   "meth_delete: failed to process scheduling message in %s"
 		   " (org=%s, att=%s)",
@@ -1547,6 +1552,7 @@ static int caldav_put(struct transaction_t *txn,
 	    struct caldav_data *cdata;
 	    struct sched_param sparam;
 	    icalcomponent *oldical = NULL;
+	    int r;
 
 	    /* Construct userid corresponding to mailbox */
 	    userid = mboxname_to_userid(txn->req_tgt.mboxname);
@@ -1569,7 +1575,10 @@ static int caldav_put(struct transaction_t *txn,
 	    }
 
 	    /* Lookup the organizer */
-	    if (caladdress_lookup(organizer, &sparam)) {
+	    r = caladdress_lookup(organizer, &sparam);
+	    if (r == HTTP_NOT_FOUND)
+		break;  /* not a local organiser?  Just skip it */
+	    if (r) {
 		syslog(LOG_ERR,
 		       "meth_put: failed to process scheduling message in %s"
 		       " (org=%s)",
@@ -1583,7 +1592,6 @@ static int caldav_put(struct transaction_t *txn,
 		/* Update existing object */
 		struct index_record record;
 		struct buf msg_buf = BUF_INITIALIZER;
-		int r;
 
 		/* Load message containing the resource and parse iCal data */
 		r = mailbox_find_index_record(mailbox, cdata->dav.imap_uid, &record, NULL);
@@ -3392,21 +3400,17 @@ static int store_resource(struct transaction_t *txn, icalcomponent *ical,
 
 int caladdress_lookup(const char *addr, struct sched_param *param)
 {
-    char *p;
+    const char *userid = addr;
     int islocal = 1, found = 1;
-    static char userid[MAX_MAILBOX_BUFFER];
 
     memset(param, 0, sizeof(struct sched_param));
 
     if (!addr) return HTTP_NOT_FOUND;
 
-    p = (char *) addr;
-    if (!strncmp(addr, "mailto:", 7)) p += 7;
+    if (!strncasecmp(userid, "mailto:", 7)) userid += 7;
 
     /* XXX  Do LDAP/DB/socket lookup to see if user is local */
     /* XXX  Hack until real lookup stuff is written */
-    strlcpy(userid, p, sizeof(userid));
-    if ((p = strchr(userid, '@'))) *p++ = '\0';
 
     if (islocal) {
 	/* User is in a local domain */
@@ -3416,7 +3420,7 @@ int caladdress_lookup(const char *addr, struct sched_param *param)
 	struct mboxname_parts parts;
 
 	if (!found) return HTTP_NOT_FOUND;
-	else param->userid = userid;
+	else param->userid = xstrdupnull(userid); /* XXX - memleak */
 
 	/* Lookup user's cal-home-set to see if its on this server */
 
@@ -3426,8 +3430,9 @@ int caladdress_lookup(const char *addr, struct sched_param *param)
 
 	r = http_mlookup(mailboxname, &mbentry, NULL);
 	if (r) {
-	    syslog(LOG_ERR, "mlookup(%s) failed: %s",
-		   mailboxname, error_message(r));
+	    if (r != IMAP_MAILBOX_NONEXISTENT)
+		syslog(LOG_ERR, "mlookup(%s) failed: %s",
+		       mailboxname, error_message(r));
 	    mboxname_free_parts(&parts);
 
 	    switch (r) {
