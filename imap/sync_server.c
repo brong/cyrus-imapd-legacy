@@ -1029,16 +1029,14 @@ static void cmd_restart(struct sync_reserve_list **reserve_listp, int re_alloc)
     struct sync_reserve *res;
     struct sync_reserve_list *l = *reserve_listp;
     struct sync_msgid *msg;
-    const char *fname;
     int hash_size = l->hash_size;
     struct partition_list *p, *pl = NULL;
 
     for (res = l->head; res; res = res->next) {
 	for (msg = res->list->head; msg; msg = msg->next) {
+	    if (!msg->fname) continue;
 	    pl = partition_list_add(res->part, pl);
-
-	    fname = dlist_reserve_path(res->part, &msg->guid);
-	    unlink(fname);
+	    unlink(msg->fname);
 	}
     }
     sync_reserve_list_free(reserve_listp);
@@ -1049,6 +1047,11 @@ static void cmd_restart(struct sync_reserve_list **reserve_listp, int re_alloc)
 
 	snprintf(buf, MAX_MAILBOX_PATH, "%s/sync./%lu",
 		 config_partitiondir(p->name), (unsigned long)getpid());
+	rmdir(buf);
+
+	/* and the archive partition too */
+	snprintf(buf, MAX_MAILBOX_PATH, "%s/sync./%lu",
+		 config_archivepartitiondir(p->name), (unsigned long)getpid());
 	rmdir(buf);
     }
     partition_list_free(pl);
@@ -1077,6 +1080,8 @@ static void reserve_folder(const char *part, const char *mboxname,
 
     if (r) return;
 
+    /* XXX - this is just on the replica, but still - we shouldn't hold
+     * the lock for so long */
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	/* ok to skip errors here - just means they'll be uploaded
 	 * rather than reserved */
@@ -1097,7 +1102,7 @@ static void reserve_folder(const char *part, const char *mboxname,
 
 	/* Attempt to reserve this message */
 	mailbox_msg_path = mailbox_record_fname(mailbox, &record);
-	stage_msg_path = dlist_reserve_path(part, &record.guid);
+	stage_msg_path = dlist_reserve_path(part, record.system_flags & FLAG_ARCHIVED, &record.guid);
 
 	/* check that the sha1 of the file on disk is correct */
 	memset(&record2, 0, sizeof(struct index_record));
@@ -1119,6 +1124,9 @@ static void reserve_folder(const char *part, const char *mboxname,
 	    continue;
 	}
 
+	item->size = record.size;
+	item->fname = xstrdup(stage_msg_path); /* track the correct location */
+	item->is_archive = record.system_flags & FLAG_ARCHIVED ? 1 : 0;
 	item->need_upload = 0;
 	part_list->toupload--;
 
@@ -1229,7 +1237,8 @@ static int do_quota(struct dlist *kin)
 /* ====================================================================== */
 
 static int mailbox_compare_update(struct mailbox *mailbox,
-				  struct dlist *kr, int doupdate)
+				  struct dlist *kr, int doupdate,
+				  struct sync_msgid_list *part_list)
 {
     struct index_record mrecord;
     struct index_record rrecord;
@@ -1359,7 +1368,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    if (!doupdate) continue;
 
 	    mrecord.silent = 1;
-	    r = sync_append_copyfile(mailbox, &mrecord, mannots);
+	    r = sync_append_copyfile(mailbox, &mrecord, mannots, part_list);
 	    if (r) {
 		syslog(LOG_ERR, "IOERROR: failed to append file %s %d",
 		       mailbox->name, recno);
@@ -1381,8 +1390,9 @@ out:
     return r;
 }
 
-static int do_mailbox(struct dlist *kin)
+static int do_mailbox(struct dlist *kin, struct sync_reserve_list *reserve_list)
 {
+    struct sync_msgid_list *part_list;
     /* fields from the request */
     const char *uniqueid;
     const char *partition;
@@ -1480,6 +1490,8 @@ static int do_mailbox(struct dlist *kin)
 	goto done;
     }
 
+    part_list = sync_reserve_partlist(reserve_list, mailbox->part);
+
     /* hold the annotate state open */
     mailbox_get_annotate_state(mailbox, ANNOTATE_ANY_UID, &astate);
     /* and make it hold a transaction open */
@@ -1571,7 +1583,7 @@ static int do_mailbox(struct dlist *kin)
 	}
     }
 
-    r = mailbox_compare_update(mailbox, kr, 0);
+    r = mailbox_compare_update(mailbox, kr, 0, part_list);
     if (r) goto done;
 
     /* now we're committed to writing something no matter what happens! */
@@ -1582,9 +1594,6 @@ static int do_mailbox(struct dlist *kin)
 	r = mboxlist_sync_setacls(mboxname, acl);
 	if (r) goto done;
     }
-
-    r = mailbox_compare_update(mailbox, kr, 0);
-    if (r) goto done;
 
     /* take all mailbox (not message) annotations - aka metadata,
      * they're not versioned either */
@@ -1600,7 +1609,7 @@ static int do_mailbox(struct dlist *kin)
 	goto done;
     }
 
-    r = mailbox_compare_update(mailbox, kr, 1);
+    r = mailbox_compare_update(mailbox, kr, 1, part_list);
     if (r) {
 	abort();
 	return r;
@@ -2361,17 +2370,22 @@ static int do_upload(struct dlist *kin, struct sync_reserve_list *reserve_list)
     for (ki = kin->head; ki; ki = ki->next) {
 	struct message_guid *guid;
 	const char *part;
+	size_t size;
+	const char *fname;
 
 	/* XXX - complain more? */
-	if (!dlist_tofile(ki, &part, &guid, NULL, NULL))
+	if (!dlist_tofile(ki, &part, &guid, &size, &fname))
 	    continue;
 
 	part_list = sync_reserve_partlist(reserve_list, part);
 	msgid = sync_msgid_insert(part_list, guid);
-	if (msgid->need_upload) {
-	    msgid->need_upload = 0;
-	    part_list->toupload--;
-	}
+	if (!msgid->need_upload)
+	    continue;
+
+	msgid->size = size;
+	msgid->fname = xstrdup(fname);
+	msgid->need_upload = 0;
+	part_list->toupload--;
     }
 
     return 0;
@@ -2418,7 +2432,7 @@ static void cmd_apply(struct dlist *kin, struct sync_reserve_list *reserve_list)
     else if (!strcmp(kin->name, "ANNOTATION"))
 	r = do_annotation(kin);
     else if (!strcmp(kin->name, "MAILBOX"))
-	r = do_mailbox(kin);
+	r = do_mailbox(kin, reserve_list);
     else if (!strcmp(kin->name, "QUOTA"))
 	r = do_quota(kin);
     else if (!strcmp(kin->name, "SEEN"))
