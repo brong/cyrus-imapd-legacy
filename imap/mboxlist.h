@@ -68,6 +68,11 @@ extern struct db *mbdb;
 #define MBTYPE_NETNEWS (1<<2) /* Netnews Mailbox - NO LONGER USED */
 #define MBTYPE_MOVING (1<<3) /* Mailbox in mid-transfer (part is remotehost!localpart) */
 #define MBTYPE_DELETED (1<<4) /* Mailbox has been deleted, but not yet cleaned up */
+#define MBTYPE_CALENDAR (1<<5) /* Calendar Mailbox */
+#define MBTYPE_ADDRESSBOOK (1<<6) /* Addressbook Mailbox */
+
+#define MBTYPES_DAV (MBTYPE_CALENDAR|MBTYPE_ADDRESSBOOK)
+#define MBTYPES_NONIMAP (MBTYPE_NETNEWS|MBTYPES_DAV)
 
 /* master name of the mailboxes file */
 #define FNAME_MBOXLIST "/mailboxes.db"
@@ -92,6 +97,10 @@ struct mboxlist_entry {
 typedef struct mboxlist_entry mbentry_t;
 
 mbentry_t *mboxlist_entry_create();
+
+EXPORTED int mboxlist_parse_entry(mbentry_t **mbentryptr,
+				  const char *name, size_t namelen,
+				  const char *data, size_t datalen);
 
 void mboxlist_entry_free(mbentry_t **mbentryptr);
 
@@ -142,7 +151,8 @@ int mboxlist_createmailbox(const char *name, int mbtype,
 int mboxlist_createsync(const char *name, int mbtype,
 			const char *partition, 
 			const char *userid, struct auth_state *auth_state,
-			int options, unsigned uidvalidity, const char *acl,
+			int options, unsigned uidvalidity, 
+			modseq_t highestmodseq, const char *acl,
 			const char *uniqueid, struct mailbox **mboxptr);
 
 /* delated delete */

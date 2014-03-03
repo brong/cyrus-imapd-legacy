@@ -134,7 +134,7 @@ static int fixmbox(char *name,
 	if (userid) {
 	    struct buf buf = BUF_INITIALIZER;
 	    buf_setcstr(&buf, mbentry->legacy_specialuse);
-	    annotatemore_write(name, "/specialuse", userid, &buf);
+	    annotatemore_rawwrite(name, "/specialuse", userid, &buf);
 	    buf_free(&buf);
 	}
 	free(mbentry->legacy_specialuse);
@@ -329,27 +329,23 @@ int main(int argc, char *argv[])
 
 	    if (!rotated) {
 		/* rotate the backup directories -- ONE time only */
-		char *tail;
+		char *file;
 		DIR *dirp;
 		struct dirent *dirent;
 
-		tail = backup2 + strlen(backup2);
-
 		/* remove db.backup2 */
 		dirp = opendir(backup2);
-		strcat(tail++, "/");
 
 		if (dirp) {
 		    while ((dirent = readdir(dirp)) != NULL) {
 			if (dirent->d_name[0] == '.') continue;
-
-			strcpy(tail, dirent->d_name);
-			unlink(backup2);
+			file = strconcat(backup2, "/", dirent->d_name, (char *)NULL);
+			unlink(file);
+			free(file);
 		    }
 
 		    closedir(dirp);
 		}
-		tail[-1] = '\0';
 		r2 = rmdir(backup2);
 
 		/* move db.backup1 to db.backup2 */

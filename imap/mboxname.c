@@ -42,6 +42,7 @@
 
 #include <config.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
@@ -55,6 +56,9 @@
 #include "global.h"
 #include "imap/imap_err.h"
 #include "mailbox.h"
+#include "map.h"
+#include "retry.h"
+#include "user.h"
 #include "util.h"
 #include "xmalloc.h"
 
@@ -151,8 +155,11 @@ static void remove_lockitem(struct mboxlocklist *remitem)
 		previtem->next = item->next;
 	    else
 		open_mboxlocks = item->next;
-	    if (item->l.lock_fd != -1)
+	    if (item->l.lock_fd != -1) {
+		if (item->l.locktype)
+		    lock_unlock(item->l.lock_fd, item->l.name);
 		close(item->l.lock_fd);
+	    }
 	    free(item->l.name);
 	    free(item);
 	    return;
@@ -165,12 +172,17 @@ static void remove_lockitem(struct mboxlocklist *remitem)
 
 /* name locking support */
 
-HIDDEN int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
-		  int locktype)
+EXPORTED int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
+		  int locktype_and_flags)
 {
     const char *fname;
     int r = 0;
     struct mboxlocklist *lockitem;
+    int nonblock;
+    int locktype;
+
+    nonblock = !!(locktype_and_flags & LOCK_NONBLOCK);
+    locktype = (locktype_and_flags & ~LOCK_NONBLOCK);
 
     fname = mboxname_lockpath(mboxname);
     if (!fname)
@@ -180,8 +192,6 @@ HIDDEN int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
 
     /* already open?  just use this one */
     if (lockitem) {
-	if (locktype == LOCK_NONBLOCKING)
-	    locktype = LOCK_EXCLUSIVE;
 	/* can't change locktype! */
 	if (lockitem->l.locktype != locktype)
 	    return IMAP_MAILBOX_LOCKED;
@@ -208,23 +218,12 @@ HIDDEN int mboxname_lock(const char *mboxname, struct mboxlock **mboxlockptr,
 	goto done;
     }
 
-    switch (locktype) {
-    case LOCK_SHARED:
-	r = lock_shared(lockitem->l.lock_fd, fname);
-	if (!r) lockitem->l.locktype = LOCK_SHARED;
-	break;
-    case LOCK_EXCLUSIVE:
-	r = lock_blocking(lockitem->l.lock_fd, fname);
-	if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
-	break;
-    case LOCK_NONBLOCKING:
-	r = lock_nonblocking(lockitem->l.lock_fd, fname);
-	if (r == -1) r = IMAP_MAILBOX_LOCKED;
-	else if (!r) lockitem->l.locktype = LOCK_EXCLUSIVE;
-	break;
-    default:
-	fatal("unknown lock type", EC_SOFTWARE);
-    }
+    r = lock_setlock(lockitem->l.lock_fd,
+		     locktype == LOCK_EXCLUSIVE,
+		     nonblock, fname);
+    if (!r) lockitem->l.locktype = locktype;
+    else if (errno == EWOULDBLOCK) r = IMAP_MAILBOX_LOCKED;
+    else r = errno;
 
 done:
     if (r) remove_lockitem(lockitem);
@@ -233,7 +232,7 @@ done:
     return r;
 }
 
-HIDDEN void mboxname_release(struct mboxlock **mboxlockptr)
+EXPORTED void mboxname_release(struct mboxlock **mboxlockptr)
 {
     struct mboxlocklist *lockitem;
     struct mboxlock *lock = *mboxlockptr;
@@ -260,6 +259,48 @@ HIDDEN void mboxname_release(struct mboxlock **mboxlockptr)
  * allow space for DELETED mailboxes and moving the domain from
  * one end to the other and such.  Yay flexibility.
  */
+
+EXPORTED int mboxname_parts_to_internal(struct mboxname_parts *parts,
+					char *result)
+{
+    char *p = result;
+    size_t sz = MAX_MAILBOX_NAME;
+    size_t len;
+    const char *dp = config_getstring(IMAPOPT_DELETEDPREFIX);
+    const char *pf = "";
+
+    if (parts->domain) {
+	len = snprintf(p, sz, "%s!", parts->domain);
+	p += len;
+	sz -= len;
+	if (!sz) return IMAP_MAILBOX_BADNAME;
+    }
+
+    if (parts->is_deleted) {
+	len = snprintf(p, sz, "%s%s", pf, dp);
+	p += len;
+	sz -= len;
+	if (!sz) return IMAP_MAILBOX_BADNAME;
+	pf = ".";
+    }
+
+    if (parts->userid) {
+	len = snprintf(p, sz, "%suser.%s", pf, parts->userid);
+	p += len;
+	sz -= len;
+	if (!sz) return IMAP_MAILBOX_BADNAME;
+	pf = ".";
+    }
+
+    if (parts->box) {
+	len = snprintf(p, sz, "%s%s", pf, parts->box);
+	p += len;
+	sz -= len;
+	if (!sz) return IMAP_MAILBOX_BADNAME;
+    }
+
+    return 0;
+}
 
 /* Handle conversion from the standard namespace to the internal namespace */
 static int mboxname_tointernal(struct namespace *namespace, const char *name,
@@ -699,7 +740,7 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
     return 0;
 }
 
-HIDDEN struct namespace *mboxname_get_adminnamespace()
+EXPORTED struct namespace *mboxname_get_adminnamespace()
 {
     static struct namespace ns;
     if (!admin_namespace) {
@@ -864,6 +905,74 @@ EXPORTED int mboxname_isdeletedmailbox(const char *name, time_t *timestampp)
 }
 
 /*
+ * If (internal) mailbox 'name' is a CALENDAR mailbox
+ * returns boolean
+ */
+int mboxname_iscalendarmailbox(const char *name, int mbtype)
+{
+    static const char *calendarprefix = NULL;
+    static int calendarprefix_len = 0;
+    const char *p;
+    const char *start = name;
+
+    if (mbtype & MBTYPE_CALENDAR) return 1;  /* Only works on backends */
+
+    if (!calendarprefix) {
+	calendarprefix = config_getstring(IMAPOPT_CALENDARPREFIX);
+	if (calendarprefix) calendarprefix_len = strlen(calendarprefix);
+    }
+
+    /* if the prefix is blank, then no calendars */
+    if (!calendarprefix_len) return 0;
+
+    /* step past the domain part */
+    if (config_virtdomains && (p = strchr(start, '!')))
+	start = p + 1;
+
+    /* step past the user part */
+    if (!strncmp(start, "user.", 5) && (p = strchr(start+5, '.')))
+	start = p + 1;
+
+    return ((!strncmp(start, calendarprefix, calendarprefix_len) &&
+	     (start[calendarprefix_len] == '\0' ||
+	      start[calendarprefix_len] == '.')) ? 1 : 0);
+}
+
+/*
+ * If (internal) mailbox 'name' is a ADDRESSBOOK mailbox
+ * returns boolean
+ */
+int mboxname_isaddressbookmailbox(const char *name, int mbtype)
+{
+    static const char *addressbookprefix = NULL;
+    static int addressbookprefix_len = 0;
+    const char *p;
+    const char *start = name;
+
+    if (mbtype & MBTYPE_ADDRESSBOOK) return 1;  /* Only works on backends */
+
+    if (!addressbookprefix) {
+	addressbookprefix = config_getstring(IMAPOPT_ADDRESSBOOKPREFIX);
+	if (addressbookprefix) addressbookprefix_len = strlen(addressbookprefix);
+    }
+
+    /* if the prefix is blank, then no addressbooks */
+    if (!addressbookprefix_len) return 0;
+
+    /* step past the domain part */
+    if (config_virtdomains && (p = strchr(start, '!')))
+	start = p + 1;
+
+    /* step past the user part */
+    if (!strncmp(start, "user.", 5) && (p = strchr(start+5, '.')))
+	start = p + 1;
+
+    return ((!strncmp(start, addressbookprefix, addressbookprefix_len) &&
+	     (start[addressbookprefix_len] == '\0' ||
+	      start[addressbookprefix_len] == '.')) ? 1 : 0);
+}
+
+/*
  * Translate (internal) inboxname into corresponding userid.
  */
 EXPORTED const char *mboxname_to_userid(const char *mboxname)
@@ -1004,7 +1113,7 @@ EXPORTED int mboxname_to_parts(const char *mboxname, struct mboxname_parts *part
     return 0;
 }
 
-int mboxname_userid_to_parts(const char *userid, struct mboxname_parts *parts)
+EXPORTED int mboxname_userid_to_parts(const char *userid, struct mboxname_parts *parts)
 {
     char *b, *e;    /* beginning and end of string parts */
 
@@ -1025,7 +1134,7 @@ int mboxname_userid_to_parts(const char *userid, struct mboxname_parts *parts)
     return 0;
 }
 
-HIDDEN void mboxname_init_parts(struct mboxname_parts *parts)
+EXPORTED void mboxname_init_parts(struct mboxname_parts *parts)
 {
     memset(parts, 0, sizeof(*parts));
 }
@@ -1304,7 +1413,46 @@ EXPORTED char *mboxname_datapath(const char *partition, const char *mboxname, un
     return pathresult;
 }
 
+/* note: mboxname must be internal */
+EXPORTED char *mboxname_archivepath(const char *partition, const char *mboxname, unsigned long uid)
+{
+    static char pathresult[MAX_MAILBOX_PATH+1];
+    const char *root;
+
+    if (!partition) return NULL;
+
+    root = config_archivepartitiondir(partition);
+    if (!root) root = config_partitiondir(partition);
+    if (!root) return NULL;
+
+    /* XXX - dedup with datapath above - but make sure to keep the results
+     * in separate buffers and/or audit the callers */
+    if (!mboxname) {
+	xstrncpy(pathresult, root, MAX_MAILBOX_PATH);
+	return pathresult;
+    }
+
+    mboxname_hash(pathresult, MAX_MAILBOX_PATH, root, mboxname);
+
+    if (uid) {
+	int len = strlen(pathresult);
+	snprintf(pathresult + len, MAX_MAILBOX_PATH - len, "/%lu.", uid);
+    }
+    pathresult[MAX_MAILBOX_PATH] = '\0';
+
+    if (strlen(pathresult) == MAX_MAILBOX_PATH)
+	return NULL;
+
+    return pathresult;
+}
+
 char *mboxname_lockpath(const char *mboxname)
+{
+    return mboxname_lockpath_suffix(mboxname, ".lock");
+}
+
+char *mboxname_lockpath_suffix(const char *mboxname,
+			       const char *suffix)
 {
     static char lockresult[MAX_MAILBOX_PATH+1];
     char basepath[MAX_MAILBOX_PATH+1];
@@ -1319,7 +1467,7 @@ char *mboxname_lockpath(const char *mboxname)
     mboxname_hash(lockresult, MAX_MAILBOX_PATH, root, mboxname);
 
     len = strlen(lockresult);
-    snprintf(lockresult + len, MAX_MAILBOX_PATH - len, "%s", ".lock");
+    snprintf(lockresult + len, MAX_MAILBOX_PATH - len, "%s", suffix);
     lockresult[MAX_MAILBOX_PATH] = '\0';
 
     if (strlen(lockresult) == MAX_MAILBOX_PATH)
@@ -1333,6 +1481,7 @@ EXPORTED char *mboxname_metapath(const char *partition, const char *mboxname,
 {
     static char metaresult[MAX_MAILBOX_PATH];
     int metaflag = 0;
+    int archiveflag = 0;
     const char *root = NULL;
     const char *filename = NULL;
     char confkey[256];
@@ -1372,6 +1521,17 @@ EXPORTED char *mboxname_metapath(const char *partition, const char *mboxname,
 	metaflag = IMAP_ENUM_METAPARTITION_FILES_ANNOTATIONS;
 	filename = FNAME_ANNOTATIONS;
 	break;
+    case META_DAV:
+	snprintf(confkey, 256, "metadir-dav-%s", partition);
+	metaflag = IMAP_ENUM_METAPARTITION_FILES_DAV;
+	filename = FNAME_DAV;
+	break;
+    case META_ARCHIVECACHE:
+	snprintf(confkey, 256, "metadir-archivecache-%s", partition);
+	metaflag = IMAP_ENUM_METAPARTITION_FILES_ARCHIVECACHE;
+	filename = FNAME_CACHE;
+	archiveflag = 1;
+	break;
     case 0:
 	break;
     default:
@@ -1383,6 +1543,9 @@ EXPORTED char *mboxname_metapath(const char *partition, const char *mboxname,
 
     if (!root && (!metaflag || (config_metapartition_files & metaflag)))
 	root = config_metapartitiondir(partition);
+
+    if (!root && archiveflag)
+	root = config_archivepartitiondir(partition);
 
     if (!root)
 	root = config_partitiondir(partition);
@@ -1458,7 +1621,7 @@ EXPORTED int mboxname_make_parent(char *name)
 
 /* NOTE: caller must free, which is different from almost every
  * other interface in the whole codebase.  Grr */
-HIDDEN char *mboxname_conf_getpath(struct mboxname_parts *parts, const char *suffix)
+EXPORTED char *mboxname_conf_getpath(struct mboxname_parts *parts, const char *suffix)
 {
     char *fname = NULL;
     char c[2], d[2];
@@ -1500,3 +1663,188 @@ HIDDEN char *mboxname_conf_getpath(struct mboxname_parts *parts, const char *suf
 
     return fname;
 }
+
+static bit64 mboxname_readval(const char *mboxname, const char *metaname)
+{
+    bit64 fileval = 0;
+    struct mboxname_parts parts;
+    char *fname = NULL;
+    const char *base = NULL;
+    size_t len = 0;
+    int fd = -1;
+
+    mboxname_to_parts(mboxname, &parts);
+
+    fname = mboxname_conf_getpath(&parts, metaname);
+    if (!fname) goto done;
+
+    fd = open(fname, O_RDONLY);
+
+    /* read the value - note: we don't care if it's being rewritten,
+     * we'll still get a consistent read on either the old or new
+     * value */
+    if (fd != -1) {
+	struct stat sbuf;
+	if (fstat(fd, &sbuf)) {
+	    syslog(LOG_ERR, "IOERROR: failed to stat fd %s: %m", fname);
+	    goto done;
+	}
+	map_refresh(fd, 1, &base, &len, sbuf.st_size, metaname, mboxname);
+	if (len > 0)
+	    parsenum(base, NULL, len, &fileval);
+	map_free(&base, &len);
+    }
+
+ done:
+    if (fd != -1) close(fd);
+    mboxname_free_parts(&parts);
+    free(fname);
+    return fileval;
+}
+
+/* XXX - inform about errors?  Any error causes the value of at least
+   last+1 to be returned.  An error only on writing causes
+   max(last, fileval) + 1 to still be returned */
+static bit64 mboxname_setval(const char *mboxname, const char *metaname,
+			     bit64 last, int add)
+{
+    int fd = -1;
+    int newfd = -1;
+    char *fname = NULL;
+    char newfname[MAX_MAILBOX_PATH];
+    struct stat sbuf, fbuf;
+    const char *base = NULL;
+    size_t len = 0;
+    bit64 fileval = 0;
+    bit64 retval = last + add;
+    char numbuf[30];
+    struct mboxname_parts parts;
+    int n;
+
+    mboxname_to_parts(mboxname, &parts);
+
+    fname = mboxname_conf_getpath(&parts, metaname);
+    if (!fname) goto done;
+
+    /* get a blocking lock on fd */
+    for (;;) {
+	fd = open(fname, O_RDWR | O_CREAT, 0644);
+	if (fd == -1) {
+	    /* OK to not exist - try creating the directory first */
+	    if (cyrus_mkdir(fname, 0755)) goto done;
+	    fd = open(fname, O_RDWR | O_CREAT, 0644);
+	}
+	if (fd == -1) {
+	    syslog(LOG_ERR, "IOERROR: failed to create %s: %m", fname);
+	    goto done;
+	}
+	if (lock_blocking(fd, fname)) {
+	    syslog(LOG_ERR, "IOERROR: failed to lock %s: %m", fname);
+	    goto done;
+	}
+	if (fstat(fd, &sbuf)) {
+	    syslog(LOG_ERR, "IOERROR: failed to stat fd %s: %m", fname);
+	    goto done;
+	}
+	if (stat(fname, &fbuf)) {
+	    syslog(LOG_ERR, "IOERROR: failed to stat file %s: %m", fname);
+	    goto done;
+	}
+	if (sbuf.st_ino == fbuf.st_ino) break;
+	lock_unlock(fd, fname);
+	close(fd);
+	fd = -1;
+    }
+
+    /* read the old value */
+    if (fd != -1) {
+	map_refresh(fd, 1, &base, &len, sbuf.st_size, metaname, mboxname);
+	if (len > 0)
+	    parsenum(base, NULL, len, &fileval);
+	map_free(&base, &len);
+	if (fileval > last) last = fileval;
+    }
+
+    retval = last + add;
+
+    /* unchanged, no need to write */
+    if (retval == fileval)
+	goto done;
+
+    snprintf(newfname, MAX_MAILBOX_PATH, "%s.NEW", fname);
+    newfd = open(newfname, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    if (newfd == -1) {
+	syslog(LOG_ERR, "IOERROR: failed to open for write %s: %m", newfname);
+	goto done;
+    }
+
+    snprintf(numbuf, 30, "%llu", retval);
+    n = retry_write(newfd, numbuf, strlen(numbuf));
+    if (n < 0) {
+	syslog(LOG_ERR, "IOERROR: failed to write %s: %m", newfname);
+	goto done;
+    }
+
+    if (fdatasync(newfd)) {
+	syslog(LOG_ERR, "IOERROR: failed to fdatasync %s: %m", newfname);
+	goto done;
+    }
+
+    close(newfd);
+    newfd = -1;
+
+    if (rename(newfname, fname)) {
+	syslog(LOG_ERR, "IOERROR: failed to rename %s: %m", newfname);
+	goto done;
+    }
+
+ done:
+    if (newfd != -1) close(newfd);
+    if (fd != -1) {
+	lock_unlock(fd, fname);
+	close(fd);
+    }
+    mboxname_free_parts(&parts);
+    free(fname);
+    return retval;
+}
+
+EXPORTED modseq_t mboxname_readmodseq(const char *mboxname)
+{
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+    return (modseq_t)mboxname_readval(mboxname, "modseq");
+}
+
+EXPORTED modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last)
+{
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return last + 1;
+    return (modseq_t)mboxname_setval(mboxname, "modseq", (bit64)last, 1);
+}
+
+EXPORTED modseq_t mboxname_setmodseq(const char *mboxname, modseq_t val)
+{
+    return (modseq_t)mboxname_setval(mboxname, "modseq", (bit64)val, 0);
+}
+
+EXPORTED uint32_t mboxname_readuidvalidity(const char *mboxname)
+{
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return 0;
+    return (uint32_t)mboxname_readval(mboxname, "uidvalidity");
+}
+
+EXPORTED uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last)
+{
+    if (!config_getswitch(IMAPOPT_CONVERSATIONS))
+	return last + 1;
+    return (uint32_t)mboxname_setval(mboxname, "uidvalidity", (bit64)last, 1);
+}
+
+EXPORTED uint32_t mboxname_setuidvalidity(const char *mboxname, uint32_t val)
+{
+    return (uint32_t)mboxname_setval(mboxname, "uidvalidity", (bit64)val, 0);
+}
+
+

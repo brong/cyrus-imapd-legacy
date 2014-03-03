@@ -255,6 +255,10 @@ int parse_upload(struct dlist *kr, struct mailbox *mailbox,
     r = sync_getflags(fl, mailbox, record);
     if (r) return r;
 
+    /* OK if it doesn't have one */
+    record->cid = NULLCONVERSATION;
+    dlist_gethex64(kr, "CID", &record->cid);
+
     /* the ANNOTATIONS list is optional too */
     if (salp && dlist_getlist(kr, "ANNOTATIONS", &fl))
 	decode_annotations(fl, salp);
@@ -432,7 +436,8 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
 					 time_t recenttime,
 					 time_t pop3_last_login,
 					 time_t pop3_show_after,
-					 struct sync_annot_list *annots)
+					 struct sync_annot_list *annots,
+					 modseq_t xconvmodseq)
 {
     struct sync_folder *result = xzmalloc(sizeof(struct sync_folder));
 
@@ -460,6 +465,7 @@ struct sync_folder *sync_folder_list_add(struct sync_folder_list *l,
     result->pop3_last_login = pop3_last_login;
     result->pop3_show_after = pop3_show_after;
     result->annots = annots; /* NOTE: not a copy! */
+    result->xconvmodseq = xconvmodseq;
 
     result->mark     = 0;
     result->reserve  = 0;
@@ -1124,8 +1130,8 @@ void sync_annot_list_add(struct sync_annot_list *l,
 {
     struct sync_annot *item = xzmalloc(sizeof(struct sync_annot));
 
-    item->entry = xstrdup(entry);
-    item->userid = xstrdup(userid);
+    item->entry = xstrdupnull(entry);
+    item->userid = xstrdupnull(userid);
     buf_copy(&item->value, value);
     item->mark = 0;
 
@@ -1147,8 +1153,8 @@ void sync_annot_list_free(struct sync_annot_list **lp)
     current = l->head;
     while (current) {
 	next = current->next;
-	if (current->entry) free(current->entry);
-	if (current->userid) free(current->userid);
+	free(current->entry);
+	free(current->userid);
 	buf_free(&current->value);
 	free(current);
 	current = next;
@@ -1341,7 +1347,7 @@ static int sync_send_file(struct mailbox *mailbox,
 
     /* we'll trust that it exists - if not, we'll bail later,
      * but right now we're under locks, so be fast */
-    fname = mailbox_message_fname(mailbox, record->uid);
+    fname = mailbox_record_fname(mailbox, record);
     if (!fname) return IMAP_MAILBOX_BADNAME;
 
     dlist_setfile(kupload, "MESSAGE", mailbox->part,
@@ -1361,6 +1367,8 @@ int sync_mailbox(struct mailbox *mailbox,
 		 struct dlist *kl, struct dlist *kupload,
 		 int printrecords)
 {
+    struct sync_annot_list *annots = NULL;
+    modseq_t xconvmodseq = 0;
     int r = 0;
 
     dlist_setatom(kl, "UNIQUEID", mailbox->uniqueid);
@@ -1381,6 +1389,20 @@ int sync_mailbox(struct mailbox *mailbox,
     dlist_setnum32(kl, "SYNC_CRC", sync_crc_calc(mailbox, /*force*/0));
     if (mailbox->quotaroot)
 	dlist_setatom(kl, "QUOTAROOT", mailbox->quotaroot);
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_get_xconvmodseq(mailbox, &xconvmodseq);
+	if (!r && xconvmodseq)
+	    dlist_setnum64(kl, "XCONVMODSEQ", xconvmodseq);
+    }
+
+    /* always send mailbox annotations */
+    r = read_annotations(mailbox, NULL, &annots);
+    if (r) goto done;
+
+    if (annots) {
+	encode_annotations(kl, annots);
+	sync_annot_list_free(&annots);
+    }
 
     if (printrecords) {
 	struct index_record record;
@@ -1389,7 +1411,6 @@ int sync_mailbox(struct mailbox *mailbox,
 	uint32_t recno;
 	int send_file;
 	uint32_t prevuid = 0;
-	struct sync_annot_list *annots = NULL;
 
 	for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	    /* we can't send bogus records */
@@ -1439,6 +1460,8 @@ int sync_mailbox(struct mailbox *mailbox,
 	    dlist_setnum32(il, "SIZE", record.size);
 	    dlist_setatom(il, "GUID", message_guid_encode(&record.guid));
 
+	    dlist_sethex64(il, "CID", record.cid);
+
 	    r = read_annotations(mailbox, &record, &annots);
 	    if (r) goto done;
 
@@ -1446,14 +1469,6 @@ int sync_mailbox(struct mailbox *mailbox,
 		encode_annotations(il, annots);
 		sync_annot_list_free(&annots);
 	    }
-	}
-
-	r = read_annotations(mailbox, NULL, &annots);
-	if (r) goto done;
-
-	if (annots) {
-	    encode_annotations(kl, annots);
-	    sync_annot_list_free(&annots);
 	}
     }
 
@@ -1562,7 +1577,7 @@ int sync_append_copyfile(struct mailbox *mailbox,
 	return IMAP_IOERROR;
     }
 
-    destname = mailbox_message_fname(mailbox, record->uid);
+    destname = mailbox_record_fname(mailbox, record);
     cyrus_mkdir(destname, 0755);
     r = mailbox_copyfile(fname, destname, 0);
     if (r) {
@@ -1631,13 +1646,13 @@ void encode_annotations(struct dlist *parent,
     struct dlist *annots = NULL;
     struct dlist *aa;
 
-    if  (!sal)
+    if (!sal)
 	return;
     for (sa = sal->head ; sa ; sa = sa->next) {
 	if (!annots)
 	    annots = dlist_newlist(parent, "ANNOTATIONS");
 
-	aa = dlist_newkvlist(annots, "A");
+	aa = dlist_newkvlist(annots, NULL);
 	dlist_setatom(aa, "ENTRY", sa->entry);
 	dlist_setatom(aa, "USERID", sa->userid);
 	dlist_setmap(aa, "VALUE", sa->value.s, sa->value.len);
@@ -1702,9 +1717,9 @@ static int diff_annotation(const struct sync_annot *a,
 	diff++;
 
     if (!diff)
-	diff = strcmp(a->entry, b->entry);
+	diff = strcmpnull(a->entry, b->entry);
     if (!diff)
-	diff = strcmp(a->userid, b->userid);
+	diff = strcmpnull(a->userid, b->userid);
     if (!diff && diff_value)
 	diff = buf_cmp(&a->value, &b->value);
 

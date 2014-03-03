@@ -44,6 +44,7 @@
 #define INCLUDED_MBOXNAME_H
 
 #include "auth.h"
+#include "util.h"
 
 #define MAX_NAMESPACE_PREFIX 40
 
@@ -86,7 +87,7 @@ struct namespace {
 struct mboxlock {
     char *name;
     int lock_fd;
-    int locktype;
+    int locktype;	/* LOCK_NONE or LOCK_SHARED or LOCK_EXCLUSIVE */
 };
 
 struct mboxname_parts {
@@ -147,12 +148,31 @@ int mboxname_isdeletedmailbox(const char *name, time_t *timestampp);
  */
 int mboxname_to_parts(const char *mboxname, struct mboxname_parts *parts);
 int mboxname_userid_to_parts(const char *userid, struct mboxname_parts *parts);
+
+/*
+ * Create an (internal) mboxname from parts
+ */
+
+int mboxname_parts_to_internal(struct mboxname_parts *parts, char *target);
+
 /*
  * Cleanup up a mboxname_parts structure.
  */
 void mboxname_init_parts(struct mboxname_parts *parts);
 void mboxname_free_parts(struct mboxname_parts *parts);
 
+
+/*
+ * If (internal) mailbox 'name' is a CALENDAR mailbox
+ * returns boolean
+ */
+int mboxname_iscalendarmailbox(const char *name, int mbtype);
+
+/*
+ * If (internal) mailbox 'name' is a ADDRESSBOOK mailbox
+ * returns boolean
+ */
+int mboxname_isaddressbookmailbox(const char *name, int mbtype);
 
 /* check if one mboxname is a parent or same as the other */
 int mboxname_is_prefix(const char *longstr, const char *shortstr);
@@ -181,15 +201,20 @@ void mboxname_hash(char *buf, size_t buf_len,
 		   const char *root,
 		   const char *name);
 
-char *mboxname_datapath(const char *partition, 
+char *mboxname_datapath(const char *partition,
 			const char *mboxname,
 			unsigned long uid);
+
+char *mboxname_archivepath(const char *partition,
+			   const char *mboxname,
+			   unsigned long uid);
 
 char *mboxname_metapath(const char *partition,
 			const char *mboxname,
 			int metafile, int isnew);
 
 char *mboxname_lockpath(const char *mboxname);
+char *mboxname_lockpath_suffix(const char *mboxname, const char *suffix);
 
 /*
  * Return nonzero if (internal) mailbox 'name' consists of legal characters.
@@ -211,4 +236,12 @@ int mboxname_make_parent(char *namebuf);
 
 char *mboxname_conf_getpath(struct mboxname_parts *parts,
 			    const char *suffix);
+
+modseq_t mboxname_readmodseq(const char *mboxname);
+modseq_t mboxname_nextmodseq(const char *mboxname, modseq_t last);
+modseq_t mboxname_setmodseq(const char *mboxname, modseq_t val);
+uint32_t mboxname_readuidvalidity(const char *mboxname);
+uint32_t mboxname_nextuidvalidity(const char *mboxname, uint32_t last);
+uint32_t mboxname_setuidvalidity(const char *mboxname, uint32_t val);
+
 #endif

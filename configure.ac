@@ -45,7 +45,7 @@ dnl
 
 
 AC_INIT([cyrus-imapd], [2.5], [http://bugzilla.cyrusimap.org],,[http://www.cyrusimap.org])
-AC_PREREQ([2.67])
+AC_PREREQ([2.63])
 AC_CONFIG_SRCDIR([imap/imapd.c])
 AC_CONFIG_HEADERS(config.h)
 AC_CONFIG_MACRO_DIR([cmulocal])
@@ -103,6 +103,7 @@ fi
 AC_DEFINE_UNQUOTED(SYSCONFDIR,"$sysconfdir",[Config File Location])
 
 AC_PROG_CC
+AC_PROG_CXX
 AM_PROG_CC_C_O
 AC_PROG_LN_S
 AC_PROG_MAKE_SET
@@ -388,6 +389,60 @@ dnl End SQLite Detection
 
 AM_CONDITIONAL([USE_SQL], [test $HAVE_SQL = 1])
 dnl End SQL DB Detection
+
+dnl
+dnl Search engines - SQUAT
+dnl
+
+AC_ARG_ENABLE(squat,
+	[  --disable-squat         disable Squat support])
+if test "x$enable_squat" != xno ; then
+    AC_DEFINE(USE_SQUAT,[],[Build in Squat support?])
+fi
+AM_CONDITIONAL([USE_SQUAT], [test "${enable_squat}" != "no"])
+
+dnl
+dnl Search engines - Sphinx
+dnl
+
+AC_ARG_ENABLE(sphinx,
+	[  --enable-sphinx         disable Sphinx support],[
+	    enable_sphinx=$enableval
+	],[
+	    enable_sphinx=no
+	])
+if test "x$enable_sphinx" != xno ; then
+    AC_DEFINE(USE_SPHINX,[],[Build in Sphinx support?])
+fi
+AM_CONDITIONAL([USE_SPHINX], [test "${enable_sphinx}" != "no"])
+
+dnl Note that Sphinx' searchd uses the MySQL protocol
+dnl so we need to link with the MySQL client libraries.
+if test "$enable_sphinx" = yes -a "$with_mysql" = no ; then
+    AC_MSG_ERROR([Sphinx requires MySQL but you have not used --with-mysql; disabling Sphinx])
+    enable_sphinx=no
+fi
+
+dnl
+dnl Search engines - Xapian
+dnl
+
+AC_ARG_ENABLE(xapian,
+	[  --enable-xapian         enable Xapian support],[
+	    enable_xapian=$enableval
+	],[
+	    enable_xapian=no
+	])
+if test "x$enable_xapian" != xno ; then
+    XO_LIB_XAPIAN([
+	AC_DEFINE(USE_XAPIAN,[],[Build in Xapian support?])
+    ])
+fi
+AM_CONDITIONAL([USE_XAPIAN], [test "${enable_xapian}" != "no"])
+
+
+AM_CONDITIONAL([SQUATTER],
+    [test "${enable_squat}" != "no" -o "${enable_sphinx}" != "no" -o "${enable_xapian}" != "no" ])
 
 AC_ARG_ENABLE(sieve,
         [AS_HELP_STRING([--disable-sieve], [disable Sieve support])],,[enable_sieve="yes";])
@@ -1087,6 +1142,7 @@ dnl
 AC_ARG_ENABLE(nntp,
         [AS_HELP_STRING([--enable-nntp], [enable NNTP support])],,[enable_nntp="no";])
 AM_CONDITIONAL([NNTPD], [test "$enable_nntp" != "no"])
+
 dnl
 dnl see if we're compiling the Murder support programs
 dnl
@@ -1097,6 +1153,47 @@ if test "$enable_murder" != no; then
 	# for master/slave auto-selection
 	AC_CHECK_HEADERS(sys/sockio.h)
 fi
+
+dnl
+dnl see if we're compiling with HTTP support
+dnl
+ENABLE_HTTP=no
+AC_ARG_ENABLE(http,
+        [AS_HELP_STRING([--enable-http], [enable HTTP support])],, [enable_http="no";])
+AM_CONDITIONAL([HTTPD], [test "$enable_http" != "no"])
+
+HTTP_CPPFLAGS=
+HTTP_LIBS=
+if test "$enable_http" != no; then
+dnl
+dnl make sure all the modules we need are present
+dnl
+	ENABLE_RSS=yes
+	ENABLE_DAV=yes
+	PKG_CHECK_MODULES([XML2], [libxml-2.0],,AC_MSG_ERROR([Need libxml-2.0 for http]))
+	PKG_CHECK_MODULES([ICAL], [libical],,AC_MSG_ERROR([Need libical for http]))
+	PKG_CHECK_MODULES([SQLITE3], [sqlite3],,AC_MSG_ERROR([Need sqlite3 for http]))
+	PKG_CHECK_MODULES([JSON], [jansson],,AC_MSG_ERROR([Need jansson for http]))
+
+	HTTP_LIBS="${XML2_LIBS} ${ICAL_LIBS} ${SQLITE3_LIBS} ${JSON_LIBS}"
+	HTTP_CPPFLAGS="${JSON_CFLAGS} ${SQLITE3_CFLAGS} ${ICAL_CFLAGS} ${XML2_CFLAGS}"
+
+	AC_DEFINE(HAVE_XML2,[],[Build in libxml support?])
+	AC_DEFINE(HAVE_ICAL,[],[Build in ical support?])
+	AC_DEFINE(HAVE_SQLITE3,[],[Build in SQLite support?])
+
+	AC_DEFINE(WITH_DAV,[],[Build DAV support into httpd?])
+	AC_DEFINE(WITH_JSON,[],[Build jCal/jCard support into httpd?])
+
+	CYRUS_OPENDKIM_CHK()
+	if test "$opendkimlib" = "yes"; then
+	    AC_SUBST(DKIM_CFLAGS)
+	    AC_SUBST(DKIM_LIBS)
+	    AC_DEFINE(WITH_DKIM,[],[Build DKIM support into iSchedule?]) 
+	fi
+fi
+AC_SUBST(HTTP_CPPFLAGS)
+AC_SUBST(HTTP_LIBS)
 
 dnl
 dnl see if we're compiling replication support programs
@@ -1499,10 +1596,6 @@ struct sockaddr_storage {
 # define HAVE_SS_FAMILY
 #endif /* !HAVE_STRUCT_SOCKADDR_STORAGE */
 
-#ifndef HAVE_SS_FAMILY
-#define ss_family	__ss_family
-#endif
-
 #ifndef AF_INET6
 /* Define it to something that should never appear */
 #define	AF_INET6	AF_MAX
@@ -1593,9 +1686,6 @@ enum {
     /* should we do a fast TLS session shutdown? */
     TLS_FAST_SHUTDOWN = 1,
 
-    /* should we use the SQUAT engine to accelerate SEARCH? */
-    SQUAT_ENGINE = 1,
-
     /* should we have long LMTP error messages? */
     LMTP_LONG_ERROR_MSGS = 1
 };
@@ -1627,6 +1717,7 @@ Cyrus Imapd configured components
    nttpd:              $enable_nntp
    replication:        $enable_replication
    sieve:              $enable_sieve
+   http:               $enable_http
 
 External dependencies:
    pcre:               $cyrus_cv_pcre_utf8

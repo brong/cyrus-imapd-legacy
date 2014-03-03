@@ -48,6 +48,7 @@
 
 #include <string.h>
 #include <sys/types.h>
+#include "util.h"
 
 typedef struct
 {
@@ -55,8 +56,6 @@ typedef struct
     int alloc;
     char **data;
 } strarray_t;
-
-typedef int compar_t(const void *a, const void *b);
 
 #define STRARRAY_INITIALIZER	{ 0, 0, NULL }
 #define strarray_init(sa)   (memset((sa), 0, sizeof(strarray_t)))
@@ -105,5 +104,7 @@ int strarray_find_case(const strarray_t *sa, const char *match,
 		       int starting);
 
 int strarray_size(const strarray_t *sa);
+
+int strarray_cmp(const strarray_t *a, const strarray_t *b);
 
 #endif /* __CYRUS_STRARRAY_H__ */

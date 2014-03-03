@@ -51,6 +51,25 @@
 #include "mailbox.h"
 #include "message_guid.h"
 
+enum dlistsax_t {
+    DLISTSAX_LISTSTART,
+    DLISTSAX_LISTEND,
+    DLISTSAX_KVLISTSTART,
+    DLISTSAX_KVLISTEND,
+    DLISTSAX_RESERVE,
+    DLISTSAX_LITERAL,
+    DLISTSAX_FLAG,
+    DLISTSAX_STRING,
+    /* error callbacks */
+    DLISTSAX_ERROR
+};
+
+struct dlistsax_data {
+    struct buf kbuf;
+    struct buf buf;
+    void *rock;
+};
+
 enum dlist_t {
     DL_NIL = 0,
     DL_ATOM,
@@ -146,10 +165,6 @@ struct dlist *dlist_setfile(struct dlist *parent, const char *name,
 			    const char *part, struct message_guid *guid,
 			    size_t size, const char *fname);
 
-/* special number and string readers - return 0 and "" if nothing */
-bit64 dlist_childvaln(struct dlist *parent, const char *name);
-const char *dlist_childvalcstring(struct dlist *parent, const char *name);
-
 struct dlist *dlist_updateatom(struct dlist *parent, const char *name,
 			       const char *val);
 struct dlist *dlist_updateflag(struct dlist *parent, const char *name,
@@ -207,10 +222,17 @@ char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
 int dlist_parsemap(struct dlist **dlp, int parsekeys,
 		   const char *base, unsigned len);
 
+typedef int dlistsax_cb_t(int type, struct dlistsax_data *data);
+
+int dlist_parsesax(const char *base, size_t len, int parsekey,
+		   dlistsax_cb_t *proc, void *rock);
+
 void dlist_stitch(struct dlist *parent, struct dlist *child);
 void dlist_unstitch(struct dlist *parent, struct dlist *child);
-void dlist_remove(struct dlist *parent, struct dlist *child);
 struct dlist *dlist_splice(struct dlist *parent, int num);
+
+/* splat: convert a list into its child elements */
+void dlist_splat(struct dlist *parent, struct dlist *child);
 
 struct dlist *dlist_getchild(struct dlist *dl, const char *name);
 struct dlist *dlist_getchildn(struct dlist *dl, int num);

@@ -74,6 +74,11 @@
 #include "annotate.h"
 #include "append.h"
 #include "auth.h"
+#ifdef WITH_DAV
+#include "caldav_db.h"
+#include "carddav_db.h"
+#include "dav_db.h"
+#endif
 #include "dlist.h"
 #include "exitcodes.h"
 #include "global.h"
@@ -127,6 +132,8 @@ static struct protstream *sync_in = NULL;
 static int sync_logfd = -1;
 static int sync_starttls_done = 0;
 static int sync_compress_done = 0;
+
+static int opt_force = 0;
 
 /* commands that have specific names */
 static void cmdloop(void);
@@ -251,10 +258,13 @@ int service_init(int argc __attribute__((unused)),
     /* load the SASL plugins */
     global_sasl_init(1, 1, mysasl_cb);
 
-    while ((opt = getopt(argc, argv, "p:")) != EOF) {
+    while ((opt = getopt(argc, argv, "p:f")) != EOF) {
 	switch(opt) {
 	case 'p': /* external protection */
 	    extprops_ssf = atoi(optarg);
+	    break;
+	case 'f':
+	    opt_force = 1;
 	    break;
 	default:
 	    usage();
@@ -282,6 +292,12 @@ int service_init(int argc __attribute__((unused)),
     if (config_getswitch(IMAPOPT_STATUSCACHE)) {
 	statuscache_open();
     }
+
+#ifdef WITH_DAV
+    dav_init();
+    caldav_init();
+    carddav_init();
+#endif
 
     return 0;
 }
@@ -443,6 +459,12 @@ void shut_down(int code)
 
     proc_cleanup();
 
+#ifdef WITH_DAV
+    carddav_done();
+    caldav_done();
+    dav_done();
+#endif
+
     if (config_getswitch(IMAPOPT_STATUSCACHE)) {
 	statuscache_close();
 	statuscache_done();
@@ -493,6 +515,7 @@ EXPORTED void fatal(const char* s, int code)
 	prot_flush(sync_out);
     }
     syslog(LOG_ERR, "Fatal error: %s", s);
+    abort();
     shut_down(code);
 }
 
@@ -1069,7 +1092,7 @@ static void reserve_folder(const char *part, const char *mboxname,
 	    continue;
 
 	/* Attempt to reserve this message */
-	mailbox_msg_path = mailbox_message_fname(mailbox, record.uid);
+	mailbox_msg_path = mailbox_record_fname(mailbox, &record);
 	stage_msg_path = dlist_reserve_path(part, &record.guid);
 
 	/* check that the sha1 of the file on disk is correct */
@@ -1212,6 +1235,7 @@ static int mailbox_compare_update(struct mailbox *mailbox,
     struct sync_annot_list *rannots = NULL;
     int r;
     int i;
+    int has_append = 0;
 
     rrecord.uid = 0;
     for (ki = kr->head; ki; ki = ki->next) {
@@ -1245,10 +1269,16 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	if (rrecord.uid == mrecord.uid) {
 	    /* higher modseq on the replica is an error */
 	    if (rrecord.modseq > mrecord.modseq) {
-		syslog(LOG_ERR, "SYNCERROR: higher modseq on replica %s %u",
-		       mailbox->name, mrecord.uid);
-		r = IMAP_SYNC_CHECKSUM;
-		goto out;
+		if (opt_force) {
+		    syslog(LOG_NOTICE, "forcesync: higher modseq on replica %s %u (" MODSEQ_FMT " > " MODSEQ_FMT ")",
+			   mailbox->name, mrecord.uid, rrecord.modseq, mrecord.modseq);
+		}
+		else {
+		    syslog(LOG_ERR, "SYNCERROR: higher modseq on replica %s %u (" MODSEQ_FMT " > " MODSEQ_FMT ")",
+			   mailbox->name, mrecord.uid, rrecord.modseq, mrecord.modseq);
+		    r = IMAP_SYNC_CHECKSUM;
+		    goto out;
+		}
 	    }
 
 	    /* everything else only matters if we're not expunged */
@@ -1274,11 +1304,12 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 	    /* skip out on the first pass */
 	    if (!doupdate) continue;
 
+	    rrecord.cid = mrecord.cid;
 	    rrecord.modseq = mrecord.modseq;
 	    rrecord.last_updated = mrecord.last_updated;
 	    rrecord.internaldate = mrecord.internaldate;
-	    rrecord.system_flags = (mrecord.system_flags & ~FLAG_UNLINKED) |
-				   (rrecord.system_flags & FLAG_UNLINKED);
+	    rrecord.system_flags = (mrecord.system_flags & FLAGS_GLOBAL) |
+				   (rrecord.system_flags & FLAGS_LOCAL);
 	    for (i = 0; i < MAX_USER_FLAGS/32; i++)
 		rrecord.user_flags[i] = mrecord.user_flags[i];
 
@@ -1326,8 +1357,13 @@ static int mailbox_compare_update(struct mailbox *mailbox,
 		       mailbox->name, recno);
 		goto out;
 	    }
+
+	    has_append = 1;
 	}
     }
+
+    if (has_append)
+	sync_log_append(mailbox->name);
 
     r = 0;
 
@@ -1358,6 +1394,9 @@ static int do_mailbox(struct dlist *kin)
     uint32_t sync_crc;
 
     uint32_t options;
+
+    /* optional fields */
+    modseq_t xconvmodseq = 0;
 
     struct mailbox *mailbox = NULL;
     struct dlist *kr;
@@ -1404,6 +1443,7 @@ static int do_mailbox(struct dlist *kin)
     dlist_getlist(kin, "ANNOTATIONS", &ka);
     dlist_getdate(kin, "POP3_SHOW_AFTER", &pop3_show_after);
     dlist_getatom(kin, "MBOXTYPE", &mboxtype);
+    dlist_getnum64(kin, "XCONVMODSEQ", &xconvmodseq);
 
     options = sync_parse_options(options_str);
     mbtype = mboxlist_string_to_mbtype(mboxtype);
@@ -1412,7 +1452,8 @@ static int do_mailbox(struct dlist *kin)
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	r = mboxlist_createsync(mboxname, mbtype, partition,
 				sync_userid, sync_authstate,
-				options, uidvalidity, acl,
+				options, uidvalidity,
+				highestmodseq, acl,
 				uniqueid, &mailbox);
 	/* set a highestmodseq of 0 so ALL changes are future
 	 * changes and get applied */
@@ -1437,36 +1478,95 @@ static int do_mailbox(struct dlist *kin)
     annotate_state_begin(astate);
 
     if (strcmp(mailbox->uniqueid, uniqueid)) {
-	syslog(LOG_ERR, "Mailbox uniqueid changed %s (%s => %s) - retry",
-	       mboxname, mailbox->uniqueid, uniqueid);
-	r = IMAP_MAILBOX_MOVED;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: fixing uniqueid %s (%s => %s)",
+		   mboxname, mailbox->uniqueid, uniqueid);
+	    free(mailbox->uniqueid);
+	    mailbox->uniqueid = xstrdup(uniqueid);
+	    mailbox->header_dirty = 1;
+	}
+	else {
+	    syslog(LOG_ERR, "Mailbox uniqueid changed %s (%s => %s) - retry",
+		   mboxname, mailbox->uniqueid, uniqueid);
+	    r = IMAP_MAILBOX_MOVED;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (highestmodseq < mailbox->i.highestmodseq) {
-	syslog(LOG_ERR, "higher modseq on replica %s - "
-	       MODSEQ_FMT " < " MODSEQ_FMT,
-	       mboxname, highestmodseq, mailbox->i.highestmodseq);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher modseq on replica %s - "
+		   MODSEQ_FMT " < " MODSEQ_FMT,
+		   mboxname, highestmodseq, mailbox->i.highestmodseq);
+	}
+	else {
+	    syslog(LOG_ERR, "higher modseq on replica %s - "
+		   MODSEQ_FMT " < " MODSEQ_FMT,
+		   mboxname, highestmodseq, mailbox->i.highestmodseq);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (uidvalidity < mailbox->i.uidvalidity) {
-	syslog(LOG_ERR, "higher uidvalidity on replica %s - %u < %u",
-	       mboxname, uidvalidity, mailbox->i.uidvalidity);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher uidvalidity on replica %s - %u < %u",
+		   mboxname, uidvalidity, mailbox->i.uidvalidity);
+	}
+	else {
+	    syslog(LOG_ERR, "higher uidvalidity on replica %s - %u < %u",
+		   mboxname, uidvalidity, mailbox->i.uidvalidity);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
 
     /* skip out now, it's going to mismatch for sure! */
     if (last_uid < mailbox->i.last_uid) {
-	syslog(LOG_ERR, "higher last_uid on replica %s - %u < %u",
-	       mboxname, last_uid, mailbox->i.last_uid);
-	r = IMAP_SYNC_CHECKSUM;
-	goto done;
+	if (opt_force) {
+	    syslog(LOG_NOTICE, "forcesync: higher last_uid on replica %s - %u < %u",
+		   mboxname, last_uid, mailbox->i.last_uid);
+	}
+	else {
+	    syslog(LOG_ERR, "higher last_uid on replica %s - %u < %u",
+		   mboxname, last_uid, mailbox->i.last_uid);
+	    r = IMAP_SYNC_CHECKSUM;
+	    goto done;
+	}
     }
+
+    /* NOTE - this is optional */
+    if (mailbox_has_conversations(mailbox) && xconvmodseq) {
+	modseq_t ourxconvmodseq = 0;
+
+	r = mailbox_get_xconvmodseq(mailbox, &ourxconvmodseq);
+	if (r) {
+	    syslog(LOG_ERR, "Failed to read xconvmodseq for %s: %s",
+		   mboxname, error_message(r));
+	    goto done;
+	}
+
+	/* skip out now, it's going to mismatch for sure! */
+	if (xconvmodseq < ourxconvmodseq) {
+	    if (opt_force) {
+		syslog(LOG_NOTICE, "forcesync: higher xconvmodseq on replica %s - %llu < %llu",
+		       mboxname, xconvmodseq, ourxconvmodseq);
+	    }
+	    else {
+		syslog(LOG_ERR, "higher xconvmodseq on replica %s - %llu < %llu",
+		       mboxname, xconvmodseq, ourxconvmodseq);
+		r = IMAP_SYNC_CHECKSUM;
+		goto done;
+	    }
+	}
+    }
+
+    r = mailbox_compare_update(mailbox, kr, 0);
+    if (r) goto done;
+
+    /* now we're committed to writing something no matter what happens! */
 
     /* always take the ACL from the master, it's not versioned */
     if (strcmp(mailbox->acl, acl)) {
@@ -1499,7 +1599,9 @@ static int do_mailbox(struct dlist *kin)
     }
 
     mailbox_index_dirty(mailbox);
-    assert(mailbox->i.last_uid <= last_uid);
+    if (!opt_force) {
+	assert(mailbox->i.last_uid <= last_uid);
+    }
     mailbox->i.last_uid = last_uid;
     mailbox->i.recentuid = recentuid;
     mailbox->i.recenttime = recenttime;
@@ -1511,15 +1613,22 @@ static int do_mailbox(struct dlist *kin)
 			 (mailbox->i.options & ~MAILBOX_OPTIONS_MASK);
 
     /* this happens all the time! */
-    if (mailbox->i.highestmodseq < highestmodseq) {
+    if (mailbox->i.highestmodseq != highestmodseq) {
+	mboxname_setmodseq(mailbox->name, highestmodseq);
 	mailbox->i.highestmodseq = highestmodseq;
     }
 
     /* this happens rarely, so let us know */
-    if (mailbox->i.uidvalidity < uidvalidity) {
-	syslog(LOG_ERR, "%s uidvalidity higher on master, updating %u => %u",
+    if (mailbox->i.uidvalidity != uidvalidity) {
+	syslog(LOG_NOTICE, "%s uidvalidity changed, updating %u => %u",
 	       mailbox->name, mailbox->i.uidvalidity, uidvalidity);
+	/* make sure nothing new gets created with a lower value */
+	mboxname_setuidvalidity(mailbox->name, uidvalidity);
 	mailbox->i.uidvalidity = uidvalidity;
+    }
+
+    if (mailbox_has_conversations(mailbox)) {
+	r = mailbox_update_xconvmodseq(mailbox, xconvmodseq, opt_force);
     }
 
 done:
@@ -2174,8 +2283,11 @@ static int do_fetch(struct dlist *kin)
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
 
     fname = mboxname_datapath(partition, mboxname, uid);
-    if (stat(fname, &sbuf) == -1)
-	return IMAP_MAILBOX_NONEXISTENT;
+    if (stat(fname, &sbuf) == -1) {
+	fname = mboxname_archivepath(partition, mboxname, uid);
+	if (stat(fname, &sbuf) == -1)
+	    return IMAP_MAILBOX_NONEXISTENT;
+    }
 
     kl = dlist_setfile(NULL, "MESSAGE", partition, &tmp_guid, sbuf.st_size, fname);
     sync_send_response(kl, sync_out);

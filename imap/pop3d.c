@@ -1762,7 +1762,7 @@ int openinbox(void)
     int r, log_level = LOG_ERR;
     const char *statusline = NULL;
     mbentry_t *mbentry = NULL;
-    struct statusdata sdata;
+    struct statusdata sdata = STATUSDATA_INIT;
     struct proc_limits limits;
     struct mboxevent *mboxevent;
 
@@ -2005,10 +2005,18 @@ static int blat(int msgno, int lines)
 {
     FILE *msgfile;
     char buf[4096];
-    char *fname;
+    const char *fname;
     int thisline = -2;
+    struct index_record record;
 
-    fname = mailbox_message_fname(popd_mailbox, popd_map[msgno-1].uid);
+    /* XXX - map file */
+
+    if (mailbox_read_index_record(popd_mailbox, popd_map[msgno-1].recno, &record)) {
+	prot_printf(popd_out, "-ERR [SYS/PERM] Could not read index record\r\n");
+	return IMAP_IOERROR;
+    }
+
+    fname = mailbox_record_fname(popd_mailbox, &record);
     msgfile = fopen(fname, "r");
     if (!msgfile) {
 	prot_printf(popd_out, "-ERR [SYS/PERM] Could not read message file\r\n");

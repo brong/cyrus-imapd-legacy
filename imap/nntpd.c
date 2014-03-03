@@ -1023,13 +1023,12 @@ static void cmdloop(void)
 
 		be = backend_current;
 		if (arg1.len &&
-		    (!is_newsgroup(arg1.s) ||
-		     (r = open_group(arg1.s, 0, &be, NULL)))) goto nogroup;
+		    (r = open_group(arg1.s, 0, &be, NULL))) goto nogroup;
 		else if (be) {
 		    prot_printf(be->out, "%s", cmd.s);
 		    if (arg1.len) {
 			prot_printf(be->out, " %s", arg1.s);
-			  if (LISTGROUP) prot_printf(be->out, " %s", arg2.s);
+			if (LISTGROUP) prot_printf(be->out, " %s", arg2.s);
 		    }
 		    prot_printf(be->out, "\r\n");
 
@@ -1741,6 +1740,8 @@ static int open_group(char *name, int has_prefix, struct backend **ret,
     if (!has_prefix) {
 	snprintf(mailboxname, sizeof(mailboxname), "%s%s", newsprefix, name);
 	name = mailboxname;
+
+	if (!is_newsgroup(name)) return IMAP_MAILBOX_NONEXISTENT;
     }
 
     if (!r) r = mlookup(name, &mbentry);
@@ -1884,8 +1885,9 @@ static void build_xref(const char *msgid, struct buf *buf, int body_only)
 static void cmd_article(int part, char *msgid, unsigned long uid)
 {
     int msgno, by_msgid = (msgid != NULL);
-    char *fname;
+    const char *fname;
     FILE *msgfile;
+    message_t *msg;
 
     msgno = index_finduid(group_state, uid);
     if (!msgno || index_getuid(group_state, msgno) != uid) {
@@ -1893,7 +1895,17 @@ static void cmd_article(int part, char *msgid, unsigned long uid)
 	return;
     }
 
-    fname = mailbox_message_fname(group_state->mailbox, uid);
+    msg = index_get_message(group_state, msgno);
+
+    if (!msg) {
+	prot_printf(nntp_out, "502 Could not read index record\r\n");
+	return;
+    }
+
+    if (message_get_fname(msg, &fname)) {
+	prot_printf(nntp_out, "502 Could not read index record\r\n");
+	return;
+    }
 
     msgfile = fopen(fname, "r");
     if (!msgfile) {

@@ -62,6 +62,8 @@
 #include "message.h"
 #include "append.h"
 #include "global.h"
+#include "prot.h"
+#include "sync_log.h"
 #include "xmalloc.h"
 #include "xstrlcpy.h"
 #include "xstrlcat.h"
@@ -74,6 +76,7 @@
 #include "annotate.h"
 #include "message_guid.h"
 #include "strarray.h"
+#include "conversations.h"
 
 struct stagemsg {
     char fname[1024];
@@ -202,11 +205,6 @@ EXPORTED int append_setup_mbox(struct appendstate *as, struct mailbox *mailbox,
     as->auth_state = auth_state;
     as->isadmin = isadmin;
 
-    /* make sure we can open the cache file, so we
-     * abort early otherwise */
-    r = mailbox_ensure_cache(mailbox, 0);
-    if (r) return r;
-
     /* initialize seen list creator */
     as->internalseen = mailbox_internal_seen(mailbox, as->userid);
     as->seen_seq = seqset_init(0, SEQ_SPARSE);
@@ -251,15 +249,15 @@ static void append_free(struct appendstate *as)
 EXPORTED int append_commit(struct appendstate *as)
 {
     int r = 0;
-    
+
     if (as->s == APPEND_DONE) return 0;
 
     if (as->nummsg) {
 	/* Calculate new index header information */
 	as->mailbox->i.last_appenddate = time(0);
 
-	/* the cache will be dirty even if we hand added the records */
-	as->mailbox->cache_dirty = 1;
+	/* log the append so rolling squatter can index this mailbox */
+	sync_log_append(as->mailbox->name);
 
 	/* set seen state */
 	if (as->userid[0])
@@ -861,7 +859,7 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 {
     struct mailbox *mailbox = as->mailbox;
     struct index_record record;
-    char *fname;
+    const char *fname;
     FILE *destfile;
     int i, r;
     strarray_t *newflags = NULL;
@@ -933,7 +931,7 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 
     /* Create message file */
     as->nummsg++;
-    fname = mailbox_message_fname(mailbox, record.uid);
+    fname = mailbox_record_fname(mailbox, &record);
 
     r = mailbox_copyfile(stagefile, fname, nolink);
     destfile = fopen(fname, "r");
@@ -953,6 +951,7 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	fsync(fileno(destfile));
 	fclose(destfile);
     }
+
     if (!r && config_getstring(IMAPOPT_ANNOTATION_CALLOUT)) {
 	if (flags)
 	    newflags = strarray_dup(flags);
@@ -987,16 +986,15 @@ EXPORTED int append_fromstage(struct appendstate *as, struct body **body,
 	    }
 	}
     }
-    if (r)
-	goto out;
 
     /* Handle flags the user wants to set in the message */
-    if (flags) {
+    if (!r && flags) {
 	r = append_apply_flags(as, mboxevent, &record, flags);
 	if (r) goto out;
     }
+
     /* Write out index file entry */
-    r = mailbox_append_index_record(mailbox, &record);
+    if (!r) r = mailbox_append_index_record(mailbox, &record);
 
 out:
     if (newflags)
@@ -1058,7 +1056,7 @@ EXPORTED int append_fromstream(struct appendstate *as, struct body **body,
 {
     struct mailbox *mailbox = as->mailbox;
     struct index_record record;
-    char *fname;
+    const char *fname;
     FILE *destfile;
     int r;
     struct mboxevent *mboxevent = NULL;
@@ -1071,7 +1069,7 @@ EXPORTED int append_fromstream(struct appendstate *as, struct body **body,
     record.internaldate = internaldate;
 
     /* Create message file */
-    fname = mailbox_message_fname(mailbox, record.uid);
+    fname = mailbox_record_fname(mailbox, &record);
     as->nummsg++;
 
     unlink(fname);
@@ -1160,7 +1158,7 @@ HIDDEN int append_run_annotator(struct appendstate *as,
 			     load_annot_cb, &user_annots);
     if (r) goto out;
 
-    fname = mailbox_message_fname(as->mailbox, record->uid);
+    fname = mailbox_record_fname(as->mailbox, record);
     if (!fname) goto out;
 
     f = fopen(fname, "r");
@@ -1178,7 +1176,7 @@ HIDDEN int append_run_annotator(struct appendstate *as,
     r = callout_run(fname, body, &user_annots, &system_annots, &flags);
     if (r) goto out;
 
-    record->system_flags &= FLAG_SEEN;
+    record->system_flags &= (FLAG_SEEN | FLAGS_INTERNAL);
     memset(&record->user_flags, 0, sizeof(record->user_flags));
     r = append_apply_flags(as, NULL, record, &flags);
     if (r) goto out;
@@ -1231,12 +1229,13 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 {
     int msg;
     struct index_record record;
-    char *srcfname, *destfname = NULL;
     int r = 0;
-    int flag, userflag;
+    int userflag;
+    int i;
+    char *srcfname, *destfname;
     annotate_state_t *astate = NULL;
     struct mboxevent *mboxevent = NULL;
-    
+
     if (!nummsg) {
 	append_abort(as);
 	return 0;
@@ -1249,30 +1248,29 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 
     /* Copy/link all files and cache info */
     for (msg = 0; msg < nummsg; msg++) {
-	zero_index(record);
+	record = copymsg[msg].record;
+
+	/* renumber the message into the new mailbox */
 	record.uid = as->mailbox->i.last_uid + 1;
 	as->nummsg++;
 
-	/* copy the parts that are the same regardless */
-	record.internaldate = copymsg[msg].internaldate;
-	message_guid_copy(&record.guid, &copymsg[msg].guid);
-
-	/* Handle any flags that need to be copied */
+	/* user flags are special - different numbers, so look them up */
 	if (as->myrights & ACL_WRITE) {
-	    /* deleted is special, different ACL */
-	    record.system_flags =
-	      copymsg[msg].system_flags & ~FLAG_DELETED;
-
-	    for (flag = 0; copymsg[msg].flag[flag]; flag++) {
-		r = mailbox_user_flag(as->mailbox, 
-				      copymsg[msg].flag[flag], &userflag, 1);
+	    for (i = 0; i < strarray_size(&copymsg[msg].flags); i++) {
+		const char *flag = strarray_nth(&copymsg[msg].flags, i);
+		r = mailbox_user_flag(as->mailbox, flag, &userflag, 1);
 		if (r) goto out;
 		record.user_flags[userflag/32] |= 1<<(userflag&31);
 	    }
 	}
-	/* deleted flag copy as well */
-	if (as->myrights & ACL_DELETEMSG) {
-	    record.system_flags |= copymsg[msg].system_flags & FLAG_DELETED;
+	else {
+	    /* only flag allow to be kept without ACL_WRITE is DELETED */
+	    record.system_flags &= FLAG_DELETED;
+	}
+
+	/* deleted flag has its own ACL */
+	if (!(as->myrights & ACL_DELETEMSG)) {
+	    record.system_flags &= ~FLAG_DELETED;
 	}
 
 	/* should this message be marked \Seen? */
@@ -1281,22 +1279,15 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 	}
 
 	/* Link/copy message file */
-	free(destfname);
-	srcfname = xstrdup(mailbox_message_fname(mailbox, copymsg[msg].uid));
-	destfname = xstrdup(mailbox_message_fname(as->mailbox, record.uid));
+	srcfname = xstrdup(mailbox_record_fname(mailbox, &copymsg[msg].record));
+	destfname = xstrdup(mailbox_record_fname(as->mailbox, &record));
 	r = mailbox_copyfile(srcfname, destfname, nolink);
+	free(destfname);
 	free(srcfname);
 	if (r) goto out;
 
-	/* Write out cache info, copy other info */
-	record.sentdate = copymsg[msg].sentdate;
-	record.size = copymsg[msg].size;
-	record.header_size = copymsg[msg].header_size;
-	record.gmtime = copymsg[msg].gmtime;
-	record.content_lines = copymsg[msg].content_lines;
-	record.cache_version = copymsg[msg].cache_version;
-	record.cache_crc = copymsg[msg].cache_crc;
-	record.crec = copymsg[msg].crec;
+	/* wipe out the cache offset so it rewrites */
+	record.cache_offset = 0;
 
 	/* Write out index file entry */
 	r = mailbox_append_index_record(as->mailbox, &record);
@@ -1308,17 +1299,16 @@ EXPORTED int append_copy(struct mailbox *mailbox,
 	r = mailbox_get_annotate_state(as->mailbox, record.uid, &astate);
 	if (r) goto out;
 
-	r = annotate_msg_copy(mailbox, copymsg[msg].uid,
+	r = annotate_msg_copy(mailbox, copymsg[msg].olduid,
 			      as->mailbox, record.uid,
 			      as->userid);
 	if (r) goto out;
 
 	mboxevent_extract_record(mboxevent, as->mailbox, &record);
-	mboxevent_extract_copied_record(mboxevent, mailbox, copymsg[msg].uid);
+	mboxevent_extract_copied_record(mboxevent, mailbox, copymsg[msg].olduid);
     }
 
 out:
-    free(destfname);
     if (r) {
 	append_abort(as);
 	return r;
@@ -1378,4 +1368,9 @@ static int append_addseen(struct mailbox *mailbox,
  done:
     seen_close(&seendb);
     return r;
+}
+
+EXPORTED const char *append_stagefname(struct stagemsg *stage)
+{
+    return strarray_nth(&stage->parts, 0);
 }

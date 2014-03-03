@@ -811,56 +811,45 @@ static int split_key(const annotate_db_t *d,
 		     const char **entryp,
 		     const char **useridp)
 {
-#define NFIELDS 3
-    const char *fields[NFIELDS];
-    int nfields = 0;
+    static struct buf keybuf;
     const char *p;
-    unsigned int uid = 0;
-    const char *mboxname = "";
+    const char *end;
 
-    /* paranoia: ensure the last character in the key is
-     * a NUL, which it should be because of the way we
-     * always build keys */
-    if (key[keysize-1])
-	return IMAP_ANNOTATION_BADENTRY;
-    keysize--;
+    buf_setmap(&keybuf, key, keysize);
+    buf_putc(&keybuf, '\0'); /* safety tricks due to broken FM code */
+    p = buf_cstring(&keybuf);
+    end = p + keysize;
+
     /*
      * paranoia: split the key into fields on NUL characters.
      * We would use strarray_nsplit() for this, except that
      * by design that function cannot split on NULs and does
      * not handle embedded NULs.
      */
-    fields[nfields++] = key;
-    for (p = key ; (p-key) < keysize ; p++) {
-	if (!*p) {
-	    if (nfields == NFIELDS)
-		return IMAP_ANNOTATION_BADENTRY;
-	    fields[nfields++] = p+1;
-	}
-    }
-    if (nfields != NFIELDS)
-	return IMAP_ANNOTATION_BADENTRY;
 
     if (d->mboxname) {
-	/* per-folder db for message scope annotations */
-	char *end = NULL;
-	uid = strtoul(fields[0], &end, 10);
-	if (uid == 0 || end == NULL || *end)
-	    return IMAP_ANNOTATION_BADENTRY;
-	mboxname = d->mboxname;
+	*mboxnamep = d->mboxname;
+	*uidp = 0;
+	while (*p && p < end) *uidp = (10 * (*uidp)) + (*p++ - '0');
+	if (p < end) p++;
+	else return IMAP_ANNOTATION_BADENTRY;
     }
     else {
 	/* global db for mailnbox & server scope annotations */
-	uid = 0;
-	mboxname = fields[0];
+	*uidp = 0;
+	*mboxnamep = p;
+	while (*p && p < end) p++;
+	if (p < end) p++;
+	else return IMAP_ANNOTATION_BADENTRY;
     }
 
-    if (mboxnamep) *mboxnamep = mboxname;
-    if (uidp) *uidp = uid;
-    if (entryp) *entryp = fields[1];
-    if (useridp) *useridp = fields[2];
+    *entryp = p; /* XXX: trailing NULLs on non-userid keys?  Bogus just at FM */
+    while (*p && p < end) p++;
+    if (p < end && !*p)
+	*useridp = p+1;
+    else
+	*useridp = NULL;
     return 0;
-#undef NFIELDS
 }
 
 #if DEBUG
@@ -949,25 +938,27 @@ static int find_cb(void *rock, const char *key, size_t keylen,
     struct find_rock *frock = (struct find_rock *) rock;
     const char *mboxname, *entry, *userid;
     unsigned int uid;
+    char newkey[MAX_MAILBOX_NAME+1];
+    size_t newkeylen;
     struct buf value = BUF_INITIALIZER;
-    char keycopy[MAX_MAILBOX_PATH+1];
     int r;
 
     assert(keylen < MAX_MAILBOX_PATH);
 
-    /* take a copy, we may be deleting this record, so the key
-     * pointer will no longer be valid */
-    memcpy(keycopy, key, keylen);
-
 #if DEBUG
     syslog(LOG_ERR, "find_cb: found key %s in %s",
-	    key_as_string(frock->d, keycopy, keylen), frock->d->filename);
+	    key_as_string(frock->d, key, keylen), frock->d->filename);
 #endif
 
-    r = split_key(frock->d, keycopy, keylen, &mboxname,
+    r = split_key(frock->d, key, keylen, &mboxname,
 		  &uid, &entry, &userid);
     if (r)
 	return r;
+
+    newkeylen = make_key(mboxname, uid, entry, userid, newkey, sizeof(newkey));
+    if (keylen != newkeylen || strncmp(newkey, key, keylen)) {
+	syslog(LOG_ERR, "find_cb: bogus key %s %d %s %s (%d %d)", mboxname, uid, entry, userid, (int)keylen, (int)newkeylen);
+    }
 
     r = split_attribs(data, datalen, &value);
 
@@ -1573,6 +1564,26 @@ static void annotation_get_pop3showafter(annotate_state_t *state,
     buf_free(&value);
 }
 
+static void annotation_get_usermodseq(annotate_state_t *state,
+				      struct annotate_entry_list *entry)
+{
+    struct buf value = BUF_INITIALIZER;
+    modseq_t modseq;
+    char *mboxname = NULL;
+
+    assert(state);
+    assert(state->userid);
+
+    mboxname = mboxname_user_mbox(state->userid, NULL);
+    modseq = mboxname_readmodseq(mboxname);
+
+    buf_printf(&value, "%llu", modseq);
+
+    output_entryatt(state, entry->name, state->userid, &value);
+    free(mboxname);
+    buf_free(&value);
+}
+
 static void annotation_get_uniqueid(annotate_state_t *state,
 				    struct annotate_entry_list *entry)
 {
@@ -1931,6 +1942,17 @@ static const annotate_entrydesc_t server_builtin_entries[] =
 	annotation_get_fromfile,
 	annotation_set_tofile,
 	(void *)"motd"
+    },{
+	/* The "usemodseq" was added with conversations support, to allow
+	 * a single value to show any changes to anything about a user */
+	"/vendor/cmu/cyrus-imapd/usermodseq",
+	ATTRIB_TYPE_UINT,
+	BACKEND_ONLY,
+	ATTRIB_VALUE_PRIV,
+	0,
+	annotation_get_usermodseq,
+	/*set*/NULL,
+	NULL
     },{
 	"/vendor/cmu/cyrus-imapd/expire",
 	ATTRIB_TYPE_UINT,
@@ -2362,6 +2384,66 @@ out:
     return r;
 }
 
+EXPORTED int annotatemore_rawwrite(const char *mboxname, const char *entry,
+				   const char *userid, const struct buf *value)
+{
+    char key[MAX_MAILBOX_PATH+1];
+    int keylen, r;
+    annotate_db_t *d = NULL;
+    uint32_t uid = 0;
+
+    r = _annotate_getdb(mboxname, uid, CYRUSDB_CREATE, &d);
+    if (r) goto done;
+
+    /* must be in a transaction to modify the db */
+    annotate_begin(d);
+
+    keylen = make_key(mboxname, uid, entry, userid, key, sizeof(key));
+
+    if (value->s == NULL) {
+	do {
+	    r = cyrusdb_delete(d->db, key, keylen, tid(d), /*force*/1);
+	} while (r == CYRUSDB_AGAIN);
+    }
+    else {
+	struct buf data = BUF_INITIALIZER;
+	unsigned long l;
+	static const char contenttype[] = "text/plain"; /* fake */
+
+	l = htonl(value->len);
+	buf_appendmap(&data, (const char *)&l, sizeof(l));
+
+	buf_appendmap(&data, value->s, value->len);
+	buf_putc(&data, '\0');
+
+	/*
+	 * Older versions of Cyrus expected content-type and
+	 * modifiedsince fields after the value.  We don't support those
+	 * but we write out default values just in case the database
+	 * needs to be read by older versions of Cyrus
+	 */
+	buf_appendcstr(&data, contenttype);
+	buf_putc(&data, '\0');
+
+	l = 0;	/* fake modifiedsince */
+	buf_appendmap(&data, (const char *)&l, sizeof(l));
+
+	do {
+	    r = cyrusdb_store(d->db, key, keylen, data.s, data.len, tid(d));
+	} while (r == CYRUSDB_AGAIN);
+
+	buf_free(&data);
+    }
+
+    if (r) goto done;
+    r = annotate_commit(d);
+
+done:
+    annotate_putdb(&d);
+
+    return r;
+}
+
 EXPORTED int annotatemore_write(const char *mboxname, const char *entry,
 				const char *userid, const struct buf *value)
 {
@@ -2373,15 +2455,24 @@ EXPORTED int annotatemore_msg_write(const char *mboxname, uint32_t uid, const ch
 {
     struct mailbox *mailbox = NULL;
     int r = 0;
+    annotate_db_t *d = NULL;
 
-    if (mboxname)
+    r = _annotate_getdb(mboxname, uid, CYRUSDB_CREATE, &d);
+    if (r) goto done;
+
+    if (mboxname) {
 	r = mailbox_open_iwl(mboxname, &mailbox);
+	if (r) goto done;
+    }
 
-    if (!r)
-	r = write_entry(mailbox, uid, entry, userid, value, /*ignorequota*/1);
+    r = write_entry(mailbox, uid, entry, userid, value, /*ignorequota*/1);
+    if (r) goto done;
 
-    if (mailbox)
-	mailbox_close(&mailbox);
+    r = annotate_commit(d);
+
+done:
+    annotate_putdb(&d);
+    mailbox_close(&mailbox);
 
     return r;
 }
@@ -2398,8 +2489,8 @@ EXPORTED int annotate_state_write(annotate_state_t *state,
 static int annotate_canon_value(struct buf *value, int type)
 {
     char *p = NULL;
-    unsigned long uwhatever;
-    long whatever;
+    unsigned long uwhatever = 0;
+    long whatever = 0;
 
     /* check for NIL */
     if (value->s == NULL)
@@ -2935,7 +3026,7 @@ static int rename_cb(const char *mboxname __attribute__((unused)),
 	const char *newuserid = userid;
 
 	if (rrock->olduserid && rrock->newuserid &&
-	    !strcmp(rrock->olduserid, userid)) {
+	    !strcmpsafe(rrock->olduserid, userid)) {
 	    /* renaming a user, so change the userid for priv annots */
 	    newuserid = rrock->newuserid;
 	}

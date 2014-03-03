@@ -63,6 +63,7 @@
 #include "mailbox.h"
 #include "seen.h"
 #include "util.h"
+#include "xmalloc.h"
 #include "xstrlcpy.h"
 
 #include "statuscache.h"
@@ -72,32 +73,33 @@
 static struct db *statuscachedb;
 static int statuscache_dbopen = 0;
 
-EXPORTED void statuscache_open(void)
+char *statuscache_filename(void)
 {
-    const char *fname = NULL;
-    int ret;
-    char *tofree = NULL;
+    const char *fname = config_getstring(IMAPOPT_STATUSCACHE_DB_PATH);
 
-    if (!fname)
-	fname = config_getstring(IMAPOPT_STATUSCACHE_DB_PATH);
+    if (fname)
+	return xstrdup(fname);
 
     /* create db file name */
-    if (!fname) {
-	tofree = strconcat(config_dir, FNAME_STATUSCACHEDB, (char *)NULL);
-	fname = tofree;
-    }
+    return strconcat(config_dir, FNAME_STATUSCACHEDB, (char *)NULL);
+}
+
+EXPORTED void statuscache_open(void)
+{
+    char *fname = statuscache_filename();
+    int ret;
 
     ret = cyrusdb_open(DB, fname, CYRUSDB_CREATE, &statuscachedb);
     if (ret != 0) {
 	syslog(LOG_ERR, "DBERROR: opening %s: %s", fname,
 	       cyrusdb_strerror(ret));
 	syslog(LOG_ERR, "statuscache in degraded mode");
-	return;
-    }    
-
-    free(tofree);
+	goto out;
+    }
 
     statuscache_dbopen = 1;
+out:
+    free(fname);
 }
 
 EXPORTED void statuscache_close(void)
@@ -271,8 +273,6 @@ EXPORTED int statuscache_lookup(const char *mboxname, const char *userid,
     if (!statuscache_dbopen)
 	return IMAP_NO_NOSUCHMSG;
 
-    memset(sdata, 0, sizeof(struct statusdata));
-
     /* Check if there is an entry in the database */
     do {
 	r = cyrusdb_fetch(statuscachedb, key, keylen, &data, &datalen, NULL);
@@ -417,6 +417,7 @@ HIDDEN int statuscache_invalidate(const char *mboxname, struct statusdata *sdata
 	cyrusdb_commit(drock.db, drock.tid);
     }
     else {
+	syslog(LOG_NOTICE, "DBERROR: failed to store statuscace data for %s", mboxname);
 	if (drock.tid) cyrusdb_abort(drock.db, drock.tid);
     }
 

@@ -59,10 +59,12 @@
 #include <utime.h>
 
 #include "annotate.h"
+#include "dav_util.h"
 #include "exitcodes.h"
 #include "global.h"
 #include "imap/imap_err.h"
 #include "map.h"
+#include "mappedfile.h"
 #include "mbdump.h"
 #include "mboxkey.h"
 #include "mboxlist.h"
@@ -457,11 +459,12 @@ static struct data_file data_files[] = {
     { META_INDEX,   "cyrus.index"   },
     { META_CACHE,   "cyrus.cache"   },
     { META_EXPUNGE, "cyrus.expunge" },
+    { META_DAV,     "cyrus.dav"     },
     { 0, NULL }
 };
 
-enum { SEEN_DB = 0, SUBS_DB = 1, MBOXKEY_DB = 2 };
-static int NUM_USER_DATA_FILES = 3;
+enum { SEEN_DB = 0, SUBS_DB = 1, MBOXKEY_DB = 2, DAV_DB = 3 };
+static int NUM_USER_DATA_FILES = 4;
 
 EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid_start,
 		 int oldversion,
@@ -478,8 +481,11 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
     struct quota q;
     struct data_file *df;
     struct seqset *expunged_seq = NULL;
+    const char *dirpath = mailbox_datapath(mailbox);
 
-    mbdir = opendir(mailbox_datapath(mailbox));
+    /* XXX - archivepath */
+
+    mbdir = opendir(dirpath);
     if (!mbdir && errno == EACCES) {
 	syslog(LOG_ERR,
 	       "could not dump mailbox %s (permission denied)", mailbox->name);
@@ -526,9 +532,13 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
 	    break;
 
 	case META_CACHE:
-	    if (mailbox->cache_buf.s) {
-		fbase = mailbox->cache_buf.s;
-		flen = mailbox->cache_buf.len;
+	    {
+		/* XXX - multi-cache-file support */
+		struct mappedfile *cachefile = ptrarray_nth(&mailbox->caches, 0);
+		if (cachefile) {
+		    fbase = mappedfile_base(cachefile);
+		    flen = mappedfile_size(cachefile);
+		}
 	    }
 	    break;
 
@@ -558,6 +568,7 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
     while ((next = readdir(mbdir)) != NULL) {
 	char *name = next->d_name;  /* Alias */
 	char *p = name;
+	char *fullpath;
 	uint32_t uid;
 
 	/* special case for '.' (well, it gets '..' too) */
@@ -577,9 +588,10 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
 	   continue;
 
 	/* construct path/filename */
-	fname = mailbox_message_fname(mailbox, uid);
+	fullpath = strconcat(dirpath, "/", name, (char *)NULL);
+	r = dump_file(0, !tag, pin, pout, fullpath, name, NULL, 0);
+	free(fullpath);
 
-	r = dump_file(0, !tag, pin, pout, fname, name, NULL, 0);
 	if (r) goto done;
     }
 
@@ -618,6 +630,14 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
 		fname = mboxkey_getpath(userid);
 		ftag = "MBOXKEY";
 		break;
+	    case DAV_DB: {
+		struct buf dav_file = BUF_INITIALIZER;
+
+		dav_getpath_byuserid(&dav_file, userid);
+		fname = (char *) buf_cstring(&dav_file);
+		ftag = "DAV";
+		break;
+	    }
 	    default:
 		fatal("unknown user data file", EC_OSFILE);
 	    }
@@ -869,7 +889,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 	r = mboxlist_lookup(mbname, &mbentry, NULL);
 	if (!r) r = mailbox_create(mbname, mbentry->mbtype,
 				   mbentry->partition, mbentry->acl,
-				   NULL, 0, 0, &mailbox);
+				   NULL, 0, 0, 0, &mailbox);
 	mboxlist_entry_free(&mbentry);
     }
     if(r) goto done;
@@ -1052,6 +1072,12 @@ EXPORTED int undump_mailbox(const char *mbname,
 	    char *s = user_hash_subs(userid);
 	    strlcpy(fnamebuf, s, sizeof(fnamebuf));
 	    free(s);
+	} else if (userid && !strcmp(file.s, "DAV")) {
+	    /* overwriting this outright is absolutely what we want to do */
+	    struct buf dav_file = BUF_INITIALIZER;
+	    dav_getpath_byuserid(&dav_file, userid);
+	    strlcpy(fnamebuf, buf_cstring(&dav_file), sizeof(fnamebuf));
+	    buf_free(&dav_file);
 	} else if (userid && !strcmp(file.s, "SEEN")) {
 	    seen_file = seen_getpath(userid);
 
@@ -1098,7 +1124,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 			/* Non-fatal,
 			   let's get the file transferred if we can */
 		    }
-		    
+
 		}
 	    }
 	} else {
@@ -1115,7 +1141,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 		if (!parseuint32(file.s, &ptr, &uid)) {
 		    /* is it really a data file? */
 		    if (ptr && ptr[0] == '.' && ptr[1] == '\0')
-			path = mailbox_message_fname(mailbox, uid);
+			path = mboxname_datapath(mailbox->part, mailbox->name, uid);
 		}
 	    }
 	    if (!path) {
@@ -1261,7 +1287,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 	    if (r) continue;
 	    if (record.system_flags & FLAG_UNLINKED)
 		continue; /* no file! */
-	    fname = mailbox_message_fname(mailbox, record.uid);
+	    fname = mailbox_record_fname(mailbox, &record);
 	    settime.actime = settime.modtime = record.internaldate;
 	    if (utime(fname, &settime) == -1) {
 		r = IMAP_IOERROR;

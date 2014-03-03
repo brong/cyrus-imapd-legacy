@@ -242,7 +242,7 @@ void dlist_unstitch(struct dlist *parent, struct dlist *child)
     assert(replace);
 
     if (prev) prev->next = child->next;
-    else (parent->head) = child->next;
+    else parent->head = child->next;
 
     if (parent->tail == child) parent->tail = prev;
 
@@ -383,7 +383,7 @@ void dlist_makefile(struct dlist *dl,
 	dl->type = DL_NIL;
 }
 
-void dlist_makemap(struct dlist *dl, const char *val, size_t len)
+EXPORTED void dlist_makemap(struct dlist *dl, const char *val, size_t len)
 {
     if (!dl) return;
     _dlist_clean(dl);
@@ -416,7 +416,7 @@ EXPORTED struct dlist *dlist_newlist(struct dlist *parent, const char *name)
     return dl;
 }
 
-struct dlist *dlist_newpklist(struct dlist *parent, const char *name)
+EXPORTED struct dlist *dlist_newpklist(struct dlist *parent, const char *name)
 {
     struct dlist *dl = dlist_child(parent, name);
     dl->type = DL_ATOMLIST;
@@ -459,7 +459,7 @@ EXPORTED struct dlist *dlist_setdate(struct dlist *parent, const char *name, tim
     return dl;
 }
 
-struct dlist *dlist_sethex64(struct dlist *parent, const char *name, bit64 val)
+EXPORTED struct dlist *dlist_sethex64(struct dlist *parent, const char *name, bit64 val)
 {
     struct dlist *dl = dlist_child(parent, name);
     dlist_makehex64(dl, val);
@@ -591,7 +591,10 @@ EXPORTED void dlist_print(const struct dlist *dl, int printkeys,
 	printfile(out, dl);
 	break;
     case DL_BUF:
-	prot_printliteral(out, dl->sval, dl->nval);
+	if (strlen(dl->sval) == dl->nval)
+	    prot_printastring(out, dl->sval);
+	else
+	    prot_printliteral(out, dl->sval, dl->nval);
 	break;
     case DL_GUID: 
 	prot_printf(out, "%s", message_guid_encode(dl->gval));
@@ -642,6 +645,191 @@ EXPORTED void dlist_free(struct dlist **dlp)
     free((*dlp)->name);
     free(*dlp);
     *dlp = NULL;
+}
+
+struct dlistsax_state {
+    const char *base;
+    const char *p;
+    const char *end;
+    dlistsax_cb_t *proc;
+    int depth;
+    struct dlistsax_data d;
+    struct buf gbuf;
+};
+
+static int _parseqstring(struct dlistsax_state *s, struct buf *buf)
+{
+    buf->len = 0;
+
+    /* get over the first quote */
+    if (*s->p++ != '"') return IMAP_INVALID_IDENTIFIER;
+
+    while (s->p < s->end) {
+	/* found the end quote */
+	if (*s->p == '"') {
+	    s->p++;
+	    return 0;
+	}
+	/* backslash just quotes the next char, no matter what it is */
+	if (*s->p == '\\') {
+	    s->p++;
+	    if (s->p == s->end) break;
+	    /* fall through */
+	}
+
+	buf_putc(buf, *s->p++);
+    }
+
+    return IMAP_INVALID_IDENTIFIER;
+}
+
+static int _parseliteral(struct dlistsax_state *s, struct buf *buf)
+{
+    size_t len = 0;
+
+    if (*s->p++ != '{') return IMAP_INVALID_IDENTIFIER;
+
+    while (s->p < s->end) {
+	if (cyrus_isdigit(*s->p)) {
+	    len = (len * 10) + (*s->p++ - '0');
+	}
+	else if (*s->p == '}') {
+	    if (s->p + 3 + len >= s->end) break;
+	    if (s->p[1] != '\r') break;
+	    if (s->p[2] != '\n') break;
+	    buf_setmap(buf, s->p+3, len);
+	    s->p += len = 3;
+	    return 0;
+	}
+    }
+
+    return IMAP_INVALID_IDENTIFIER;
+}
+
+static int _parseitem(struct dlistsax_state *s, struct buf *buf)
+{
+    const char *sp;
+    if (*s->p == '"')
+	return _parseqstring(s, buf);
+    else if (*s->p == '{')
+	return _parseliteral(s, buf);
+
+    sp = memchr(s->p, ' ', s->end - s->p);
+    if (!sp) sp = s->end;
+    while (sp[-1] == ')' && sp > s->p) sp--;
+    /* this is much faster because it doesn't do a reset and check the MMAP flag */
+    buf->len = 0;
+    buf_appendmap(buf, s->p, sp - s->p);
+    s->p = sp;
+    return 0; /* this could be the last thing, so end is OK */
+}
+
+static int _parsesax(struct dlistsax_state *s, int parsekey)
+{
+    int r = 0;
+
+    s->depth++;
+
+    /* handle the key if wanted */
+    if (parsekey) {
+	r = _parseitem(s, &s->d.kbuf);
+	if (r) return r;
+	if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+	if (*s->p == ' ') s->p++;
+	else return IMAP_INVALID_IDENTIFIER;
+    }
+    else {
+	s->d.kbuf.len = 0;
+    }
+
+    if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+
+    /* check what sort of value we have */
+    if (*s->p == '(') {
+	r = s->proc(DLISTSAX_LISTSTART, &s->d);
+	if (r) return r;
+
+	s->p++;
+	if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+
+	while (*s->p != ')') {
+	    r = _parsesax(s, 0);
+	    if (r) return r;
+	    if (*s->p == ')') break;
+	    if (*s->p == ' ') s->p++;
+	    else return IMAP_INVALID_IDENTIFIER;
+	    if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+	}
+
+	r = s->proc(DLISTSAX_LISTEND, &s->d);
+	if (r) return r;
+
+	s->p++;
+    }
+    else if (*s->p == '%') {
+	s->p++;
+	if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+	/* no whitespace allowed here */
+	if (*s->p == '(') {
+	    r = s->proc(DLISTSAX_KVLISTSTART, &s->d);
+	    if (r) return r;
+
+	    s->p++;
+	    if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+
+	    while (*s->p != ')') {
+		r = _parsesax(s, 1);
+		if (r) return r;
+		if (*s->p == ')') break;
+		if (*s->p == ' ') s->p++;
+		else return IMAP_INVALID_IDENTIFIER;
+		if (s->p >= s->end) return IMAP_INVALID_IDENTIFIER;
+	    }
+
+	    r = s->proc(DLISTSAX_KVLISTEND, &s->d);
+	    if (r) return r;
+
+	    s->p++;
+	}
+	else {
+	    /* unknown percent type */
+	    return IMAP_INVALID_IDENTIFIER;
+	}
+    }
+    else {
+	r = _parseitem(s, &s->d.buf);
+	if (r) return r;
+
+	r = s->proc(DLISTSAX_STRING, &s->d);
+	if (r) return r;
+    }
+
+    s->depth--;
+
+    /* success */
+    return 0;
+}
+
+EXPORTED int dlist_parsesax(const char *base, size_t len, int parsekey,
+			    dlistsax_cb_t *proc, void *rock)
+{
+    static struct dlistsax_state state;
+    int r;
+
+    state.base = base;
+    state.p = base;
+    state.end = base + len;
+    state.proc = proc;
+    state.d.rock = rock;
+
+    r = _parsesax(&state, parsekey);
+
+    if (r) return r;
+
+    if (state.p < state.end)
+	return IMAP_IOERROR;
+
+    return 0;
 }
 
 static char next_nonspace(struct protstream *in, char c)
@@ -750,7 +938,7 @@ fail:
     return EOF;
 }
 
-char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
+EXPORTED char dlist_parse_asatomlist(struct dlist **dlp, int parsekey,
 			    struct protstream *in)
 {
     char c = dlist_parse(dlp, parsekey, in);
@@ -845,6 +1033,39 @@ EXPORTED struct dlist *dlist_splice(struct dlist *dl, int num)
     return ret;
 }
 
+EXPORTED void dlist_splat(struct dlist *parent, struct dlist *child)
+{
+    struct dlist *prev = NULL;
+    struct dlist *replace;
+
+    /* find old record */
+    for (replace = parent->head; replace; replace = replace->next) {
+	if (replace == child) break;
+	prev = replace;
+    }
+
+    assert(replace);
+
+    if (child->head) {
+	/* stitch in children */
+	if (prev) prev->next = child->head;
+	else parent->head = child->head;
+	if (child->next) child->tail->next = child->next;
+	else parent->tail = child->tail;
+    }
+    else {
+	/* just remove the record */
+	if (prev) prev->next = child->next;
+	else parent->head = child->next;
+	if (!child->next) parent->tail = prev;
+    }
+    /* remove the node itself, carefully blanking out
+     * the now unlinked children */
+    child->head = NULL;
+    child->tail = NULL;
+    dlist_free(&child);
+}
+
 struct dlist *dlist_getkvchild_bykey(struct dlist *dl,
 				     const char *key, const char *val)
 {
@@ -866,6 +1087,14 @@ int dlist_toatom(struct dlist *dl, const char **valp)
 {
     const char *str;
     size_t len;
+
+    if (!dl) return 0;
+
+    /* atom can be NULL */
+    if (dl->type == DL_NIL) {
+	*valp = NULL;
+	return 1;
+    }
 
     /* tomap always adds a trailing \0 */
     if (!dlist_tomap(dl, &str, &len))
@@ -1051,7 +1280,7 @@ EXPORTED int dlist_tofile(struct dlist *dl,
     return 1;
 }
 
-int dlist_isatomlist(const struct dlist *dl)
+EXPORTED int dlist_isatomlist(const struct dlist *dl)
 {
     if (!dl) return 0;
     return (dl->type == DL_ATOMLIST);
@@ -1085,7 +1314,7 @@ int dlist_isnum(struct dlist *dl)
 
 /* XXX - these ones aren't const, because they can change
  * things... */
-int dlist_ishex64(struct dlist *dl)
+EXPORTED int dlist_ishex64(struct dlist *dl)
 {
     bit64 tmp;
 
@@ -1157,7 +1386,7 @@ EXPORTED int dlist_getdate(struct dlist *parent, const char *name, time_t *valp)
     return dlist_todate(child, valp);
 }
 
-int dlist_gethex64(struct dlist *parent, const char *name, bit64 *valp)
+EXPORTED int dlist_gethex64(struct dlist *parent, const char *name, bit64 *valp)
 {
     struct dlist *child = dlist_getchild(parent, name);
     return dlist_tohex64(child, valp);
