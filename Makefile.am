@@ -1190,7 +1190,6 @@ dist_man_MANS = \
 	man/deliver.8 \
 	man/fetchnews.8 \
 	man/fud.8 \
-	man/httpd.8 \
 	man/idled.8 \
 	man/imapd.8 \
 	man/ipurge.8 \
@@ -1206,15 +1205,25 @@ dist_man_MANS = \
 	man/rmnews.8 \
 	man/smmapd.8 \
 	man/syncnews.8 \
-	man/sync_client.8 \
-	man/sync_reset.8 \
-	man/sync_server.8 \
 	man/timsieved.8 \
 	man/tls_prune.8 \
 	man/unexpunge.8
-if USE_SQUAT
+
+if SQUATTER
 dist_man_MANS += \
 	man/squatter.8
+endif
+
+if HTTPD
+dist_man_MANS += \
+	man/httpd.8
+endif
+
+if REPLICATION
+dist_man_MANS += \
+	man/sync_client.8 \
+	man/sync_reset.8 \
+	man/sync_server.8
 endif
 
 master_master_SOURCES = \

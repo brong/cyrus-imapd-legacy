@@ -51,7 +51,9 @@
 #elif defined(HAVE_STDINT_H)
 # include <stdint.h>
 #endif
+#ifdef WITH_DAV
 #include <libical/vcc.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,8 +83,10 @@
 
 #include "annotate.h"
 #include "assert.h"
+#ifdef WITH_DAV
 #include "caldav_db.h"
 #include "carddav_db.h"
+#endif
 #include "crc32.h"
 #include "md5.h"
 #include "exitcodes.h"
@@ -2660,6 +2664,7 @@ out:
     return r;
 }
 
+#ifdef WITH_DAV
 static int mailbox_update_carddav(struct mailbox *mailbox,
 				 struct index_record *old,
 				 struct index_record *new)
@@ -2880,6 +2885,7 @@ static int mailbox_update_dav(struct mailbox *mailbox,
 	return mailbox_update_caldav(mailbox, old, new);
     return 0;
 }
+#endif //WITH_DAV
 
 EXPORTED int mailbox_update_conversations(struct mailbox *mailbox,
 				 struct index_record *old,
@@ -3106,8 +3112,10 @@ static int mailbox_update_indexes(struct mailbox *mailbox,
 {
     int r = 0;
 
+#ifdef WITH_DAV
     r = mailbox_update_dav(mailbox, old, new);
     if (r) return r;
+#endif
 
     r = mailbox_update_conversations(mailbox, old, new);
     if (r) return r;
@@ -4231,6 +4239,7 @@ static int chkchildren(char *name,
     return r;
 }
 
+#ifdef WITH_DAV
 EXPORTED int mailbox_add_dav(struct mailbox *mailbox)
 {
     struct index_record record;
@@ -4250,6 +4259,7 @@ EXPORTED int mailbox_add_dav(struct mailbox *mailbox)
 
     return 0;
 }
+#endif
 
 EXPORTED int mailbox_add_conversations(struct mailbox *mailbox)
 {

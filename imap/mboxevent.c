@@ -53,8 +53,10 @@
 
 #include "annotate.h"
 #include "assert.h"
+#ifdef WITH_DAV
 #include "caldav_db.h"
 #include "carddav_db.h"
+#endif
 #include "exitcodes.h"
 #include "imapurl.h"
 #include "libconfig.h"
@@ -131,9 +133,11 @@ static struct mboxevent event_template =
     { EVENT_PID, "pid", EVENT_PARAM_INT, 0, 0 },
     { EVENT_USER, "user", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_MESSAGE_SIZE, "messageSize", EVENT_PARAM_INT, 0, 0 },
+#ifdef WITH_DAV
     { EVENT_MBTYPE, "vnd.cmu.mbtype", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_DAV_FILENAME, "vnd.cmu.davFilename", EVENT_PARAM_STRING, 0, 0 },
     { EVENT_DAV_UID, "vnd.cmu.davUid", EVENT_PARAM_STRING, 0, 0 },
+#endif
     { EVENT_MESSAGE_CID, "vnd.fastmail.cid", EVENT_PARAM_STRING, 0, 0 },
     /* always at end to let the parser to easily truncate this part */
     { EVENT_ENVELOPE, "vnd.cmu.envelope", EVENT_PARAM_STRING, 0, 0 },
@@ -378,8 +382,10 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
 	return extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_SESSIONID;
     case EVENT_MAILBOX_ID:
 	return (type & MAILBOX_EVENTS);
+#ifdef WITH_DAV
     case EVENT_MBTYPE:
 	return (type & MAILBOX_EVENTS);
+#endif
     case EVENT_MAX_MESSAGES:
 	return type & QUOTA_EVENTS;
     case EVENT_MESSAGE_CONTENT:
@@ -388,12 +394,14 @@ static int mboxevent_expected_param(enum event_type type, enum event_param param
     case EVENT_MESSAGE_SIZE:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_MESSAGESIZE) &&
 	       (type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW));
+#ifdef WITH_DAV
     case EVENT_DAV_FILENAME:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_DAVFILENAME) &&
 	       (type & EVENT_CALENDAR);
     case EVENT_DAV_UID:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_CMU_DAVUID) &&
 	       (type & EVENT_CALENDAR);
+#endif
     case EVENT_MESSAGE_CID:
 	return (extra_params & IMAP_ENUM_EVENT_EXTRA_PARAMS_VND_FASTMAIL_CID) &&
 	       (type & (EVENT_MESSAGE_APPEND|EVENT_MESSAGE_NEW));
@@ -743,6 +751,7 @@ EXPORTED void mboxevent_extract_record(struct mboxevent *event, struct mailbox *
 				   cacheitem_size(record, CACHE_BODYSTRUCTURE)));
     }
 
+#ifdef WITH_DAV
     /* add caldav items */
     if ((mailbox->mbtype & (MBTYPES_DAV)) &&
 	(mboxevent_expected_param(event->type, EVENT_DAV_FILENAME) ||
@@ -783,7 +792,7 @@ EXPORTED void mboxevent_extract_record(struct mboxevent *event, struct mailbox *
 	}
     }
 }
-
+#endif //WITH_DAV
 void mboxevent_extract_copied_record(struct mboxevent *event,
 				     const struct mailbox *mailbox, uint32_t uid)
 {
@@ -993,8 +1002,10 @@ EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event,
     imapurl_toURL(url, &imapurl);
     FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
 
+#ifdef WITH_DAV
     FILL_STRING_PARAM(event, EVENT_MBTYPE,
 	xstrdup(mboxlist_mbtype_to_string(mailbox->mbtype)));
+#endif
 
     /* mailbox related events also require mailboxID */
     if (event->type & MAILBOX_EVENTS) {

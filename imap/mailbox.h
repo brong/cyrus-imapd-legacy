@@ -577,7 +577,9 @@ extern int mailbox_get_annotate_state(struct mailbox *mailbox,
 uint32_t mailbox_sync_crc(struct mailbox *mailbox, unsigned vers, int recalc);
 unsigned mailbox_best_crcvers(unsigned minvers, unsigned maxvers);
 
+#ifdef WITH_DAV
 extern int mailbox_add_dav(struct mailbox *mailbox);
+#endif
 
 /* Rename a CID.  Note - this is just one mailbox! */
 extern int mailbox_cid_rename(struct mailbox *mailbox,
