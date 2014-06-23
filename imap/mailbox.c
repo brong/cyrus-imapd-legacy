@@ -2902,7 +2902,6 @@ static int mailbox_update_caldav(struct mailbox *mailbox,
 {
     const char *userid = mboxname_to_userid(mailbox->name);
     struct caldav_db *caldavdb = NULL;
-    struct caldav_alarm_db *alarmdb = NULL;
     struct param *param;
     struct body *body = NULL;
     struct caldav_data *cdata = NULL;
@@ -2932,7 +2931,6 @@ static int mailbox_update_caldav(struct mailbox *mailbox,
         }
     }
 
-    alarmdb = caldav_alarm_open();
     caldavdb = caldav_open_mailbox(mailbox, 0);
 
     /* Find existing record for this resource */
@@ -2957,7 +2955,9 @@ static int mailbox_update_caldav(struct mailbox *mailbox,
 	r = caldav_delete(caldavdb, cdata->dav.rowid, 0);
 
 	/* and associated alarms */
+	struct caldav_alarm_db *alarmdb = caldav_alarm_open();
 	caldav_alarm_delete_all(alarmdb, &alarmdata);
+	caldav_alarm_close(alarmdb);
     }
     else {
 	struct buf msg_buf = BUF_INITIALIZER;
@@ -2982,7 +2982,12 @@ static int mailbox_update_caldav(struct mailbox *mailbox,
 	caldav_make_entry(ical, cdata);
 
 	r = caldav_write(caldavdb, cdata, 0);
+	if (r) {
+	    icalcomponent_free(ical);
+	    goto done;
+	}
 
+	struct caldav_alarm_db *alarmdb = caldav_alarm_open();
 	caldav_alarm_begin(alarmdb);
 
 	struct caldav_alarm_data alarmdata = {
@@ -3008,6 +3013,7 @@ static int mailbox_update_caldav(struct mailbox *mailbox,
 	    caldav_alarm_rollback(alarmdb);
 	else
 	    caldav_alarm_commit(alarmdb);
+	caldav_alarm_close(alarmdb);
 
 	icalcomponent_free(ical);
     }
@@ -3020,9 +3026,6 @@ done:
 	caldav_commit(caldavdb);
 	caldav_close(caldavdb);
     }
-
-    if (alarmdb)
-	caldav_alarm_close(alarmdb);
 
     return r;
 }
@@ -4696,7 +4699,6 @@ static int mailbox_delete_internal(struct mailbox **mailboxptr)
 static int mailbox_delete_caldav(struct mailbox *mailbox)
 {
     struct caldav_db *caldavdb = NULL;
-    struct caldav_alarm_db *alarmdb = NULL;
 
     caldavdb = caldav_open_mailbox(mailbox, 0);
     if (caldavdb) {
@@ -4705,7 +4707,7 @@ static int mailbox_delete_caldav(struct mailbox *mailbox)
 	if (r) return r;
     }
 
-    alarmdb = caldav_alarm_open();
+    struct caldav_alarm_db *alarmdb = caldav_alarm_open();
     if (alarmdb) {
 	int r = caldav_alarm_delmbox(alarmdb, mailbox->name);
 	caldav_alarm_close(alarmdb);
