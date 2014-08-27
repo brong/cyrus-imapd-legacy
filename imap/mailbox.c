@@ -1052,7 +1052,8 @@ EXPORTED void mailbox_modseq_dirty(struct mailbox *mailbox)
 	return;
 
     mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name,
-			       mailbox->i.highestmodseq);
+			       mailbox->i.highestmodseq,
+			       mailbox->mbtype);
     mailbox->last_updated = time(0);
     mailbox->modseq_dirty = 1;
     mailbox_index_dirty(mailbox);
@@ -4441,15 +4442,15 @@ EXPORTED int mailbox_create(const char *name,
 
     /* ensure a UIDVALIDITY is set */
     if (!uidvalidity)
-	uidvalidity = mboxname_nextuidvalidity(name, time(0));
+	uidvalidity = mboxname_nextuidvalidity(name, time(0), mbtype);
     else
-	mboxname_setuidvalidity(mailbox->name, uidvalidity);
+	mboxname_setuidvalidity(mailbox->name, uidvalidity, mbtype);
 
     /* and highest modseq */
     if (!highestmodseq)
-	highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
+	highestmodseq = mboxname_nextmodseq(mailbox->name, 0, mbtype);
     else
-	mboxname_setmodseq(mailbox->name, highestmodseq);
+	mboxname_setmodseq(mailbox->name, highestmodseq, mbtype);
 
     /* init non-zero fields */
     mailbox_index_dirty(mailbox);
@@ -4938,7 +4939,7 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
 
     /* create uidvalidity if not explicitly requested */
     if (!uidvalidity)
-	uidvalidity = mboxname_nextuidvalidity(newname, oldmailbox->i.uidvalidity);
+	uidvalidity = mboxname_nextuidvalidity(newname, oldmailbox->i.uidvalidity, oldmailbox->mbtype);
 
     /* Create new mailbox */
     r = mailbox_create(newname, oldmailbox->mbtype, newpartition,
@@ -5630,7 +5631,8 @@ static int mailbox_reconstruct_compare_update(struct mailbox *mailbox,
 		   mailbox->name, record->uid, record->modseq);
 	mailbox_index_dirty(mailbox);
 	mailbox->i.highestmodseq = mboxname_setmodseq(mailbox->name,
-						      record->modseq);
+						      record->modseq,
+						      mailbox->mbtype);
     }
 
     if (record->uid > mailbox->i.last_uid) {
@@ -6124,7 +6126,7 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
     /* fix up 2.4.0 bug breakage */
     if (!mailbox->i.uidvalidity) {
 	if (make_changes) {
-	    mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name, time(0));
+	    mailbox->i.uidvalidity = mboxname_nextuidvalidity(mailbox->name, time(0), mailbox->mbtype);
 	    mailbox_index_dirty(mailbox);
 	}
 	syslog(LOG_ERR, "%s: zero uidvalidity", mailbox->name);
@@ -6132,7 +6134,7 @@ EXPORTED int mailbox_reconstruct(const char *name, int flags)
     if (!mailbox->i.highestmodseq) {
 	if (make_changes) {
 	    mailbox_index_dirty(mailbox);
-	    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0);
+	    mailbox->i.highestmodseq = mboxname_nextmodseq(mailbox->name, 0, mailbox->mbtype);
 	}
 	syslog(LOG_ERR, "%s:  zero highestmodseq", mailbox->name);
     }
