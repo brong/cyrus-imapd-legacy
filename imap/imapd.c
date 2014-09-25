@@ -174,7 +174,6 @@ static char *imapd_magicplus = NULL;
 struct auth_state *imapd_authstate = 0;
 static int imapd_userisadmin = 0;
 static int imapd_userisproxyadmin = 0;
-unsigned imapd_client_capa = 0;
 static sasl_conn_t *imapd_saslconn; /* the sasl connection context */
 static int imapd_starttls_done = 0; /* have we done a successful starttls? */
 static void *imapd_tls_comp = NULL; /* TLS compression method, if any */
@@ -783,7 +782,7 @@ static void imapd_reset(void)
     }
     imapd_userisadmin = 0;
     imapd_userisproxyadmin = 0;
-    imapd_client_capa = 0;
+    client_capa = 0;
     if (imapd_saslconn) {
 	sasl_dispose(&imapd_saslconn);
 	free(imapd_saslconn);
@@ -3347,7 +3346,6 @@ static int catenate_url(const char *s, const char *cur_name, FILE *f,
 	    if (!r) {
 		struct index_init init;
 		memset(&init, 0, sizeof(init));
-		init.qresync = imapd_client_capa & CAPA_QRESYNC;
 		init.userid = imapd_userid;
 		init.authstate = imapd_authstate;
 		init.out = imapd_out;
@@ -3891,9 +3889,9 @@ static void cmd_select(char *tag, char *cmd, char *name)
 	for (;;) {
 	    ucase(arg.s);
 	    if (!strcmp(arg.s, "CONDSTORE")) {
-		imapd_client_capa |= CAPA_CONDSTORE;
+		client_capa |= CAPA_CONDSTORE;
 	    }
-	    else if ((imapd_client_capa & CAPA_QRESYNC) &&
+	    else if ((client_capa & CAPA_QRESYNC) &&
 		     !strcmp(arg.s, "QRESYNC")) {
 		char *p;
 
@@ -4022,13 +4020,13 @@ static void cmd_select(char *tag, char *cmd, char *name)
 	    return;
 	}
 
-	if (imapd_client_capa) {
+	if (client_capa) {
 	    /* Enable client capabilities on new backend */
 	    proxy_gentag(mytag, sizeof(mytag));
 	    prot_printf(backend_current->out, "%s Enable", mytag);
-	    if (imapd_client_capa & CAPA_QRESYNC)
+	    if (client_capa & CAPA_QRESYNC)
 		prot_printf(backend_current->out, " Qresync");
-	    else if (imapd_client_capa & CAPA_CONDSTORE)
+	    else if (client_capa & CAPA_CONDSTORE)
 		prot_printf(backend_current->out, " Condstore");
 	    prot_printf(backend_current->out, "\r\n");
 	    pipe_until_tag(backend_current, mytag, 0);
@@ -4089,7 +4087,6 @@ static void cmd_select(char *tag, char *cmd, char *name)
 
     if (wasopen) prot_printf(imapd_out, "* OK [CLOSED] Ok\r\n");
 
-    init.qresync = imapd_client_capa & CAPA_QRESYNC;
     init.userid = imapd_userid;
     init.authstate = imapd_authstate;
     init.out = imapd_out;
@@ -4697,8 +4694,8 @@ badannotation:
     }
 
     if (fa->fetchitems & FETCH_MODSEQ) {
-	if (!(imapd_client_capa & CAPA_CONDSTORE)) {
-	    imapd_client_capa |= CAPA_CONDSTORE;
+	if (!(client_capa & CAPA_CONDSTORE)) {
+	    client_capa |= CAPA_CONDSTORE;
 	    if (imapd_index)
 		prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 			index_highestmodseq(imapd_index));
@@ -4762,7 +4759,7 @@ static void cmd_fetch(char *tag, char *sequence, int usinguid)
     memset(&fetchargs, 0, sizeof(struct fetchargs));
 
     r = parse_fetch_args(tag, cmd,
-			 (usinguid && (imapd_client_capa & CAPA_QRESYNC)),
+			 (usinguid && (client_capa & CAPA_QRESYNC)),
 			 &fetchargs);
     if (r)
 	goto freeargs;
@@ -5382,8 +5379,8 @@ notflagsdammit:
     }
 
     if ((storeargs.unchangedsince != ULONG_MAX) &&
-	!(imapd_client_capa & CAPA_CONDSTORE)) {
-	imapd_client_capa |= CAPA_CONDSTORE;
+	!(client_capa & CAPA_CONDSTORE)) {
+	client_capa |= CAPA_CONDSTORE;
 	prot_printf(imapd_out, "* OK [HIGHESTMODSEQ " MODSEQ_FMT "]  \r\n",
 		    index_highestmodseq(imapd_index));
     }
@@ -12931,7 +12928,11 @@ static void cmd_enable(char *tag)
 {
     static struct buf arg;
     int c;
-    unsigned new_capa = imapd_client_capa;
+    unsigned new_capa = client_capa;
+
+    /* RFC5161 says that enable while selected is actually bogus,
+     * but it's no skin off our nose to support it, so don't
+     * bother checking */
 
     do {
 	c = getword(imapd_in, &arg);
@@ -12943,9 +12944,9 @@ static void cmd_enable(char *tag)
 	    return;
 	}
 	if (!strcasecmp(arg.s, "condstore"))
-	    new_capa |= CAPA_CONDSTORE;
+	    new_capa = CAPA_CONDSTORE;
 	else if (!strcasecmp(arg.s, "qresync"))
-	    new_capa |= CAPA_QRESYNC | CAPA_CONDSTORE;
+	    new_capa = CAPA_QRESYNC | CAPA_CONDSTORE;
     } while (c == ' ');
 
     /* check for CRLF */
@@ -12958,21 +12959,18 @@ static void cmd_enable(char *tag)
     }
 
     prot_printf(imapd_out, "* ENABLED");
-    if (!(imapd_client_capa & CAPA_CONDSTORE) &&
+    if (!(client_capa & CAPA_CONDSTORE) &&
 	 (new_capa & CAPA_CONDSTORE)) {
 	prot_printf(imapd_out, " CONDSTORE");
     }
-    if (!(imapd_client_capa & CAPA_QRESYNC) &&
+    if (!(client_capa & CAPA_QRESYNC) &&
 	 (new_capa & CAPA_QRESYNC)) {
 	prot_printf(imapd_out, " QRESYNC");
-	/* RFC5161 says that enable while selected is actually bogus,
-	 * but it's no skin off our nose to support it */
-	if (imapd_index) imapd_index->qresync = 1;
     }
     prot_printf(imapd_out, "\r\n");
 
     /* track the new capabilities */
-    imapd_client_capa = new_capa;
+    client_capa |= new_capa;
 
     prot_printf(imapd_out, "%s OK %s\r\n", tag,
 		error_message(IMAP_OK_COMPLETED));
