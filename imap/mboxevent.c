@@ -761,19 +761,10 @@ EXPORTED void mboxevent_set_access(struct mboxevent *event,
     }
     if (userid && mboxevent_expected_param(event->type, EVENT_USER)) {
 	/* translate any separators in user */
-<<<<<<< HEAD
-	userbuf = xstrdup(userid);
-	if (userbuf != NULL && ext_name)
-	    mboxname_hiersep_toexternal(&namespace, userbuf,
-				    config_virtdomains ? strcspn(userbuf, "@") : 0);
-
-	FILL_STRING_PARAM(event, EVENT_USER, userbuf);
-=======
 	char *user = xstrdup(userid);
 	mboxname_hiersep_toexternal(&namespace, user,
 				    config_virtdomains ? strcspn(user, "@") : 0);
 	FILL_STRING_PARAM(event, EVENT_USER, user);
->>>>>>> mboxevent: don't crash on mailboxes without associated userid
     }
 }
 
