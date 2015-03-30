@@ -84,6 +84,8 @@ EXPORTED void fatal(const char *msg, int err)
 
     cyrus_done();
 
+    abort();
+
     exit(err);
 }
 

@@ -1226,6 +1226,7 @@ EXPORTED void fatal(const char* s, int code)
     }
 
     syslog(LOG_ERR, "%s%s", fatal, s);
+    abort();
     shut_down(code);
 }
 

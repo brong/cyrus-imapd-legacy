@@ -210,6 +210,7 @@ EXPORTED void fatal(const char *msg, int code)
 {
     syslog(LOG_CRIT, "%s", msg);
     syslog(LOG_NOTICE, "exiting");
+    abort();
     exit(code);
 }
 
