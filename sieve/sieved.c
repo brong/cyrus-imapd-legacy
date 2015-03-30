@@ -74,6 +74,8 @@ EXPORTED void fatal(const char *s, int code)
 {
     fprintf(stderr, "Fatal error: %s (%d)\r\n", s, code);
 
+    abort();
+
     exit(1);
 }
 

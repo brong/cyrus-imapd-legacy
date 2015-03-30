@@ -86,7 +86,7 @@ EXPORTED void fatal(const char *msg, int err)
 {
     syslog(LOG_CRIT, "%s", msg);
     syslog(LOG_NOTICE, "exiting");
-
+    abort();
     shut_down(err);
 }
 
