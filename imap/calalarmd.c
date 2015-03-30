@@ -75,6 +75,7 @@ EXPORTED void fatal(const char *msg, int err)
     syslog(LOG_NOTICE, "exiting");
 
     cyrus_done();
+    abort();
 
     exit(err);
 }

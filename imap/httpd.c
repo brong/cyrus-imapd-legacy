@@ -1075,6 +1075,7 @@ void fatal(const char* s, int code)
         prot_flush(httpd_out);
     }
     syslog(LOG_ERR, "%s%s", fatal, s);
+    abort();
     shut_down(code);
 }
 
