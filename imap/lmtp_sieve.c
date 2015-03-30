@@ -83,6 +83,8 @@
 #include "xstrlcat.h"
 #include "imap/zoneinfo_db.h"
 
+#include "me.h"
+
 /* generated headers are not necessarily in current directory */
 #include "imap/imap_err.h"
 #include "imap/lmtp_err.h"
@@ -492,7 +494,7 @@ static int send_rejection(const char *userid,
             config_servername, CYRUS_VERSION, SIEVE_VERSION);
     if (origreceip)
         buf_printf(&msgbuf, "Original-Recipient: rfc822; %s\r\n", origreceip);
-    buf_printf(&msgbuf, "Final-Recipient: rfc822; %s\r\n", mailreceip);
+    buf_printf(&msgbuf, "Final-Recipient: rfc822; %s\r\n", me_create_sasl_enc(mailreceip));
     if (origid)
         buf_printf(&msgbuf, "Original-Message-ID: %s\r\n", origid);
     buf_printf(&msgbuf, "Disposition: "
@@ -993,7 +995,7 @@ static int sieve_reject(void *ac, void *ic,
         return SIEVE_OK;
     }
 
-    body = msg_getheader(md, "original-recipient");
+    body = msg_getheader(md, "x-delivered-to");
     origreceip = body ? body[0] : NULL;
     if ((res = send_rejection(ctx->userid, md->id, md->return_path,
                               origreceip, mbname_recipient(sd->mbname, ((deliver_data_t *) mc)->ns),
