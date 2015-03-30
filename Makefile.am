@@ -754,6 +754,7 @@ include_HEADERS = \
 	lib/lsort.h \
 	lib/map.h \
 	lib/mappedfile.h \
+	lib/me.h \
 	lib/mkgmtime.h \
 	lib/mpool.h \
 	lib/murmurhash2.h \
@@ -1430,6 +1431,7 @@ lib_libcyrus_min_la_SOURCES = \
 	lib/hash.c \
 	lib/hashu64.c \
 	lib/libconfig.c \
+	lib/me.c \
 	lib/mpool.c \
 	lib/retry.c \
 	lib/strarray.c \
