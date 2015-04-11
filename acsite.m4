@@ -1176,7 +1176,7 @@ AC_DEFUN([CYRUS_GSSAPI],[
 	AC_REQUIRE([CYRUS_COM_ERR])
 	SNERT_CHECK_PACKAGE([GSSAPI], dnl
 		[gssapi/gssapi.h gssapi/gssapi_ext.h gssapi.h appsec-sdk/include/gssapi.h], dnl
-		[libgssapi libgssapi_krb5 libkrb5support appsec-rt/lib/libgss], dnl
+		[libgssapi_krb5 libkrb5support appsec-rt/lib/libgss], dnl
 		[gss_unwrap krb5int_getspecific csf_gss_acq_user], dnl
 		[$with_gssapi],[$with_gssapi_inc],[$with_gssapi_lib],[],[no]dnl
 	)
