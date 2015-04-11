@@ -199,15 +199,15 @@ HIDDEN int saslclient(sasl_conn_t *conn, struct sasl_cmd_t *sasl_cmd,
 
     if (r != SASL_OK && r != SASL_CONTINUE) {
 	if (sasl_result) *sasl_result = r;
-	if (status) *status = sasl_errdetail(conn);
+	if (status) *status = sasl_errdetail(conn);	
 	return IMAP_SASL_FAIL;
     }
 
     /* build the auth command */
     if (sasl_cmd->quote)
-	SNPRINTF_LOG(cmdbuf, sizeof (cmdbuf), "%s \"%s\"", sasl_cmd->cmd, mech);
+	sprintf(cmdbuf, "%s \"%s\"", sasl_cmd->cmd, mech);
     else
-	SNPRINTF_LOG(cmdbuf, sizeof (cmdbuf), "%s %s", sasl_cmd->cmd, mech);
+	sprintf(cmdbuf, "%s %s", sasl_cmd->cmd, mech);
     prot_printf(pout, "%s", cmdbuf);
 
     if (!clientout) goto noinitresp;  /* no initial response */

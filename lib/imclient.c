@@ -1323,8 +1323,7 @@ EXPORTED int imclient_authenticate(struct imclient *imclient,
 
 	/* eliminate mtried (mechanism tried) from mlist */
 	if (r != 0 && mtried) {
-	    size_t size = strlen(mlist)+1;
-	    char *newlist = xmalloc(size);
+	    char *newlist = xmalloc(strlen(mlist)+1);
 	    char *mtr = xstrdup(mtried);
 	    char *tmp;
 
@@ -1336,15 +1335,15 @@ EXPORTED int imclient_authenticate(struct imclient *imclient,
 		break;
 	    }
 	    *tmp = '\0';
-	    STRLCPY_LOG(newlist, mlist, size);
-
+	    strcpy(newlist,mlist);
+	    
 	    /* Use tmp+1 here to skip the \0 we just put in.
 	     * this is safe because even if the mechs are one character
 	     * long there would still be another trailing \0 */
 	    tmp = strchr(tmp+1,' ');
-	    if (tmp) {
+	    if (tmp) {		
 		tmp++; /* skip the space */
-		STRLCAT_LOG(newlist, tmp, size);
+		strcat(newlist,tmp);
 	    }
 
 	    free(mtr);
@@ -1716,15 +1715,15 @@ static int tls_dump(const char *s, int len)
 	buf[0] = '\0';				/* start with empty string */
 	ss = buf;
 
-	SNPRINTF_LOG(ss, sizeof (buf), "%04x ", i * DUMP_WIDTH);
+	sprintf(ss, "%04x ", i * DUMP_WIDTH);
 	ss += strlen(ss);
 	for (j = 0; j < DUMP_WIDTH; j++) {
 	    if (((i * DUMP_WIDTH) + j) >= len) {
-		STRLCPY_LOG(ss, "   ", sizeof (buf) - (ss-buf));
+		strcpy(ss, "   ");
 	    } else {
 		ch = ((unsigned char) *((char *) (s) + i * DUMP_WIDTH + j))
 		    & 0xff;
-		SNPRINTF_LOG(ss, sizeof (buf) - (ss-buf), "%02x[%c]%c", ch, ch, j == 7 ? '|' : ' ');
+		sprintf(ss, "%02x[%c]%c", ch, ch, j == 7 ? '|' : ' ');
 		ss += 6;
 	    }
 	}
@@ -1747,7 +1746,7 @@ static int tls_dump(const char *s, int len)
     }
 #ifdef TRUNCATE
     if (trunc > 0) {
-	SNPRINTF_LOG(buf, sizeof (buf), "%04x - <SPACES/NULS>\n", len+ trunc);
+	sprintf(buf, "%04x - <SPACES/NULS>\n", len+ trunc);
 	printf("%s\n", buf);
 	ret += strlen(buf);
     }

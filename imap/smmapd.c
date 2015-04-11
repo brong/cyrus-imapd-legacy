@@ -375,15 +375,15 @@ static int verify_user(const char *key, struct auth_state *authstate)
 	/* XXX port should be configurable */
 	sin.sin_port = htons(12345);
 
-	if (connect(soc,(struct sockaddr *) &sin, sizeof(sin)) < 0) {
-	    syslog(LOG_ERR, "verify_user(%s) failed: can't connect to %s",
+	if (connect(soc,(struct sockaddr *) &sin, sizeof(sin)) < 0) { 
+	    syslog(LOG_ERR, "verify_user(%s) failed: can't connect to %s", 
 		   namebuf, mbentry->server);
 	    close(soc);
 	    mboxlist_entry_free(&mbentry);
 	    return r;
 	}
 
-	SNPRINTF_LOG(buf, sizeof (buf),SIZE_T_FMT ":cyrus %s,%c",strlen(key)+6,key,4);
+	sprintf(buf,SIZE_T_FMT ":cyrus %s,%c",strlen(key)+6,key,4);
 	sendto(soc,buf,strlen(buf),0,(struct sockaddr *)&sin,sizeof(sin));
 
 	x = sizeof(sfrom);

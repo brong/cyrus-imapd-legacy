@@ -4897,7 +4897,7 @@ HIDDEN int mailbox_delete_cleanup(const char *part, const char *name, const char
 
     do {
 	/* Check if the mailbox has children */
-	STRLCPY_LOG(ntail, ".*", sizeof (nbuf) - (ntail - nbuf));
+	strcpy(ntail, ".*");
 	r = mboxlist_findall(NULL, nbuf, 1, NULL, NULL, chkchildren, (void *)part);
 	if (r != 0) break; /* We short-circuit with CYRUSDB_DONE */
 

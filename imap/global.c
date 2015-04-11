@@ -803,19 +803,19 @@ EXPORTED void parse_sessionid(const char *str, char *sessionid)
 
     if ((str) && (sp = strstr(str, "SESSIONID=<")) && (ep = strchr(sp, '>')))
     {
-	sp += STRLEN("SESSIONID=<");
+	sp += 11;
 	len = ep - sp;
 	if (len < MAX_SESSIONID_SIZE)
 	{
-	    (void) strncpy(sessionid, sp, len);
+	    strncpy(sessionid, sp, len);
 	    ep = sessionid + len;
 	    *ep = '\0';
 	}
 	else
-	    (void) strcpy(sessionid, "invalid");
+	    strcpy(sessionid, "invalid");
     }
     else
-	(void) strcpy(sessionid, "unknown");
+	strcpy(sessionid, "unknown");
 }
 
 EXPORTED int capa_is_disabled(const char *str)

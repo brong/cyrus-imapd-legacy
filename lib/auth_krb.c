@@ -221,16 +221,16 @@ const char *real_realm;
 		}
 	    }
 
-	    STRLCPY_LOG(localuser, aname, sizeof (localuser));
+	    strcpy(localuser, aname);
 	    if (*inst) {
-		(void) strlcat(localuser, ".", sizeof (localuser));
-		STRLCAT_LOG(localuser, inst, sizeof (localuser));
+		strcat(localuser, ".");
+		strcat(localuser, inst);
 	    }
 	    if (*realm) {
-		(void) strlcat(localuser, "@", sizeof (localuser));
-		STRLCAT_LOG(localuser, realm, sizeof (localuser));
+		strcat(localuser, "@");
+		strcat(localuser, realm);
 	    }
-
+	    
 	    return localuser;
 	}
     }
@@ -287,18 +287,18 @@ static const char *mycanonifyid(const char *identifier, size_t len)
 
     /* Check for krb.equiv remappings. */
     if ((p = auth_map_krbid(aname, inst, realm)) ) {
-        STRLCPY_LOG(retbuf, p, sizeof (retbuf));
+        strcpy(retbuf, p);
         return retbuf;
     }
 
-    STRLCPY_LOG(retbuf, aname, sizeof (retbuf));
+    strcpy(retbuf, aname);
     if (*inst) {
-	(void) strlcat(retbuf, ".", sizeof (retbuf));
-	STRLCAT_LOG(retbuf, inst, sizeof (retbuf));
+	strcat(retbuf, ".");
+	strcat(retbuf, inst);
     }
     if (*realm) {
-	(void) strlcat(retbuf, "@", sizeof (retbuf));
-	STRLCAT_LOG(retbuf, realm, sizeof (retbuf));
+	strcat(retbuf, "@");
+	strcat(retbuf, realm);
     }
 
     return retbuf;
@@ -318,7 +318,7 @@ static struct auth_state *mynewstate(const char *identifier)
 
     newstate = (struct auth_state *)xmalloc(sizeof(struct auth_state));
 
-    STRLCPY_LOG(newstate->userid, identifier, sizeof (newstate->userid));
+    strcpy(newstate->userid, identifier);
     newstate->aname[0] = newstate->inst[0] = newstate->realm[0] = '\0';
     kname_parse(newstate->aname, newstate->inst, newstate->realm, (char *) identifier);
 

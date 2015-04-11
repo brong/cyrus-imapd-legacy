@@ -554,31 +554,31 @@ static int tls_dump(const char *s, int len)
     int     rows;
     int     trunc;
     unsigned char ch;
-
+    
     trunc = 0;
-
+    
 #ifdef TRUNCATE
     for (; (len > 0) && ((s[len - 1] == ' ') || (s[len - 1] == '\0')); len--)
 	trunc++;
 #endif
-
+    
     rows = (len / DUMP_WIDTH);
     if ((rows * DUMP_WIDTH) < len)
 	rows++;
-
+    
     for (i = 0; i < rows; i++) {
 	buf[0] = '\0';				/* start with empty string */
 	ss = buf;
-
-	SNPRINTF_ERR(ss, sizeof (buf)-(ss-buf), "%04x ", i * DUMP_WIDTH);
+	
+	sprintf(ss, "%04x ", i * DUMP_WIDTH);
 	ss += strlen(ss);
 	for (j = 0; j < DUMP_WIDTH; j++) {
 	    if (((i * DUMP_WIDTH) + j) >= len) {
-		STRLCPY_ERR(ss, "   ", sizeof (buf)-(ss-buf));
+		strcpy(ss, "   ");
 	    } else {
 		ch = ((unsigned char) *((char *) (s) + i * DUMP_WIDTH + j))
 		    & 0xff;
-		SNPRINTF_ERR(ss, sizeof (buf)-(ss-buf), "%02x%c", ch, j == 7 ? '|' : ' ');
+		sprintf(ss, "%02x%c", ch, j == 7 ? '|' : ' ');
 		ss += 3;
 	    }
 	}
@@ -601,7 +601,7 @@ static int tls_dump(const char *s, int len)
     }
 #ifdef TRUNCATE
     if (trunc > 0) {
-	SNPRINTF_ERR(buf, sizeof (buf), "%04x - <SPACES/NULS>\n", len+ trunc);
+	sprintf(buf, "%04x - <SPACES/NULS>\n", len+ trunc);
 	printf("%s\n", buf);
 	ret += strlen(buf);
     }
@@ -923,33 +923,33 @@ static void interaction (int id, const char *challenge, const char *prompt,
 	*tresult = s;
 	return;
     } else if (id==SASL_CB_PASS && cmdline_password) {
-	STRLCPY_ERR(result, cmdline_password, sizeof (result));
+	strcpy(result, cmdline_password);
     } else if (id==SASL_CB_USER) {
 	if (username != NULL) {
-	    STRLCPY_ERR(result, username, sizeof (result));
+	    strcpy(result, username);
 	} else {
-	    (void) strcpy(result, "");
+	    strcpy(result, "");
 	}
     } else if (id==SASL_CB_AUTHNAME) {
 	if (authname != NULL) {
-	    STRLCPY_ERR(result, authname, sizeof (result));
+	    strcpy(result, authname);
 	} else {
-	    STRLCPY_ERR(result, getpwuid(getuid())->pw_name, sizeof (result));
+	    strcpy(result, getpwuid(getuid())->pw_name);
 	}
 #ifdef SASL_CB_GETREALM
     } else if ((id==SASL_CB_GETREALM) && (realm != NULL)) {
-	STRLCPY_ERR(result, realm, sizeof (result));
+	strcpy(result, realm);
 #endif
     } else {
 	int c;
-
+	
 	if (((id==SASL_CB_ECHOPROMPT) || (id==SASL_CB_NOECHOPROMPT)) &&
 	    (challenge != NULL)) {
 	    printf("Server challenge: %s\n", challenge);
 	}
 	printf("%s: ",prompt);
 	if (id==SASL_CB_NOECHOPROMPT) {
-	    STRLCPY_ERR(result, cyrus_getpass(""), sizeof (result));
+	    strcpy(result, cyrus_getpass(""));
 	} else {
 	    result[0] = '\0';
 	    if (fgets(result, sizeof(result) - 1, stdin) != NULL) {
@@ -1018,19 +1018,19 @@ static int auth_sasl(struct sasl_cmd_t *sasl_cmd, char *mechlist)
 				       &outlen, &mechusing);
 
 	if (saslresult == SASL_INTERACT)
-	    fillin_interactions(client_interact); /* fill in prompts */
+	    fillin_interactions(client_interact); /* fill in prompts */      
     } while (saslresult == SASL_INTERACT);
-
+    
     if ((saslresult != SASL_OK) && (saslresult != SASL_CONTINUE)) {
 	return saslresult;
     }
 
     /* build the auth command */
     if (sasl_cmd->quote) {
-	SNPRINTF_ERR(cmdbuf, sizeof (cmdbuf), "%s \"%s\"", sasl_cmd->cmd, mechusing);
+	sprintf(cmdbuf, "%s \"%s\"", sasl_cmd->cmd, mechusing);
     }
     else {
-	SNPRINTF_ERR(cmdbuf, sizeof (cmdbuf), "%s %s", sasl_cmd->cmd, mechusing);
+	sprintf(cmdbuf, "%s %s", sasl_cmd->cmd, mechusing);
     }
     printf("C: %s", cmdbuf);
     prot_printf(pout, "%s", cmdbuf);
@@ -1138,7 +1138,7 @@ static int init_net(char *serverFQDN, char *port)
     }
 
     if (res0->ai_canonname)
-	/* ACH: hard coded buffer size */ STRLCPY_ERR(serverFQDN, res0->ai_canonname, 1024);
+	strncpy(serverFQDN, res0->ai_canonname, 1023);
     for (res = res0; res; res = res->ai_next) {
 	sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (sock < 0)
@@ -1224,10 +1224,10 @@ static void interactive(struct protocol_t *protocol, char *filename)
     } else if(output_socket) {
 	struct timeval tv;
 	struct stat sbuf;
-
+	
 	/* can't have this and a file for input */
 	sunsock.sun_family = AF_UNIX;
-	STRLCPY_ERR(sunsock.sun_path, output_socket, sizeof (sunsock.sun_path));
+	strcpy(sunsock.sun_path, output_socket);
 	unlink(output_socket);
 
 	listen_sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -1612,29 +1612,28 @@ static int generic_pipe(char *buf, int len, void *rock)
 
 static char *imap_parse_mechlist(const char *str, struct protocol_t *prot)
 {
-    size_t ret_size = strlen(str)+1;
-    char *ret = xzmalloc(ret_size);
+    char *ret = xzmalloc(strlen(str)+1);
     char *tmp;
     int num = 0;
-
+    
     if (strstr(str, " SASL-IR")) {
 	/* server supports initial response in AUTHENTICATE command */
 	prot->sasl_cmd.maxlen = USHRT_MAX;
     }
-
+    
     while ((tmp = strstr(str, " AUTH="))) {
-	char *end = (tmp += STRLEN(" AUTH="));
-
+	char *end = (tmp += 6);
+	
 	while((*end != ' ') && (*end != '\0')) end++;
-
+	
 	/* add entry to list */
-	if (num++ > 0) (void) strlcat(ret, " ", ret_size);
-	STRLCAT_ERR(ret, tmp, ret_size);
-
+	if (num++ > 0) strcat(ret, " ");
+	strlcat(ret, tmp, strlen(ret) + (end - tmp) + 1);
+	
 	/* reset the string */
 	str = end;
     }
-
+    
     return ret;
 }
 
@@ -1960,30 +1959,30 @@ static int auth_apop(char *apop_chal)
     MD5_CTX ctx;
     unsigned char digest[MD5_DIGEST_LENGTH];
     char digeststr[2*MD5_DIGEST_LENGTH+1];
-
+    
     interaction(SASL_CB_AUTHNAME, NULL, "Authname", &username, &userlen);
     interaction(SASL_CB_PASS,NULL, "Please enter your password",
 		&pass, &passlen);
-
+    
     MD5Init(&ctx);
     MD5Update(&ctx,apop_chal,strlen(apop_chal));
     MD5Update(&ctx,pass,passlen);
     MD5Final(digest, &ctx);
-
+    
     /* convert digest from binary to ASCII hex */
     for (i = 0; i < 16; i++)
-	SNPRINTF_ERR(digeststr + (i*2), sizeof (digeststr) - i*2, "%02x", digest[i]);
-
+	sprintf(digeststr + (i*2), "%02x", digest[i]);
+    
     printf("C: APOP %s %s\r\n", username, digeststr);
     prot_printf(pout,"APOP %s %s\r\n", username, digeststr);
     prot_flush(pout);
-
+    
     if(prot_fgets(str, 1024, pin) == NULL) {
 	imtest_fatal("prot layer failure");
     }
-
+    
     printf("S: %s", str);
-
+    
     if (!strncasecmp(str, "+OK", 3)) {
 	return IMTEST_OK;
     } else {

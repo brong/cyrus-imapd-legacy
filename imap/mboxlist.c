@@ -2023,7 +2023,7 @@ mboxlist_sync_setacls(const char *name, const char *newacl)
         mupdate_handle *mupdate_h = NULL;
 	/* commit the update to MUPDATE */
 	char buf[MAX_PARTITION_LEN + HOSTNAME_SIZE + 2];
-	SNPRINTF_LOG(buf, sizeof (buf), "%s!%s", config_servername, mbentry->partition);
+	sprintf(buf, "%s!%s", config_servername, mbentry->partition);
 
 	r = mupdate_connect(config_mupdate_server, NULL, &mupdate_h, NULL);
 	if (r) {

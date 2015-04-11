@@ -475,12 +475,12 @@ EXPORTED void config_read(const char *alt_config, const int config_need_data)
 	 * 17 is the length of "{configdirectory}",
 	 * 16 is one less than that length, so that the replacement string
 	 *    that is malloced has room for the '\0' */
-	if (!strncasecmp(imapopts[opt].val.s,"{configdirectory}",STRLEN("{configdirectory}"))) {
+	if (!strncasecmp(imapopts[opt].val.s,"{configdirectory}",17)) {
 	    const char *str = imapopts[opt].val.s;
-	    size_t size = strlen(config_dir) + strlen(str) - STRLEN("{configdirectory}")+1;
-	    char *newstring = xmalloc(size);
+	    char *newstring =
+		xmalloc(strlen(config_dir) + strlen(str) - 16);
 	    char *freeme = NULL;
-
+	    
 	    /* we need to replace this string, will we need to free
 	     * the current value?  -- only if we've actually seen it in
 	     * the config file. */
@@ -488,8 +488,8 @@ EXPORTED void config_read(const char *alt_config, const int config_need_data)
 		freeme = (char *)str;
 
 	    /* Build replacement string from configdirectory option */
-	    (void) strlcpy(newstring, config_dir, size);
-	    STRLCAT_LOG(newstring, str + STRLEN("{configdirectory}"), size);
+	    strcpy(newstring, config_dir);
+	    strcat(newstring, str + 17);
 
 	    imapopts[opt].val.s = newstring;
 
@@ -753,7 +753,7 @@ static void config_read_file(const char *filename)
 		    (imapopts[opt].seen == 2 && service_specific)
 		) {
 
-		SNPRINTF_LOG(errbuf, sizeof (errbuf),
+		sprintf(errbuf,
 			"option '%s' was specified twice in config file (second occurance on line %d)",
 			fullkey, lineno);
 		fatal(errbuf, EC_CONFIG);
@@ -787,11 +787,11 @@ static void config_read_file(const char *filename)
 	    {
 		long val;
 		char *ptr;
-
+		
 		val = strtol(p, &ptr, 0);
 		if (!ptr || *ptr != '\0') {
 		    /* error during conversion */
-		    SNPRINTF_LOG(errbuf, sizeof (errbuf), "non-integer value for %s in line %d",
+		    sprintf(errbuf, "non-integer value for %s in line %d",
 			    imapopts[opt].optname, lineno);
 		    fatal(errbuf, EC_CONFIG);
 		}
@@ -811,7 +811,7 @@ static void config_read_file(const char *filename)
 		}
 		else {
 		    /* error during conversion */
-		    SNPRINTF_LOG(errbuf, sizeof (errbuf), "non-switch value for %s in line %d",
+		    sprintf(errbuf, "non-switch value for %s in line %d",
 			    imapopts[opt].optname, lineno);
 		    fatal(errbuf, EC_CONFIG);
 		}
@@ -854,7 +854,7 @@ static void config_read_file(const char *filename)
 
 		    if (!e->name) {
 			/* error during conversion */
-			SNPRINTF_LOG(errbuf, sizeof (errbuf), "invalid value '%s' for %s in line %d",
+			sprintf(errbuf, "invalid value '%s' for %s in line %d",
 				p, imapopts[opt].optname, lineno);
 			fatal(errbuf, EC_CONFIG);
 		    }
@@ -886,7 +886,7 @@ static void config_read_file(const char *filename)
 
 	    if (strncasecmp(key,"sasl_",5)
 	    && strncasecmp(key,"partition-",10)) {
-		SNPRINTF_LOG(errbuf, sizeof (errbuf),
+		sprintf(errbuf,
 			"option '%s' is unknown on line %d of config file",
 			fullkey, lineno);
 		fatal(errbuf, EC_CONFIG);

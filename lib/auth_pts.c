@@ -427,7 +427,7 @@ static int ptload(const char *identifier, struct auth_state **state)
 
     memset((char *)&srvaddr, 0, sizeof(srvaddr));
     srvaddr.sun_family = AF_UNIX;
-    STRLCPY_LOG(srvaddr.sun_path, fname, sizeof (srvaddr.sun_path));
+    strcpy(srvaddr.sun_path, fname);
     r = nb_connect(s, (struct sockaddr *)&srvaddr, sizeof(srvaddr), PT_TIMEOUT_SEC);
     free(tofree);
 

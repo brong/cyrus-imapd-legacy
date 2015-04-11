@@ -368,17 +368,17 @@ static int tls_dump(const char *s, int len)
 
 	val = i * DUMP_WIDTH;
 	assert(val <= 0xFFFF);
-	SNPRINTF_LOG(ss, sizeof (buf), "%04x ", i * DUMP_WIDTH);
+	sprintf(ss, "%04x ", i * DUMP_WIDTH);
 	ss += strlen(ss);
 
 	for (j = 0; j < DUMP_WIDTH; j++) {
 	    if (((i * DUMP_WIDTH) + j) >= len) {
-		STRLCPY_LOG(ss, "   ", sizeof (buf)-(ss-buf));
+		strcpy(ss, "   ");
 	    } else {
 		ch = ((unsigned char) *((char *) (s) + i * DUMP_WIDTH + j))
 		    & 0xFF;
 
-		SNPRINTF_LOG(ss, sizeof (buf)-(ss-buf), "%02x%c", ch, j == 7 ? '|' : ' ');
+		sprintf(ss, "%02x%c", ch, j == 7 ? '|' : ' ');
 		ss += 3;
 	    }
 	}
@@ -392,17 +392,17 @@ static int tls_dump(const char *s, int len)
 	    if (j == 7) *ss+= ' ';
 	}
 	*ss = 0;
-	/*
+	/* 
 	 * if this is the last call then update the ddt_dump thing so that
          * we will move the selection point in the debug window
-         */
+         */	
 	if (var_imapd_tls_loglevel>0)
 	  syslog(LOG_DEBUG, "%s", buf);
 	ret += strlen(buf);
     }
 #ifdef TRUNCATE
     if (trunc > 0) {
-	SNPRINTF_LOG(buf, sizeof(buf), "%04x - <SPACES/NULS>\n", len+ trunc);
+	snprintf(buf, sizeof(buf), "%04x - <SPACES/NULS>\n", len+ trunc);
 	if (var_imapd_tls_loglevel>0)
 	  syslog(LOG_DEBUG, "%s", buf);
 	ret += strlen(buf);
@@ -506,7 +506,7 @@ static int new_session_cb(SSL *ssl __attribute__((unused)),
 	unsigned int i;
 	char idstr[SSL_MAX_SSL_SESSION_ID_LENGTH*2 + 1];
 	for (i = 0; i < sess->session_id_length; i++) {
-	    SNPRINTF_LOG(idstr+i*2, sizeof (idstr) - i*2, "%02X", sess->session_id[i]);
+	    sprintf(idstr+i*2, "%02X", sess->session_id[i]);
 	}
 	syslog(LOG_DEBUG, "new TLS session: id=%s, expire=%s, status=%s",
 	       idstr, ctime(&expire), ret ? "failed" : "ok");
@@ -602,7 +602,7 @@ static SSL_SESSION *get_session_cb(SSL *ssl __attribute__((unused)),
 	int i;
 	char idstr[SSL_MAX_SSL_SESSION_ID_LENGTH*2 + 1];
 	for (i = 0; i < idlen; i++)
-	    SNPRINTF_LOG(idstr+i*2, sizeof (idstr) - i*2, "%02X", id[i]);
+	    sprintf(idstr+i*2, "%02X", id[i]);
 
 	syslog(LOG_DEBUG, "get TLS session: id=%s, expire=%s, status=%s",
 	       idstr, ctime(&expire),
@@ -1298,9 +1298,9 @@ static int prune_p(void *rock, const char *id, size_t idlen,
 	assert(idlen <= SSL_MAX_SSL_SESSION_ID_LENGTH);
 
 	for (i = 0; i < idlen; i++) {
-	    SNPRINTF_LOG(idstr+i*2, sizeof (idstr) - i*2, "%02X", (unsigned char) id[i]);
+	    sprintf(idstr+i*2, "%02X", (unsigned char) id[i]);
 	}
-
+	
 	syslog(LOG_DEBUG, "found TLS session: id=%s, expire=%s",
 	       idstr, ctime(&expire));
     }

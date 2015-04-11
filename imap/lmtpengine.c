@@ -649,7 +649,7 @@ static int savemsg(struct clientdata *cd,
 
 	addlen = 2 + strlen(rpath) + (hostname ? 1 + strlen(hostname) : 0);
 	addbody = xmalloc(addlen + 1);
-	(void) sprintf(addbody, "<%s%s%s>",
+	sprintf(addbody, "<%s%s%s>",
 		rpath, hostname ? "@" : "", hostname ? hostname : "");
 	fprintf(f, "Return-Path: %s\r\n", addbody);
 	spool_cache_header(xstrdup("Return-Path"), addbody, m->hdrcache);
@@ -665,39 +665,39 @@ static int savemsg(struct clientdata *cd,
 	addlen += 3 + tls_get_info(cd->tls_conn, tls_info, sizeof(tls_info));
     }
 #endif
-    addlen += 2 + strlen(datestr) + 1;
-    p = addbody = xmalloc(addlen);
+    addlen += 2 + strlen(datestr);
+    p = addbody = xmalloc(addlen + 1);
 
     nfold = 0;
-    p += snprintf(p, addlen, "from %s (%s)", cd->lhlo_param, cd->clienthost);
+    p += sprintf(p, "from %s (%s)", cd->lhlo_param, cd->clienthost);
     fold[nfold++] = p;
     if (m->authuser) {
 	const void *ssfp;
 	sasl_ssf_t ssf;
 	sasl_getprop(cd->conn, SASL_SSF, &ssfp);
 	ssf = *((sasl_ssf_t *) ssfp);
-	p += snprintf(p, addlen, " (authenticated user=%s bits=%d)", m->authuser, ssf);
+	p += sprintf(p, " (authenticated user=%s bits=%d)", m->authuser, ssf);
 	fold[nfold++] = p;
     }
 
     /* We are always atleast "with LMTPA" -- no unauth delivery */
-    p += snprintf(p, addlen, " by %s", config_servername);
+    p += sprintf(p, " by %s", config_servername);
     if (config_serverinfo == IMAP_ENUM_SERVERINFO_ON) {
-	p += snprintf(p, addlen, " (Cyrus %s)", cyrus_version());
+	p += sprintf(p, " (Cyrus %s)", cyrus_version());
     }
-    p += snprintf(p, addlen, " with LMTP%s%s",
+    p += sprintf(p, " with LMTP%s%s",
 		 cd->starttls_done ? "S" : "",
 		 cd->authenticated != NOAUTH ? "A" : "");
 
     if (*tls_info) {
 	fold[nfold++] = p;
-	p += snprintf(p, addlen, " (%s)", tls_info);
+	p += sprintf(p, " (%s)", tls_info);
     }
 
-    (void) strlcat(p++, ";", addlen);
+    strcat(p++, ";");
     fold[nfold++] = p;
-    p += snprintf(p, addlen, " %s", datestr);
-
+    p += sprintf(p, " %s", datestr);
+ 
     fprintf(f, "Received: ");
     for (i = 0, p = addbody; i < nfold; p = fold[i], i++) {
 	fprintf(f, "%.*s\r\n\t", (int) (fold[i] - p), p);
@@ -731,10 +731,9 @@ static int savemsg(struct clientdata *cd,
     } else {
 	/* no message-id, create one */
 	pid_t p = getpid();
-	size_t size = 40 + strlen(config_servername);
 
-	m->id = xmalloc(size);
-	SNPRINTF_LOG(m->id, size, "<cmu-lmtpd-%d-%d-%u@%s>", p, (int) now,
+	m->id = xmalloc(40 + strlen(config_servername));
+	sprintf(m->id, "<cmu-lmtpd-%d-%d-%u@%s>", p, (int) now,
 		msgid_count++, config_servername);
 	fprintf(f, "Message-ID: %s\r\n", m->id);
 	spool_cache_header(xstrdup("Message-ID"), xstrdup(m->id), m->hdrcache);

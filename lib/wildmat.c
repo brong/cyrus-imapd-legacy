@@ -83,8 +83,8 @@
 
 #include "config.h"
 #include "wildmat.h"
-#include "util.h"
 #include "xmalloc.h"
+
 
 #define TRUE			1
 #define FALSE			0
@@ -244,7 +244,8 @@ EXPORTED struct wildmat *split_wildmats(char *str, const char *prefix)
 	else if (*c == '@') wild[n].not = -1;	/* absolute not (feeding) */
 	else wild[n].not = 0;
 
-	(void) strlcpy(p, wild[n].not ? c + 1 : c, sizeof(pattern) - (p-pattern));
+	strncpy(p, wild[n].not ? c + 1 : c, pattern+sizeof(pattern) - p);
+	pattern[sizeof(pattern)-1] = '\0';
 
 	wild[n++].pat = xstrdup(pattern);
     } while (c != str);

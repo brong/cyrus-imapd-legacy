@@ -583,7 +583,7 @@ int squat_index_open_document(SquatIndex *index, char const *name)
     if ((buf = prepare_buffered_write(&index->out, name_len)) == NULL) {
 	return SQUAT_ERR;
     }
-    /* ACH: DANGER unknown size of buf? name_len or other? */ strcpy(buf, name);
+    strcpy(buf, name);
     complete_buffered_write(&index->out, buf + name_len);
 
     index->current_doc_len = 0;

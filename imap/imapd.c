@@ -646,9 +646,9 @@ static void imapd_refer(const char *tag,
     imapurl.mailbox = mailbox;
     imapurl.auth = !strcmp(imapd_userid, "anonymous") ? "anonymous" : "*";
 
-    imapurl_toURL(url, sizeof (url), &imapurl);
-
-    prot_printf(imapd_out, "%s NO [REFERRAL %s] Remote mailbox.\r\n",
+    imapurl_toURL(url, &imapurl);
+    
+    prot_printf(imapd_out, "%s NO [REFERRAL %s] Remote mailbox.\r\n", 
 		tag, url);
 }
 
@@ -6614,6 +6614,7 @@ static void cmd_delete(char *tag, char *name, int localonly, int force)
     char mailboxname[MAX_MAILBOX_BUFFER];
     mbentry_t *mbentry = NULL;
     struct mboxevent *mboxevent = NULL;
+    char *p;
 
     r = (*imapd_namespace.mboxname_tointernal)(&imapd_namespace, name,
 					       imapd_userid, mailboxname);
@@ -6698,9 +6699,15 @@ static void cmd_delete(char *tag, char *name, int localonly, int force)
     /* was it a top-level user mailbox? */
     /* localonly deletes are only per-mailbox */
     if (!r && !localonly && mboxname_isusermailbox(mailboxname, 1)) {
+	size_t mailboxname_len = strlen(mailboxname);
 	const char *userid = mboxname_to_userid(mailboxname);
-	STRLCAT_LOG(mailboxname, ".*", sizeof(mailboxname));
 
+	/* If we aren't too close to MAX_MAILBOX_BUFFER, append .* */
+	p = mailboxname + mailboxname_len; /* end of mailboxname */
+	if (mailboxname_len < sizeof(mailboxname) - 3) {
+	    strcpy(p, ".*");
+	}
+	
 	/* build a list of mailboxes - we're using internal names here */
 	mboxlist_findall(NULL, mailboxname,
 			 imapd_userisadmin || imapd_userisproxyadmin,
@@ -7062,10 +7069,10 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	char ombn[MAX_MAILBOX_BUFFER];
 	char nmbn[MAX_MAILBOX_BUFFER];
 
-	(void) strlcpy(ombn, oldmailboxname, sizeof (ombn));
-	(void) strlcpy(nmbn, newmailboxname, sizeof (nmbn));
-	STRLCAT_LOG(ombn, ".*", sizeof (ombn));
-	STRLCAT_LOG(nmbn, ".", sizeof (nmbn));
+	strcpy(ombn, oldmailboxname);
+	strcpy(nmbn, newmailboxname);
+	strcat(ombn, ".*");
+	strcat(nmbn, ".");
 
 	/* setup the rock */
 	rock.namespace = &imapd_namespace;
@@ -7123,15 +7130,11 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	/* create canonified userids */
 
 	domain = strchr(oldmailboxname, '!');
-	if (domain == NULL) {
-		STRLCPY_LOG(olduser, oldmailboxname+5, sizeof (olduser));
-	} else {
-		SNPRINTF_LOG(
-			olduser, sizeof (olduser), "%s@%.*s",
-			domain+6, (int) (domain - oldmailboxname), oldmailboxname
-		);
-	}
-	STRLCPY_LOG(acl_olduser, olduser, sizeof (acl_olduser));
+	strcpy(olduser, domain ? domain+6 : oldmailboxname+5);
+	if (domain)
+	    sprintf(olduser+strlen(olduser), "@%.*s",
+		    (int) (domain - oldmailboxname), oldmailboxname);
+	strcpy(acl_olduser, olduser);
 
 	/* Translate any separators in source old userid (for ACLs) */
 	mboxname_hiersep_toexternal(&imapd_namespace, acl_olduser,
@@ -7139,15 +7142,11 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 				    strcspn(acl_olduser, "@") : 0);
 
 	domain = strchr(newmailboxname, '!');
-	if (domain == NULL) {
-		STRLCPY_LOG(newuser, newmailboxname+5, sizeof (newuser));
-	} else {
-		SNPRINTF_LOG(
-			newuser, sizeof (newuser), "%s@%.*s",
-			domain+6, (int) (domain - newmailboxname), newmailboxname
-		);
-	}
-	STRLCPY_LOG(acl_newuser, newuser, sizeof (acl_newuser));
+	strcpy(newuser, domain ? domain+6 : newmailboxname+5);
+	if (domain)
+	    sprintf(newuser+strlen(newuser), "@%.*s",
+		    (int) (domain - newmailboxname), newmailboxname);
+	strcpy(acl_newuser, newuser);
 
 	/* Translate any separators in destination new userid (for ACLs) */
 	mboxname_hiersep_toexternal(&imapd_namespace, acl_newuser,
@@ -7170,8 +7169,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	prot_flush(imapd_out);
 
 submboxes:
-	STRLCAT_LOG(oldmailboxname, ".*", sizeof (oldmailboxname));
-	STRLCAT_LOG(newmailboxname, ".", sizeof (newmailboxname));
+	strcat(oldmailboxname, ".*");
+	strcat(newmailboxname, ".");
 
 	/* setup the rock */
 	rock.namespace = &imapd_namespace;
@@ -7240,7 +7239,7 @@ static void cmd_reconstruct(const char *tag, const char *name, int recursive)
 
     if (!r && !strcmpsafe(mailboxname, index_mboxname(imapd_index)))
 	r = IMAP_MAILBOX_LOCKED;
-
+    
     if (!r) {
 	r = mlookup(tag, name, mailboxname, &mbentry);
     }
@@ -7267,8 +7266,8 @@ static void cmd_reconstruct(const char *tag, const char *name, int recursive)
 	} else if (pid == 0) {
 	    char buf[4096];
 	    int ret;
-
-	    /* Child - exec reconstruct*/
+	    
+	    /* Child - exec reconstruct*/	    
 	    syslog(LOG_NOTICE, "Reconstructing '%s' (%s) for user '%s'",
 		   mailboxname, recursive ? "recursive" : "not recursive",
 		   imapd_userid);
@@ -7311,13 +7310,13 @@ static void cmd_reconstruct(const char *tag, const char *name, int recursive)
 
     if(!r) {
 	if(mailbox->quotaroot) {
-	    STRLCPY_LOG(quotaroot, mailbox->quotaroot, sizeof (quotaroot));
+	    strcpy(quotaroot, mailbox->quotaroot);
 	} else {
-	    STRLCPY_LOG(quotaroot, mailboxname, sizeof (quotaroot));
+	    strcpy(quotaroot, mailboxname);
 	}
 	mailbox_close(&mailbox);
     }
-
+    
     /* Run quota -f */
     if (!r) {
 	int pid;
@@ -9773,11 +9772,11 @@ static void cmd_getmetadata(const char *tag)
 	}
 	strarray_append(&newe, entry);
 	if (opts.depth == 1) {
-	    STRLCAT_LOG(entry, "/%", sizeof (entry));
+	    strncat(entry, "/%", MAX_MAILBOX_NAME);
 	    strarray_append(&newe, entry);
 	}
 	else if (opts.depth == -1) {
-	    STRLCAT_LOG(entry, "/*", sizeof (entry));
+	    strncat(entry, "/*", MAX_MAILBOX_NAME);
 	    strarray_append(&newe, entry);
 	}
     }

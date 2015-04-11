@@ -314,7 +314,6 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
 		       char **users, int numusers, char *mailbox)
 {
     int r;
-    size_t size;
     struct backend *conn;
     struct lmtp_txn *txn = LMTP_TXN_ALLOC(numusers ? numusers : 1);
     int j;
@@ -343,9 +342,8 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
     if (numusers == 0) {
 	/* just deliver to mailbox 'mailbox' */
 	const char *BB = config_getstring(IMAPOPT_POSTUSER);
-	size = ml + strlen(BB) + 2;
-	txn->rcpt[0].addr = (char *) xmalloc(size); /* xxx leaks! */
-	SNPRINTF_LOG(txn->rcpt[0].addr, size, "%s+%s", BB, mailbox);
+	txn->rcpt[0].addr = (char *) xmalloc(ml + strlen(BB) + 2); /* xxx leaks! */
+	sprintf(txn->rcpt[0].addr, "%s+%s", BB, mailbox);
 	txn->rcpt[0].ignorequota = ignorequota;
     } else {
 	/* setup each recipient */
@@ -353,16 +351,17 @@ static int deliver_msg(char *return_path, char *authuser, int ignorequota,
 	    if (mailbox) {
 		size_t ulen;
 
-		size = strlen(users[j]) + ml + 2;
-		txn->rcpt[j].addr = (char *) xmalloc(size);
+		txn->rcpt[j].addr = 
+		    (char *) xmalloc(strlen(users[j]) + ml + 2);
 
 		/* find the length of the userid minus the domain */
 		ulen = strcspn(users[j], "@");
-		SNPRINTF_LOG(txn->rcpt[j].addr, size, "%.*s+%s", (int)ulen, users[j], mailbox);
+		sprintf(txn->rcpt[j].addr, "%.*s+%s",
+			(int) ulen, users[j], mailbox);
 
 		/* add the domain if we have one */
 		if (ulen < strlen(users[j]))
-		    STRLCAT_LOG(txn->rcpt[j].addr, users[j]+ulen, sizeof (txn->rcpt[j].addr));
+		    strcat(txn->rcpt[j].addr, users[j]+ulen);
 	    } else {
 		txn->rcpt[j].addr = xstrdup(users[j]);
 	    }

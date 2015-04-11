@@ -312,9 +312,6 @@ static int rss_parse_path(const char *path, struct request_target_t *tgt,
     /* Locate the mailbox */
     if (*mboxname) {
 	int r = http_mlookup(mboxname, &tgt->mbentry, NULL);
-
-
-
 	if (r) {
 	    syslog(LOG_ERR, "mlookup(%s) failed: %s",
 		   mboxname, error_message(r));
@@ -433,7 +430,7 @@ static int list_cb(char *name, int matchlen, int maycreate, void *rock)
 	else href = path;
 
 	/* Populate new/updated node */
-	STRLCPY_LOG(node->name, name, sizeof (node->name));
+	strncpy(node->name, name, len);
 	node->name[len] = '\0';
 	node->len = len;
 	node->parent = last;
@@ -736,10 +733,8 @@ static int list_messages(struct transaction_t *txn, struct mailbox *mailbox)
 
     /* Check any preconditions */
     lastmod = mailbox->i.last_appenddate;
-    SNPRINTF_LOG(
-    	etag, sizeof (etag), "%u-%u-%u",
-	mailbox->i.uidvalidity, mailbox->i.last_uid, mailbox->i.exists
-    );
+    sprintf(etag, "%u-%u-%u",
+	    mailbox->i.uidvalidity, mailbox->i.last_uid, mailbox->i.exists);
     precond = check_precond(txn, etag, lastmod);
 
     switch (precond) {

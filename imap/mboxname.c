@@ -568,29 +568,29 @@ static int mboxname_toexternal(struct namespace *namespace, const char *mboxname
     if (mbparts.userid) {
 	if (!namespace->isadmin && !mbparts.is_deleted &&
 	    mboxname_parts_same_userid(&mbparts, &userparts)) {
-	    (void) strlcpy(result, "INBOX", MAX_MAILBOX_BUFFER);
+	    strcpy(result, "INBOX");
 	}
 	else if (mbparts.is_deleted) {
 	    const char *dp = config_getstring(IMAPOPT_DELETEDPREFIX);
-	    SNPRINTF_LOG(result, MAX_MAILBOX_BUFFER, "%s.user.%s", dp, mbparts.userid);
+	    sprintf(result, "%s.user.%s", dp, mbparts.userid);
 	}
 	else {
-	    SNPRINTF_LOG(result, MAX_MAILBOX_BUFFER, "user.%s", mbparts.userid);
+	    sprintf(result, "user.%s", mbparts.userid);
 	}
 
 	if (mbparts.box)
-	    STRLCAT_LOG(result, ".", MAX_MAILBOX_BUFFER);
+	    strcat(result, ".");
     } else {
 	/* shared mailbox */
 	if (mbparts.is_deleted) {
 	    const char *dp = config_getstring(IMAPOPT_DELETEDPREFIX);
-	    SNPRINTF_LOG(result, MAX_MAILBOX_BUFFER, "%s.", dp);
+	    sprintf(result, "%s.", dp);
 	}
     }
 
 
     if (mbparts.box)
-	STRLCAT_LOG(result, mbparts.box, MAX_MAILBOX_BUFFER);
+	strcat(result, mbparts.box);
 
     /* Translate any separators in mailboxname */
     mboxname_hiersep_toexternal(namespace, result, 0);
@@ -598,8 +598,8 @@ static int mboxname_toexternal(struct namespace *namespace, const char *mboxname
     /* Append domain - only if not the same as the user */
     if (mbparts.domain &&
 	strcmpsafe(userparts.domain, mbparts.domain)) {
-	STRLCAT_LOG(result, "@", MAX_MAILBOX_BUFFER);
-	STRLCAT_LOG(result, mbparts.domain, MAX_MAILBOX_BUFFER);
+	strcat(result, "@");
+	strcat(result, mbparts.domain);
     }
 
     mboxname_free_parts(&mbparts);
@@ -657,13 +657,13 @@ static int mboxname_toexternal_alt(struct namespace *namespace, const char *mbox
     /* special case:  LIST/LSUB "" % */
     if (!strncmp(mboxname, namespace->prefix[NAMESPACE_SHARED],
 	strlen(namespace->prefix[NAMESPACE_SHARED])-1)) {
-        STRLCPY_LOG(result, mboxname, MAX_MAILBOX_BUFFER);
+	strcpy(result, mboxname);
     } else {
 	strcpy(result, namespace->prefix[NAMESPACE_SHARED]);
-	STRLCAT_LOG(result, mboxname, MAX_MAILBOX_BUFFER);
+	strcat(result, mboxname);
     }
 
-    SNPRINTF_LOG(result, MAX_MAILBOX_BUFFER, "%s%s", namespace->prefix[NAMESPACE_SHARED], iresult);
+    sprintf(result, "%s%s", namespace->prefix[NAMESPACE_SHARED], iresult);
 
     return 0;
 }
@@ -689,14 +689,14 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
 
     if (namespace->isalt) {
 	/* alternate namespace */
-	STRLCPY_LOG(namespace->prefix[NAMESPACE_INBOX], "", sizeof (namespace->prefix[NAMESPACE_INBOX]));
+	strcpy(namespace->prefix[NAMESPACE_INBOX], "");
 
 	prefix = config_getstring(IMAPOPT_USERPREFIX);
 	if (!prefix || strlen(prefix) == 0 ||
 	    strlen(prefix) >= MAX_NAMESPACE_PREFIX ||
 	    strchr(prefix,namespace->hier_sep) != NULL)
 	    return IMAP_NAMESPACE_BADPREFIX;
-	SNPRINTF_LOG(namespace->prefix[NAMESPACE_USER], sizeof (namespace->prefix[NAMESPACE_USER]), "%.*s%c",
+	sprintf(namespace->prefix[NAMESPACE_USER], "%.*s%c",
 		MAX_NAMESPACE_PREFIX-1, prefix, namespace->hier_sep);
 
 	prefix = config_getstring(IMAPOPT_SHAREDPREFIX);
@@ -705,8 +705,8 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
 	    strchr(prefix, namespace->hier_sep) != NULL ||
 	    !strncmp(namespace->prefix[NAMESPACE_USER], prefix, strlen(prefix)))
 	    return IMAP_NAMESPACE_BADPREFIX;
-	SNPRINTF_LOG(namespace->prefix[NAMESPACE_SHARED], sizeof (namespace->prefix[NAMESPACE_SHARED]), "%.*s%c",
-		MAX_NAMESPACE_PREFIX-1, prefix, namespace->hier_sep);
+	sprintf(namespace->prefix[NAMESPACE_SHARED], "%.*s%c",
+		MAX_NAMESPACE_PREFIX-1, prefix, namespace->hier_sep); 
 
 	namespace->mboxname_tointernal = mboxname_tointernal_alt;
 	namespace->mboxname_toexternal = mboxname_toexternal_alt;
@@ -716,11 +716,11 @@ EXPORTED int mboxname_init_namespace(struct namespace *namespace, int isadmin)
 
     else {
 	/* standard namespace */
-	SNPRINTF_LOG(namespace->prefix[NAMESPACE_INBOX], sizeof (namespace->prefix[NAMESPACE_INBOX]), "%s%c",
+	sprintf(namespace->prefix[NAMESPACE_INBOX], "%s%c",
 		"INBOX", namespace->hier_sep);
-	SNPRINTF_LOG(namespace->prefix[NAMESPACE_USER], sizeof (namespace->prefix[NAMESPACE_USER]), "%s%c",
+	sprintf(namespace->prefix[NAMESPACE_USER], "%s%c",
 		"user", namespace->hier_sep);
-	STRLCPY_LOG(namespace->prefix[NAMESPACE_SHARED], "", sizeof (namespace->prefix[NAMESPACE_SHARED]));
+	strcpy(namespace->prefix[NAMESPACE_SHARED], "");
 
 	namespace->mboxname_tointernal = mboxname_tointernal;
 	namespace->mboxname_toexternal = mboxname_toexternal;

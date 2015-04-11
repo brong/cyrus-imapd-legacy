@@ -485,7 +485,7 @@ static const char *path_to_qr(const char *path, char *buf)
     if ((p = strstr(path, FNAME_DOMAINDIR))) {
 	/* use the quota_path as a buffer to construct virtdomain qr */
 	p += strlen(FNAME_DOMAINDIR) + 2; /* +2 for hashdir */
-	/* ACH: DANGER sizeof buf unknown */ sprintf(buf, "%.*s!%s", (int) strcspn(p, "/"), p,
+	sprintf(buf, "%.*s!%s", (int) strcspn(p, "/"), p,
 		strcmp(qr, "root") ? qr : "");
 	qr = buf;
     }
@@ -527,8 +527,8 @@ static void scan_qr_dir(char *quota_path, const char *prefix,
     struct dirent *next = NULL;
 
     /* strip off the qr specific path */
-    endp = strstr(quota_path, FNAME_QUOTADIR) + STRLEN(FNAME_QUOTADIR);
-    STRLCPY_LOG(endp, "?/", MAX_QUOTA_PATH+1 - (endp-quota_path));
+    endp = strstr(quota_path, FNAME_QUOTADIR) + strlen(FNAME_QUOTADIR);
+    strcpy(endp, "?/");
 
     /* check for path restriction - if there's a prefix we only
      * need to scan a single directory */
@@ -560,7 +560,7 @@ static void scan_qr_dir(char *quota_path, const char *prefix,
 	/* search for a domain quota */
 	struct stat buf;
 
-	STRLCPY_LOG(endp, "root", MAX_QUOTA_PATH+1 - (endp-quota_path));
+	strcpy(endp, "root");
 
 	if (!stat(quota_path, &buf))
 	    strarray_append(pathbuf, quota_path);

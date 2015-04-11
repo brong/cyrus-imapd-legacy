@@ -2203,14 +2203,14 @@ int cmd_change(struct mupdate_mailboxdata *mdata,
 	    newm->location = xstrdup(mdata->location);
 
 	    if (mdata->acl) {
-		(void) strcpy(newm->acl, mdata->acl);
+		strcpy(newm->acl, mdata->acl);
 	    } else {
 		newm->acl[0] = '\0';
 	    }
 
-	    if (!strncmp(rock, "MAILBOX", STRLEN("MAILBOX"))) {
+	    if (!strncmp(rock, "MAILBOX", 6)) {
 		newm->t = t = SET_ACTIVE;
-	    } else if (!strncmp(rock, "RESERVE", STRLEN("RESERVE"))) {
+	    } else if (!strncmp(rock, "RESERVE", 7)) {
 		newm->t = t = SET_RESERVE;
 	    } else {
 		syslog(LOG_DEBUG,

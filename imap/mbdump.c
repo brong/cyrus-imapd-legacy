@@ -1157,7 +1157,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 		r = IMAP_PROTOCOL_ERROR;
 		goto done;
 	    }
-	    STRLCPY_LOG(fnamebuf, path, sizeof (fnamebuf));
+	    strncpy(fnamebuf, path, MAX_MAILBOX_PATH);
 	}
 
 	/* if we haven't opened it, do so */

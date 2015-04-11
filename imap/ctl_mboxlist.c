@@ -846,9 +846,9 @@ static void add_path(struct found_list *found, int type,
     /* add our new node to the end of the array */
     new = &found->data[found->size++];
     new->type = type;
-    STRLCPY_LOG(new->mboxname, name, sizeof (new->mboxname));
-    STRLCPY_LOG(new->partition, part, sizeof (new->partition));
-    STRLCPY_LOG(new->path, path, sizeof (new->path));
+    strcpy(new->mboxname, name);
+    strcpy(new->partition, part);
+    strcpy(new->path, path);
 }
 
 static void add_part(struct found_list *found,
@@ -862,7 +862,7 @@ static void add_part(struct found_list *found,
 	    /* found it */
 	    if (override) {
 		/* replace the path with the one containing cyrus.header */
-		STRLCPY_LOG(found->data[i].path, path, sizeof (found->data[i].path));
+		strcpy(found->data[i].path, path);
 	    }
 
 	    /* we already have the proper path, so we're done */
@@ -1010,18 +1010,18 @@ static void do_verify(void)
 
 	    /* make the toplevel partition /a */
 	    if (config_fulldirhash) {
-		STRLCAT_LOG(found.data[i].path, "/A", sizeof (found.data[i].path));
+		strcat(found.data[i].path, "/A");
 		c = 'B';
 	    } else {
-		STRLCAT_LOG(found.data[i].path, "/a", sizeof (found.data[i].path));
+		strcat(found.data[i].path, "/a");
 		c = 'b';
 	    }
 	    type = (found.data[i].type &= ~ROOT);
 
 	    /* make a template path for /b - /z */
-	    STRLCPY_LOG(name, found.data[i].mboxname, sizeof (name));
-	    STRLCPY_LOG(part, found.data[i].partition, sizeof (part));
-	    STRLCPY_LOG(path, found.data[i].path, sizeof (path));
+	    strcpy(name, found.data[i].mboxname);
+	    strcpy(part, found.data[i].partition);
+	    strcpy(path, found.data[i].path);
 	    tail = path + strlen(path) - 1;
 
 	    for (j = 1; j < 26; j++, c++) {
@@ -1031,7 +1031,7 @@ static void do_verify(void)
 
 	    if (config_virtdomains && !type) {
 		/* need to add root domain directory */
-		STRLCPY_LOG(tail, "domain", sizeof (path) - (tail - path));
+		strcpy(tail, "domain");
 		add_path(&found, DOMAIN | ROOT, name, part, path);
 	    }
 	}
@@ -1047,7 +1047,7 @@ static void do_verify(void)
 		     (found.data[i].type & DOMAIN)) {
 		/* probably a directory, add it to the array */
 		type = 0;
-		STRLCPY_LOG(name, found.data[i].mboxname, sizeof (name));
+		strcpy(name, found.data[i].mboxname);
 
 		if (config_virtdomains &&
 		    (found.data[i].type == ROOT) &&
@@ -1057,21 +1057,20 @@ static void do_verify(void)
 		}
 		else if (!name[0] && found.data[i].type & DOMAIN) {
 		    /* toplevel domain directory */
-		    STRLCAT_LOG(name, dirent->d_name, sizeof (name));
-		    STRLCAT_LOG(name, "!", sizeof (name));
+		    strcat(name, dirent->d_name);
+		    strcat(name, "!");
 		    type = DOMAIN | ROOT;
 		}
 		else {
 		    /* possibly a mailbox directory */
-		    if (name[0] && !(found.data[i].type & DOMAIN))
-		    	STRLCAT_LOG(name, ".", sizeof (name));
-		    STRLCAT_LOG(name, dirent->d_name, sizeof (name));
+		    if (name[0] && !(found.data[i].type & DOMAIN)) strcat(name, ".");
+		    strcat(name, dirent->d_name);
 		}
 
-		STRLCPY_LOG(part, found.data[i].partition, sizeof (part));
-		(void) strlcpy(path, found.data[i].path, sizeof (path));
-		(void) strlcat(path, "/", sizeof (path));
-		STRLCAT_LOG(path, dirent->d_name, sizeof (path));
+		strcpy(part, found.data[i].partition);
+		strcpy(path, found.data[i].path);
+		strcat(path, "/");
+		strcat(path, dirent->d_name);
 		add_path(&found, type, name, part, path);
 	    }
 	}

@@ -1850,8 +1850,7 @@ EXPORTED int propfind_quota(const xmlChar *name, xmlNsPtr ns,
 
 	syslog(LOG_DEBUG, "reading quota for '%s'", qr);
 
-	STRLCPY_LOG(prevroot, qr, sizeof (prevroot));
-	fctx->quota.root = prevroot;
+	fctx->quota.root = strcpy(prevroot, qr);
 
 	quota_read(&fctx->quota, NULL, 0);
     }
@@ -3108,7 +3107,7 @@ int meth_copy(struct transaction_t *txn, void *params)
 
 	/* Replace cached Destination header with just the absolute path */
 	hdr = spool_getheader(txn->req_hdrs, "Destination");
-	/* ACH: DANGER unknown size */ strcpy((char *) hdr[0], dest_tgt.path);
+	strcpy((char *) hdr[0], dest_tgt.path);
 
 	if (!dest_tgt.mbentry->server) {
 	    /* Local destination mailbox */

@@ -98,23 +98,22 @@ static void abortcurrent(struct mboxkey *s)
 
 HIDDEN char *mboxkey_getpath(const char *userid)
 {
-    size_t size = strlen(config_dir) + sizeof(FNAME_DOMAINDIR) +
+    char *fname = xmalloc(strlen(config_dir) + sizeof(FNAME_DOMAINDIR) +
 			  sizeof(FNAME_USERDIR) + strlen(userid) +
-			  sizeof(FNAME_MBOXKEYSUFFIX) + 10;
-    char *fname = xmalloc(size);
+			  sizeof(FNAME_MBOXKEYSUFFIX) + 10);
     char c, *domain;
 
     if (config_virtdomains && (domain = strchr(userid, '@'))) {
 	char d = (char) dir_hash_c(domain+1, config_fulldirhash);
 	*domain = '\0';  /* split user@domain */
 	c = (char) dir_hash_c(userid, config_fulldirhash);
-	SNPRINTF_LOG(fname, size, "%s%s%c/%s%s%c/%s%s", config_dir, FNAME_DOMAINDIR, d,
+	sprintf(fname, "%s%s%c/%s%s%c/%s%s", config_dir, FNAME_DOMAINDIR, d,
 		domain+1, FNAME_USERDIR, c, userid, FNAME_MBOXKEYSUFFIX);
 	*domain = '@';  /* reassemble user@domain */
     }
     else {
 	c = (char) dir_hash_c(userid, config_fulldirhash);
-	SNPRINTF_LOG(fname, size, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
+	sprintf(fname, "%s%s%c/%s%s", config_dir, FNAME_USERDIR, c, userid,
 		FNAME_MBOXKEYSUFFIX);
     }
 

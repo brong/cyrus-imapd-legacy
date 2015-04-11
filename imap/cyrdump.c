@@ -197,7 +197,7 @@ static int dump_me(char *name, int matchlen __attribute__((unused)),
     memset(&url, 0, sizeof(struct imapurl));
     url.server = config_servername;
     url.mailbox = name;
-    imapurl_toURL(imapurl, sizeof (imapurl), &url);
+    imapurl_toURL(imapurl, &url);
     printf("  <mailbox-url>%s</mailbox-url>\n", imapurl);
     printf("  <incremental-uid>%d</incremental-uid>\n", irec->incruid);
     printf("  <nextuid>%u</nextuid>\n", state->mailbox->i.last_uid + 1);

@@ -1486,11 +1486,9 @@ static int dump_calendar(struct transaction_t *txn, int rights)
     }
 
     /* Check any preconditions */
-    SNPRINTF_LOG(
-    	etag, sizeof (etag), "%u-%u-%u", mailbox->i.uidvalidity,
-    	mailbox->i.last_uid, mailbox->i.exists
-    );
-    precond = caldav_check_precond(txn, NULL, etag, mailbox->index_mtime);
+    sprintf(etag, "%u-%u-%u",
+	    mailbox->i.uidvalidity, mailbox->i.last_uid, mailbox->i.exists);
+    precond = check_precond(txn, etag, mailbox->index_mtime);
 
     switch (precond) {
     case HTTP_OK:

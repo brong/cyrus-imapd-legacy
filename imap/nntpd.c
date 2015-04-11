@@ -867,7 +867,7 @@ static void cmdloop(void)
 
 	/* In case a [LIST]GROUP fails or
 	   a retrieval by msgid makes us switch groups */
-	STRLCPY_LOG(curgroup, group_state ? group_state->mboxname : "", sizeof (curgroup));
+	strcpy(curgroup, group_state ? group_state->mboxname : "");
 
 	switch (cmd.s[0]) {
 	case 'A':
@@ -2653,8 +2653,8 @@ static void cmd_list(char *arg1, char *arg2)
 
 	prot_printf(nntp_out, "215 List of newsgroups follows:\r\n");
 
-	(void) strlcpy(pattern, newsprefix, sizeof (pattern));
-	STRLCAT_LOG(pattern, "*", sizeof (pattern));
+	strcpy(pattern, newsprefix);
+	strcat(pattern, "*");
 	list_cb(NULL, 0, 0, NULL);
 	mboxlist_findall(NULL, pattern, 0,
 			 nntp_authstate ? nntp_userid : NULL, nntp_authstate,
@@ -2714,8 +2714,8 @@ static void cmd_list(char *arg1, char *arg2)
 
 	prot_printf(nntp_out, "215 List of newsgroups follows:\r\n");
 
-	(void) strlcpy(pattern, newsprefix, sizeof (pattern));
-	STRLCAT_LOG(pattern, "*", sizeof (pattern));
+	strcpy(pattern, newsprefix);
+	strcat(pattern, "*");
 	list_cb(NULL, 0, 0, NULL);
 	mboxlist_findall(NULL, pattern, 0,
 			 nntp_authstate ? nntp_userid : NULL, nntp_authstate,
@@ -2724,8 +2724,8 @@ static void cmd_list(char *arg1, char *arg2)
 	/* proxy to the backends */
 	hash_enumerate(&lrock.server_table, list_proxy, &erock);
 
-	(void) strlcpy(pattern, newsprefix, sizeof (pattern));
-	STRLCAT_LOG(pattern, "*", sizeof (pattern));
+	strcpy(pattern, newsprefix);
+	strcat(pattern, "*");
 	annotatemore_findall(pattern, 0, "/comment",
 			     newsgroups_cb, lrock.wild);
 
@@ -3115,10 +3115,9 @@ static int savemsg(message_data_t *m, FILE *f)
     } else {
 	/* no message-id, create one */
 	pid_t p = getpid();
-	size_t size = 40 + strlen(config_servername);
 
-	m->id = xmalloc(size);
-	SNPRINTF_LOG(m->id, size, "<cmu-nntpd-%d-%d-%d@%s>", p, (int) now,
+	m->id = xmalloc(40 + strlen(config_servername));
+	sprintf(m->id, "<cmu-nntpd-%d-%d-%d@%s>", p, (int) now, 
 		post_count++, config_servername);
 	fprintf(f, "Message-ID: %s\r\n", m->id);
 	spool_cache_header(xstrdup("Message-ID"), xstrdup(m->id), m->hdrcache);
@@ -3140,16 +3139,15 @@ static int savemsg(message_data_t *m, FILE *f)
 
     /* get control */
     if ((body = spool_getheader(m->hdrcache, "control")) != NULL) {
-	size_t len, size;
+	size_t len;
 	char *s;
 
 	m->control = xstrdup(body[0]);
 
 	/* create a recipient for the appropriate pseudo newsgroup */
 	len = strcspn(m->control, " \t\r\n");
-	size = strlen(newsprefix) + 8 + len + 1;
-	s = xmalloc(size);
-	SNPRINTF_LOG(s, size, "%scontrol.%.*s", newsprefix, (int) len, m->control);
+	s = xmalloc(strlen(newsprefix) + 8 + len + 1);
+	sprintf(s, "%scontrol.%.*s", newsprefix, (int) len, m->control);
 
 	strarray_appendm(&m->rcpt, s);
     } else {

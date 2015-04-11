@@ -223,7 +223,7 @@ static int pipe_response(struct backend *s, const char *tag, int include_last,
             /* only got part of a line */
 	    /* we save the last 64 characters in case it has important
 	       literal information */
-	    STRLCPY_LOG(eol, buf + sl - 64, sizeof (eol));
+	    strcpy(eol, buf + sl - 64);
 
 	    /* write out this part, but we have to keep reading until we
 	       hit the end of the line */
@@ -238,9 +238,9 @@ static int pipe_response(struct backend *s, const char *tag, int include_last,
 
 	    /* now we have to see if this line ends with a literal */
 	    if (sl < 64) {
-		STRLCAT_LOG(eol, buf, sizeof (eol));
+		strcat(eol, buf);
 	    } else {
-		STRLCAT_LOG(eol, buf + sl - 63, sizeof (eol));
+		strcat(eol, buf + sl - 63);
 	    }
 
 	    /* eol now contains the last characters from the line; we want
@@ -343,7 +343,7 @@ int pipe_command(struct backend *s, int optimistic_literal)
 
 	if (sl == (sizeof(buf) - 1) && buf[sl-1] != '\n') {
             /* only got part of a line */
-	    STRLCPY_LOG(eol, buf + sl - 64, sizeof (eol));
+	    strcpy(eol, buf + sl - 64);
 
 	    /* and write this out, except for what we've saved */
 	    prot_write(s->out, buf, sl - 64);
@@ -352,13 +352,13 @@ int pipe_command(struct backend *s, int optimistic_literal)
 	    int i, nonsynch = 0, islit = 0, litlen = 0;
 
 	    if (sl < 64) {
-		STRLCAT_LOG(eol, buf, sizeof (eol));
+		strcat(eol, buf);
 	    } else {
 		/* write out what we have, and copy the last 64 characters
 		   to eol */
 		prot_printf(s->out, "%s", eol);
 		prot_write(s->out, buf, sl - 64);
-		STRLCPY_LOG(eol, buf + sl - 64, sizeof (eol));
+		strcpy(eol, buf + sl - 64);
 	    }
 
 	    /* now determine if eol has a literal in it */

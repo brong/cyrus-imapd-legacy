@@ -297,8 +297,8 @@ EXPORTED void cyrusdb_init(void)
     const char *confdir = libcyrus_config_getstring(CYRUSOPT_CONFIG_DIR);
     int initflags = libcyrus_config_getint(CYRUSOPT_DB_INIT_FLAGS);
 
-    (void) strlcpy(dbdir, confdir, sizeof (dbdir));
-    STRLCAT_LOG(dbdir, FNAME_DBDIR, sizeof (dbdir));
+    strcpy(dbdir, confdir);
+    strcat(dbdir, FNAME_DBDIR);
 
     for(i=0; _backends[i]; i++) {
 	r = (_backends[i])->init(dbdir, initflags);

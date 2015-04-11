@@ -743,7 +743,7 @@ EXPORTED void mboxevent_set_access(struct mboxevent *event,
 	}
     }
 
-    imapurl_toURL(url, sizeof (url), &imapurl);
+    imapurl_toURL(url, &imapurl);
     FILL_STRING_PARAM(event, EVENT_MAILBOX_ID, xstrdup(url));
 
     if (serveraddr && mboxevent_expected_param(event->type, EVENT_SERVER_ADDRESS)) {
@@ -1111,7 +1111,7 @@ void mboxevent_extract_quota(struct mboxevent *event, const struct quota *quota,
 	    imapurl.user = user;
 	}
 
-	imapurl_toURL(url, sizeof (url), &imapurl);
+	imapurl_toURL(url, &imapurl);
 
 	if (!event->params[EVENT_URI].filled) {
 	    FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
@@ -1192,7 +1192,7 @@ EXPORTED void mboxevent_extract_mailbox(struct mboxevent *event,
     }
 
     /* all events needs uri parameter */
-    imapurl_toURL(url, sizeof (url), &imapurl);
+    imapurl_toURL(url, &imapurl);
     FILL_STRING_PARAM(event, EVENT_URI, xstrdup(url));
 
 #ifdef WITH_DAV
@@ -1283,7 +1283,7 @@ void mboxevent_extract_old_mailbox(struct mboxevent *event,
 	imapurl.user = user;
     }
 
-    imapurl_toURL(url, sizeof (url), &imapurl);
+    imapurl_toURL(url, &imapurl);
     FILL_STRING_PARAM(event, EVENT_OLD_MAILBOX_ID, xstrdup(url));
 }
 

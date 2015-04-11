@@ -362,7 +362,7 @@ static void httpd_reset(void)
 
     cyrus_reset_stdio();
 
-    (void) strlcpy(httpd_clienthost, "[local]", sizeof (httpd_clienthost));
+    strcpy(httpd_clienthost, "[local]");
     if (httpd_logfd != -1) {
 	close(httpd_logfd);
 	httpd_logfd = -1;
@@ -550,8 +550,8 @@ int service_main(int argc __attribute__((unused)),
 	 httpd_remoteaddr.ss_family == AF_INET6)) {
 	if (getnameinfo((struct sockaddr *)&httpd_remoteaddr, salen,
 			hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD) == 0) {
-    	    (void) strlcpy(httpd_clienthost, hbuf, sizeof(httpd_clienthost));
-	    STRLCAT_LOG(httpd_clienthost, " ", sizeof(httpd_clienthost));
+    	    strncpy(httpd_clienthost, hbuf, sizeof(hbuf));
+	    strlcat(httpd_clienthost, " ", sizeof(httpd_clienthost));
 	} else {
 	    httpd_clienthost[0] = '\0';
 	}

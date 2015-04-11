@@ -788,7 +788,7 @@ EXPORTED void kick_mupdate(void)
     strlcat(buf, FNAME_MUPDATE_TARGET_SOCK, sizeof(buf));
     memset((char *)&srvaddr, 0, sizeof(srvaddr));
     srvaddr.sun_family = AF_UNIX;
-    STRLCPY_LOG(srvaddr.sun_path, buf, sizeof (srvaddr.sun_path));
+    strcpy(srvaddr.sun_path, buf);
     len = sizeof(srvaddr.sun_family) + strlen(srvaddr.sun_path) + 1;
 
     r = connect(s, (struct sockaddr *)&srvaddr, len);

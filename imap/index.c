@@ -730,7 +730,7 @@ static void index_refresh_locked(struct index_state *state)
 	/* make sure we don't overflow the memory we mapped */
 	if (msgno > state->mapsize) {
 	    char buf[2048];
-	    SNPRINTF_LOG(buf, sizeof (buf), "Exists wrong %u %u %u %u", msgno,
+	    sprintf(buf, "Exists wrong %u %u %u %u", msgno,
 		    state->mapsize, mailbox->i.exists, mailbox->i.num_records);
 	    fatal(buf, EC_IOERR);
 	}
@@ -2895,14 +2895,13 @@ index_copy(struct index_state *state,
 	    r = index_expunge(state, source, 0);
 
 	if (docopyuid) {
-	    size_t size = strlen(source) + 50;
-	    *copyuidp = xmalloc(size);
+	    *copyuidp = xmalloc(strlen(source) + 50);
 
 	    if (appendstate.nummsg == 1)
-		SNPRINTF_LOG(*copyuidp, size, "%u %s %u", uidvalidity, source,
+		sprintf(*copyuidp, "%u %s %u", uidvalidity, source,
 			appendstate.baseuid);
 	    else
-		SNPRINTF_LOG(*copyuidp, size, "%u %s %u:%u", uidvalidity, source,
+		sprintf(*copyuidp, "%u %s %u:%u", uidvalidity, source,
 			appendstate.baseuid,
 			appendstate.baseuid + appendstate.nummsg - 1);
 	}
@@ -6260,10 +6259,8 @@ EXPORTED extern struct nntp_overview *index_overview(struct index_state *state,
 	    from = xrealloc(from, fromsize);
 	}
 	from[0] = '\0';
-	size_t from_length = 0;
-	if (addr.name)
-		from_length = snprintf(from, fromsize, "\"%s\" ", addr.name);
-	SNPRINTF_LOG(from + from_length, fromsize - from_length,
+	if (addr.name) sprintf(from, "\"%s\" ", addr.name);
+	snprintf(from + strlen(from), fromsize - strlen(from),
 		 "<%s@%s>", addr.mailbox, addr.domain);
 
 	over.from = from;
