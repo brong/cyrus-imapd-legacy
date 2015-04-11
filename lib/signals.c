@@ -165,7 +165,7 @@ static char *describe_process(pid_t pid)
 	close(fd);
     }
     if (!cmdline[0])
-	(void) strlcpy(cmdline, "unknown", sizeof (cmdline));
+	strncpy(cmdline, "unknown", sizeof (cmdline));
     (void) snprintf(buf, sizeof(buf), "%d (%s)", (int)pid, cmdline);
     return xstrdup(buf);
 #else

@@ -2158,8 +2158,10 @@ int main(int argc, char **argv)
 		if (path == NULL)
 			path = "/tmp";
 	}
-	(void) chdir(path);
-	(void) chdir("cores");
+	if (chdir(path))
+	    fatal("cd error", EX_OSERR);
+	if (chdir("cores"))
+	    fatal("cd error", EX_OSERR);
 
 	do {
 	    pid = fork();

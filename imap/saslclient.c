@@ -144,7 +144,7 @@ EXPORTED sasl_callback_t *mysasl_callbacks(const char *username,
 	size_t len = strlen(password);
 
 	secret = (sasl_secret_t *)xmalloc(sizeof(sasl_secret_t) + len);
-	(void) strlcpy((char *) secret->data, password, len);
+	strncpy((char *) secret->data, password, len);
 	secret->len = len;
 
 	/* password */

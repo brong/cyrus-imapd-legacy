@@ -2809,7 +2809,7 @@ static void auth_success(struct transaction_t *txn)
 	/* Rewind log to current request and truncate it */
 	off_t end = lseek(httpd_logfd, 0, SEEK_END);
 
-	ftruncate(httpd_logfd, end - buf_len(&txn->buf));
+	assert(!ftruncate(httpd_logfd, end - buf_len(&txn->buf)));
     }
 
     if (!proxy_userid || strcmp(proxy_userid, httpd_userid)) {
@@ -2825,7 +2825,7 @@ static void auth_success(struct transaction_t *txn)
 
     if (httpd_logfd != -1) {
 	/* Log credential-redacted request */
-	write(httpd_logfd, buf_cstring(&txn->buf), buf_len(&txn->buf));
+	assert(write(httpd_logfd, buf_cstring(&txn->buf), buf_len(&txn->buf)));
     }
 
     buf_reset(&txn->buf);
