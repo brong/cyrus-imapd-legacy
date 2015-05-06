@@ -919,9 +919,6 @@ static void cmdloop(void)
     /* Start with an empty (clean) transaction */
     memset(&txn, 0, sizeof(struct transaction_t));
 
-    /* Pre-allocate our working buffer */
-    buf_ensure(&txn.buf, 1024);
-
 #ifdef HAVE_ZLIB
     /* Always use gzip format because IE incorrectly uses raw deflate */
     if (config_getswitch(IMAPOPT_HTTPALLOWCOMPRESS) &&
@@ -1501,6 +1498,11 @@ static void cmdloop(void)
 #endif
             return;
         }
+
+        /* bust the double-free-candidate right here */
+        buf_free(&txn.buf);
+        buf_free(&txn.req_body.payload);
+        buf_free(&txn.resp_body.payload);
 
         continue;
     }
