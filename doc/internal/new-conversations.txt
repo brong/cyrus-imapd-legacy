@@ -1,0 +1,60 @@
+The existing conversations code (FastMail 2015) stores a ton of counts:
+
+    dl = dlist_newlist(NULL, NULL);
+    dlist_setnum64(dl, "MODSEQ", conv->modseq);
+    dlist_setnum32(dl, "NUMRECORDS", conv->num_records);
+    dlist_setnum32(dl, "EXISTS", conv->exists);
+    dlist_setnum32(dl, "UNSEEN", conv->unseen);
+    n = dlist_newlist(dl, "COUNTS");
+    if (state->counted_flags) {
+        for (i = 0; i < state->counted_flags->count; i++) {
+            const char *flag = strarray_nth(state->counted_flags, i);
+            dlist_setnum32(n, flag, conv->counts[i]);
+        }
+    }
+
+    n = dlist_newlist(dl, "SENDER");
+    i = 0;
+    for (sender = conv->senders ; sender ; sender = sender->next) {
+        if (!sender->exists)
+            continue;
+        /* don't ever store more than 100 senders */
+        if (++i >= 100) break;
+        nn = dlist_newlist(n, "SENDER");
+        /* envelope form */
+        dlist_setatom(nn, "NAME", sender->name);
+        dlist_setatom(nn, "ROUTE", sender->route);
+        dlist_setatom(nn, "MAILBOX", sender->mailbox);
+        dlist_setatom(nn, "DOMAIN", sender->domain);
+        dlist_setnum32(nn, "LASTSEEN", sender->lastseen);
+        dlist_setnum32(nn, "EXISTS", sender->exists);
+    }
+
+    dlist_setatom(dl, "SUBJECT", conv->subject);
+
+    dlist_setnum32(dl, "SIZE", conv->size);
+
+    buf_printf(&buf, "%d ", version);
+    dlist_printbuf(dl, 0, &buf);
+    dlist_free(&dl);
+
+========
+
+Tons of counters.
+
+So in theory, it's more expensive to store data for individual messages
+instead, but in practice, the median conversation has fewer than 2
+messages, so just storing per-message data is actually cheaper.
+
+We need to store:
+
+FOLDERID (conversations map has numbers - I guess eventually this is global)
+INTERNALDATE
+UID
+MODSEQ
+SIZE
+FLAGS (system flags & countedflags)
+SUBJECT
+
+
+
