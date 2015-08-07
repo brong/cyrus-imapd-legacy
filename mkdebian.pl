@@ -11,6 +11,8 @@ chomp($branch);
 
 my $date = `date -R`;
 
+my $CYRUSLIBS = "cyruslibs-fastmail-v4";
+
 my $basename = "cyrus-$branch";
 my $basedir = $branch eq 'fastmail' ? 'usr/cyrus' : "usr/$basename";
 
@@ -32,13 +34,13 @@ Section: mail
 Priority: extra
 Maintainer: Bron Gondwana <brong\@fastmail.fm>
 Build-Depends: libssl-dev, zlib1g-dev, comerr-dev, libsasl2-dev,
- libzephyr-dev, libpcre3-dev, autoconf, libxapian-dev,
- libxml2-dev, libical-dev, libsqlite3-dev,
+ libzephyr-dev, libpcre3-dev, autoconf,
+ libxml2-dev, libsqlite3-dev, $CYRUSLIBS,
  flex, bison, debhelper, libsnmp-dev, libglib2.0-dev
 
 Package: $basename
 Architecture: all
-Depends: \${shlibs:Depends}
+Depends: \${shlibs:Depends}, $CYRUSLIBS
 Description: Cyrus package for branch $branch at FastMail.FM
 
 Package: $basename-build
@@ -59,6 +61,8 @@ print FH <<EOF;
 
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
+export LDFLAGS=-L/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu -L/usr/local/$CYRUSLIBS/lib -Wl,-rpath,/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu -Wl,-rpath,/usr/local/$CYRUSLIBS/lib
+export PKG_CONFIG_PATH=/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu/pkgconfig:/usr/local/$CYRUSLIBS/lib/pkgconfig:\$PKG_CONFIG_PATH
 
 # Use v4 compatability mode, so ldconfig gets added to maint scripts.
 export DH_COMPAT=4
@@ -68,7 +72,7 @@ PACKAGE=\$(shell dh_listpackages)
 build:
 	dh_testdir
 	autoreconf -v -i
-	./configure --without-krb --with-perl=/usr/bin/perl --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service
+	./configure --without-krb --with-perl=/usr/bin/perl --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service XAPIAN_CONFIG=/usr/local/$CYRUSLIBS/bin/xapian-config-1.3
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -Werror -fstack-protector-all"
 	make sieve/test
 	touch build
