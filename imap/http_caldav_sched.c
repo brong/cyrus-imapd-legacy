@@ -1592,6 +1592,9 @@ static void sched_deliver_local(const char *recipient,
     icalproperty *prop;
     struct transaction_t txn;
 
+    // attempt to deliver locally is an immediate failure - FastMail only
+    abort();
+
     /* Start with an empty (clean) transaction */
     memset(&txn, 0, sizeof(struct transaction_t));
 
