@@ -1729,6 +1729,8 @@ static void sched_deliver_local(const char *recipient,
     struct transaction_t txn;
 
     syslog(LOG_DEBUG, "sched_deliver_local(%s, %X)", recipient, sparam->flags);
+    // attempt to deliver locally is an immediate failure - FastMail only
+    abort();
 
     /* Start with an empty (clean) transaction */
     memset(&txn, 0, sizeof(struct transaction_t));
