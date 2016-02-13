@@ -410,6 +410,7 @@ static int do_xconvfetch(struct dlist *cidlist,
                          struct fetchargs *fetchargs);
 static void cmd_xsnippets(char *tag);
 static void cmd_xstats(char *tag, int c);
+static void authentication_success(void);
 
 static void cmd_xapplepushservice(const char *tag,
                                   struct applepushserviceargs *applepushserviceargs);
@@ -970,6 +971,15 @@ int service_main(int argc __attribute__((unused)),
     mboxname_init_namespace(&imapd_namespace, /*isadmin*/1);
     mboxevent_setnamespace(&imapd_namespace);
 
+    /* Auto-login if configured */
+    if (config_getstring(IMAPOPT_AUTOLOGIN_USERID)) {
+        imapd_userid = xstrdup(config_getstring(IMAPOPT_AUTOLOGIN_USERID));
+        imapd_authstate = auth_newstate(imapd_userid);
+        syslog(LOG_NOTICE, "login: %s %s%s autologin SESSIONID=<%s>", imapd_clienthost,
+               imapd_userid, imapd_magicplus ? imapd_magicplus : "", session_id());
+        authentication_success();
+    }
+
     cmdloop();
 
     /* LOGOUT executed */
@@ -1183,7 +1193,9 @@ static void cmdloop(void)
     struct applepushserviceargs applepushserviceargs;
 
     prot_printf(imapd_out, "* OK [CAPABILITY ");
-    capa_response(CAPA_PREAUTH);
+    int capa = CAPA_PREAUTH;
+    if (imapd_userid) capa |= CAPA_POSTAUTH; // autologin
+    capa_response(capa);
     prot_printf(imapd_out, "]");
     if (config_serverinfo) prot_printf(imapd_out, " %s", config_servername);
     if (config_serverinfo == IMAP_ENUM_SERVERINFO_ON) {

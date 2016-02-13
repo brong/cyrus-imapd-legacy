@@ -561,6 +561,15 @@ int service_main(int argc __attribute__((unused)),
     }
     prot_printf(popd_out, " server ready %s\r\n", popd_apop_chal);
 
+    if (config_getstring(IMAPOPT_AUTOLOGIN_USERID)) {
+        popd_userid = xstrdup(config_getstring(IMAPOPT_AUTOLOGIN_USERID));
+
+        syslog(LOG_NOTICE, "login: %s %s%s autologin SESSIONID=<%s>", popd_clienthost,
+            popd_userid, popd_subfolder ? popd_subfolder : "", session_id());
+        popd_authstate = auth_newstate(popd_userid);
+        openinbox();
+    }
+
     cmdloop();
 
     /* QUIT executed */

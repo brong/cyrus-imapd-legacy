@@ -326,6 +326,9 @@ Blank lines and lines beginning with ``#'' are ignored.
 { "autocreatequotamsg", -1, INT, "2.5.0", "autocreate_quota_messages" }
 /* Deprecated in favor of \fIautocreate_quota_messages\fR. */
 
+{ "autologin_userid", NULL, STRING }
+/* If set, automatically log in the daemon with this userid */
+
 { "autosievefolders", NULL, STRING, "2.5.0", "autocreate_sieve_folders" }
 /* Deprecated in favor of \fIautocreate_sieve_folders\fR. */
 
