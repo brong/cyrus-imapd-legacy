@@ -6739,6 +6739,12 @@ EXPORTED void freesearchargs(struct searchargs *s)
     free(s);
 }
 
+EXPORTED int searchargscomplexity(struct searchargs *s)
+{
+    if (!s) return 0;
+    return search_expr_depth(s->root);
+}
+
 EXPORTED char *sortcrit_as_string(const struct sortcrit *sortcrit)
 {
     struct buf b = BUF_INITIALIZER;

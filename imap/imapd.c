@@ -5840,7 +5840,11 @@ static void cmd_search(char *tag, int usinguid)
         return;
     }
 
-    if (searchargs->charset == CHARSET_UNKNOWN_CHARSET) {
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
+    }
+    else if (searchargs->charset == CHARSET_UNKNOWN_CHARSET) {
         prot_printf(imapd_out, "%s NO %s\r\n", tag,
                error_message(IMAP_UNRECOGNIZED_CHARSET));
     }
@@ -5894,6 +5898,11 @@ static void cmd_sort(char *tag, int usinguid)
     if (c != '\n') {
         prot_printf(imapd_out,
                     "%s BAD Unexpected extra arguments to Sort\r\n", tag);
+        goto error;
+    }
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
         goto error;
     }
 
@@ -6004,6 +6013,11 @@ void cmd_xconvsort(char *tag, int updates)
     if (c != '\n') {
         prot_printf(imapd_out,
                     "%s BAD Unexpected extra arguments to Xconvsort\r\n", tag);
+        goto error;
+    }
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
         goto error;
     }
 
@@ -6126,6 +6140,11 @@ static void cmd_xconvmultisort(char *tag)
                     "%s BAD Unexpected extra arguments to XconvMultiSort\r\n", tag);
         goto error;
     }
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
+        goto error;
+    }
 
     r = index_convmultisort(imapd_index, sortcrit, searchargs, windowargs);
 
@@ -6202,6 +6221,11 @@ static void cmd_xsnippets(char *tag)
     if (c != '\n') {
         prot_printf(imapd_out,
                     "%s BAD Unexpected extra arguments to Xsnippets\r\n", tag);
+        goto error;
+    }
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
         goto error;
     }
 
@@ -6322,6 +6346,13 @@ static void cmd_thread(char *tag, int usinguid)
         prot_printf(imapd_out,
                     "%s BAD Unexpected extra arguments to Thread\r\n", tag);
         eatline(imapd_in, c);
+        freesearchargs(searchargs);
+        return;
+    }
+
+    if (searchargscomplexity(searchargs) > 20) {
+        prot_printf(imapd_out, "%s NO %s\r\n", tag,
+               error_message(IMAP_SEARCH_COMPLEX));
         freesearchargs(searchargs);
         return;
     }
