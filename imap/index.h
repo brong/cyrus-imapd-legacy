@@ -315,6 +315,7 @@ struct searchargs *new_searchargs(const char *tag, int state,
 
 void freesequencelist(struct seqset *l);
 void freesearchargs(struct searchargs *s);
+int searchargscomplexity(struct searchargs *s);
 char *sortcrit_as_string(const struct sortcrit *sortcrit);
 void freesortcrit(struct sortcrit *s);
 void index_msgdata_sort(MsgData **msgdata, int n, const struct sortcrit *sortcrit);
