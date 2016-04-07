@@ -185,6 +185,19 @@ EXPORTED void search_expr_append(search_expr_t *parent, search_expr_t *e)
     append(parent, e);
 }
 
+/* calculate the depth of a search expression */
+EXPORTED int search_expr_depth(search_expr_t *e)
+{
+    if (!e) return 0;
+    int depth = 0;
+    search_expr_t *child;
+    for (child = e->children; child; child = child->next) {
+        int this = search_expr_depth(child);
+        if (depth < this) depth = this;
+    }
+    return depth + 1;
+}
+
 /*
  * Recursively free a search expression tree including the given node
  * and all descendant nodes.
