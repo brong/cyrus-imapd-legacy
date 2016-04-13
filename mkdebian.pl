@@ -16,6 +16,11 @@ my $CYRUSLIBS = "cyruslibs-fastmail-v4";
 my $basename = "cyrus-$branch";
 my $basedir = $branch eq 'fastmail' ? 'usr/cyrus' : "usr/$basename";
 
+my $LEXFIX = "echo";
+if ($ENV{CYRUS_LEXFIX}) {
+  $LEXFIX = "make lex-fix";
+}
+
 mkdir("debian");
 open(FH, ">debian/changelog");
 print FH <<EOF;
@@ -73,6 +78,7 @@ build:
 	dh_testdir
 	autoreconf -v -i
 	./configure --without-krb --with-perl=/usr/bin/perl --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service XAPIAN_CONFIG=/usr/local/$CYRUSLIBS/bin/xapian-config-1.3
+	$LEXFIX
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -Werror -fstack-protector-all"
 	make sieve/test
 	touch build
