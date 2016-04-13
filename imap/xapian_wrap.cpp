@@ -69,7 +69,7 @@ int xapian_dbw_open(const char *path, xapian_dbw_t **dbwp)
     int r = 0;
 
     try {
-        int action = Xapian::DB_CREATE_OR_OPEN;
+        int action = Xapian::DB_CREATE_OR_OPEN|Xapian::DB_BACKEND_CHERT;
         dbw->database = new Xapian::WritableDatabase(path, action);
         dbw->term_generator = new Xapian::TermGenerator();
         dbw->stemmer = new Xapian::Stem("en");
