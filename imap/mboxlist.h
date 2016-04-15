@@ -209,7 +209,7 @@ int mboxlist_set_racls(int enabled);
 
 modseq_t mboxlist_foldermodseq_dirty(struct mailbox *mailbox);
 
-typedef int findall_cb(const char *name, int matchlen, int maycreate, void *rock);
+typedef int findall_cb(const char *name, int matchlen, int category, void *rock);
 /* Find all mailboxes that match 'pattern'. */
 int mboxlist_findall(struct namespace *namespace,
                      const char *pattern, int isadmin,

@@ -219,9 +219,9 @@ static int usage(const char *name)
   exit(0);
 }
 
-/* we don't check what comes in on matchlen and maycreate, should we? */
+/* we don't check what comes in on matchlen and category, should we? */
 static int purge_me(const char *name, int matchlen __attribute__((unused)),
-                    int maycreate __attribute__((unused)),
+                    int category __attribute__((unused)),
                     void *rock __attribute__((unused)))
 {
   struct mailbox *mailbox = NULL;

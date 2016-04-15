@@ -117,7 +117,7 @@ static struct namespace recon_namespace;
 /* forward declarations */
 static void do_mboxlist(void);
 static int do_reconstruct_p(const mbentry_t *mbentry, void *rock);
-static int do_reconstruct(const char *name, int matchlen, int maycreate, void *rock);
+static int do_reconstruct(const char *name, int matchlen, int category, void *rock);
 static void usage(void);
 
 extern cyrus_acl_canonproc_t mboxlist_ensureOwnerRights;
@@ -425,7 +425,7 @@ static int do_reconstruct_p(const mbentry_t *mbentry, void *rock)
  */
 static int do_reconstruct(const char *name,
                           int matchlen,
-                          int maycreate __attribute__((unused)),
+                          int category __attribute__((unused)),
                           void *rock)
 {
     strarray_t *discovered = (strarray_t *)rock;

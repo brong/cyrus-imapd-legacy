@@ -539,7 +539,7 @@ struct changesub_rock_st {
  */
 static int autochangesub(const char *name,
                          int matchlen __attribute__((unused)),
-                         int maycreate __attribute__((unused)),
+                         int category __attribute__((unused)),
                          void *rock)
 {
     struct changesub_rock_st *crock = (struct changesub_rock_st *)rock;

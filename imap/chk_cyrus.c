@@ -73,7 +73,7 @@ static const char *check_part = NULL; /* partition we are checking */
 
 static int chkmbox(const char *name,
                    int matchlen __attribute__((unused)),
-                   int maycreate __attribute__((unused)),
+                   int category __attribute__((unused)),
                    void *rock __attribute__((unused)))
 {
     int r;

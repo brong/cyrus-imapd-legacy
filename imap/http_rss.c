@@ -409,7 +409,7 @@ struct list_rock {
     struct node *last;
 };
 
-static int list_cb(const char *name, int matchlen, int maycreate, void *rock)
+static int list_cb(const char *name, int matchlen, int category, void *rock)
 {
     struct list_rock *lrock = (struct list_rock *) rock;
     struct node *last = lrock->last;
@@ -493,7 +493,7 @@ static int list_cb(const char *name, int matchlen, int maycreate, void *rock)
             /* Add missing ancestor and recurse down the tree */
             buf_printf(buf, "<li>%s", shortname);
 
-            list_cb(name, matchlen, maycreate, rock);
+            list_cb(name, matchlen, category, rock);
         }
     }
     else {
@@ -507,7 +507,7 @@ static int list_cb(const char *name, int matchlen, int maycreate, void *rock)
         if (last->parent) {
             /* Recurse back up the tree */
             lrock->last = last->parent;
-            list_cb(name, matchlen, maycreate, rock);
+            list_cb(name, matchlen, category, rock);
         }
     }
 

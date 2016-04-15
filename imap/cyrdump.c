@@ -66,7 +66,7 @@
 
 static int verbose = 0;
 
-static int dump_me(const char *name, int matchlen, int maycreate, void *rock);
+static int dump_me(const char *name, int matchlen, int category, void *rock);
 static void print_seq(const char *tag, const char *attrib,
                       unsigned *seq, int n);
 static int usage(const char *name);
@@ -152,7 +152,7 @@ static search_expr_t *systemflag_match(int flag)
 }
 
 static int dump_me(const char *name, int matchlen __attribute__((unused)),
-                   int maycreate __attribute__((unused)), void *rock)
+                   int category __attribute__((unused)), void *rock)
 {
     int r;
     char boundary[128];

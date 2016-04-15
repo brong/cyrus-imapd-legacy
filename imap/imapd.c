@@ -261,6 +261,7 @@ struct list_rock {
     strarray_t *subs;
     char *last_name;
     int last_attributes;
+    int last_category;
 };
 
 /* Information about one mailbox name that LIST returns */
@@ -481,9 +482,9 @@ static char *canonical_list_pattern(const char *reference,
                                     const char *pattern);
 static void canonical_list_patterns(const char *reference,
                                     strarray_t *patterns);
-static int list_cb(const char *name, int matchlen, int maycreate,
+static int list_cb(const char *name, int matchlen, int category,
                    void *rock);
-static int subscribed_cb(const char *name, int matchlen, int maycreate,
+static int subscribed_cb(const char *name, int matchlen, int category,
                          void *rock);
 static void list_data(struct listargs *listargs);
 static int list_data_remote(char *tag, struct listargs *listargs);
@@ -8706,7 +8707,7 @@ static void cmd_status(char *tag, char *name)
  */
 static int namespacedata(const char *name,
                          int matchlen __attribute__((unused)),
-                         int maycreate __attribute__((unused)),
+                         int category __attribute__((unused)),
                          void *rock)
 {
     int* sawone = (int*) rock;
@@ -9339,7 +9340,7 @@ struct apply_rock {
 };
 
 static int apply_cb(const char *name, int matchlen,
-                    int maycreate __attribute__((unused)), void* rock)
+                    int category __attribute__((unused)), void* rock)
 {
     struct apply_rock *arock = (struct apply_rock *)rock;
     annotate_state_t *state = arock->state;
@@ -11340,7 +11341,7 @@ struct xfer_list {
 };    
 
 static int xfer_addmbox(const char *name, int matchlen,
-			int maycreate __attribute__((unused)), void *rock)
+			int category __attribute__((unused)), void *rock)
 {
     struct xfer_list *list = (struct xfer_list *) rock;
     mbentry_t *mbentry;
@@ -12191,8 +12192,8 @@ done:
 }
 
 /* Print LIST or LSUB untagged response */
-static void list_response(const char *name, int attributes,
-                          struct listargs *listargs)
+static void list_response(const char *name, const char *extname,
+                          int attributes, struct listargs *listargs)
 {
     const struct mbox_name_attribute *attr;
     int r;
@@ -12201,8 +12202,6 @@ static void list_response(const char *name, int attributes,
     mbentry_t *mbentry = NULL;
     struct statusdata sdata = STATUSDATA_INIT;
 
-    if (!name) return;
-
     /* get info and set flags */
     r = mboxlist_lookup(name, &mbentry, NULL);
 
@@ -12210,7 +12209,7 @@ static void list_response(const char *name, int attributes,
         attributes |= (listargs->cmd & LIST_CMD_EXTENDED) ?
                        MBOX_ATTRIBUTE_NONEXISTENT : MBOX_ATTRIBUTE_NOSELECT;
     }
-    else if (r) return;
+    else if (r) goto done;
 
     else if (listargs->scan) {
         /* SCAN mailbox for content */
@@ -12378,6 +12377,7 @@ static void list_response(const char *name, int attributes,
         cmd = "LIST";
         break;
     }
+
     prot_printf(imapd_out, "* %s (", cmd);
     for (sep = "", attr = mbox_name_attributes; attr->id; attr++) {
         if (attributes & attr->flag) {
@@ -12397,7 +12397,6 @@ static void list_response(const char *name, int attributes,
 
     prot_printf(imapd_out, "\"%c\" ", imapd_namespace.hier_sep);
 
-    char *extname = mboxname_to_external(name, &imapd_namespace, imapd_userid);
     prot_printastring(imapd_out, extname);
 
     if (listargs->cmd & LIST_CMD_EXTENDED &&
@@ -12430,7 +12429,6 @@ static void list_response(const char *name, int attributes,
         !(attributes & MBOX_ATTRIBUTE_NOSELECT)) {
         printmetadata(mbentry, &listargs->metaitems, &listargs->metaopts);
     }
-    free(extname);
 
 done:
     mboxlist_entry_free(&mbentry);
@@ -12439,7 +12437,6 @@ done:
 static void _addsubs(struct list_rock *rock)
 {
     if (!rock->subs) return;
-    if (rock->last_attributes & MBOX_ATTRIBUTE_NOINFERIORS) return;
     if (!strcmp(rock->last_name, "")) return;
     if (!strcmp(rock->last_name, "user")) return;
     int i;
@@ -12459,7 +12456,7 @@ static int perform_output(const char *name, size_t matchlen,
                           struct list_rock *rock)
 {
     /* skip non-responsive mailboxes early, so they don't break sub folder detection */
-    if (name && !imapd_userisadmin) {
+    if (name && matchlen && !imapd_userisadmin) {
         int mbtype = 0;
         /* skip all non-IMAP folders */
         mbentry_t *mbentry = NULL;
@@ -12480,22 +12477,31 @@ static int perform_output(const char *name, size_t matchlen,
             !strncmp(rock->last_name, name, matchlen))
             return 0; /* skip duplicate calls */
         _addsubs(rock);
-        list_response(rock->last_name, rock->last_attributes, rock->listargs);
+        if (rock->last_category == MBNAME_ALTINBOX)
+            rock->last_attributes |= MBOX_ATTRIBUTE_NOINFERIORS;
+        char *extname = mboxname_to_external(rock->last_name, &imapd_namespace, imapd_userid);
+        if (extname) list_response(rock->last_name, extname, rock->last_attributes, rock->listargs);
+        free(extname);
         free(rock->last_name);
         rock->last_name = NULL;
     }
-
-    if (name) {
-        rock->last_name = xstrndup(name, matchlen);
-        rock->last_attributes = 0;
+    else if (rock->last_category) {
+        const char *extname = mbname_category_prefix(rock->last_category, &imapd_namespace);
+        if (extname) list_response("", extname, rock->last_attributes, rock->listargs);
     }
+
+    if (name && matchlen)
+        rock->last_name = xstrndup(name, matchlen);
+
+    rock->last_attributes = 0;
+    rock->last_category = 0;
 
     return 1;
 }
 
 /* callback for mboxlist_findall
  * used when the SUBSCRIBED selection option is NOT given */
-static int list_cb(const char *name, int matchlen, int maycreate,
+static int list_cb(const char *name, int matchlen, int category,
                    void *rockp)
 {
     struct list_rock *rock = (struct list_rock *)rockp;
@@ -12504,7 +12510,6 @@ static int list_cb(const char *name, int matchlen, int maycreate,
         rock->last_name
         && matchlen >= (last_len = strlen(rock->last_name))
         && name[last_len] == '.'
-        && !(rock->last_attributes & MBOX_ATTRIBUTE_NOINFERIORS)
         && !memcmp(rock->last_name, name, last_len);
 
     list_callback_calls++;
@@ -12513,23 +12518,24 @@ static int list_cb(const char *name, int matchlen, int maycreate,
         rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
 
     /* tidy up flags */
-    if (!(rock->last_attributes & MBOX_ATTRIBUTE_HASCHILDREN))
+    if (rock->last_name && !(rock->last_attributes & MBOX_ATTRIBUTE_HASCHILDREN))
         rock->last_attributes |= MBOX_ATTRIBUTE_HASNOCHILDREN;
 
     if (!perform_output(name, matchlen, rock))
         return 0;
 
-    if (!maycreate)
-        rock->last_attributes |= MBOX_ATTRIBUTE_NOINFERIORS;
-    else if (name[matchlen] == '.')
+    if (matchlen && name[matchlen] == '.')
         rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
+    if (!matchlen && category)
+        rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
+    rock->last_category = category;
 
     return 0;
 }
 
 /* callback for mboxlist_findsub
  * used when SUBSCRIBED but not RECURSIVEMATCH is given */
-static int subscribed_cb(const char *name, int matchlen, int maycreate,
+static int subscribed_cb(const char *name, int matchlen, int category,
                          void *rockp)
 {
     struct list_rock *rock = (struct list_rock *)rockp;
@@ -12538,7 +12544,6 @@ static int subscribed_cb(const char *name, int matchlen, int maycreate,
         rock->last_name
         && matchlen >= (last_len = strlen(rock->last_name))
         && name[last_len] == '.'
-        && !(rock->last_attributes & MBOX_ATTRIBUTE_NOINFERIORS)
         && !memcmp(rock->last_name, name, last_len);
 
     list_callback_calls++;
@@ -12546,11 +12551,14 @@ static int subscribed_cb(const char *name, int matchlen, int maycreate,
     if (last_name_is_ancestor)
         rock->last_attributes |= MBOX_ATTRIBUTE_HASCHILDREN;
 
-    if (!name[matchlen]) {
+    if (!matchlen) {
+        perform_output(name, matchlen, rock);
+        if (category)
+            rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+    }
+    else if (!name[matchlen]) {
         perform_output(name, matchlen, rock);
         rock->last_attributes |= MBOX_ATTRIBUTE_SUBSCRIBED;
-        if (!maycreate)
-            rock->last_attributes |= MBOX_ATTRIBUTE_NOINFERIORS;
     }
     else if (name[matchlen] == '.' &&
              rock->listargs->cmd & LIST_CMD_LSUB) {
@@ -12561,6 +12569,10 @@ static int subscribed_cb(const char *name, int matchlen, int maycreate,
         perform_output(name, matchlen, rock);
         rock->last_attributes |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
     }
+    else {
+        /* SHOULD NEVER HAPPEN */
+    }
+    rock->last_category = category;
 
     return 0;
 }
@@ -12617,7 +12629,7 @@ static void canonical_list_patterns(const char *reference,
 
 /* callback for mboxlist_findsub
  * used by list_data_recursivematch */
-static int recursivematch_cb(const char *name, int matchlen, int maycreate, void *rockp)
+static int recursivematch_cb(const char *name, int matchlen, int category __attribute__((unused)), void *rockp)
 {
     struct list_rock_recursivematch *rock = (struct list_rock_recursivematch *)rockp;
     list_callback_calls++;
@@ -12633,8 +12645,7 @@ static int recursivematch_cb(const char *name, int matchlen, int maycreate, void
                 hash_insert(parentname, parent_info, &rock->table);
                 rock->count++;
             }
-            if (!(*parent_info & MBOX_ATTRIBUTE_NOINFERIORS))
-                *parent_info |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
+            *parent_info |= MBOX_ATTRIBUTE_CHILDINFO_SUBSCRIBED;
             free(parentname);
         }
     } else {
@@ -12642,7 +12653,6 @@ static int recursivematch_cb(const char *name, int matchlen, int maycreate, void
         if (!list_info) {
             list_info = xzmalloc(sizeof(int));
             *list_info |= MBOX_ATTRIBUTE_SUBSCRIBED;
-            if (!maycreate) *list_info |= MBOX_ATTRIBUTE_NOINFERIORS;
             hash_insert(name, list_info, &rock->table);
             rock->count++;
         }
@@ -12694,9 +12704,13 @@ static void list_data_recursivematch(struct listargs *listargs) {
 
         /* print */
         for (i = 0; i < entries; i++) {
+            if (!rock.array[i].name) continue;
+            char *extname = mboxname_to_external(rock.array[i].name, &imapd_namespace, imapd_userid);
             list_response(rock.array[i].name,
+                          extname,
                           rock.array[i].attributes,
                           rock.listargs);
+            free(extname);
         }
 
         free(rock.array);

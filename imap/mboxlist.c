@@ -95,7 +95,7 @@ static int mboxlist_dbopen = 0;
 static int mboxlist_opensubs(const char *userid, struct db **ret);
 static void mboxlist_closesubs(struct db *sub);
 
-static int mboxlist_rmquota(const char *name, int matchlen, int maycreate,
+static int mboxlist_rmquota(const char *name, int matchlen, int category,
                             void *rock);
 static int mboxlist_changequota(const mbentry_t *mbentry, void *rock);
 
@@ -2239,12 +2239,10 @@ struct find_rock {
     struct namespace *namespace;
     const char *userid;
     const char *domain;
-    int find_namespace;
-    int is_the_inbox;
+    int mb_category;
     int checkmboxlist;
     int issubs;
-    int checkuser;
-    int checkshared;
+    int singlepercent;
     struct db *db;
     int isadmin;
     const struct auth_state *auth_state;
@@ -2279,21 +2277,8 @@ static int find_p(void *rockp,
             goto nomatch;
     }
 
-    /* XXX - skip 'user' by itself - is that even a thing? */
-
-    if (rock->find_namespace == NAMESPACE_INBOX) {
-        if (rock->isadmin) goto nomatch;
-        if (!mbname_localpart(rock->mbname)) goto nomatch;
-    }
-    else if (rock->find_namespace == NAMESPACE_USER) {
-        /* this would've been output with the inbox stuff, so skip it */
-        if (!mbname_localpart(rock->mbname)) goto nomatch;
-        if (!rock->isadmin && !strcmp(rock->userid, mbname_userid(rock->mbname))) goto nomatch;
-    }
-    else {
-        /* this would've been output with the user stuff, so skip it */
-        if (!mbname_isdeleted(rock->mbname) && mbname_localpart(rock->mbname)) goto nomatch;
-    }
+    if (mbname_category(rock->mbname, rock->namespace, rock->userid) != rock->mb_category)
+        goto nomatch;
 
     /* NOTE: this will all be cleaned up to be much more efficient sooner or later, with
      * a mbname_t being kept inside the mbentry, and the extname cached all the way to
@@ -2312,14 +2297,9 @@ static int find_p(void *rockp,
     /* If its not a match, skip it -- partial matches are ok. */
     if (matchlen == -1) goto nomatch;
 
-    /* we need to recalculate matchlen against the internal mailbox name.
-     * There are various possiblities, but simplest is just to assume the
-     * same number of characters from the end is the same point */
-    rock->intmatchlen = matchlen - strlen(extname) + keylen;
-
     /* subs DB has empty keys */
     if (rock->issubs)
-        return 1;
+        goto good;
 
     /* ignore entirely deleted records */
     if (mboxlist_parse_entry(&rock->mbentry, key, keylen, data, datalen))
@@ -2338,8 +2318,23 @@ static int find_p(void *rockp,
         if (!(cyrus_acl_myrights(rock->auth_state, rock->mbentry->acl) & ACL_LOOKUP)) goto nomatch;
     }
 
+good:
     /* if we get here, close enough for us to spend the time
        acting interested */
+
+    /* we need to recalculate matchlen against the internal mailbox name.
+     * If it's an exact match we can just use the full length */
+    if (matchlen == (int)strlen(extname)) {
+        rock->intmatchlen = keylen;
+    }
+    /* otherwise we need to convert back to internal name to be sure we got the right length */
+    else {
+        char *extmatch = xstrndup(extname, matchlen);
+        char *intmatch = mboxname_from_external(extmatch, rock->namespace, rock->userid);
+        rock->intmatchlen = strlen(intmatch);
+        free(intmatch);
+        free(extmatch);
+    }
 
     return 1;
 
@@ -2367,36 +2362,23 @@ static int find_cb(void *rockp,
         }
     }
 
-    if (rock->find_namespace == NAMESPACE_USER && rock->checkuser) {
+    if (rock->singlepercent) {
         /* special case:  LIST "" *% -- output prefix */
-        r = (*rock->proc)("user", 4, 1, rock->procrock);
+        r = (*rock->proc)("", 0, rock->mb_category, rock->procrock);
         if (r) goto done;
 
-        if (rock->checkuser > 1) {
+        if (rock->singlepercent > 1) {
             /* special case:  LIST "" % -- output prefix only */
             /* short-circuit the foreach - one mailbox is sufficient */
             r = CYRUSDB_DONE;
             goto done;
         }
-        rock->checkuser = 0;
+
+        rock->singlepercent = 0;
     }
 
-    /* found an entry; output it */
-    if (rock->find_namespace == NAMESPACE_SHARED && rock->checkshared) {
-        /* special case:  LIST "" *% -- output shared prefix */
-        r = (*rock->proc)("", 0, 1, rock->procrock);
-        if (r) goto done;
-
-        if (rock->checkshared > 1) {
-            /* special case:  LIST "" % -- output prefix only */
-            /* short-circuit the foreach - one mailbox is sufficient */
-            r = CYRUSDB_DONE;
-            goto done;
-        }
-        rock->checkshared = 0;
-    }
-
-    r = (*rock->proc)(mbname_intname(rock->mbname), rock->intmatchlen, !rock->is_the_inbox, rock->procrock);
+    r = (*rock->proc)(mbname_intname(rock->mbname), rock->intmatchlen,
+                      rock->mb_category, rock->procrock);
 
  done:
     mboxlist_entry_free(&rock->mbentry);
@@ -2646,14 +2628,14 @@ EXPORTED int mboxlist_usermboxtree(const char *userid, mboxlist_cb *proc,
     return r;
 }
 
-static int mboxlist_find_namespace(struct find_rock *rock, const char *prefix, size_t len)
+static int mboxlist_find_category(struct find_rock *rock, const char *prefix, size_t len)
 {
     int r = 0;
     if (!rock->issubs && !rock->isadmin && !cyrusdb_fetch(rock->db, "$RACL", 5, NULL, NULL, NULL)) {
         /* we're using reverse ACLs */
         struct buf buf = BUF_INITIALIZER;
         strarray_t matches = STRARRAY_INITIALIZER;
-        mboxlist_racl_key(rock->find_namespace == NAMESPACE_USER, rock->userid, NULL, &buf);
+        mboxlist_racl_key(rock->mb_category == MBNAME_OTHERUSER, rock->userid, NULL, &buf);
         /* this is the prefix */
         struct raclrock raclrock = { buf.len, &matches };
         /* we only need to look inside the prefix still, but we keep the length
@@ -2718,14 +2700,14 @@ static int mboxlist_do_find(struct find_rock *rock, const strarray_t *patterns)
     else
         domainpat[0] = '\0';
 
-    /* calculate the inbox */
+    /* calculate the inbox (with trailing .INBOX. for later use) */
     if (userid && (!(p = strchr(userid, '.')) || ((p - userid) > (int)userlen)) &&
-        strlen(userid)+5 < MAX_MAILBOX_BUFFER) {
+        strlen(userid)+7 < MAX_MAILBOX_BUFFER) {
         if (domainlen)
             snprintf(inbox, sizeof(inbox), "%s!", userid+userlen+1);
         snprintf(inbox+domainlen, sizeof(inbox)-domainlen,
-                 "user.%.*s", (int)userlen, userid);
-        inboxlen = strlen(inbox);
+                 "user.%.*s.INBOX.", (int)userlen, userid);
+        inboxlen = strlen(inbox) - 7;
     }
     else {
         userid = 0;
@@ -2744,33 +2726,76 @@ static int mboxlist_do_find(struct find_rock *rock, const strarray_t *patterns)
             if (pat[prefixlen] != c) break;
         }
         if (i < patterns->count) break;
-        if (c == '*' || c == '%' || c == '?' || c == '@') break;
+        if (c == '*' || c == '%' || c == '?') break;
         commonpat[prefixlen] = c;
     }
     commonpat[prefixlen] = '\0';
+
+    int singlepercent = 0;
+    if (patterns->count == 1) {
+        /* Skip pattern which matches shared namespace prefix */
+        if (!strcmp(firstpat+prefixlen, "%"))
+            singlepercent = 2;
+        /* output prefix regardless */
+        if (!strcmp(firstpat+prefixlen, "*%"))
+            singlepercent = 1;
+    }
 
     /*
      * Personal (INBOX) namespace (only if not admin)
      */
     if (userid && !isadmin) {
-        rock->find_namespace = NAMESPACE_INBOX;
-
-        /* special case magic for now */
-        rock->is_the_inbox = rock->namespace->isalt;
-
+        /* first the INBOX */
+        rock->mb_category = MBNAME_INBOX;
         r = cyrusdb_forone(rock->db, inbox, inboxlen, &find_p, &find_cb, rock, NULL);
         if (r == CYRUSDB_DONE) r = 0;
         if (r) goto done;
 
-        rock->is_the_inbox = 0;
+        if (rock->namespace->isalt) {
+            /* do exact INBOX subs before resetting the namebuffer */
+            rock->mb_category = MBNAME_INBOXSUB;
+            r = cyrusdb_foreach(rock->db, inbox, inboxlen+7, &find_p, &find_cb, rock, NULL);
+            if (r == CYRUSDB_DONE) r = 0;
+            if (r) goto done;
 
-        /* only do subfolders of the user themselves, not everyone else with a similar prefix */
-        inbox[inboxlen] = '.';
+            /* reset the the namebuffer by sending an earlier name */
+            r = (*rock->proc)("", 0, 0, rock->procrock);
+            if (r) goto done;
+        }
 
         /* iterate through all the mailboxes under the user's inbox */
+        rock->mb_category = MBNAME_OWNER;
         r = cyrusdb_foreach(rock->db, inbox, inboxlen+1, &find_p, &find_cb, rock, NULL);
         if (r == CYRUSDB_DONE) r = 0;
         if (r) goto done;
+
+        /* "Alt Prefix" folders */
+        if (rock->namespace->isalt) {
+            /* reset the the namebuffer */
+            r = (*rock->proc)("", 0, 0, rock->procrock);
+            if (r) goto done;
+
+            rock->mb_category = MBNAME_ALTINBOX;
+            rock->singlepercent = singlepercent;
+
+            /* special case user.foo.INBOX.  If we're singlepercent == 2, this could
+             return DONE, in which case we don't need to foreach the rest of the
+             altprefix space */
+            r = cyrusdb_forone(rock->db, inbox, inboxlen+6, &find_p, &find_cb, rock, NULL);
+            if (r == CYRUSDB_DONE) goto skipalt;
+            if (r) goto done;
+
+            /* reset the the namebuffer */
+            r = (*rock->proc)("", 0, 0, rock->procrock);
+            if (r) goto done;
+
+            /* special case any other altprefix stuff */
+            rock->mb_category = MBNAME_ALTPREFIX;
+            r = cyrusdb_foreach(rock->db, inbox, inboxlen+1, &find_p, &find_cb, rock, NULL);
+        skipalt: /* we got a done, so skip out of the foreach early */
+            if (r == CYRUSDB_DONE) r = 0;
+            if (r) goto done;
+        }
     }
 
     /*
@@ -2793,12 +2818,17 @@ static int mboxlist_do_find(struct find_rock *rock, const strarray_t *patterns)
                 strlcpy(domainpat+domainlen+5, commonpat+len+1, sizeof(domainpat)-domainlen-5);
             }
 
-            rock->find_namespace = NAMESPACE_USER;
+            rock->mb_category = MBNAME_OTHERUSER;
+            rock->singlepercent = singlepercent;
 
             /* because of how domains work, with crossdomains or admin you can't prefix at all :( */
             size_t thislen = (isadmin || crossdomains) ? 0 : strlen(domainpat);
 
-            r = mboxlist_find_namespace(rock, domainpat, thislen);
+            /* reset the the namebuffer */
+            r = (*rock->proc)("", 0, 0, rock->procrock);
+            if (r) goto done;
+
+            r = mboxlist_find_category(rock, domainpat, thislen);
             if (r) goto done;
         }
     }
@@ -2814,31 +2844,15 @@ static int mboxlist_do_find(struct find_rock *rock, const strarray_t *patterns)
         if (len) len--; // trailing separator
 
         if (!strncmp(rock->namespace->prefix[NAMESPACE_SHARED], commonpat, MIN(len, prefixlen))) {
-            rock->find_namespace = NAMESPACE_SHARED;
+            rock->mb_category = MBNAME_SHARED;
+            rock->singlepercent = singlepercent;
 
-            if (prefixlen <= len && patterns->count == 1) {
-                /* Skip pattern which matches shared namespace prefix */
-                for (p = firstpat+prefixlen; *p; p++) {
-                    if (*p == '%') continue;
-                    else if (*p == '.') p++;
-                    break;
-                }
-
-                if (*firstpat && !strchr(firstpat, '.') &&
-                    firstpat[strlen(firstpat)-1] == '%') {
-                    /* special case:  LIST "" *% -- output prefix */
-                    rock->checkshared = 1;
-                }
-
-                if ((rock->checkshared || prefixlen == len) && !*p) {
-                    /* special case:  LIST "" % -- output prefix
-                       (if we have a shared mbox) and quit */
-                    rock->checkshared = 2;
-                }
-            }
+            /* reset the the namebuffer */
+            r = (*rock->proc)("", 0, 0, rock->procrock);
+            if (r) goto done;
 
             /* iterate through all the non-user folders on the server */
-            r = mboxlist_find_namespace(rock, domainpat, domainlen);
+            r = mboxlist_find_category(rock, domainpat, domainlen);
             if (r) goto done;
         }
     }
@@ -3132,7 +3146,7 @@ EXPORTED int mboxlist_ensureOwnerRights(void *rock, const char *identifier,
  */
 static int mboxlist_rmquota(const char *name,
                             int matchlen __attribute__((unused)),
-                            int maycreate __attribute__((unused)),
+                            int category __attribute__((unused)),
                             void *rock)
 {
     int r = 0;
