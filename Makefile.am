@@ -63,7 +63,7 @@ if HAVE_LDAP
 AM_CPPFLAGS += $(LDAP_CPPFLAGS)
 endif # HAVE_LDAP
 
-AM_LDFLAGS = $(COV_LDFLAGS)
+AM_LDFLAGS = $(COV_LDFLAGS) -lm
 BUILT_SOURCES = \
 	xversion.h \
 	imap/imap_err.c \
@@ -1234,6 +1234,7 @@ imap_httpd_SOURCES = \
 	imap/http_dblookup.c \
 	imap/http_ischedule.c \
 	imap/http_jmap.c \
+	imap/jmapical.c \
 	imap/http_proxy.c \
 	imap/http_proxy.h \
 	imap/http_rss.c \
