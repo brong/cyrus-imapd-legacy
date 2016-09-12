@@ -98,6 +98,8 @@ jmapical_tojmap(icalcomponent *ical, struct json_t *props,
  * err:  optional error receiver
  * opts: optional conversion options
  */
+
+/* FIXME uid is not necessary, always source from obj */
 icalcomponent*
 jmapical_toical(json_t *obj, icalcomponent *ical, const char *uid,
                 jmapical_err_t *err, jmapical_opts_t *opts);
