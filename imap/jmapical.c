@@ -1335,9 +1335,9 @@ translations_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent
                 if (!loctr)
                     loctr = json_pack("{}");
 
-                json_object_set_new(loctr, field, json_string(text));
-                json_object_set_new(locations, locid, loctr);
-                json_object_set_new(tr, "locations", locations);
+                json_object_set(loctr, field, json_string(text));
+                json_object_set(locations, locid, loctr);
+                json_object_set(tr, "locations", locations);
             }
 
         } else if (field && text) {
@@ -3441,7 +3441,6 @@ static void
 translations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *translations)
 {
     json_t *tr;
-    hash_table ids;
     const char *id;
 
     /* Purge existing translations */
@@ -3452,8 +3451,6 @@ translations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *translations
         return;
     }
 
-    construct_hash_table(&ids, json_array_size(translations) + 1, 0);
-
     /* Add translations */
     json_object_foreach(translations, id, tr) {
         const char *locid, *s;
@@ -3462,7 +3459,7 @@ translations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *translations
         beginprop_key(ctx, "translations", id);
 
         /* Validate the location id */
-        if (!strlen(id) || hash_lookup(id, &ids)) {
+        if (!strlen(id)) {
             invalidprop(ctx, NULL);
             endprop(ctx);
             continue;
@@ -3484,11 +3481,8 @@ translations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *translations
             if (s) translation_to_ical(comp, id, "accessInstructions", s, locid);
         }
 
-        hash_insert(id, (void*)1, &ids);
         endprop(ctx);
     }
-
-    free_hash_table(&ids, NULL);
 }
 
 static void set_language_icalprop(icalcomponent *comp, icalproperty_kind kind,
