@@ -286,6 +286,18 @@ static int _wantprop(json_t *props, const char *name)
     return json_object_get(props, name) != NULL;
 }
 
+/* FIXME libical doesn't return the builtin UTC timezone for Etc/UTC */
+static icaltimezone *tz_from_tzid(const char *tzid)
+{
+    if (!tzid)
+        return NULL;
+
+    if (!strcmp(tzid, "Etc/UTC") || !strcmp(tzid, "UTC"))
+        return icaltimezone_get_utc_timezone();
+
+    return icaltimezone_get_builtin_timezone(tzid);
+}
+
 /* Determine the Olson TZID, if any, of the ical property prop. */
 static const char *tzid_from_icalprop(icalproperty *prop, int guess) {
     const char *tzid = NULL;
@@ -295,19 +307,19 @@ static const char *tzid_from_icalprop(icalproperty *prop, int guess) {
     if (param) tzid = icalparameter_get_tzid(param);
     /* Check if the tzid already corresponds to an Olson name. */
     if (tzid) {
-        icaltimezone *tz = icaltimezone_get_builtin_timezone(tzid);
+        icaltimezone *tz = tz_from_tzid(tzid);
         if (!tz && guess) {
             /* Try to guess the timezone. */
             icalvalue *val = icalproperty_get_value(prop);
             icaltimetype dt = icalvalue_get_datetime(val);
             tzid = dt.zone ? icaltimezone_get_location((icaltimezone*) dt.zone) : NULL;
-            tzid = tzid && icaltimezone_get_builtin_timezone(tzid) ? tzid : NULL;
+            tzid = tzid && tz_from_tzid(tzid) ? tzid : NULL;
         }
     } else {
         icalvalue *val = icalproperty_get_value(prop);
         icaltimetype dt = icalvalue_get_datetime(val);
         if (icaltime_is_valid_time(dt) && dt.is_utc) {
-            tzid = "UTC";
+            tzid = "Etc/UTC";
         }
     }
     return tzid;
@@ -332,7 +344,7 @@ static struct icaltimetype dtstart_from_ical(icalcomponent *comp)
     if (dt.zone) return dt;
 
     if ((tzid = tzid_from_ical(comp, ICAL_DTSTART_PROPERTY))) {
-        dt.zone = icaltimezone_get_builtin_timezone(tzid);
+        dt.zone = tz_from_tzid(tzid);
     }
 
     return dt;
@@ -351,7 +363,7 @@ static struct icaltimetype dtend_from_ical(icalcomponent *comp)
     prop = icalcomponent_get_first_property(comp, ICAL_DTEND_PROPERTY);
     if (prop) {
         if ((tzid = tzid_from_icalprop(prop, 1))) {
-            dt.zone = icaltimezone_get_builtin_timezone(tzid);
+            dt.zone = tz_from_tzid(tzid);
         }
     } else {
         dt.zone = dtstart_from_ical(comp).zone;
@@ -621,7 +633,7 @@ recurrence_from_ical(fromicalctx_t *ctx, struct icalrecurrencetype recur, const 
         /* Recur count takes precedence over until. */
         json_object_set_new(jrecur, "count", json_integer(recur.count));
     } else if (!icaltime_is_null_time(recur.until)) {
-        icaltimezone *tz = icaltimezone_get_builtin_timezone(tzid);
+        icaltimezone *tz = tz_from_tzid(tzid);
         icaltimetype dtloc = icaltime_convert_to_zone(recur.until, tz);
         char *until = localdate_from_icaltime_r(dtloc);
         if (until == NULL) {
@@ -656,8 +668,8 @@ override_rdate_from_ical(fromicalctx_t *ctx, icalproperty *prop)
 
             if (ctx->tzid_start && tzid_rdate && strcmp(ctx->tzid_start, tzid_rdate)) {
                 /* Edge case: a RDATE in another timezone */
-                icaltimezone *tz_rdate = icaltimezone_get_builtin_timezone(tzid_rdate);
-                icaltimezone *tz_start = icaltimezone_get_builtin_timezone(ctx->tzid_start);
+                icaltimezone *tz_rdate = tz_from_tzid(tzid_rdate);
+                icaltimezone *tz_start = tz_from_tzid(ctx->tzid_start);
                 if (tz_rdate && tz_start) {
                     char *localdate = localdate_from_icaltime_r(rdate.time);
                     json_object_set_new(o, "start", json_string(localdate));
@@ -691,7 +703,7 @@ override_rdate_from_ical(fromicalctx_t *ctx, icalproperty *prop)
         if (ctx->tzid_start) {
             icaltimezone *tz = icaltimezone_get_utc_timezone();
             if (!id.zone) id.zone = tz;
-            tz = icaltimezone_get_builtin_timezone(ctx->tzid_start);
+            tz = tz_from_tzid(ctx->tzid_start);
             if (tz) {
                 id = icaltime_convert_to_zone(id, tz);
             }
@@ -726,8 +738,8 @@ override_exdate_from_ical(fromicalctx_t *ctx, icalproperty *prop)
 
     tzid_xdate = tzid_from_icalprop(prop, 1);
     if (ctx->tzid_start && tzid_xdate && strcmp(ctx->tzid_start, tzid_xdate)) {
-        icaltimezone *tz_xdate = icaltimezone_get_builtin_timezone(tzid_xdate);
-        icaltimezone *tz_start = icaltimezone_get_builtin_timezone(ctx->tzid_start);
+        icaltimezone *tz_xdate = tz_from_tzid(tzid_xdate);
+        icaltimezone *tz_start = tz_from_tzid(ctx->tzid_start);
         if (tz_xdate && tz_start) {
             if (id.zone) id.zone = tz_xdate;
             id = icaltime_convert_to_zone(id, tz_start);
@@ -2141,7 +2153,7 @@ static void toicalctx_timezones_to_ical(toicalctx_t *ctx, icalcomponent *ical)
         prop = icalcomponent_get_first_property(tzcomp, ICAL_TZID_PROPERTY);
         if (prop) {
             const char *tzid = icalproperty_get_tzid(prop);
-            if (icaltimezone_get_builtin_timezone(tzid)) {
+            if (tz_from_tzid(tzid)) {
                 icalcomponent_remove_component(ical, tzcomp);
                 icalcomponent_free(tzcomp);
             }
@@ -2407,7 +2419,7 @@ startend_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event)
     /* Determine current timezone */
     tzid = tzid_from_ical(comp, ICAL_DTSTART_PROPERTY);
     if (tzid) {
-        ctx->tzstart_old = icaltimezone_get_builtin_timezone(tzid);
+        ctx->tzstart_old = tz_from_tzid(tzid);
     } else {
         ctx->tzstart_old = NULL;
     }
@@ -2417,7 +2429,7 @@ startend_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event)
         pe = readprop(ctx, event, "timeZone", create&&!ctx->isallday, "s", &val);
         if (pe > 0) {
             /* Lookup the new timezone. */
-            ctx->tzstart = icaltimezone_get_builtin_timezone(val);
+            ctx->tzstart = tz_from_tzid(val);
             if (!ctx->tzstart) {
                 invalidprop(ctx, "timeZone");
             }
@@ -2437,7 +2449,7 @@ startend_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event)
     /* Determine current end timezone */
     tzid = tzid_from_ical(comp, ICAL_DTEND_PROPERTY);
     if (tzid) {
-        ctx->tzend_old = icaltimezone_get_builtin_timezone(tzid);
+        ctx->tzend_old = tz_from_tzid(tzid);
     } else {
         ctx->tzend_old = ctx->tzstart_old;
     }
@@ -2465,7 +2477,7 @@ startend_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event)
             if (timeZone != json_null()) {
                 tzid = json_string_value(json_object_get(loc, "timeZone"));
                 if (tzid) {
-                    ctx->tzend = icaltimezone_get_builtin_timezone(tzid);
+                    ctx->tzend = tz_from_tzid(tzid);
                 } else {
                     invalidprop(ctx, "timeZone");
                 }
@@ -3425,7 +3437,7 @@ validate_location(toicalctx_t *ctx, json_t *loc)
     }
     pe = readprop(ctx, loc, "timeZone", 0, "s", &val);
     if (pe > 0) {
-        if (icaltimezone_get_builtin_timezone(val)) {
+        if (tz_from_tzid(val)) {
             isempty = 0;
         } else {
             invalidprop(ctx, "timeZone");
