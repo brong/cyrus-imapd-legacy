@@ -549,9 +549,7 @@ recurrence_from_ical(fromicalctx_t *ctx, struct icalrecurrencetype recur, const 
 
         jday = json_pack("{}");
         weekday = icalrecurrencetype_day_day_of_week(recur.by_day[i]) - 1;
-        if (weekday >= 0) {
-            json_object_set_new(jday, "day", json_string(weekday_names[weekday]));
-        }
+        json_object_set_new(jday, "day", json_string(weekday_names[weekday]));
         pos = icalrecurrencetype_day_position(recur.by_day[i]);
         if (pos) {
             json_object_set_new(jday, "nthOfPeriod", json_integer(pos));
