@@ -1597,6 +1597,30 @@ translations_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent
                 json_object_set(locations, locid, loctr);
                 json_object_set(tr, "locations", locations);
             }
+        } else if (field && text && !strncmp(field, "links.", 6)) {
+            /* FIXME Yes, this is copy-pasta from locations above and needs to be refactored */
+            const char *locid;
+
+            /* A location translation  */
+            field += 6;
+
+            /* Determine the location id */
+            locid = get_icalxparam_value(prop, JMAPICAL_XPARAM_ID);
+            if (locid && strlen(locid)) {
+                json_t *links, *loctr;
+
+                links = json_object_get(tr, "links");
+                if (!links)
+                    links = json_pack("{}");
+
+                loctr = json_object_get(links, locid);
+                if (!loctr)
+                    loctr = json_pack("{}");
+
+                json_object_set(loctr, field, json_string(text));
+                json_object_set(links, locid, loctr);
+                json_object_set(tr, "links", links);
+            }
 
         } else if (field && text) {
             /* Some other translation */
@@ -3561,8 +3585,9 @@ locations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *locations)
  * and start the value of `X-JMAP-PROP` with `locations.`
  */
 static void
-translation_to_ical(icalcomponent *comp, const char *id, const char *field,
-                    const char *text, const char *locationid)
+translation_to_ical(icalcomponent *comp, const char *id,
+                    const char *object, const char *field,
+                    const char *text, const char *objectid)
 {
     icalproperty *prop;
     icalvalue *val;
@@ -3579,9 +3604,10 @@ translation_to_ical(icalcomponent *comp, const char *id, const char *field,
     /* Set X-JMAP-PROP parameter */
     param = icalparameter_new(ICAL_X_PARAMETER);
     icalparameter_set_xname(param, JMAPICAL_XPARAM_PROP);
-    if (locationid) {
+    if (object) {
         struct buf buf = BUF_INITIALIZER;
-        buf_setcstr(&buf, "locations.");
+        buf_setcstr(&buf, object);
+        buf_appendcstr(&buf, ".");
         buf_appendcstr(&buf, field);
         icalparameter_set_xvalue(param, buf_cstring(&buf));
         buf_free(&buf);
@@ -3590,9 +3616,9 @@ translation_to_ical(icalcomponent *comp, const char *id, const char *field,
     }
     icalproperty_add_parameter(prop, param);
 
-    if (locationid) {
+    if (objectid) {
         /* Set X-JMAP-ID parameter */
-        xjmapid_to_ical(prop, locationid);
+        xjmapid_to_ical(prop, objectid);
     }
 
     /* Set value */
@@ -3632,18 +3658,24 @@ translations_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *translations
 
         /* Create a translation for each title and description */
         s = json_string_value(json_object_get(tr, "title"));
-        if (s) translation_to_ical(comp, id, "title", s, NULL);
+        if (s) translation_to_ical(comp, id, NULL, "title", s, NULL);
 
         s = json_string_value(json_object_get(tr, "description"));
-        if (s) translation_to_ical(comp, id, "description", s, NULL);
+        if (s) translation_to_ical(comp, id, NULL, "description", s, NULL);
 
         /* location translations */
         json_object_foreach(json_object_get(tr, "locations"), locid, loctr) {
             s = json_string_value(json_object_get(loctr, "name"));
-            if (s) translation_to_ical(comp, id, "name", s, locid);
+            if (s) translation_to_ical(comp, id, "locations", "name", s, locid);
 
             s = json_string_value(json_object_get(loctr, "accessInstructions"));
-            if (s) translation_to_ical(comp, id, "accessInstructions", s, locid);
+            if (s) translation_to_ical(comp, id, "locations", "accessInstructions", s, locid);
+        }
+
+        /* link translations */
+        json_object_foreach(json_object_get(tr, "links"), locid, loctr) {
+            s = json_string_value(json_object_get(loctr, "title"));
+            if (s) translation_to_ical(comp, id, "links", "title", s, locid);
         }
 
         endprop(ctx);
