@@ -342,14 +342,20 @@ static struct icaltimetype dtstart_from_ical(icalcomponent *comp)
 static struct icaltimetype dtend_from_ical(icalcomponent *comp)
 {
     struct icaltimetype dt;
+    icalproperty *prop;
     const char *tzid;
 
     /* Handles DURATION vs DTEND */
     dt = icalcomponent_get_dtend(comp);
     if (dt.zone) return dt;
 
-    if ((tzid = tzid_from_ical(comp, ICAL_DTEND_PROPERTY))) {
-        dt.zone = icaltimezone_get_builtin_timezone(tzid);
+    prop = icalcomponent_get_first_property(comp, ICAL_DTEND_PROPERTY);
+    if (prop) {
+        if ((tzid = tzid_from_icalprop(prop, 1))) {
+            dt.zone = icaltimezone_get_builtin_timezone(tzid);
+        }
+    } else {
+        dt.zone = dtstart_from_ical(comp).zone;
     }
 
     return dt;
@@ -743,46 +749,73 @@ override_exdate_from_ical(fromicalctx_t *ctx, icalproperty *prop)
     return override;
 }
 
-static json_t*
-exceptions_from_ical(fromicalctx_t *ctx, icalcomponent *comp)
+static char* jsonpointer_encode(const char *src)
 {
-    json_t *exceptions = json_pack("{}");
-    icalcomponent *excomp, *ical;
+    struct buf buf = BUF_INITIALIZER;
+    const char *base, *top;
+    buf_ensure(&buf, strlen(src));
 
-    ical = icalcomponent_get_parent(comp);
-    for (excomp = icalcomponent_get_first_component(ical, ICAL_VEVENT_COMPONENT);
-            excomp;
-            excomp = icalcomponent_get_next_component(ical, ICAL_VEVENT_COMPONENT)) {
-
-        if (excomp == comp) continue; /* skip toplevel promoted object */
-
-        struct fromicalctx myctx;
-        json_t *ex;
-
-        /* Convert exceptional VEVENT */
-        memcpy(&myctx, ctx, sizeof(struct fromicalctx));
-        myctx.main = comp;
-        ex = calendarevent_from_ical(&myctx, excomp);
-        if (!ex) {
-            continue;
+    base = src;
+    top = base;
+    while (*top) {
+        for (top = base; *top && *top != '~' && *top != '/'; top++)
+            ;
+        buf_appendmap(&buf, base, top-base);
+        if (*top == '~') {
+            buf_appendmap(&buf, "~0", 2);
+            top++;
+        } else if (*top == '/') {
+            buf_appendmap(&buf, "~1", 2);
+            top++;
         }
+        base = top;
+        top = base;
+    }
+    buf_appendmap(&buf, base, top-base);
+    return buf_release(&buf);
+}
 
-        /* Add exception */
-        struct icaltimetype recurid = icalcomponent_get_recurrenceid(excomp);
-        char *s = localdate_from_icaltime_r(recurid);
-        json_object_set_new(exceptions, s, ex);
-        free(s);
+static json_t* diff_object(struct buf *buf, json_t *a, json_t *b)
+{
+    const char *id;
+    json_t *o, *diff;
+
+    if (b == NULL)
+        return NULL;
+
+    if (json_equal(a, b)) {
+        return NULL;
     }
 
-    if (!json_object_size(exceptions)) {
-        json_decref(exceptions);
-        exceptions = NULL;
+    /* FIXME check if encodes json null properly */
+    if (!JNOTNULL(a) || json_typeof(b) != JSON_OBJECT) {
+        return json_pack("{s:o}", buf_cstring(buf), b);
     }
-    return exceptions;
+
+    diff = json_pack("{}");
+    json_object_foreach(b, id, o) {
+        char *encid = jsonpointer_encode(id);
+        size_t l = buf_len(buf);
+        if (!l) {
+            buf_setcstr(buf, encid);
+        } else {
+            buf_appendcstr(buf, "/");
+            buf_appendcstr(buf, encid);
+        }
+        json_object_update(diff, diff_object(buf, json_object_get(a, id), o));
+        buf_truncate(buf, l);
+        free(encid);
+    }
+    if (!json_object_size(diff)) {
+        json_decref(diff);
+        diff = NULL;
+    }
+
+    return diff;
 }
 
 static json_t*
-overrides_from_ical(fromicalctx_t *ctx, icalcomponent *comp, json_t *event __attribute__((unused)) /* XXX */)
+overrides_from_ical(fromicalctx_t *ctx, icalcomponent *comp, json_t *event)
 {
     icalproperty *prop;
     json_t *overrides = json_pack("{}");
@@ -810,11 +843,39 @@ overrides_from_ical(fromicalctx_t *ctx, icalcomponent *comp, json_t *event __att
     }
 
     /* VEVENT exceptions */
-    json_t *exceptions = exceptions_from_ical(ctx, comp);
-    if (exceptions) json_decref(exceptions); /* FIXME WIP */
+    json_t *exceptions = json_pack("{}");
+    icalcomponent *excomp, *ical;
 
-    /* XXX convert exceptions to patch format */
-    /* XXX json_object_update(overrides, exceptions); FIXME for debugging */
+    ical = icalcomponent_get_parent(comp);
+    for (excomp = icalcomponent_get_first_component(ical, ICAL_VEVENT_COMPONENT);
+            excomp;
+            excomp = icalcomponent_get_next_component(ical, ICAL_VEVENT_COMPONENT)) {
+
+        if (excomp == comp) continue; /* skip toplevel promoted object */
+
+        struct fromicalctx myctx;
+        json_t *ex;
+
+        /* Convert exceptional VEVENT */
+        memcpy(&myctx, ctx, sizeof(struct fromicalctx));
+        myctx.main = comp;
+        ex = calendarevent_from_ical(&myctx, excomp);
+        if (!ex) {
+            continue;
+        }
+
+        /* Add exception */
+        struct icaltimetype recurid = icalcomponent_get_recurrenceid(excomp);
+        char *s = localdate_from_icaltime_r(recurid);
+
+        struct buf buf = BUF_INITIALIZER;
+        json_t *diff = diff_object(&buf, event, ex);
+        json_object_set_new(exceptions, s, diff ? diff : json_pack("{}"));
+        buf_free(&buf);
+        free(s);
+    }
+
+    json_object_update(overrides, exceptions);
 
     if (!json_object_size(overrides)) {
         json_decref(overrides);
@@ -998,6 +1059,7 @@ static json_t *participant_from_ical(icalproperty *prop, hash_table *hatts)
 {
     json_t *p = json_pack("{}");
     icalparameter *param;
+    int is_owner = icalproperty_isa(prop) == ICAL_ORGANIZER_PROPERTY;
 
     /* name */
     const char *name = NULL;
@@ -1044,10 +1106,9 @@ static json_t *participant_from_ical(icalproperty *prop, hash_table *hatts)
 
     /* roles */
     json_t *roles = json_pack("[]");
-    if (icalproperty_isa(prop) == ICAL_ORGANIZER_PROPERTY) {
+    if (is_owner) {
         json_array_append_new(roles, json_string("owner"));
-    }
-    if (icalproperty_isa(prop) == ICAL_ATTENDEE_PROPERTY) {
+    } else {
         json_array_append_new(roles, json_string("attendee"));
     }
     param = icalproperty_get_first_parameter(prop, ICAL_ROLE_PARAMETER);
@@ -1065,7 +1126,7 @@ static json_t *participant_from_ical(icalproperty *prop, hash_table *hatts)
     /* scheduleStatus */
     const char *status = NULL;
     short depth = 0;
-    while (!status) {
+    while (!status && !is_owner) {
         param = icalproperty_get_first_parameter(prop, ICAL_PARTSTAT_PARAMETER);
         if (!param) {
             status = "needs-action";
@@ -1110,7 +1171,7 @@ static json_t *participant_from_ical(icalproperty *prop, hash_table *hatts)
     }
 
     /* schedulePriority */
-    const char *prio;
+    const char *prio = NULL;
     param = icalproperty_get_first_parameter(prop, ICAL_ROLE_PARAMETER);
     if (param) {
         icalparameter_role role = icalparameter_get_role(param);
@@ -1129,7 +1190,9 @@ static json_t *participant_from_ical(icalproperty *prop, hash_table *hatts)
                 prio = "required";
         }
     }
-    json_object_set_new(p, "schedulePriority", json_string(prio));
+    if (prio) {
+        json_object_set_new(p, "schedulePriority", json_string(prio));
+    }
 
     /* scheduleRSVP */
     json_t *rsvp = NULL;
@@ -1170,7 +1233,8 @@ participants_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent
 {
     struct hash_table hatts;
     icalproperty *prop;
-    json_t *p, *participants = json_pack("{}");
+    json_t *org, *participants = json_pack("{}");
+    const char *orgaddr;
 
     /* Collect all attendees in a map to lookup delegates. */
     construct_hash_table(&hatts, 32, 0);
@@ -1185,28 +1249,46 @@ participants_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent
     }
 
     /* Add ORGANIZER */
+    org = NULL;
+    orgaddr = NULL;
     prop = icalcomponent_get_first_property(comp, ICAL_ORGANIZER_PROPERTY);
     if (!prop) {
         goto done;
     }
-    if ((p = participant_from_ical(prop, &hatts))) {
+    if ((org = participant_from_ical(prop, &hatts))) {
         /* XXX X-JMAP-ID */
-        char *id = mailaddr_from_uri(icalproperty_get_organizer(prop));
-        json_object_set_new(participants, id, p);
+        char *id;
+        orgaddr = icalproperty_get_organizer(prop);
+        id = mailaddr_from_uri(orgaddr);
+        json_object_set_new(participants, id, org);
         free(id);
+    }
+    if (!orgaddr || !org) {
+        goto done;
     }
 
     /* Add ATTENDEEs */
     for (prop = icalcomponent_get_first_property(comp, ICAL_ATTENDEE_PROPERTY);
          prop;
          prop = icalcomponent_get_next_property(comp, ICAL_ATTENDEE_PROPERTY)) {
+        const char *addr = icalproperty_get_attendee(prop);
+        json_t *p;
 
         p = participant_from_ical(prop, &hatts);
-        if (p) {
+        if (p && strcmp(addr, orgaddr)) {
+            /* Add ATTENDEE */
             /* XXX X-JMAP-ID */
             char *id = mailaddr_from_uri(icalproperty_get_attendee(prop));
-            json_object_set_new(participants, id, p);
+            if (json_object_get(participants, id)) {
+                json_object_update(json_object_get(participants, id), p);
+            } else {
+                json_object_set_new(participants, id, p);
+            }
             free(id);
+        } else if (p) {
+            /* Merge ORGANIZER and its ATTENDEE */
+            json_object_update(org, p);
+            json_object_set_new(org, "roles", json_pack("[s]", "owner"));
         }
     }
 
@@ -3734,28 +3816,17 @@ static void
 replyto_to_ical(toicalctx_t *ctx, icalcomponent *comp, const char *replyto)
 {
     icalproperty *prop;
-    struct address *a = NULL;
-    char *addr;
-
-    parseaddr_list(replyto, &a);
-    if (!a || a->invalid) {
+    char *addr = mailaddr_to_uri(replyto);
+    if (!addr) {
         invalidprop(ctx, "replyTo");
-        if (a) parseaddr_free(a);
         return;
     }
 
     remove_icalprop(comp, ICAL_ORGANIZER_PROPERTY);
-    addr = address_get_all(a, 0);
     prop = icalproperty_new_organizer(addr);
-    free(addr);
-
-    if (a->name) {
-        icalparameter *param = icalparameter_new_cn(a->name);
-        icalproperty_add_parameter(prop, param);
-    }
     icalcomponent_add_property(comp, prop);
 
-    parseaddr_free(a);
+    free(addr);
 }
 
 /* Create or overwrite the iCalendar properties in VEVENT comp based on the
@@ -3957,12 +4028,12 @@ calendarevent_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event) {
     }
 
     /* replyTo */
-    if (0 /* XXX readonly? */ && json_object_get(event, "replyTo") != json_null()) {
+    if (json_object_get(event, "replyTo") != json_null()) {
         pe = readprop(ctx, event, "replyTo", 0, "s", &val);
         if (pe > 0) {
             replyto_to_ical(ctx, comp, val);
         }
-    } else if (0 /* XXX */ ) {
+    } else {
         remove_icalprop(comp, ICAL_ORGANIZER_PROPERTY);
     }
 
