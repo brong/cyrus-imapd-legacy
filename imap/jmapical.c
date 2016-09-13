@@ -96,7 +96,6 @@
 #include "jmapical.h"
 
 /* Custom iCalendar properties */
-#define JMAPICAL_XPROP_LINK         "X-JMAP-LINK"
 #define JMAPICAL_XPROP_LOCATION     "X-JMAP-LOCATION"
 #define JMAPICAL_XPROP_TRANSLATION  "X-JMAP-TRANSLATION"
 
@@ -1301,12 +1300,11 @@ done:
     return participants;
 }
 
-/* Convert a VEVENT ical component to CalendarEvent attachments. */
 static json_t*
-attachments_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent *comp)
+links_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent *comp)
 {
     icalproperty* prop;
-    json_t *ret = json_pack("[]");
+    json_t *ret = json_pack("{}");
 
     for (prop = icalcomponent_get_first_property(comp, ICAL_ATTACH_PROPERTY);
          prop;
@@ -1314,31 +1312,33 @@ attachments_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent 
 
         icalattach *attach = icalproperty_get_attach(prop);
         icalparameter *param = NULL;
-        json_t *file = NULL;
+        json_t *link = NULL;
 
         /* Ignore ATTACH properties with value BINARY. */
+        /* XXX embed BINARY as data URI? */
         if (!attach || !icalattach_get_is_url(attach)) {
             continue;
         }
 
-        /* blobId */
+        /* href */
         const char *url = icalattach_get_url(attach);
         if (!url || !strlen(url)) {
             continue;
         }
 
-        file = json_pack("{s:s}", "blobId", url);
+        link = json_pack("{s:s}", "href", url);
 
         /* type */
         param = icalproperty_get_first_parameter(prop, ICAL_FMTTYPE_PARAMETER);
         if (param) {
             const char *type = icalparameter_get_fmttype(param);
-            json_object_set_new(file, "type",
-                    type && strlen(type) ? json_string(type) : json_null());
+            if (type) {
+                json_object_set_new(link, "type", json_string(type));
+            }
         }
 
-        /* name */
-        json_object_set_new(file, "name", json_null());
+        /* XXX title */
+        /* XXX json_object_set_new(link, "name", json_null()); */
 
         /* size */
         json_int_t size = -1;
@@ -1348,51 +1348,18 @@ attachments_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent 
             if (s) {
                 char *ptr;
                 size = strtol(s, &ptr, 10);
-                json_object_set_new(file, "size",
+                json_object_set_new(link, "size",
                         ptr && *ptr == '\0' ? json_integer(size) : json_null());
             }
         }
 
-        json_array_append_new(ret, file);
+        /* XXX rel */
+
+        /* XXX use X-JMAP-ID? */
+        json_object_set_new(ret, url, link);
     }
 
-    if (!json_array_size(ret)) {
-        json_decref(ret);
-        ret = json_null();
-    }
-
-    return ret;
-}
-
-/* Convert a VEVENT ical component to CalendarEvent links */
-static json_t*
-links_from_ical(fromicalctx_t *ctx __attribute__((unused)), icalcomponent *comp)
-{
-    icalproperty* prop;
-    json_t *ret = json_pack("[]");
-
-    for (prop = icalcomponent_get_first_property(comp, ICAL_X_PROPERTY);
-         prop;
-         prop = icalcomponent_get_next_property(comp, ICAL_X_PROPERTY)) {
-        const char *uri, *s;
-
-        if (strcasecmp(icalproperty_get_x_name(prop), JMAPICAL_XPROP_LINK))
-            continue;
-
-        uri = icalproperty_get_value_as_string(prop);
-        if (!uri) continue;
-
-        /* uri */
-        json_t *link = json_pack("{s:s}", "uri", uri);
-
-        /* name */
-        s = get_icalxparam_value(prop, JMAPICAL_XPARAM_NAME);
-        if (s) json_object_set_new(link, "name", json_string(s));
-
-        json_array_append_new(ret, link);
-    }
-
-    if (!json_array_size(ret)) {
+    if (!json_object_size(ret)) {
         json_decref(ret);
         ret = json_null();
     }
@@ -1807,11 +1774,6 @@ calendarevent_from_ical(fromicalctx_t *ctx, icalcomponent *comp)
     /* links */
     if (_wantprop(props, "links")) {
         json_object_set_new(obj, "links", links_from_ical(ctx, comp));
-    }
-
-    /* attachments */
-    if (_wantprop(props, "attachments")) {
-        json_object_set_new(obj, "attachments", attachments_from_ical(ctx, comp));
     }
 
     /* language */
@@ -3313,96 +3275,58 @@ recurrence_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *recur)
     buf_free(&buf);
 }
 
-/* Create or overwrite the VEVENT attachments for VEVENT component comp */
 static void
-attachments_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *attachments)
+links_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *links)
 {
-    hash_table atts;
-    icalproperty *prop, *next;
+    icalproperty *prop;
     struct buf buf = BUF_INITIALIZER;
 
-    /* Move existing URL attachments to a temporary cache. */
-    construct_hash_table(&atts, json_array_size(attachments) + 1, 0);
-    for (prop = icalcomponent_get_first_property(comp, ICAL_ATTACH_PROPERTY);
-         prop;
-         prop = next) {
-
-        next = icalcomponent_get_next_property(comp, ICAL_ATTACH_PROPERTY);
-        icalattach *attach = icalproperty_get_attach(prop);
-
-        /* Ignore binary attachments. */
-        if (!attach || !icalattach_get_is_url(attach)) {
-            continue;
-        }
-
-        /* Ignore malformed URLs. */
-        const char *url = icalattach_get_url(attach);
-        if (!url || !strlen(url)) {
-            continue;
-        }
-
-        icalcomponent_remove_property(comp, prop);
-        hash_insert(url, prop, &atts);
-    }
-
-    /* Create or update attachments. */
-    size_t i;
-    json_t *attachment;
-    json_array_foreach(attachments, i, attachment) {
+    const char *id;
+    json_t *link;
+    json_object_foreach(links, id, link) {
         int pe;
-        const char *blobId = NULL;
+        const char *href = NULL;
         const char *type = NULL;
         const char *name = NULL;
         json_int_t size = -1;
 
-        beginprop_idx(ctx, "attachments", i);
+        beginprop_key(ctx, "links", id);
 
-        /* Parse and validate JMAP File object. */
-        pe = readprop(ctx, attachment, "blobId", 1, "s", &blobId);
+        pe = readprop(ctx, link, "href", 1, "s", &href);
         if (pe > 0) {
-            if (!strlen(blobId)) {
-                invalidprop(ctx, "blobId");
-                blobId = NULL;
+            if (!strlen(href)) {
+                invalidprop(ctx, "href");
+                href = NULL;
             }
         }
-        if (JNOTNULL(json_object_get(attachment, "type"))) {
-            readprop(ctx, attachment, "type", 0, "s", &type);
+        if (JNOTNULL(json_object_get(link, "type"))) {
+            readprop(ctx, link, "type", 0, "s", &type);
         }
-        if (JNOTNULL(json_object_get(attachment, "name"))) {
-            readprop(ctx, attachment, "name", 0, "s", &name);
+        if (JNOTNULL(json_object_get(link, "name"))) {
+            readprop(ctx, link, "name", 0, "s", &name);
         }
-        if (JNOTNULL(json_object_get(attachment, "size"))) {
-            pe = readprop(ctx, attachment, "size", 0, "I", &size);
+        if (JNOTNULL(json_object_get(link, "size"))) {
+            pe = readprop(ctx, link, "size", 0, "I", &size);
             if (pe > 0 && size < 0) {
                 invalidprop(ctx, "size");
             }
         }
 
-        if (blobId && !have_invalid_props(ctx)) {
-            /* blobId */
-            prop = (icalproperty*) hash_lookup(blobId, &atts);
-            if (prop) {
-                hash_del(blobId, &atts);
-            } else {
-                icalattach *icalatt = icalattach_new_from_url(blobId);
-                prop = icalproperty_new_attach(icalatt);
-                icalattach_unref(icalatt);
-            }
+        if (href && !have_invalid_props(ctx)) {
+            /* href */
+            icalattach *icalatt = icalattach_new_from_url(href);
+            prop = icalproperty_new_attach(icalatt);
 
             /* type */
-            icalparameter *param = icalproperty_get_first_parameter(prop, ICAL_FMTTYPE_PARAMETER);
-            if (param) icalproperty_remove_parameter_by_ref(prop, param);
             if (type) {
                 icalproperty_add_parameter(prop, icalparameter_new_fmttype(type));
             }
 
-            /* name */
-            /* XXX Could use Microsoft's X-FILENAME parameter to store name,
+            /* title */
+            /* XXX Could use Microsoft's X-FILENAME parameter to store ,
              * but that's only for binary attachments. For now, ignore name. */
 
             /* size */
-            param = icalproperty_get_first_parameter(prop, ICAL_SIZE_PARAMETER);
-            if (param) icalproperty_remove_parameter_by_ref(prop, param);
             if (size >= 0) {
                 buf_printf(&buf, "%lld", (long long) size);
                 icalproperty_add_parameter(prop, icalparameter_new_size(buf_cstring(&buf)));
@@ -3415,75 +3339,6 @@ attachments_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *attachments)
         endprop(ctx);
         buf_free(&buf);
     }
-
-    /* Purge any remaining URL attachments from the cache. */
-    free_hash_table(&atts, (void(*)(void*)) icalproperty_free);
-}
-
-/* Create or overwrite the JMAP links in comp */
-static void
-links_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *links)
-{
-    icalproperty *prop;
-    json_t *link;
-    size_t i;
-    struct buf buf = BUF_INITIALIZER;
-
-    /* Purge existing links from component */
-    remove_icalxprop(comp, JMAPICAL_XPROP_LINK);
-
-    /* Add links */
-    json_array_foreach(links, i, link) {
-        const char *uri, *name;
-        icalvalue *val;
-        int pe;
-
-        uri = name = NULL;
-
-        beginprop_idx(ctx, "links", i);
-
-        /* Read and validate uri */
-        pe = readprop(ctx, link, "uri", 1, "s", &uri);
-        if (pe <= 0) {
-            endprop(ctx);
-            continue;
-        }
-
-        val = icalvalue_new_from_string(ICAL_URI_VALUE, uri);
-        if (!val) {
-            invalidprop(ctx, "uri");
-            endprop(ctx);
-            continue;
-        }
-
-        pe = readprop(ctx, link, "name", 0, "s", &name);
-        if (pe < 0) {
-            endprop(ctx);
-            continue;
-        }
-
-        /* Add link as x-property */
-        prop = icalproperty_new(ICAL_X_PROPERTY);
-        icalproperty_set_x_name(prop, JMAPICAL_XPROP_LINK);
-        icalproperty_set_value(prop, val);
-        if (name) {
-            icalparameter *param;
-
-            /* Create parameter from NAME=VALUE */
-            buf_setcstr(&buf, JMAPICAL_XPARAM_NAME);
-            buf_appendcstr(&buf, "=");
-            buf_appendcstr(&buf, name);
-            param = icalparameter_new_from_string(buf_cstring(&buf));
-
-            /* Add name as x-parameter */
-            icalproperty_add_parameter(prop, param);
-            buf_reset(&buf);
-        }
-        icalcomponent_add_property(comp, prop);
-        endprop(ctx);
-    }
-
-    buf_free(&buf);
 }
 
 /* Create or overwrite JMAP relatedTo in comp */
@@ -3915,21 +3770,10 @@ calendarevent_to_ical(toicalctx_t *ctx, icalcomponent *comp, json_t *event) {
     json_t *links = NULL;
     pe = readprop(ctx, event, "links", 0, "o", &links);
     if (pe > 0) {
-        if (links == json_null() || json_array_size(links)) {
+        if (links == json_null() || json_object_size(links)) {
             links_to_ical(ctx, comp, links);
         } else {
             invalidprop(ctx, "links");
-        }
-    }
-
-    /* attachments */
-    json_t *attachments = NULL;
-    pe = readprop(ctx, event, "attachments", 0, "o", &attachments);
-    if (pe > 0) {
-        if (attachments == json_null() || json_array_size(attachments)) {
-            attachments_to_ical(ctx, comp, attachments);
-        } else {
-            invalidprop(ctx, "attachments");
         }
     }
 
