@@ -45,6 +45,7 @@
 
 #ifdef ENABLE_APPLEPUSHSERVICE
 
+#include "acl.h"
 #include "httpd.h"
 #include "util.h"
 #include <syslog.h>
@@ -130,7 +131,9 @@ static int meth_get_applepush(struct transaction_t *txn,
         goto done;
 
     /* check if auth user has access to mailbox */
-    // XXX implement this
+    int myrights = httpd_myrights(httpd_authstate, mbentry->acl);
+    if (!(myrights & ACL_READ))
+        goto done;
 
     aps_topic = config_getstring(mbtype == MBTYPE_CALENDAR ? IMAPOPT_APS_TOPIC_CALDAV : IMAPOPT_APS_TOPIC_CARDDAV);
     if (!aps_topic) {
