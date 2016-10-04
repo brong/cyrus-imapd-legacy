@@ -57,14 +57,13 @@ AM_CPPFLAGS = \
 	${DEFS} \
 	${LOCALDEFS} \
 	$(SASLFLAGS) \
-	$(SSL_CPPFLAGS) \
-	$(ICU_CFLAGS)
+	$(SSL_CPPFLAGS)
 
 if HAVE_LDAP
 AM_CPPFLAGS += $(LDAP_CPPFLAGS)
 endif # HAVE_LDAP
 
-AM_LDFLAGS = $(COV_LDFLAGS) $(ICU_LIBS)
+AM_LDFLAGS = $(COV_LDFLAGS)
 BUILT_SOURCES = \
 	xversion.h \
 	imap/imap_err.c \
@@ -1470,8 +1469,8 @@ lib_libcyrus_min_la_LIBADD = $(LTLIBOBJS) $(LIB_UUID) $(GCOV_LIBS)
 lib_libcyrus_min_la_CFLAGS = $(AM_CFLAGS) $(CFLAG_VISIBILITY)
 
 lib/chartable.c: lib/mkchartable.pl lib/charset/unifix.txt \
-	$(top_srcdir)/lib/charset/*.t \
-	lib/charset/UnicodeData.txt lib/charset/aliases.txt
+	$(top_srcdir)/lib/charset/*.t lib/charset/UnicodeData.txt \
+	lib/charset/aliases.txt
 	@echo "### Building chartables..."
 	$(AM_V_GEN)perl $(top_srcdir)/lib/mkchartable.pl -m $(top_srcdir)/lib/charset/unifix.txt -m $(top_srcdir)/lib/charset/UnicodeData.txt -a $(top_srcdir)/lib/charset/aliases.txt -o $@ $(top_srcdir)/lib/charset/*.t || (rm -f $@ && exit 1)
 	@echo "### Done building chartables."

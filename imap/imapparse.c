@@ -751,9 +751,8 @@ static int get_search_criterion(struct protstream *pin,
         c = getcharset(pin, pout, &arg);
         if (c != ' ') goto missingcharset;
         lcase(arg.s);
-        charset_free(&base->charset);
         base->charset = charset_lookupname(arg.s);
-        if (base->charset == CHARSET_UNKNOWN_CHARSET) goto badcharset;
+        if (base->charset == -1) goto badcharset;
         base->state &= ~GETSEARCH_CHARSET_FIRST;
     }
 
@@ -883,9 +882,8 @@ static int get_search_criterion(struct protstream *pin,
             c = getcharset(pin, pout, &arg);
             if (c != ' ') goto missingcharset;
             lcase(arg.s);
-            charset_free(&base->charset);
             base->charset = charset_lookupname(arg.s);
-            if (base->charset == CHARSET_UNKNOWN_CHARSET) goto badcharset;
+            if (base->charset == -1) goto badcharset;
         }
         else if (!strcmp(criteria.s, "cid")) {          /* nonstandard */
             conversation_id_t cid;
