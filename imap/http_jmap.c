@@ -4705,7 +4705,7 @@ static int setContactGroups(struct jmap_req *req)
             r = carddav_store(newmailbox ? newmailbox : mailbox, card, resource,
                               NULL, NULL, req->userid, req->authstate, ignorequota);
             if (!r)
-                r = carddav_remove(mailbox, olduid, /*isreplace*/!newmailbox);
+                r = carddav_remove(mailbox, olduid, /*isreplace*/!newmailbox, req->userid);
             mailbox_close(&newmailbox);
 
             vparse_free_card(vcard);
@@ -4759,7 +4759,7 @@ static int setContactGroups(struct jmap_req *req)
             /* XXX - alive check */
 
             syslog(LOG_NOTICE, "jmap: destroy group %s (%s)", req->userid, uid);
-            r = carddav_remove(mailbox, olduid, /*isreplace*/0);
+            r = carddav_remove(mailbox, olduid, /*isreplace*/0, req->userid);
             if (r) {
                 syslog(LOG_ERR,
                        "IOERROR: setContactGroups remove failed for %s %u",
@@ -6701,7 +6701,7 @@ static int setContacts(struct jmap_req *req)
             r = carddav_store(newmailbox ? newmailbox : mailbox, card, resource,
                               flags, annots, req->userid, req->authstate, ignorequota);
             if (!r)
-                r = carddav_remove(mailbox, olduid, /*isreplace*/!newmailbox);
+                r = carddav_remove(mailbox, olduid, /*isreplace*/!newmailbox, req->userid);
 
          finish:
             mailbox_close(&newmailbox);
@@ -6756,10 +6756,8 @@ static int setContacts(struct jmap_req *req)
                 if (r) goto done;
             }
 
-            /* XXX - fricking mboxevent */
-
             syslog(LOG_NOTICE, "jmap: remove contact %s/%s", req->userid, uid);
-            r = carddav_remove(mailbox, olduid, /*isreplace*/0);
+            r = carddav_remove(mailbox, olduid, /*isreplace*/0, req->userid);
             if (r) {
                 syslog(LOG_ERR, "IOERROR: setContacts remove failed for %s %u",
                        mailbox->name, olduid);
