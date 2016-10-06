@@ -116,8 +116,11 @@ static int meth_get_applepush(struct transaction_t *txn,
 
     /* lookup mailbox */
     mboxname = mboxlist_find_uniqueid(mailbox_uniqueid, mailbox_userid);
-    if (!mboxname)
+    if (!mboxname) {
+        syslog(LOG_ERR, "meth_get_applepush: mboxlist_find_uniqueid(%s, %s) not found",
+               mailbox_uniqueid, mailbox_userid);
         goto done;
+    }
 
     r = mboxlist_lookup(mboxname, &mbentry, NULL);
     if (r || !mbentry) {
@@ -132,8 +135,10 @@ static int meth_get_applepush(struct transaction_t *txn,
 
     /* check if auth user has access to mailbox */
     int myrights = httpd_myrights(httpd_authstate, mbentry->acl);
-    if (!(myrights & ACL_READ))
+    if (!(myrights & ACL_READ)) {
+        syslog(LOG_ERR, "meth_get_applepush: no read access to %s for %s (%s)", mboxname, httpd_userid, mbentry->acl);
         goto done;
+    }
 
     aps_topic = config_getstring(mbtype == MBTYPE_CALENDAR ? IMAPOPT_APS_TOPIC_CALDAV : IMAPOPT_APS_TOPIC_CARDDAV);
     if (!aps_topic) {
