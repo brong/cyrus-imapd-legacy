@@ -104,9 +104,6 @@ static int _parse_param_quoted(struct vparse_state *state, int multiparam)
             break;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
@@ -159,9 +156,6 @@ static int _parse_param_key(struct vparse_state *state, int *haseq)
             return 0;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
@@ -287,9 +281,6 @@ repeat:
             goto repeat;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
@@ -350,9 +341,6 @@ static int _parse_entry_key(struct vparse_state *state)
             break;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
@@ -411,9 +399,6 @@ static int _parse_entry_multivalue(struct vparse_state *state)
             break;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
@@ -472,9 +457,6 @@ static int _parse_entry_value(struct vparse_state *state)
             break;
 
         case '\r':
-            if (state->p[1] != '\n' && state->p[1] != '\r') {
-                return PE_ILLEGAL_CHAR;
-            }
             INC(1);
             break; /* just skip */
         case '\n':
