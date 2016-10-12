@@ -4511,6 +4511,7 @@ static int setContactGroups(struct jmap_req *req)
 
             struct vparse_card *card = vparse_new_card("VCARD");
             vparse_add_entry(card, NULL, "VERSION", "3.0");
+            vparse_add_entry(card, NULL, "N", name);
             vparse_add_entry(card, NULL, "FN", name);
             vparse_add_entry(card, NULL, "UID", uid);
             vparse_add_entry(card, NULL, "X-ADDRESSBOOKSERVER-KIND", "group");
@@ -4668,7 +4669,16 @@ static int setContactGroups(struct jmap_req *req)
                     free(resource);
                     continue;
                 }
-                struct vparse_entry *entry = vparse_get_entry(card, NULL, "FN");
+                /* both N and FN get the name */
+                struct vparse_entry *entry = vparse_get_entry(card, NULL, "N");
+                if (entry) {
+                    free(entry->v.value);
+                    entry->v.value = xstrdup(name);
+                }
+                else {
+                    vparse_add_entry(card, NULL, "N", name);
+                }
+                entry = vparse_get_entry(card, NULL, "FN");
                 if (entry) {
                     free(entry->v.value);
                     entry->v.value = xstrdup(name);
