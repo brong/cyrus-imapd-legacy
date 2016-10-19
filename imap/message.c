@@ -2894,7 +2894,7 @@ static int message_read_body(struct protstream *strm, struct body *body)
  * Read cached binary bodystructure.
  * Analog to mesage_write_section()
  */
-static void message_read_binarybody(struct body *body, const char **sect)
+static void message_read_binarybody(struct body *body, const char **sect, uint32_t cache_version)
 {
     bit32 n, i;
     const char *p = *sect;
@@ -2932,6 +2932,16 @@ static void message_read_binarybody(struct body *body, const char **sect)
         p += CACHE_ITEM_SIZE_SKIP;
         body->charset_cte = CACHE_ITEM_BIT32(p);
         p += CACHE_ITEM_SIZE_SKIP;
+        if (cache_version >= 4) {
+            /* determine the length of the charset identifer */
+            uint32_t len = (body->charset_cte >> 16) & 0xffff;
+            if (len) {
+                /* XXX - assert (cte & 0xff00) == 0x100 */
+                /* read len bytes as charset id */
+                p += len;
+            }
+            body->charset_cte &= 0xffff; /* remove charset */
+        }
     }
 
     /* read body parts */
@@ -2946,11 +2956,21 @@ static void message_read_binarybody(struct body *body, const char **sect)
         p += CACHE_ITEM_SIZE_SKIP;
         subpart[i].charset_cte = CACHE_ITEM_BIT32(p);
         p += CACHE_ITEM_SIZE_SKIP;
+        if (cache_version >= 4) {
+            /* determine the length of the charset identifer */
+            uint32_t len = (subpart[i].charset_cte >> 16) & 0xffff;
+            if (len) {
+                /* XXX - assert (cte & 0xff00) == 0x100 */
+                /* read len bytes as charset id */
+                p += len;
+            }
+            subpart[i].charset_cte &= 0xffff; /* remove charset */
+        }
     }
 
     /* read sub-parts */
     for (*sect = p, i = 0; i < n-1; i++) {
-        message_read_binarybody(&subpart[i], sect);
+        message_read_binarybody(&subpart[i], sect, cache_version);
     }
 
 }
@@ -2988,7 +3008,7 @@ EXPORTED void message_read_bodystructure(const struct index_record *record, stru
 
     /* Read binary bodystructure from cache */
     binbody = cacheitem_base(record, CACHE_SECTION);
-    message_read_binarybody(&toplevel, &binbody);
+    message_read_binarybody(&toplevel, &binbody, record->cache_version);
 }
 
 static void de_nstring_buf(struct buf *src, struct buf *dst)
@@ -3707,11 +3727,13 @@ out:
     return r;
 }
 
-static int parse_bodystructure_sections(const char **cachestrp, const char *cacheend, struct body *body)
+static int parse_bodystructure_sections(const char **cachestrp, const char *cacheend,
+                                        struct body *body, uint32_t cache_version)
 {
     struct body *this;
     int nsubparts;
     int part;
+    uint32_t cte;
 
     if (*cachestrp + 4 > cacheend)
         return IMAP_MAILBOX_BADFORMAT;
@@ -3745,13 +3767,23 @@ static int parse_bodystructure_sections(const char **cachestrp, const char *cach
                 this->header_size = CACHE_ITEM_BIT32(*cachestrp+1*4);
                 this->content_offset = CACHE_ITEM_BIT32(*cachestrp+2*4);
                 this->content_size = CACHE_ITEM_BIT32(*cachestrp+3*4);
-                *cachestrp += 5*4;
+                *cachestrp += 4*4;
+
+                /* Skip charset/encoding identifiers. */
+                cte = CACHE_ITEM_BIT32(*cachestrp);
+                *cachestrp += 1*4;
+                /* XXX CACHE_MINOR_VERSION 4 replaces numeric charset
+                 * identifiers with variable-length strings. Remove
+                 * this conditional once cache versions <= 3 are
+                 * deprecated */
+                if (cache_version >= 4)
+                    *cachestrp += (cte >> 16) & 0xffff;
             }
 
             /* and parse subparts */
             for (part = 0; part < body->subpart->numparts; part++) {
                 this = &body->subpart->subpart[part];
-                if (parse_bodystructure_sections(cachestrp, cacheend, this))
+                if (parse_bodystructure_sections(cachestrp, cacheend, this, cache_version))
                     return IMAP_MAILBOX_BADFORMAT;
             }
         }
@@ -3770,10 +3802,26 @@ static int parse_bodystructure_sections(const char **cachestrp, const char *cach
             body->subpart->header_size = CACHE_ITEM_BIT32(*cachestrp+1*4);
             body->subpart->content_offset = CACHE_ITEM_BIT32(*cachestrp+2*4);
             body->subpart->content_size = CACHE_ITEM_BIT32(*cachestrp+3*4);
-            *cachestrp += 10*4;
+            *cachestrp += 9*4;
+
+            if (strcmp(body->subpart->type, "MULTIPART") == 0) {
+                /* Treat 0-part multipart as 0-length text */
+                *cachestrp += 1*4;
+            }
+            else {
+                /* Skip charset/encoding identifiers. */
+                cte = CACHE_ITEM_BIT32(*cachestrp);
+                *cachestrp += 1*4;
+                /* XXX CACHE_MINOR_VERSION 4 replaces numeric charset
+                 * identifiers with variable-length strings. Remove
+                 * this conditional once cache versions <= 3 are
+                 * deprecated */
+                if (cache_version >= 4)
+                    *cachestrp += (cte >> 16) & 0xffff;
+            }
 
             /* and parse subpart */
-            if (parse_bodystructure_sections(cachestrp, cacheend, body->subpart))
+            if (parse_bodystructure_sections(cachestrp, cacheend, body->subpart, cache_version))
                 return IMAP_MAILBOX_BADFORMAT;
         }
     }
@@ -3791,12 +3839,16 @@ static int parse_bodystructure_sections(const char **cachestrp, const char *cach
             this->header_size = CACHE_ITEM_BIT32(*cachestrp+1*4);
             this->content_offset = CACHE_ITEM_BIT32(*cachestrp+2*4);
             this->content_size = CACHE_ITEM_BIT32(*cachestrp+3*4);
+            cte = CACHE_ITEM_BIT32(*cachestrp+4*4);
             *cachestrp += 5*4;
+
+            if (cache_version >= 4)
+                *cachestrp += (cte >> 16) & 0xffff;
         }
 
         for (part = 0; part < body->numparts; part++) {
             this = &body->subpart[part];
-            if (parse_bodystructure_sections(cachestrp, cacheend, this))
+            if (parse_bodystructure_sections(cachestrp, cacheend, this, cache_version))
                 return IMAP_MAILBOX_BADFORMAT;
         }
     }
@@ -3841,7 +3893,7 @@ static int message_parse_cbodystructure(message_t *m)
     toplevel.subtype = "RFC822";
     toplevel.subpart = m->body;
 
-    r = parse_bodystructure_sections(&cachestr, cacheend, &toplevel);
+    r = parse_bodystructure_sections(&cachestr, cacheend, &toplevel, m->record.cache_version);
     if (r) syslog(LOG_ERR, "IOERROR: parsing section structure for %s %u (%.*s)",
                   m->mailbox->name, m->record.uid,
                   (int)cacheitem_size(&m->record, CACHE_BODYSTRUCTURE),
