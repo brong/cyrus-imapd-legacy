@@ -77,7 +77,7 @@ PACKAGE=\$(shell dh_listpackages)
 build:
 	dh_testdir
 	autoreconf -v -i
-	./configure --without-krb --with-perl=/usr/bin/perl --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-lmdb --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service --enable-backup XAPIAN_CONFIG=/usr/local/$CYRUSLIBS/bin/xapian-config-1.3
+	./configure --without-krb --with-perl=/usr/bin/perl --enable-silent-rules --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-lmdb --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service --enable-backup XAPIAN_CONFIG=/usr/local/$CYRUSLIBS/bin/xapian-config-1.3
 	$LEXFIX
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -Werror -fstack-protector-all"
 	make sieve/test
