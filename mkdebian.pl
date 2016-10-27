@@ -11,7 +11,7 @@ chomp($branch);
 
 my $date = `date -R`;
 
-my $CYRUSLIBS = "cyruslibs-fastmail-v6";
+my $CYRUSLIBS = "cyruslibs-fastmail-v7";
 
 my $basename = "cyrus-$branch";
 my $basedir = $branch eq 'fastmail' ? 'usr/cyrus' : "usr/$basename";
@@ -67,7 +67,8 @@ print FH <<EOF;
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 export LDFLAGS=-L/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu -L/usr/local/$CYRUSLIBS/lib -Wl,-rpath,/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu -Wl,-rpath,/usr/local/$CYRUSLIBS/lib
-export PKG_CONFIG_PATH=/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu/pkgconfig:/usr/local/$CYRUSLIBS/lib/pkgconfig:\$PKG_CONFIG_PATH
+export PKG_CONFIG_PATH=/usr/local/$CYRUSLIBS/lib/x86_64-linux-gnu/pkgconfig:/usr/local/$CYRUSLIBS/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}
+export PATH=/usr/local/$CYRUSLIBS/bin:$ENV{PATH}
 
 # Use v4 compatability mode, so ldconfig gets added to maint scripts.
 export DH_COMPAT=4
@@ -77,7 +78,7 @@ PACKAGE=\$(shell dh_listpackages)
 build:
 	dh_testdir
 	autoreconf -v -i
-	./configure --without-krb --with-perl=/usr/bin/perl --enable-silent-rules --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-lmdb --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service --enable-backup XAPIAN_CONFIG=/usr/local/$CYRUSLIBS/bin/xapian-config-1.3
+	./configure --without-krb --with-perl=/usr/bin/perl --enable-silent-rules --enable-http --enable-calalarmd --enable-idled --with-extraident=git-$branch-$num --prefix=/$basedir -with-cyrus-prefix=/$basedir --with-lmdb --with-zlib --without-snmp --enable-replication --without-bdb --enable-xapian --enable-apple-push-service --enable-backup
 	$LEXFIX
 	make -j 8 all CFLAGS="-g -fPIC -W -Wall -Werror -fstack-protector-all"
 	make sieve/test
