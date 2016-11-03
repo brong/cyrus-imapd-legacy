@@ -106,9 +106,12 @@ static int xapian_basedir(const char *tier, const char *mboxname, const char *pa
  * largest generation found.  In the simplest configuration this is
  * just ":0" */
 
+/* engines are 'c' for chert and 'g' for glass */
+
 struct activeitem {
     char *tier;
     int generation;
+    char engine;
 };
 
 static struct activeitem *activeitem_parse(const char *input)
@@ -120,7 +123,15 @@ static struct activeitem *activeitem_parse(const char *input)
 
     res = xzmalloc(sizeof(struct activeitem));
     res->tier = xstrndup(input, num-input);
-    res->generation = atoi(num+1);
+    num++;
+    if (*num == 'g') {
+        res->engine = 'g';
+        num++;
+    }
+    else {
+        res->engine = 'c';
+    }
+    res->generation = atoi(num);
 
     return res;
 }
@@ -132,16 +143,16 @@ static void activeitem_free(struct activeitem *item)
     free(item);
 }
 
-char *activeitem_generate(const char *tier, int generation)
+static char *activeitem_generate(const char *tier, char *engine, int generation)
 {
     struct buf buf = BUF_INITIALIZER;
-    buf_printf(&buf, "%s:%d", tier, generation);
+    buf_printf(&buf, "%s:%s%d", tier, engine == 'g' ? "g" : "", generation);
     return buf_release(&buf);
 }
 
 /* calculate the next name for this tier, by incrementing the generation
  * to one higher than any existing active record */
-static char *activefile_nextname(const strarray_t *active, const char *tier)
+static char *activefile_nextname(const strarray_t *active, char engine, const char *tier)
 {
     int max = -1;
     int i;
@@ -155,7 +166,7 @@ static char *activefile_nextname(const strarray_t *active, const char *tier)
         activeitem_free(item);
     }
 
-    return activeitem_generate(tier, max+1);
+    return activeitem_generate(tier, engine, max+1);
 }
 
 /* filter a list of active records to only those in certain tiers.
@@ -272,7 +283,7 @@ static void _activefile_init(const char *mboxname, const char *partition,
     inspect_filesystem(mboxname, partition, list, NULL);
     /* always put the next item on the front so we don't write to any
      * existing databases */
-    strarray_unshiftm(list, activefile_nextname(list, tier));
+    strarray_unshiftm(list, activefile_nextname(list, 'g', tier));
 
     activefile_write(activefile, list);
 
@@ -2308,7 +2319,7 @@ static int compact_dbs(const char *userid, const char *tempdir,
      * they never will */
 
     /* register the target name first, and put it at the end of the file */
-    newdest = activefile_nextname(active, desttier);
+    newdest = activefile_nextname(active, 'g', desttier);
     strarray_push(active, newdest);
 
     if (verbose) {
@@ -2324,7 +2335,7 @@ static int compact_dbs(const char *userid, const char *tempdir,
     if (strarray_find(tochange, strarray_nth(active, 0), 0) >= 0) {
         /* always recalculate the first name once the destination is chosen,
         * because we may be compressing to the default tier for some reason */
-        char *newstart = activefile_nextname(active, config_getstring(IMAPOPT_DEFAULTSEARCHTIER));
+        char *newstart = activefile_nextname(active, 'g', config_getstring(IMAPOPT_DEFAULTSEARCHTIER));
         if (verbose) {
             printf("adding new initial search location %s\n", newstart);
         }
