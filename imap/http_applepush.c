@@ -95,12 +95,11 @@ static void applepush_init(struct buf *serverinfo __attribute__((unused)))
 static int meth_get_applepush(struct transaction_t *txn,
                               void *params __attribute__((unused)))
 {
-    int rc = HTTP_BAD_REQUEST, r = 0;
+    int rc = HTTP_BAD_REQUEST;
     struct strlist *vals = NULL;
     const char *token = NULL, *key = NULL, *aps_topic = NULL;
     const char *mailbox_userid = NULL, *mailbox_uniqueid = NULL;
     strarray_t *keyparts = NULL;
-    char *mboxname = NULL;
     struct mboxlist_entry *mbentry = NULL;
     int mbtype = 0;
 
@@ -121,18 +120,11 @@ static int meth_get_applepush(struct transaction_t *txn,
     mailbox_uniqueid = strarray_nth(keyparts, 1);
 
     /* lookup mailbox */
-    mboxname = mboxlist_find_uniqueid(mailbox_uniqueid, mailbox_userid);
-    if (!mboxname) {
+    mbentry = mboxlist_find_uniqueid(mailbox_uniqueid, mailbox_userid);
+    if (!mbentry) {
         syslog(LOG_ERR,
                "meth_get_applepush: mboxlist_find_uniqueid(%s, %s) not found",
                mailbox_uniqueid, mailbox_userid);
-        goto done;
-    }
-
-    r = mboxlist_lookup(mboxname, &mbentry, NULL);
-    if (r || !mbentry) {
-        syslog(LOG_ERR, "meth_get_applepush: mboxlist_lookup(%s): %s",
-               mboxname, error_message(r));
         goto done;
     }
 
@@ -145,7 +137,7 @@ static int meth_get_applepush(struct transaction_t *txn,
     int myrights = httpd_myrights(httpd_authstate, mbentry);
     if (!(myrights & ACL_READ)) {
         syslog(LOG_ERR, "meth_get_applepush: no read access to %s for %s (%s)",
-               mboxname, httpd_userid, mbentry->acl);
+               mbentry->name, httpd_userid, mbentry->acl);
         goto done;
     }
 
@@ -172,7 +164,6 @@ static int meth_get_applepush(struct transaction_t *txn,
 
 done:
     mboxlist_entry_free(&mbentry);
-    if (mboxname) free(mboxname);
     if (keyparts) strarray_free(keyparts);
 
     return rc;

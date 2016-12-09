@@ -552,9 +552,9 @@ EXPORTED mbname_t *mbname_from_extname(const char *extname, const struct namespa
 
     /* specialuse magic */
     if (extname && extname[0] == '\\') {
-        char *intname = mboxlist_find_specialuse(extname, userid);
-        mbname_t *mbname = mbname_from_intname(intname);
-        free(intname);
+        mbentry_t *mbentry = mboxlist_find_specialuse(extname, userid);
+        mbname_t *mbname = mbname_from_intname(mbentry->name);
+        mboxlist_entry_free(&mbentry);
         return mbname;
     }
 

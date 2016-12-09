@@ -671,19 +671,10 @@ static int getMailboxes(jmap_req_t *req)
                 goto done;
             }
             /* Lookup mailbox by uniqueid. */
-            char *mboxname = mboxlist_find_uniqueid(id, req->userid);
-            if (mboxname) {
-                struct mboxlist_entry *mbentry = NULL;
-                int r = mboxlist_lookup(mboxname, &mbentry, NULL);
-                if (!r && mbentry) {
-                    jmapmbox_mboxlist_cb(mbentry, &data);
-                    mboxlist_entry_free(&mbentry);
-                } else {
-                    syslog(LOG_ERR, "mboxlist_entry_lookup(%s): %s", mboxname,
-                            error_message(r));
-                    json_array_append_new(notFound, json_string(id));
-                }
-                free(mboxname);
+            mbentry_t *mbentry = mboxlist_find_uniqueid(id, req->userid);
+            if (mbentry) {
+                jmapmbox_mboxlist_cb(mbentry, &data);
+                mboxlist_entry_free(&mbentry);
             } else {
                 json_array_append_new(notFound, json_string(id));
             }
@@ -888,9 +879,10 @@ static int jmapmbox_write(jmap_req_t *req, char **uid, json_t *arg,
     char *name = NULL;
     const char *role = NULL, *specialuse = NULL;
     int sortOrder = -1;
-    char *mboxname = NULL, *parentname = NULL;
     int r = 0, pe, is_create = (*uid == NULL);
     mbentry_t *inboxentry = NULL;
+    mbentry_t *mbparent = NULL;
+    mbentry_t *mbentry = NULL;
 
     /* Validate properties. */
 
@@ -918,7 +910,6 @@ static int jmapmbox_write(jmap_req_t *req, char **uid, json_t *arg,
         pe = readprop(arg, "parentId", is_create, invalid, "s", &parentId);
         if (pe > 0 && strlen(parentId)) {
             if (strcmp(parentId, inboxentry->uniqueid)) {
-                char *newparentname = NULL;
                 int iserr = 0;
                 /* Check if parentId is a creation id. If so, look up its uid. */
                 if (*parentId == '#') {
@@ -931,25 +922,19 @@ static int jmapmbox_write(jmap_req_t *req, char **uid, json_t *arg,
                 }
                 /* Check if the parent mailbox exists. */
                 if (!iserr) {
-                    newparentname = mboxlist_find_uniqueid(parentId, req->userid);
-                    if (!newparentname) iserr = 1;
+                    mbparent = mboxlist_find_uniqueid(parentId, req->userid);
+                    if (!mbparent) iserr = 1;
                 }
                 /* Check if the mailbox accepts children. */
                 if (!iserr) {
-                    int may_create = 0;
-                    struct mboxlist_entry *mbparent = NULL;
-                    r = mboxlist_lookup(newparentname, &mbparent, NULL);
-                    if (!r) {
-                        int rights = httpd_myrights(req->authstate, mbparent);
-                        may_create = (rights & (ACL_CREATE)) == ACL_CREATE;
-                    }
-                    if (mbparent) mboxlist_entry_free(&mbparent);
+                    int rights = httpd_myrights(req->authstate, mbparent);
+                    int may_create = (rights & (ACL_CREATE)) == ACL_CREATE;
                     iserr = !may_create;
                 }
                 if (iserr) {
                     json_array_append_new(invalid, json_string("parentId"));
                 }
-                if (newparentname) free(newparentname);
+                mboxlist_entry_free(&mbparent);
             } else {
                 parentId = inboxentry->uniqueid;
             }
@@ -1071,29 +1056,25 @@ static int jmapmbox_write(jmap_req_t *req, char **uid, json_t *arg,
     if (!is_create) {
         /* Determine name of the existing mailbox with uniqueid uid. */
         if (strcmp(*uid, inboxentry->uniqueid)) {
-            mboxname = mboxlist_find_uniqueid(*uid, req->userid);
-            if (!mboxname) {
+            mbentry = mboxlist_find_uniqueid(id, req->userid);
+            if (!mbentry) {
                 *err = json_pack("{s:s}", "type", "notFound");
                 goto done;
             }
 
             /* Determine parent name. */
-            struct mboxlist_entry *mbparent = NULL;
-            r = mboxlist_findparent(mboxname, &mbparent);
+            r = mboxlist_findparent(mbentry->name, &mbparent);
             if (r) {
                 syslog(LOG_INFO, "mboxlist_findparent(%s) failed: %s",
                         mboxname, error_message(r));
                 goto done;
             }
-            parentname = xstrdup(mbparent->name);
-            mboxlist_entry_free(&mbparent);
         } else {
-            parentname = NULL;
-            mboxname = xstrdup(inboxentry->name);
+            mbentry = mboxlist_entry_copy(inboxentry);
         }
     } else {
         /* Determine name for the soon-to-be created mailbox. */
-        if (parentId && strcmp(parentId, inboxentry->uniqueid)) {
+        if (parentId) {
             parentname = mboxlist_find_uniqueid(parentId, req->userid);
             if (!parentname) {
                 json_array_append_new(invalid, json_string("parentId"));

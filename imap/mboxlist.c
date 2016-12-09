@@ -544,7 +544,7 @@ EXPORTED int mboxlist_lookup_allow_all(const char *name,
 struct _find_specialuse_data {
     const char *use;
     const char *userid;
-    char *mboxname;
+    mbentry_t *entry;
 };
 
 static int _find_specialuse(const mbentry_t *mbentry, void *rock)
@@ -557,48 +557,53 @@ static int _find_specialuse(const mbentry_t *mbentry, void *rock)
     if (attrib.len) {
         strarray_t *uses = strarray_split(buf_cstring(&attrib), " ", 0);
         if (strarray_find_case(uses, d->use, 0) >= 0)
-            d->mboxname = xstrdup(mbentry->name);
+            d->entry = mboxlist_entry_copy(mbentry);
         strarray_free(uses);
     }
 
     buf_free(&attrib);
 
-    if (d->mboxname) return CYRUSDB_DONE;
+    if (d->entry) return CYRUSDB_DONE;
     return 0;
 }
 
 
-EXPORTED char *mboxlist_find_specialuse(const char *use, const char *userid)
+EXPORTED mbentry_t *mboxlist_find_specialuse(const char *use, const char *userid)
 {
     /* \\Inbox is magical */
-    if (!strcasecmp(use, "\\Inbox"))
-        return mboxname_user_mbox(userid, NULL);
+    if (!strcasecmp(use, "\\Inbox")) {
+        char *inboxname = mboxname_user_mbox(userid, NULL);
+        mbentry_t *res;
+        mboxlist_lookup(inboxname, &res, NULL);
+        free(inboxname);
+        return res;
+    }
 
     struct _find_specialuse_data rock = { use, userid, NULL };
     mboxlist_usermboxtree(userid, _find_specialuse, &rock, MBOXTREE_SKIP_ROOT);
-    return rock.mboxname;
+    return rock.entry;
 }
 
 struct _find_uniqueid_data {
     const char *uniqueid;
-    char *mboxname;
+    mbentry_t *entry;
 };
 
 static int _find_uniqueid(const mbentry_t *mbentry, void *rock) {
     struct _find_uniqueid_data *d = (struct _find_uniqueid_data *) rock;
     int r = 0;
     if (!strcmp(d->uniqueid, mbentry->uniqueid)) {
-        d->mboxname = xstrdup(mbentry->name);
+        d->entry = mboxlist_entry_copy(mbentry);
         r = CYRUSDB_DONE;
     }
     return r;
 }
 
-EXPORTED char *mboxlist_find_uniqueid(const char *uniqueid, const char *userid)
+EXPORTED mbentry_t *mboxlist_find_uniqueid(const char *uniqueid, const char *userid)
 {
     struct _find_uniqueid_data rock = { uniqueid, NULL };
     mboxlist_usermboxtree(userid, _find_uniqueid, &rock, MBOXTREE_PLUS_RACL);
-    return rock.mboxname;
+    return rock.entry;
 }
 
 /* given a mailbox name, find the staging directory.  XXX - this should

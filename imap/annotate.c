@@ -2960,9 +2960,9 @@ EXPORTED int specialuse_validate(const char *userid, const char *src, struct buf
         }
 
         /* don't allow names that are already in use */
-        char *mboxname = mboxlist_find_specialuse(strarray_nth(valid, j), userid);
-        if (mboxname) {
-            free(mboxname);
+        mbentry_t *entry = mboxlist_find_specialuse(strarray_nth(valid, j), userid);
+        if (entry) {
+            mboxlist_entry_free(&entry);
             r = IMAP_MAILBOX_SPECIALUSE;
             goto done;
         }

@@ -120,9 +120,8 @@ int mboxlist_lookup_allow_all(const char *name,
                                    mbentry_t **mbentryptr,
                                    struct txn **tid);
 
-char *mboxlist_find_specialuse(const char *use, const char *userid);
-char *mboxlist_find_uniqueid(const char *uniqueid, const char *userid);
-
+mbentry_t *mboxlist_find_specialuse(const char *use, const char *userid);
+mbentry_t *mboxlist_find_uniqueid(const char *uniqueid, const char *userid);
 
 /* insert/delete stub entries */
 int mboxlist_insertremote(mbentry_t *mbentry, struct txn **rettid);
