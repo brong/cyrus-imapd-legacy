@@ -202,6 +202,7 @@ int mboxlist_setacl(const struct namespace *namespace, const char *name,
 int mboxlist_sync_setacls(const char *name, const char *acl);
 
 int mboxlist_set_racls(int enabled);
+int mboxlist_set_runq(int enabled);
 
 modseq_t mboxlist_foldermodseq_dirty(struct mailbox *mailbox);
 

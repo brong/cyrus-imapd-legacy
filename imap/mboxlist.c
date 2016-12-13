@@ -625,7 +625,7 @@ HIDDEN int mboxlist_findstage(const char *name, char *stagedir, size_t sd_len)
     return 0;
 }
 
-static void mboxlist_racl_key(int isuser, const char *keyuser, const char *mbname, struct buf *buf)
+static void mboxlist_racl_key(int isuser, const char *keyuser, const char *mboxname, struct buf *buf)
 {
     buf_setcstr(buf, "$RACL$");
     buf_putc(buf, isuser ? 'U' : 'S');
@@ -634,8 +634,8 @@ static void mboxlist_racl_key(int isuser, const char *keyuser, const char *mbnam
         buf_appendcstr(buf, keyuser);
         buf_putc(buf, '$');
     }
-    if (mbname) {
-        buf_appendcstr(buf, mbname);
+    if (mboxname) {
+        buf_appendcstr(buf, mboxname);
     }
 }
 
@@ -703,15 +703,62 @@ static int mboxlist_update_racl(const char *name, const mbentry_t *oldmbentry, c
     return r;
 }
 
+static void mboxlist_runq_key(const char *uniqueid, const char *mboxname, struct buf *buf)
+{
+    buf_setcstr(buf, "$RUNQ$");
+    buf_appendcstr(buf, uniqueid);
+    buf_putc(buf, '$');
+    if (mboxname) {
+        buf_appendcstr(buf, mboxname);
+    }
+}
+
+static int mboxlist_update_runq(const char *mboxname, const mbentry_t *oldmbentry, const mbentry_t *newmbentry, struct txn **txn)
+{
+    const char *oldunq = oldmbentry ? oldmbentry->uniqueid : NULL;
+    const char *newunq = newmbentry ? newmbentry->uniqueid : NULL;
+
+    if (!strcmpsafe(oldunq, newunq))
+        return 0; // unchanged
+
+    struct buf buf = BUF_INITIALIZER;
+    int r = 0;
+
+    if (oldunq) {
+        mboxlist_runq_key(oldunq, mboxname, &buf);
+        r = cyrusdb_delete(mbdb, buf.s, buf.len, txn, /*force*/1);
+        if (r) goto done;
+    }
+
+    if (newunq) {
+        mboxlist_runq_key(newunq, mboxname, &buf);
+        r = cyrusdb_store(mbdb, buf.s, buf.len, "", 0, txn);
+        if (r) goto done;
+    }
+
+ done:
+    buf_free(&buf);
+    return r;
+}
+
 static int mboxlist_update_entry(const char *name, const mbentry_t *mbentry, struct txn **txn)
 {
     int r = 0;
 
-    if (!cyrusdb_fetch(mbdb, "$RACL", 5, NULL, NULL, txn)) {
+    /* transaction this thing */
+    struct txn *mytxn = NULL;
+    if (!txn) txn = &mytxn;
+
+    int have_racl = !cyrusdb_fetch(mbdb, "$RACL", 5, NULL, NULL, txn);
+    int have_runq = !cyrusdb_fetch(mbdb, "$RUNQ", 5, NULL, NULL, txn);
+
+    if (have_racl || have_runq) {
         mbentry_t *old = NULL;
         mboxlist_mylookup(name, &old, txn, 0); // ignore errors, it will be NULL
-        r = mboxlist_update_racl(name, old, mbentry, txn);
+        if (have_racl && !r) r = mboxlist_update_racl(name, old, mbentry, txn);
+        if (have_runq && !r) r = mboxlist_update_runq(name, old, mbentry, txn);
         mboxlist_entry_free(&old);
+        if (r) goto done;
     }
 
     if (mbentry) {
@@ -722,6 +769,13 @@ static int mboxlist_update_entry(const char *name, const mbentry_t *mbentry, str
     else {
         r = cyrusdb_delete(mbdb, name, strlen(name), txn, /*force*/1);
     }
+
+done:
+    if (mytxn) {
+        if (r) cyrusdb_abort(mbdb, mytxn);
+        else cyrusdb_commit(mbdb, mytxn);
+    }
+
     return r;
 }
 
@@ -2532,6 +2586,53 @@ EXPORTED int mboxlist_set_racls(int enabled)
         }
         mboxlist_entry_free(&mbrock.mbentry);
         if (!r) r = cyrusdb_store(mbdb, "$RACL", 5, "", 0, &tid);
+    }
+
+    if (r)
+        cyrusdb_abort(mbdb, tid);
+    else
+        cyrusdb_commit(mbdb, tid);
+
+    return r;
+}
+
+static int runq_del_cb(void *rock,
+                  const char *key, size_t keylen,
+                  const char *data __attribute__((unused)),
+                  size_t datalen __attribute__((unused)))
+{
+    struct txn **txn = (struct txn **)rock;
+    return cyrusdb_delete(mbdb, key, keylen, txn, /*force*/0);
+}
+
+static int runq_add_cb(const mbentry_t *mbentry, void *rock)
+{
+    struct txn **txn = (struct txn **)rock;
+    return mboxlist_update_runq(mbentry->name, NULL, mbentry, txn);
+}
+
+EXPORTED int mboxlist_set_runq(int enabled)
+{
+    struct txn *tid = NULL;
+    int r = 0;
+    int now = !cyrusdb_fetch(mbdb, "$RUNQ", 5, NULL, NULL, &tid);
+
+    if (now && !enabled) {
+        syslog(LOG_NOTICE, "removing reverse uniqueid support");
+        /* remove */
+        r = cyrusdb_foreach(mbdb, "$RUNQ", 5, NULL, runq_del_cb, &tid, &tid);
+    }
+    else if (enabled && !now) {
+        /* add */
+        struct allmb_rock mbrock = { NULL, 0, runq_add_cb, &tid };
+        /* we can't use mboxlist_allmbox because it doesn't do transactions */
+        syslog(LOG_NOTICE, "adding reverse uniqueid support");
+        r = cyrusdb_foreach(mbdb, "", 0, allmbox_p, allmbox_cb, &mbrock, &tid);
+        if (r) {
+            syslog(LOG_ERR, "ERROR: failed to add reverse uniqueid support %s", error_message(r));
+        }
+        mboxlist_entry_free(&mbrock.mbentry);
+        if (!r) r = cyrusdb_store(mbdb, "$RUNQ", 5, "", 0, &tid);
     }
 
     if (r)

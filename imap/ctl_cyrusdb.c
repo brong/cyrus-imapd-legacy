@@ -185,6 +185,8 @@ static void process_mboxlist(void)
 
     /* enable or disable RACLs per config */
     mboxlist_set_racls(config_getswitch(IMAPOPT_REVERSEACLS));
+    /* reverse uniqueids too, I'm not going to make a separate switch */
+    mboxlist_set_runq(config_getswitch(IMAPOPT_REVERSEACLS));
 
     quotadb_close();
     quotadb_done();
