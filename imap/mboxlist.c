@@ -594,10 +594,28 @@ static int _find_uniqueid(const mbentry_t *mbentry, void *rock) {
     return r;
 }
 
+static void mboxlist_runq_key(const char *uniqueid, const char *mboxname, struct buf *buf)
+{
+    buf_setcstr(buf, "$RUNQ$");
+    buf_appendcstr(buf, uniqueid);
+    buf_putc(buf, '$');
+    if (mboxname) {
+        buf_appendcstr(buf, mboxname);
+    }
+}
+
 EXPORTED char *mboxlist_find_uniqueid(const char *uniqueid, const char *userid)
 {
     struct _find_uniqueid_data rock = { uniqueid, NULL };
-    mboxlist_usermboxtree(userid, _find_uniqueid, &rock, MBOXTREE_PLUS_RACL);
+    int have_runq = !cyrusdb_fetch(mbdb, "$RUNQ", 5, NULL, NULL, NULL);
+    if (have_runq) {
+        /* find matching mboxnames */
+        struct buf buf = BUF_INITIALIZER;
+        mboxlist_runq_key(uniqueid, NULL, &buf);
+        r = cyrusdb_foreach(mbdb, buf.s, buf.len, )
+    }
+    else
+        mboxlist_usermboxtree(userid, _find_uniqueid, &rock, MBOXTREE_PLUS_RACL);
     return rock.mboxname;
 }
 
@@ -701,16 +719,6 @@ static int mboxlist_update_racl(const char *name, const mbentry_t *oldmbentry, c
     free(userid);
     buf_free(&buf);
     return r;
-}
-
-static void mboxlist_runq_key(const char *uniqueid, const char *mboxname, struct buf *buf)
-{
-    buf_setcstr(buf, "$RUNQ$");
-    buf_appendcstr(buf, uniqueid);
-    buf_putc(buf, '$');
-    if (mboxname) {
-        buf_appendcstr(buf, mboxname);
-    }
 }
 
 static int mboxlist_update_runq(const char *mboxname, const mbentry_t *oldmbentry, const mbentry_t *newmbentry, struct txn **txn)
