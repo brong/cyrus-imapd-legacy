@@ -523,6 +523,8 @@ struct caldav_db *mailbox_open_caldav(struct mailbox *mailbox);
 struct carddav_db *mailbox_open_carddav(struct mailbox *mailbox);
 struct webdav_db *mailbox_open_webdav(struct mailbox *mailbox);
 
+struct entryattlist;
+
 /* reading bits and pieces */
 extern int mailbox_refresh_index_header(struct mailbox *mailbox);
 extern int mailbox_write_header(struct mailbox *mailbox, int force);
@@ -532,8 +534,14 @@ extern int mailbox_reload_index_record(struct mailbox *mailbox,
                                      struct index_record *record);
 extern int mailbox_rewrite_index_record(struct mailbox *mailbox,
                                         struct index_record *record);
+extern int mailbox_rewrite_index_record_annots(struct mailbox *mailbox,
+                                               struct index_record *record,
+                                               struct entryattlist *annots);
 extern int mailbox_append_index_record(struct mailbox *mailbox,
                                        struct index_record *record);
+extern int mailbox_append_index_record_annots(struct mailbox *mailbox,
+                                              struct index_record *record,
+                                              struct entryattlist *annots);
 extern int mailbox_find_index_record(struct mailbox *mailbox, uint32_t uid,
                                      struct index_record *record);
 

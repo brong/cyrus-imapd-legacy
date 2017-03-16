@@ -3388,6 +3388,20 @@ EXPORTED int mailbox_reload_index_record(struct mailbox *mailbox,
         return mailbox_find_index_record(mailbox, record->uid, record);
 }
 
+EXPORTED int mailbox_rewrite_index_record_annots(struct mailbox *mailbox,
+                                                 struct index_record *record,
+                                                 struct entryattlist *annots)
+{
+    int r = mailbox_rewrite_index_record(mailbox, record);
+    if (r) return r;
+    annotate_state_t *astate = NULL;
+    r = mailbox_get_annotate_state(mailbox, record->uid, &astate);
+    if (r) return r;
+    annotate_state_set_auth(astate, 1, NULL, NULL); // admin can always write
+    /* XXX - we want to store annots with modseq from record->modseq */
+    return annotate_state_store(astate, annots);
+}
+
 /*
  * Rewrite an index record in a mailbox - updates all
  * necessary tracking fields automatically.
@@ -3499,11 +3513,26 @@ EXPORTED int mailbox_rewrite_index_record(struct mailbox *mailbox,
     return 0;
 }
 
+
+EXPORTED int mailbox_append_index_record_annots(struct mailbox *mailbox,
+                                                struct index_record *record,
+                                                struct entryattlist *annots)
+{
+    int r = mailbox_rewrite_index_record(mailbox, record);
+    if (r) return r;
+    annotate_state_t *astate = NULL;
+    r = mailbox_get_annotate_state(mailbox, record->uid, &astate);
+    if (r) return r;
+    annotate_state_set_auth(astate, 1, NULL, NULL); // admin can always write
+    /* XXX - we want to store annots with modseq from record->modseq */
+    return annotate_state_store(astate, annots);
+}
+
 /* append a single message to a mailbox - also updates everything
  * automatically.  These two functions are the ONLY way to modify
  * the contents or tracking fields of a message */
 EXPORTED int mailbox_append_index_record(struct mailbox *mailbox,
-                                struct index_record *record)
+                                         struct index_record *record)
 {
     int r;
     struct utimbuf settime;
