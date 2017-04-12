@@ -996,7 +996,7 @@ static int setContactGroups(struct jmap_req *req)
                 /* both N and FN get the name */
                 struct vparse_entry *entry = vparse_get_entry(card, NULL, "N");
                 if (entry) {
-                    if (entry->multivalue) {
+                    if (entry->multivaluesep) {
                         strarray_free(entry->v.values);
                         entry->v.values = NULL;
                     } else {
@@ -1010,7 +1010,7 @@ static int setContactGroups(struct jmap_req *req)
                 }
                 entry = vparse_get_entry(card, NULL, "FN");
                 if (entry) {
-                    if (entry->multivalue) {
+                    if (entry->multivaluesep) {
                         /* FN isn't allowed to be a multi-value, but let's
                          * rather check than deal with corrupt memory */
                         strarray_free(entry->v.values);
@@ -2233,12 +2233,12 @@ done:
 }
 
 static struct vparse_entry *_card_multi(struct vparse_card *card,
-                                        const char *name)
+                                        const char *name, char sepchar)
 {
     struct vparse_entry *res = vparse_get_entry(card, NULL, name);
     if (!res) {
         res = vparse_add_entry(card, NULL, name, NULL);
-        res->multivalue = 1;
+        res->multivaluesep = sepchar;
         res->v.values = strarray_new();
     }
     return res;
@@ -2477,7 +2477,7 @@ static int _addresses_to_card(struct vparse_card *card, json_t *arg, json_t *inv
         if (label)
             vparse_add_param(entry, "label", label);
 
-        entry->multivalue = 1;
+        entry->multivaluesep = ';';
         entry->v.values = strarray_new();
         strarray_append(entry->v.values, ""); // PO Box
         strarray_append(entry->v.values, ""); // Extended Address
