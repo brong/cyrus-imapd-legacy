@@ -401,9 +401,14 @@ EXTRA_DIST += \
 	perl/imap/Changes \
 	perl/imap/cyradm.sh \
 	perl/imap/cyrperl.h \
+	perl/imap/Cyrus/CacheFile.pm \
+	perl/imap/Cyrus/CheckReplication.pm \
+	perl/imap/Cyrus/HeaderFile.pm \
+	perl/imap/Cyrus/IndexFile.pm \
 	perl/imap/examples/auditmbox.pl \
 	perl/imap/examples/imapcollate.pl \
 	perl/imap/examples/imapdu.pl \
+	perl/imap/examples/index_uids.pl \
 	perl/imap/examples/test-imsp.pl \
 	perl/imap/IMAP/Admin.pm \
 	perl/imap/IMAP/IMSP.pm \
