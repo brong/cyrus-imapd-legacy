@@ -1914,7 +1914,6 @@ static int export_calendar(struct transaction_t *txn)
 
   done:
     buf_free(&attrib);
-    caldav_close(caldavdb);
     mailbox_close(&mailbox);
 
     return ret;
