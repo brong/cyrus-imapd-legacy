@@ -2705,6 +2705,7 @@ static int compact_dbs(const char *userid, const char *tempdir,
     }
 
     /* release and take an exclusive lock on activefile */
+    mappedfile_unlock(activefile);
     mappedfile_writelock(activefile);
 
     /* check that we still have 'directory zero'.  If not, delete all
