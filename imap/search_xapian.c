@@ -2292,6 +2292,7 @@ struct mbfilter {
     struct db *indexeddb;
     struct txn **tid;
     const strarray_t *destpaths;
+    const strarray_t *desttiers;
     int flags;
 };
 
@@ -2344,6 +2345,7 @@ static int bloomadd_cb(void *rock,
 }
 
 static int create_filter(const strarray_t *srcpaths, const strarray_t *destpaths,
+                         const strarray_t *desttiers,
                          const char *userid, int flags, struct mbfilter *filter, int bloom)
 {
     struct buf buf = BUF_INITIALIZER;
@@ -2353,6 +2355,7 @@ static int create_filter(const strarray_t *srcpaths, const strarray_t *destpaths
 
     memset(filter, 0, sizeof(struct mbfilter));
     filter->destpaths = destpaths;
+    filter->desttiers = desttiers;
     filter->userid = userid;
     filter->flags = flags;
 
@@ -2410,13 +2413,13 @@ done:
 }
 
 static int search_filter(const char *userid, const strarray_t *srcpaths,
-                         const strarray_t *destpaths, int flags)
+                         const strarray_t *destpaths, const strarray_t *desttiers, int flags)
 {
     struct mbfilter filter;
     int verbose = SEARCH_VERBOSE(flags);
     int r;
 
-    r = create_filter(srcpaths, destpaths, userid, flags, &filter, 1);
+    r = create_filter(srcpaths, destpaths, desttiers, userid, flags, &filter, 1);
     if (r) goto done;
 
     if (verbose)
@@ -2471,6 +2474,9 @@ static int reindex_mb(void *rock,
     if (r) goto done;
     tr->super.mailbox = mailbox;
 
+    tr->activedirs = strarray_dup(filter->destpaths);
+    tr->activetiers = strarray_dup(filter->desttiers);
+
     struct mailbox_iter *iter = mailbox_iter_init(mailbox, 0, ITER_SKIP_UNLINKED);
 
     const message_t *msg;
@@ -2524,6 +2530,8 @@ static int reindex_mb(void *rock,
 
 done:
     if (tr) {
+        strarray_free(tr->activedirs);
+        strarray_free(tr->activetiers);
         if (tr->indexed) seqset_free(tr->indexed);
         if (tr->dbw) xapian_dbw_close(tr->dbw);
         free_receiver(&tr->super);
@@ -2536,14 +2544,14 @@ done:
 }
 
 static int search_reindex(const char *userid, const strarray_t *srcpaths,
-                          const strarray_t *destpaths, int flags)
+                          const strarray_t *destpaths, const strarray_t *desttiers, int flags)
 {
     struct buf buf = BUF_INITIALIZER;
     struct mbfilter filter;
     int verbose = SEARCH_VERBOSE(flags);
     int r;
 
-    r = create_filter(srcpaths, destpaths, userid, flags, &filter, 0);
+    r = create_filter(srcpaths, destpaths, desttiers, userid, flags, &filter, 0);
     if (r) goto done;
 
     if (verbose)
@@ -2565,14 +2573,14 @@ done:
 }
 
 static int search_compress(const char *userid, const strarray_t *srcpaths,
-                           const strarray_t *destpaths, int flags)
+                           const strarray_t *destpaths, const strarray_t *desttiers, int flags)
 {
     struct buf buf = BUF_INITIALIZER;
     struct mbfilter filter;
     int verbose = SEARCH_VERBOSE(flags);
     int r;
 
-    r = create_filter(srcpaths, destpaths, userid, flags, &filter, 0);
+    r = create_filter(srcpaths, destpaths, desttiers, userid, flags, &filter, 0);
     if (r) goto done;
 
     if (verbose)
@@ -2612,6 +2620,7 @@ static int compact_dbs(const char *userid, const char *tempdir,
     char *destdir = NULL;
     char *tempdestdir = NULL;
     char *tempreindexdir = NULL;
+    strarray_t *newtiers = NULL;
     struct buf mytempdir = BUF_INITIALIZER;
     char *namelock_fname = NULL;
     int verbose = SEARCH_VERBOSE(flags);
@@ -2771,9 +2780,11 @@ static int compact_dbs(const char *userid, const char *tempdir,
         strarray_t *existing = strarray_dup(orig);
         for (i = 0; i < tochange->count; i++)
             strarray_remove_all(existing, strarray_nth(tochange, i));
-        newdirs = activefile_resolve(mboxname, mbentry->partition, existing, /*dostat*/1, NULL);
+        newdirs = activefile_resolve(mboxname, mbentry->partition, existing, /*dostat*/1, &newtiers);
         strarray_free(existing);
-        /* we'll be prepending the final target directory to newdirs before compacting */
+        /* we'll be prepending the final target directory to newdirs before compacting,
+         * so also add the new tier so the indexes match up */
+        strarray_unshift(newtiers, newdest);
 
         toreindex = strarray_new();
         tocompact = strarray_new();
@@ -2794,7 +2805,7 @@ static int compact_dbs(const char *userid, const char *tempdir,
             tempreindexdir = strconcat(buf_cstring(&mytempdir), ".REINDEX", (char *)NULL);
             // add this directory to the repack target as the first entry point
             strarray_unshift(newdirs, tempreindexdir);
-            r = search_reindex(userid, toreindex, newdirs, flags);
+            r = search_reindex(userid, toreindex, newdirs, newtiers, flags);
             if (r) {
                 printf("ERROR: failed to reindex to %s", buf_cstring(&mytempdir));
                 goto out;
@@ -2821,14 +2832,14 @@ static int compact_dbs(const char *userid, const char *tempdir,
         strarray_unshift(newdirs, buf_cstring(&mytempdir));
 
         if (flags & SEARCH_COMPACT_FILTER) {
-            r = search_filter(userid, tocompact, newdirs, flags);
+            r = search_filter(userid, tocompact, newdirs, newtiers, flags);
             if (r) {
                 printf("ERROR: failed to filter to %s", buf_cstring(&mytempdir));
                 goto out;
             }
         }
         else {
-            r = search_compress(userid, tocompact, newdirs, flags);
+            r = search_compress(userid, tocompact, newdirs, newtiers, flags);
             if (r) {
                 printf("ERROR: failed to compact to %s", buf_cstring(&mytempdir));
                 goto out;
