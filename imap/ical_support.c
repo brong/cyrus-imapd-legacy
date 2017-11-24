@@ -887,11 +887,7 @@ icalrecurrenceset_get_utc_timespan(icalcomponent *ical,
 
 EXPORTED void icaltime_set_utc(struct icaltimetype *t, int set)
 {
-#ifdef ICALTIME_HAS_IS_UTC
-    t->is_utc = set;
-#else
     icaltime_set_timezone(t, set ? icaltimezone_get_utc_timezone() : NULL);
-#endif
 }
 
 
