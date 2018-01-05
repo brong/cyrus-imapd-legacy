@@ -6886,7 +6886,8 @@ static void expand_occurrences(icalcomponent *ical,
     struct icalperiodtype rangespan =
         { fbfilter->start, fbfilter->end, icaldurationtype_null_duration() };
 
-    icalcomponent_myforeach(ical, rangespan, NULL, add_freebusy_comp, fbfilter);
+    icalcomponent_myforeach(ical, rangespan, fbfilter->floatingtz,
+                            add_freebusy_comp, fbfilter);
 }
 
 
@@ -7043,7 +7044,16 @@ static int busytime_by_collection(const mbentry_t *mbentry, void *rock)
         }
     }
 
-    return propfind_by_collection(mbentry, rock);
+    fbfilter->floatingtz = caldav_mailbox_floatingtz(mboxname, fctx->userid);
+
+    int r = propfind_by_collection(mbentry, rock);
+
+    if (fbfilter->floatingtz) {
+        icaltimezone_free(fbfilter->floatingtz, 1);
+        fbfilter->floatingtz = NULL;
+    }
+    return r;
+
 }
 
 
@@ -7104,6 +7114,7 @@ static void combine_vavailability(struct freebusy_filter *fbfilter)
     unsigned i, j;
 
     memset(&availfilter, 0, sizeof(struct freebusy_filter));
+    availfilter.floatingtz = fbfilter.floatingtz;
 
     /* Sort VAVAILABILITY periods by priority and start time */
     qsort(vavail->vav, vavail->len,
