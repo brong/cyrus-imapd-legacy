@@ -5346,7 +5346,8 @@ static int expand_cb(icalcomponent *comp,
 /* Expand recurrences of ical in range.
    NOTE: expand_cb() is destructive of ical as it builds expanded_ical */
 static icalcomponent *expand_caldata(icalcomponent **ical,
-                                     struct icalperiodtype range)
+                                     struct icalperiodtype range,
+                                     icaltimezone *floatingtz)
 {
     icalcomponent *expanded_ical =
         icalcomponent_vanew(ICAL_VCALENDAR_COMPONENT,
@@ -5360,10 +5361,10 @@ static icalcomponent *expand_caldata(icalcomponent **ical,
     if (prop)
         icalcomponent_add_property(expanded_ical, icalproperty_new_clone(prop));
 
-    icalcomponent_myforeach(*ical, range, NULL, expand_cb, expanded_ical);
+    icalcomponent_myforeach(*ical, range, floatingtz, expand_cb, expanded_ical);
     icalcomponent_free(*ical);
     *ical = expanded_ical;
-    
+
     return *ical;
 }
 
@@ -5525,7 +5526,7 @@ static int propfind_caldata(const xmlChar *name, xmlNsPtr ns,
             ical = fctx->obj;
 
             if (partial->expand) {
-                fctx->obj = expand_caldata(&ical, partial->range);
+                fctx->obj = expand_caldata(&ical, partial->range, NULL);
             }
             else limit_caldata(ical, &partial->range);
         }
@@ -7114,7 +7115,7 @@ static void combine_vavailability(struct freebusy_filter *fbfilter)
     unsigned i, j;
 
     memset(&availfilter, 0, sizeof(struct freebusy_filter));
-    availfilter.floatingtz = fbfilter.floatingtz;
+    availfilter.floatingtz = fbfilter->floatingtz;
 
     /* Sort VAVAILABILITY periods by priority and start time */
     qsort(vavail->vav, vavail->len,
