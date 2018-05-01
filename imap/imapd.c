@@ -342,7 +342,7 @@ static struct capa_struct base_capabilities[] = {
     { "DIGEST=SHA1",           2 }, /* not standard */
     { "X-REPLICATION",         2 }, /* not standard */
     { "STATUS=SIZE",           2 }, /* draft-bosch-imap-status-size */
-    { "OBJECTID",              2 }, /* draft-gondwana-imap-uniqueid */
+    { "OBJECTID",              2 }, /* draft-gondwana-imap-objectid */
 
 #ifdef HAVE_SSL
     { "URLAUTH",               2 },
