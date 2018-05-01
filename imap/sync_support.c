@@ -2013,6 +2013,15 @@ int decode_annotations(/*const*/struct dlist *annots,
                 /* XXX - check on p? */
             }
         }
+        else if (!strcmp(entry, IMAP_ANNOT_NS "savedate")) {
+            if (record) {
+                const char *p = buf_cstring(&value);
+                bit64 newval;
+                parsenum(p, &p, 0, &newval);
+                record->savedate = newval;
+                /* XXX - check on p? */
+            }
+        }
         else if (record && !strcmp(entry, IMAP_ANNOT_NS "basethrid")) {
                 /* this might double-apply the annotation, but oh well.  It does mean that
                  * basethrid is paired in here when we do a comparison against new values
