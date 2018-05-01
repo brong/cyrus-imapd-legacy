@@ -593,7 +593,6 @@ HIDDEN int message_create_record(struct index_record *record,
 
     record->size = body->filesize;
     record->header_size = body->header_size;
-    record->content_lines = body->content_lines;
     message_guid_copy(&record->guid, &body->guid);
 
     message_write_cache(record, body);

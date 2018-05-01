@@ -150,7 +150,7 @@ struct index_record {
     time_t last_updated;
     uint32_t system_flags;
     uint32_t user_flags[MAX_USER_FLAGS/32];
-    uint32_t content_lines;
+    time_t savedate;
     uint16_t cache_version;
     struct message_guid guid;
     modseq_t modseq;

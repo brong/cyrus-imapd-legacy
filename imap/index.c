@@ -6800,11 +6800,24 @@ EXPORTED extern unsigned long index_getlines(struct index_state *state,
                                              uint32_t msgno)
 {
     struct index_record record;
+    struct body *body = NULL;
+    unsigned long lines = 0;
 
     if (index_reload_record(state, msgno, &record))
         return 0;
 
-    return record.content_lines;
+    if (mailbox_cacherecord(state->mailbox, &record))
+        return 0;
+
+    message_read_bodystructure(&record, &body);
+    if (!body) return 0;
+
+    lines = body->content_lines;
+
+    message_free_body(body);
+    free(body);
+
+    return lines;
 }
 
 EXPORTED const char *index_mboxname(const struct index_state *state)
