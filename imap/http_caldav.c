@@ -1901,7 +1901,7 @@ static int export_calendar(struct transaction_t *txn)
                     }
 
                     /* Set STATUS:DELETED */
-                    icalcomponent_set_status(comp, ICAL_STATUS_DELETED);
+                    //icalcomponent_set_status(comp, ICAL_STATUS_DELETED);
                 }
 
                 /* Include this component in our iCalendar */
