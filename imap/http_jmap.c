@@ -1125,14 +1125,12 @@ static void jmap_finireq(jmap_req_t *req)
 
     for (i = 0; i < req->mboxes->count; i++) {
         struct _mboxcache_rec *rec = ptrarray_nth(req->mboxes, i);
-        syslog(LOG_ERR, "jmap: force-closing mailbox %s (refcount=%d)",
-                        rec->mbox->name, rec->refcount);
+        if (rec->refcount)
+            syslog(LOG_ERR, "DBERROR jmap: force-closing mailbox %s (refcount=%d)",
+                            rec->mbox->name, rec->refcount);
         mailbox_close(&rec->mbox);
         free(rec);
     }
-    /* Fail after cleaning up open mailboxes */
-    assert(!req->mboxes->count);
-
     ptrarray_free(req->mboxes);
     req->mboxes = NULL;
 }
@@ -1201,16 +1199,14 @@ EXPORTED void jmap_closembox(jmap_req_t *req, struct mailbox **mboxp)
     for (i = 0; i < req->mboxes->count; i++) {
         rec = (struct _mboxcache_rec*) ptrarray_nth(req->mboxes, i);
         if (rec->mbox == *mboxp) {
-            if (!(--rec->refcount)) {
-                ptrarray_remove(req->mboxes, i);
-                mailbox_close(&rec->mbox);
-                free(rec);
-            }
+            --rec->refcount;
+            assert(rec->refcount >= 0);
             *mboxp = NULL;
             return;
         }
     }
     syslog(LOG_INFO, "jmap: ignoring non-cached mailbox %s", (*mboxp)->name);
+    // XXX - assert and die here?
 }
 
 EXPORTED char *jmap_blobid(const struct message_guid *guid)
