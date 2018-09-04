@@ -56,6 +56,7 @@
 #include "annotate.h"
 #include "append.h"
 #include "assert.h"
+#include "bitvector.h"
 #include "bsearch.h"
 #include "charset.h"
 #include "crc32.h"
@@ -247,6 +248,9 @@ EXPORTED int conversations_open_path(const char *fname, const char *userid, stru
         dlist_parsesax(val, vallen, 0, _saxfolder, open);
     }
 
+    bv_setsize(&open->s.folder_access, open->s.folder_names->count);
+    bv_setall(&open->s.folder_access);
+
     if (userid)
         open->s.annotmboxname = mboxname_user_mbox(userid, CONVSPLITFOLDER);
     else
@@ -331,6 +335,7 @@ static void _conv_remove(struct conversations_state *state)
                 strarray_free(cur->s.counted_flags);
             if (cur->s.folder_names)
                 strarray_free(cur->s.folder_names);
+            bv_free(&cur->s.folder_access);
             free(cur);
             return;
         }
@@ -702,6 +707,10 @@ static int folder_number(struct conversations_state *state,
         r = write_folders(state);
         if (r) abort();
     }
+
+    // check ACLs
+    if (pos >= 0 && !bv_isset(state->folder_access, pos))
+        pos = -1;
 
     return pos;
 }
@@ -1780,6 +1789,11 @@ static int _guid_one(const char *s, struct guid_foreach_rock *frock, conversatio
     /* mboxname */
     int r = parseuint32(s, &err, &res);
     if (r || err != p) return IMAP_INTERNAL;
+
+    // ACLs - skip unseeable records
+    if (!bv_isset(&frock->folder_access, res))
+        return 0;
+
     rec.mboxname = strarray_safenth(frock->state->folder_names, res);
     if (!rec.mboxname) return IMAP_INTERNAL;
 
