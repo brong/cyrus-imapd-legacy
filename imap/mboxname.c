@@ -1570,6 +1570,12 @@ HIDDEN int mboxname_policycheck(const char *name)
     if (!strcmp(name, "user.anyone")) return IMAP_MAILBOX_BADNAME;
     if (!strcmp(name, "user.anonymous")) return IMAP_MAILBOX_BADNAME;
 
+    // exact "INBOX" child
+    if (!strncmp(name, "user.", 5)) {
+        p = strchr(name+5, '.');
+        if (p && !strcmp(p+1, "INBOX")) return IMAP_MAILBOX_BADNAME;
+    }
+
     while (*name) {
         if (*name == '&') {
             /* Modified UTF-7 */
