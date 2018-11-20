@@ -1543,9 +1543,7 @@ static void _email_search_mbox(jmap_req_t *req, search_expr_t *parent,
     e = search_expr_new(parent, SEOP_MATCH);
     e->attr = search_attr_find("folder");
     e->value.s = xstrdup(mbentry->name);
-    if (!is_otherthan) {
-        e->match_guid = 1;
-    }
+    e->match = is_otherthan ? SEARCH_MATCH_UID : SEARCH_MATCH_GUID;
     mboxlist_entry_free(&mbentry);
 }
 
