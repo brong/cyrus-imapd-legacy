@@ -212,7 +212,6 @@ EXPORTED search_expr_t *search_expr_duplicate(const search_expr_t *e)
 
     newe = search_expr_new(NULL, e->op);
     newe->attr = e->attr;
-    newe->match = e->match;
     if (newe->attr && newe->attr->duplicate)
         newe->attr->duplicate(&newe->value, &e->value);
     else
@@ -848,7 +847,7 @@ EXPORTED int search_expr_evaluate(message_t *m, const search_expr_t *e)
     case SEOP_MATCH:
         assert(e->attr);
         assert(e->attr->match);
-        return e->attr->match(m, &e->value, e->internalised, e->match, e->attr->data1);
+        return e->attr->match(m, &e->value, e->internalised, e->attr->data1);
     case SEOP_AND:
         for (child = e->children ; child ; child = child->next)
             if (!search_expr_evaluate(m, child))
@@ -1147,15 +1146,23 @@ static void split(search_expr_t *e,
              * to all folders */
             cb(NULL, NULL, e, rock);
         }
-        else {
-            /* One or more folder matches; Extract the first folder
-             * to split the expression. Any remaining folder matches
-             * will be evaluated in the subtree. */
+        else if (nfolders == 1) {
+            /* Exactly one positive folder match: remainder of expression
+             * applies to this specific folder */
             child = detachp(folder_prevp);
-            /* normalise the remaining subtree */
+            /* normalise the remaining subtree - the top node might be
+             * trivial now that we've detached the folder match */
             search_expr_normalise(&e);
             cb(child->value.s, NULL, e, rock);
             search_expr_free(child);
+        }
+        else {
+            /* Two or more positive folder matches; this expression
+             * will never match any messages because messages belong
+             * to exactly one folder, so just delete it.
+             * TODO need to uniquify the (match folder) nodes
+             * before this will work properly */
+            search_expr_free(e);
         }
     }
     else if (is_folder_node(e)) {
@@ -1173,9 +1180,7 @@ static void split(search_expr_t *e,
 /* ====================================================================== */
 
 static int search_string_match(message_t *m, const union search_value *v,
-                                void *internalised,
-                                enum search_match match __attribute__((unused)),
-                                void *data1)
+                                void *internalised, void *data1)
 {
     int r;
     struct buf buf = BUF_INITIALIZER;
@@ -1235,7 +1240,6 @@ static void search_string_free(union search_value *v)
 
 static int search_listid_match(message_t *m, const union search_value *v,
                                void *internalised,
-                               enum search_match match __attribute__((unused)),
                                void *data1 __attribute__((unused)))
 {
     int r;
@@ -1265,7 +1269,6 @@ out:
 
 static int search_contenttype_match(message_t *m, const union search_value *v,
                                     void *internalised,
-                                    enum search_match match __attribute__((unused)),
                                     void *data1 __attribute__((unused)))
 {
     int r;
@@ -1304,9 +1307,7 @@ out:
 /* ====================================================================== */
 
 static int search_header_match(message_t *m, const union search_value *v,
-                               void *internalised,
-                               enum search_match match __attribute__((unused)),
-                               void *data1)
+                               void *internalised, void *data1)
 {
     int r;
     struct buf buf = BUF_INITIALIZER;
@@ -1363,7 +1364,6 @@ static void search_uid_internalise(struct index_state *state,
 static int search_seq_match(message_t *m,
                             const union search_value *v __attribute__((unused)),
                             void *internalised,
-                            enum search_match match __attribute__((unused)),
                             void *data1)
 {
     struct seqset *seq = internalised;
@@ -1389,7 +1389,6 @@ static void search_seq_serialise(struct buf *b, const union search_value *v)
 
 static int search_flags_match(message_t *m, const union search_value *v,
                               void *internalised __attribute__((unused)),
-                              enum search_match match __attribute__((unused)),
                               void *data1)
 {
     int r;
@@ -1496,7 +1495,6 @@ static void search_keyword_internalise(struct index_state *state,
 static int search_keyword_match(message_t *m,
                                 const union search_value *v __attribute__((unused)),
                                 void *internalised,
-                                enum search_match match __attribute__((unused)),
                                 void *data1 __attribute__((unused)))
 {
     int r;
@@ -1542,7 +1540,6 @@ static int search_time_t_cmp(message_t *m, const union search_value *v,
 
 static int search_time_t_match(message_t *m, const union search_value *v,
                                void *internalised __attribute__((unused)),
-                               enum search_match match __attribute__((unused)),
                                void *data1)
 {
     int r;
@@ -1599,7 +1596,6 @@ static int search_uint64_cmp(message_t *m, const union search_value *v,
 
 static int search_uint64_match(message_t *m, const union search_value *v,
                                void *internalised __attribute__((unused)),
-                               enum search_match match __attribute__((unused)),
                                void *data1)
 {
     int r;
@@ -1652,59 +1648,19 @@ static int search_cid_unserialise(struct protstream *prot, union search_value *v
 
 /* ====================================================================== */
 
-struct search_folder_internal {
-    struct conversations_state *cstate;
-    int matches; // 1: definitely yes, 0: check cstate, or false
-};
-
 static void search_folder_internalise(struct index_state *state,
                                       const union search_value *v,
                                       void **internalisedp)
 {
-    if (*internalisedp) {
-        free(*internalisedp);
-        *internalisedp = NULL;
-    }
-    if (state && v) {
-        struct search_folder_internal *internal =
-            xzmalloc(sizeof(struct search_folder_internal));
-        if (!strcmp(state->mailbox->name, v->s)) {
-            internal->matches = 1;
-        }
-        else {
-            internal->cstate = mailbox_get_cstate(state->mailbox);
-        }
-        *internalisedp = internal;
-    }
+    if (state)
+        *internalisedp = (void *)(unsigned long)(!strcmp(state->mailbox->name, v->s));
 }
 
-static int search_folder_matchguid_cb(const conv_guidrec_t *rec, void *rock)
+static int search_folder_match(message_t *m __attribute__((unused)),
+                               const union search_value *v __attribute__((unused)),
+                               void *internalised, void *data1 __attribute__((unused)))
 {
-    return strcmp(rec->mboxname, (const char*)rock) ? 0 : IMAP_OK_COMPLETED;
-}
-
-static int search_folder_match(message_t *m, const union search_value *v,
-                               void *internalised,
-                               enum search_match match,
-                               void *data1 __attribute__((unused)))
-{
-    struct search_folder_internal *internal = internalised;
-
-    /* Trivially matches */
-    if (internal->matches) return 1;
-
-    /* Trivially can't match */
-    if (match != SEARCH_MATCH_GUID) return 0;
-
-    /* Match by GUID */
-    struct conversations_state *cstate = internal->cstate;
-    if (!cstate) return 0;
-    const struct message_guid *guid = NULL;
-    int r = message_get_guid(m, &guid);
-    if (r) return 0;
-    r = conversations_guid_foreach(cstate, message_guid_encode(guid),
-                                   search_folder_matchguid_cb, v->s);
-    return r == IMAP_OK_COMPLETED;
+    return (int)(unsigned long)internalised;
 }
 
 unsigned int search_folder_get_countability(const union search_value *v
@@ -1766,7 +1722,6 @@ static void _search_annot_callback(const char *mboxname __attribute__((unused)),
 
 static int search_emailid_match(message_t *m, const union search_value *v,
                               void *internalised __attribute__((unused)),
-                              enum search_match match __attribute__((unused)),
                               void *data1 __attribute__((unused)))
 {
     const struct message_guid *guid = NULL;
@@ -1784,7 +1739,6 @@ static int search_emailid_match(message_t *m, const union search_value *v,
 
 static int search_threadid_match(message_t *m, const union search_value *v,
                                  void *internalised __attribute__((unused)),
-                                 enum search_match match __attribute__((unused)),
                                  void *data1 __attribute__((unused)))
 {
     conversation_id_t cid = 0;
@@ -1801,9 +1755,7 @@ static int search_threadid_match(message_t *m, const union search_value *v,
 }
 
 static int search_annotation_match(message_t *m, const union search_value *v,
-                                   void *internalised,
-                                   enum search_match match __attribute__((unused)),
-                                   void *data1 __attribute__((unused)))
+                                   void *internalised, void *data1 __attribute__((unused)))
 {
     struct mailbox *mailbox = (struct mailbox *)internalised;
     struct searchannot *sa = v->annot;
@@ -1951,7 +1903,6 @@ static void search_convflags_internalise(struct index_state *state,
 static int search_convflags_match(message_t *m,
                                   const union search_value *v __attribute__((unused)),
                                   void *internalised,
-                                  enum search_match match __attribute__((unused)),
                                   void *data1 __attribute__((unused)))
 {
     struct conv_rock *rock = (struct conv_rock *)internalised;
@@ -1977,7 +1928,6 @@ static int search_convflags_match(message_t *m,
 static int search_allconvflags_match(message_t *m,
                                      const union search_value *v __attribute__((unused)),
                                      void *internalised,
-                                     enum search_match match __attribute__((unused)),
                                      void *data1 __attribute__((unused)))
 {
     struct conv_rock *rock = (struct conv_rock *)internalised;
@@ -2021,9 +1971,7 @@ static void search_convmodseq_internalise(struct index_state *state,
 }
 
 static int search_convmodseq_match(message_t *m, const union search_value *v,
-                                   void *internalised,
-                                   enum search_match match __attribute__((unused)),
-                                   void *data1 __attribute__((unused)))
+                                   void *internalised, void *data1 __attribute__((unused)))
 {
     struct conv_rock *rock = (struct conv_rock *)internalised;
     conversation_id_t cid = NULLCONVERSATION;
@@ -2096,7 +2044,6 @@ static int search_uint32_cmp(message_t *m, const union search_value *v,
 
 static int search_uint32_match(message_t *m, const union search_value *v,
                                void *internalised __attribute__((unused)),
-                               enum search_match match __attribute__((unused)),
                                void *data1)
 {
     int r;
@@ -2186,9 +2133,7 @@ static int searchmsg_cb(int isbody, charset_t charset, int encoding,
 }
 
 static int search_text_match(message_t *m, const union search_value *v,
-                             void *internalised,
-                             enum search_match match __attribute__((unused)),
-                             void *data1)
+                             void *internalised, void *data1)
 {
     struct searchmsg_rock sr;
 

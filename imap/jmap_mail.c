@@ -1525,7 +1525,7 @@ static void _email_search_type(search_expr_t *parent, const char *s)
 }
 
 static void _email_search_mbox(jmap_req_t *req, search_expr_t *parent,
-                               json_t *mailbox, int is_otherthan)
+                               json_t *mailbox, int is_not)
 {
     search_expr_t *e;
     const char *s = json_string_value(mailbox);
@@ -1536,14 +1536,13 @@ static void _email_search_mbox(jmap_req_t *req, search_expr_t *parent,
         return;
     }
 
-    if (is_otherthan) {
+    if (is_not) {
         parent = search_expr_new(parent, SEOP_NOT);
     }
 
     e = search_expr_new(parent, SEOP_MATCH);
     e->attr = search_attr_find("folder");
     e->value.s = xstrdup(mbentry->name);
-    e->match = is_otherthan ? SEARCH_MATCH_UID : SEARCH_MATCH_GUID;
     mboxlist_entry_free(&mbentry);
 }
 
@@ -1714,12 +1713,12 @@ static search_expr_t *_email_buildsearch(jmap_req_t *req, json_t *filter,
             charset_free(&utf8);
         }
         if ((val = json_object_get(filter, "inMailbox"))) {
-            _email_search_mbox(req, this, val, /*is_otherthan*/0);
+            _email_search_mbox(req, this, val, /*is_not*/0);
         }
 
         json_array_foreach(json_object_get(filter, "inMailboxOtherThan"), i, val) {
             e = search_expr_new(this, SEOP_AND);
-            _email_search_mbox(req, e, val, /*is_otherthan*/1);
+            _email_search_mbox(req, e, val, /*is_not*/1);
         }
 
         if (JNOTNULL((val = json_object_get(filter, "allInThreadHaveKeyword")))) {
