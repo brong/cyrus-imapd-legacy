@@ -593,8 +593,7 @@ static int savemsg(struct clientdata *cd,
         "Return-Path",  /* need to remove (we add our own) */
         NULL
     };
-    char *addbody, *fold[5], *p;
-    int addlen, nfold, i;
+    struct buf hdrbuf = BUF_INITIALIZER;
 
     /* Copy to spool file */
     f = func->spoolfile(m);
@@ -623,12 +622,10 @@ static int savemsg(struct clientdata *cd,
             hostname = config_servername;
         }
 
-        addlen = 2 + strlen(rpath) + (hostname ? 1 + strlen(hostname) : 0);
-        addbody = xmalloc(addlen + 1);
-        sprintf(addbody, "<%s%s%s>",
-                rpath, hostname ? "@" : "", hostname ? hostname : "");
-        fprintf(f, "Return-Path: %s\r\n", addbody);
-        spool_cache_header(xstrdup("Return-Path"), addbody, m->hdrcache);
+        buf_printf(&hdrbuf, "<%s%s%s>",
+                   rpath, hostname ? "@" : "", hostname ? hostname : "");
+        fprintf(f, "Return-Path: %s\r\n", buf_cstring(&hdrbuf));
+        spool_cache_header(xstrdup("Return-Path"), buf_release(&hdrbuf), m->hdrcache);
     }
 
     /* add a received header */
