@@ -466,7 +466,8 @@ static jmap_method_t *find_methodproc(const char *name, hash_table *jmap_methods
 
 /* Return the ACL for mbentry for the authstate of userid.
  * Lookup and store ACL rights in the mboxrights cache. */
-static int _rights_for_mbentry(struct auth_state *authstate,
+static int _rights_for_mbentry(const char *userid,
+                               struct auth_state *authstate,
                                const mbentry_t *mbentry,
                                hash_table *mboxrights)
 {
@@ -490,6 +491,11 @@ static int _rights_for_mbentry(struct auth_state *authstate,
         mboxlist_entry_free(&parententry);
     }
     else rights = httpd_myrights(authstate, mbentry);
+
+    /* XXX FastMail workaround: mailbox owner always has ADMIN */
+    if (!strcmpsafe(mbname_userid(mbname), userid)) {
+        rights |= ACL_ADMIN;
+    }
 
     /* Cache rights */
     rightsptr = xmalloc(sizeof(int));
@@ -519,7 +525,7 @@ static int _is_accessible(const mbentry_t *mbentry, void *vrock)
     }
 
     struct is_accessible_rock *rock = vrock;
-    int rights = _rights_for_mbentry(rock->authstate, mbentry, rock->mboxrights);
+    int rights = _rights_for_mbentry(rock->userid, rock->authstate, mbentry, rock->mboxrights);
     if (!(rights & ACL_LOOKUP)) return 0;
     return IMAP_OK_COMPLETED;
 }
@@ -1177,7 +1183,7 @@ HIDDEN char *jmap_xhref(const char *mboxname, const char *resource)
 
 HIDDEN int jmap_myrights(jmap_req_t *req, const mbentry_t *mbentry)
 {
-    return _rights_for_mbentry(req->authstate, mbentry, req->mboxrights);
+    return _rights_for_mbentry(req->userid, req->authstate, mbentry, req->mboxrights);
 }
 
 // gotta have them all
@@ -1198,7 +1204,7 @@ HIDDEN int jmap_myrights_byname(jmap_req_t *req, const char *mboxname)
 
     mbentry_t *mbentry = NULL;
     if (!jmap_mboxlist_lookup(mboxname, &mbentry, NULL)) {
-        rights = _rights_for_mbentry(req->authstate, mbentry, req->mboxrights);
+        rights = _rights_for_mbentry(req->userid, req->authstate, mbentry, req->mboxrights);
     }
     mboxlist_entry_free(&mbentry);
 
