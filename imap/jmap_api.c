@@ -462,6 +462,10 @@ static struct mbstate *_mbstate_getoradd(struct auth_state *authstate,
         mboxlist_entry_free(&parententry);
     }
     else mbstate->rights = httpd_myrights(authstate, mbentry);
+    /* XXX FastMail workaround: mailbox owner always has ADMIN */
+    if (auth_memberof(authstate, mbname_userid(mbname)) == 3) {
+        mbstate->rights |= ACL_ADMIN;
+    }
     mbname_free(&mbname);
 
     hash_insert(mbentry->name, mbstate, mbstates);
