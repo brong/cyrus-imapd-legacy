@@ -1527,7 +1527,8 @@ static int setcalendarevents_create(jmap_req_t *req,
                                     json_t *event,
                                     struct caldav_db *db,
                                     char **uidptr,
-                                    json_t *invalid)
+                                    json_t *invalid,
+                                    json_t *create)
 {
     int r, pe;
     int needrights = DACL_WRITEPROPS|DACL_WRITECONT;
@@ -1680,6 +1681,10 @@ static int setcalendarevents_create(jmap_req_t *req,
     r = 0;
     *uidptr = uid;
 
+    char *xhref = jmap_xhref(mbox->name, resource);
+    json_object_set_new(create, "x-href", json_string(xhref));
+    free(xhref);
+
 done:
     if (r) {
         *uidptr = NULL;
@@ -1697,7 +1702,8 @@ static int setcalendarevents_update(jmap_req_t *req,
                                     json_t *event_patch,
                                     const char *id,
                                     struct caldav_db *db,
-                                    json_t *invalid)
+                                    json_t *invalid,
+                                    json_t *update)
 {
     int r, pe;
     int needrights = DACL_RMRSRC|DACL_WRITEPROPS|DACL_WRITECONT;
@@ -1809,6 +1815,15 @@ static int setcalendarevents_update(jmap_req_t *req,
         json_array_append_new(invalid, json_string("participantId"));
     }
     json_decref(new_event);
+
+    json_t *jnewsequence = json_object_get(event_patch, "sequence");
+    if (!JNOTNULL(jnewsequence)) {
+        json_t *joldseq = json_object_get(old_event, "sequence");
+        int oldseq = joldseq ? json_integer_value(joldseq) : 0;
+        int newseq = oldseq + 1;
+        json_object_set_new(new_event, "sequence", json_integer(newseq));
+        json_object_set_new(update, "sequence", json_integer(newseq));
+    }
 
     if (json_array_size(invalid)) {
         r = 0;
@@ -2075,8 +2090,6 @@ static int jmap_calendarevent_set(struct jmap_req *req)
     const char *key;
     json_t *arg;
     json_object_foreach(set.create, key, arg) {
-        char *uid = NULL;
-
         /* Validate calendar event id. */
         if (!strlen(key)) {
             json_t *err= json_pack("{s:s}", "type", "invalidArguments");
@@ -2086,12 +2099,14 @@ static int jmap_calendarevent_set(struct jmap_req *req)
 
         /* Create the calendar event. */
         json_t *invalid = json_pack("[]");
-        r = setcalendarevents_create(req, req->accountid, arg, db, &uid, invalid);
+        json_t *create = json_pack("{}");
+        r = setcalendarevents_create(req, req->accountid, arg, db, &uid, invalid, create);
         if (r) {
             json_t *err = json_pack("{s:s s:s}",
                                     "type", "internalError",
                                     "message", error_message(r));
             json_object_set_new(set.not_created, key, err);
+            json_decref(create);
             r = 0;
             free(uid);
             continue;
@@ -2107,7 +2122,8 @@ static int jmap_calendarevent_set(struct jmap_req *req)
         json_decref(invalid);
 
         /* Report calendar event as created. */
-        json_object_set_new(set.created, key, json_pack("{s:s}", "id", uid));
+        json_object_set_new(create, "id", json_string(uid));
+        json_object_set_new(set.created, key, create);
         jmap_add_id(req, key, uid);
         free(uid);
     }
@@ -2147,15 +2163,18 @@ static int jmap_calendarevent_set(struct jmap_req *req)
 
         /* Update the calendar event. */
         json_t *invalid = json_pack("[]");
-        r = setcalendarevents_update(req, arg, uid, db, invalid);
+        json_t *update = json_pack("{}");
+        r = setcalendarevents_update(req, arg, uid, db, invalid, update);
         if (r == IMAP_NOTFOUND) {
             json_t *err = json_pack("{s:s}", "type", "notFound");
             json_object_set_new(set.not_updated, uid, err);
             json_decref(invalid);
+            json_decref(update);
             r = 0;
             continue;
         } else if (r) {
             json_decref(invalid);
+            json_decref(update);
             goto done;
         }
         if (json_array_size(invalid)) {
@@ -2167,8 +2186,13 @@ static int jmap_calendarevent_set(struct jmap_req *req)
         }
         json_decref(invalid);
 
+        if(!json_object_size(update)) {
+            json_decref(update);
+            update = json_null();
+        }
+
         /* Report calendar event as updated. */
-        json_object_set_new(set.updated, uid, json_null());
+        json_object_set_new(set.updated, uid, update);
     }
 
 
