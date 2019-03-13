@@ -35,11 +35,13 @@ EXPORTED const char *me_create_sasl_enc(const char *username)
   junk_buf[i] = '\0';
 
   padded_sasl[255] = '\0';
-  snprintf(padded_sasl, 255, "%02d%s%s", junk_len, junk_buf, username);
+  if (snprintf(padded_sasl, 254, "%02d%s%s", junk_len, junk_buf, username) < 0)
+      return NULL;
 
   key_buf[255] = '\0';
   format = config_getstring(IMAPOPT_ME_SECRET);
-  snprintf(key_buf, 255, format, epoch, epoch);
+  if (snprintf(key_buf, 254, format, epoch, epoch) < 0)
+      return NULL;
 
   key_len = strlen(key_buf);
   data_len = strlen(padded_sasl);
@@ -47,7 +49,8 @@ EXPORTED const char *me_create_sasl_enc(const char *username)
   encoded_base64 = base64_encode(data_len, (unsigned char *)padded_sasl);
 
   padded_sasl[255] = '\0';
-  snprintf(padded_sasl, 255, "%s %d", encoded_base64, epoch);
+  if (snprintf(padded_sasl, 255, "%s %d", encoded_base64, epoch) < 0)
+     return NULL;
 
   return padded_sasl;
 }
