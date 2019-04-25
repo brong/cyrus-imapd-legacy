@@ -346,9 +346,18 @@ static int validate_request(struct transaction_t *txn, json_t *req,
             syslog(LOG_DEBUG, "old capability %s used", s);
         }
         else if (!json_object_get(settings->server_capabilities, s))  {
+#if 0 /* FIXME - FastMail Only, ignore unknown capabilities */
             return JMAP_UNKNOWN_CAPABILITY;
+#endif
         }
     }
+
+    /* FIXME - FastMail Only, set required capabilities */
+    const char *capability;
+    json_object_foreach(settings->server_capabilities, capability, val) {
+        json_array_append_new(using, json_string(capability));
+    }
+
 
     return 0;
 }
