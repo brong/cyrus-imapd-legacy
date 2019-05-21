@@ -11,7 +11,7 @@ chomp($num);
 
 my $date = `date -R`;
 
-my $CYRUSLIBS = "cyruslibs-fastmail-v22";
+my $CYRUSLIBS = "cyruslibs-fastmail-v25";
 
 my $basename = "cyrus-$tag";
 my $basedir = "usr/$basename";
