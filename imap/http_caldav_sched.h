@@ -136,7 +136,7 @@ struct freebusy_filter {
     unsigned flags;
     struct icaltimetype start;
     struct icaltimetype end;
-    icaltimezone *tz;
+    icaltimezone *floatingtz;
     struct freebusy_array freebusy;     /* array of found freebusy periods */
     struct vavailability_array vavail;  /* array of found vavail components */
 };

@@ -788,3 +788,27 @@ EXPORTED int caldav_get_events(struct caldav_db *caldavdb,
 
     return r;
 }
+
+EXPORTED icaltimezone *caldav_mailbox_floatingtz(const char *mailbox,
+                                                 const char *userid)
+{
+    icaltimezone *floatingtz = NULL;
+
+    struct buf buf = BUF_INITIALIZER;
+    const char *annotname = DAV_ANNOT_NS "<" XML_NS_CALDAV ">calendar-timezone";
+    if (!annotatemore_lookupmask(mailbox, annotname, userid, &buf)) {
+        icalcomponent *comp = NULL;
+        comp = icalparser_parse_string(buf_cstring(&buf));
+        icalcomponent *subcomp =
+            icalcomponent_get_first_component(comp, ICAL_VTIMEZONE_COMPONENT);
+        if (subcomp) {
+            floatingtz = icaltimezone_new();
+            icalcomponent_remove_component(comp, subcomp);
+            icaltimezone_set_component(floatingtz, subcomp);
+        }
+        icalcomponent_free(comp);
+    }
+    buf_free(&buf);
+
+    return floatingtz;
+}
