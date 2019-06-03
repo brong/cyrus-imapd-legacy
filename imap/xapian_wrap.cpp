@@ -1350,6 +1350,9 @@ int xapian_snipgen_make_snippet(xapian_snipgen_t *snipgen,
 
         unsigned flags = Xapian::MSet::SNIPPET_EXHAUSTIVE |
             Xapian::MSet::SNIPPET_EMPTY_WITHOUT_MATCH;
+#ifdef USE_XAPIAN_CYRUS_EXTENSIONS
+        flags |= Xapian::TermGenerator::FLAG_CJK_WORDS;
+#endif
 
         snippet = enquire.get_mset(0, 0).snippet(text,
                 snipgen->max_len - buf_len(snipgen->buf),
@@ -1358,9 +1361,6 @@ int xapian_snipgen_make_snippet(xapian_snipgen_t *snipgen,
                 snipgen->hi_start,
                 snipgen->hi_end,
                 snipgen->omit
-#ifdef USE_XAPIAN_CYRUS_EXTENSIONS
-                , Xapian::TermGenerator::FLAG_CJK_WORDS
-#endif
                 );
 
         if (snippet.size()) {
