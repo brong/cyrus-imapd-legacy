@@ -2593,6 +2593,7 @@ struct acl_change {
 struct invite_rock {
     xmlNodePtr notify;
     xmlNsPtr ns[NUM_NAMESPACE];
+    const char *mboxname;
     struct buf resource;
     struct request_target_t tgt;
     const struct prop_entry *live_props;
@@ -2608,16 +2609,25 @@ static void send_dav_invite(const char *userid, void *val, void *rock)
     long new = change->new & (ACL_READ|ACL_LOOKUP|WRITERIGHTS);
 
     if (old != new) {
-        int access, r;
+        int access, r = 0;
 
         if (!new) access = SHARE_NONE;
         else if (new & WRITERIGHTS) access = SHARE_READWRITE;
         else access = SHARE_READONLY;
 
+        if (new && !old)
+            r = mboxlist_changesub(irock->mboxname, userid, httpd_authstate,
+                                   1, 0, /*notify*/1);
+        if (old && !new)
+            r = mboxlist_changesub(irock->mboxname, userid, httpd_authstate,
+                                   0, 0, /*notify*/1);
+
         /* Notify sharee */
-        r = dav_create_invite(&irock->notify, irock->ns, &irock->tgt,
-                              irock->live_props, userid, access,
-                              BAD_CAST "Shared via JMAP");
+        if (!r)
+            r = dav_create_invite(&irock->notify, irock->ns, &irock->tgt,
+                                  irock->live_props, userid, access,
+                                  BAD_CAST "Shared via JMAP");
+
         if (!r) {
             /* Create a resource name for the notifications -
                We use a consistent naming scheme so that multiple
@@ -2816,6 +2826,8 @@ HIDDEN int jmap_set_sharewith(struct mailbox *mbox,
 
         make_collection_url(&irock.resource, irock.tgt.namespace->prefix,
                             /*haszzzz*/0, mbname, mbname_userid(mbname));
+
+        irock.mboxname = mbox->name;
 
         /* Create a request target for this collection */
         irock.tgt.flags = TGT_DAV_SHARED;  // prevent old-style sharing redirect
