@@ -356,22 +356,7 @@ static int getcalendars_cb(const mbentry_t *mbentry, void *vrock)
                 is_subscribed = 1;
             }
             else {
-                /* Support legacy shared calendars: they are subscribed
-                 * by default, if the user did not explicitly set the
-                 * invite-status DAV property */
-                buf_reset(&attrib);
-                static const char *invite_annot =
-                    DAV_ANNOT_NS "<" XML_NS_DAV ">invite-status";
-                r = annotatemore_lookupmask(mbentry->name, invite_annot,
-                                            httpd_userid, &attrib);
-                if (!strcmp(buf_cstring(&attrib), "invite-accepted")) {
-                    is_subscribed = 1;
-                }
-                else if (buf_len(&attrib)) {
-                    is_subscribed = 0;
-                }
-                else is_subscribed = 1;
-                buf_free(&attrib);
+                is_subscribed = 0;
             }
         }
         json_object_set_new(obj, "isSubscribed", json_boolean(is_subscribed));
