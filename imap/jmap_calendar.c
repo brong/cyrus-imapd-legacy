@@ -1626,7 +1626,7 @@ static int getcalendarevents_cb(void *vrock, struct caldav_data *cdata)
     icalcomponent* ical = NULL;
     json_t *jsevent = NULL;
     jmap_req_t *req = rock->req;
-    char *schedule_address = NULL;
+    strarray_t schedule_addresses = STRARRAY_INITIALIZER;
 
     if (!cdata->dav.alive)
         return 0;
@@ -1651,7 +1651,7 @@ static int getcalendarevents_cb(void *vrock, struct caldav_data *cdata)
     }
 
     /* Load message containing the resource and parse iCal data */
-    ical = caldav_record_to_ical(rock->mailbox, cdata, httpd_userid, &schedule_address);
+    ical = caldav_record_to_ical(rock->mailbox, cdata, httpd_userid, &schedule_addresses);
     if (!ical) {
         syslog(LOG_ERR, "caldav_record_to_ical failed for record %u:%s",
                 cdata->dav.imap_uid, rock->mailbox->name);
@@ -1672,12 +1672,12 @@ static int getcalendarevents_cb(void *vrock, struct caldav_data *cdata)
 
     /* Add participant id */
     const char *participant_id = NULL;
-    if (schedule_address) {
+    if (strarray_size(&schedule_addresses)) {
         const char *key;
         json_t *participant;
         json_object_foreach(json_object_get(jsevent, "participants"), key, participant) {
             const char *email = json_string_value(json_object_get(participant, "email"));
-            if (email && !strcmp(email, schedule_address)) {
+            if (email && strarray_find_case(&schedule_addresses, email, 0) >= 0) {
                 participant_id = key;
                 break;
             }
@@ -1718,7 +1718,7 @@ gotevent:
     }
 
 done:
-    free(schedule_address);
+    strarray_fini(&schedule_addresses);
     if (ical) icalcomponent_free(ical);
     return r;
 }
@@ -2064,7 +2064,7 @@ done:
 }
 
 static int setcalendarevents_schedule(jmap_req_t *req,
-                                      char **schedaddrp,
+                                      strarray_t *schedule_addresses,
                                       icalcomponent *oldical,
                                       icalcomponent *ical,
                                       int mode)
@@ -2080,38 +2080,9 @@ static int setcalendarevents_schedule(jmap_req_t *req,
     if (!organizer) return 0;
     if (!strncasecmp(organizer, "mailto:", 7)) organizer += 7;
 
-    if (!*schedaddrp) {
-        const char **hdr =
-            spool_getheader(req->txn->req_hdrs, "Schedule-Address");
-        if (hdr) *schedaddrp = xstrdup(hdr[0]);
-    }
-
-    /* XXX - after legacy records are gone, we can strip this and just not send a
-     * cancellation if deleting a record which was never replied to... */
-    if (!*schedaddrp) {
-        /* userid corresponding to target */
-        *schedaddrp = xstrdup(req->userid);
-
-        /* or overridden address-set for target user */
-        const char *annotname =
-            DAV_ANNOT_NS "<" XML_NS_CALDAV ">calendar-user-address-set";
-        char *mailboxname = caldav_mboxname(*schedaddrp, NULL);
-        struct buf attrib = BUF_INITIALIZER;
-        int r = annotatemore_lookupmask(mailboxname, annotname,
-                                        *schedaddrp, &attrib);
-        if (!r) {
-            strarray_t *values = strarray_split(buf_cstring(&attrib), ",", STRARRAY_TRIM);
-            const char *item = strarray_nth(values, 0);
-            if (item) {
-                if (!strncasecmp(item, "mailto:", 7)) item += 7;
-                free(*schedaddrp);
-                *schedaddrp = xstrdup(item);
-            }
-            strarray_free(values);
-        }
-        free(mailboxname);
-        buf_free(&attrib);
-    }
+    const char **hdr =
+        spool_getheader(req->txn->req_hdrs, "Schedule-Address");
+    if (hdr) strarray_append(schedule_addresses, hdr[0]);
 
     /* Validate create/update. */
     if (oldical && (mode & (JMAP_CREATE|JMAP_UPDATE))) {
@@ -2139,9 +2110,9 @@ static int setcalendarevents_schedule(jmap_req_t *req,
     if (organizer &&
             /* XXX Hack for Outlook */ icalcomponent_get_first_invitee(comp)) {
         /* Send scheduling message. */
-        if (!strcmpsafe(organizer, *schedaddrp)) {
+        if (strarray_find_case(schedule_addresses, organizer, 0) >= 0) {
             /* Organizer scheduling object resource */
-            sched_request(req->userid, *schedaddrp, oldical, ical);
+            sched_request(req->userid, organizer, oldical, ical);
         } else {
             /* Attendee scheduling object resource */
             int omit_reply = 0;
@@ -2150,15 +2121,15 @@ static int setcalendarevents_schedule(jmap_req_t *req,
                      prop;
                      prop = icalcomponent_get_next_property(comp, ICAL_ATTENDEE_PROPERTY)) {
                     const char *addr = icalproperty_get_attendee(prop);
-                    if (!addr || strncasecmp(addr, "mailto:", 7) || strcmp(addr + 7, *schedaddrp))
+                    if (!addr || strncasecmp(addr, "mailto:", 7) || strarray_find_case(schedule_addresses, addr+7, 0) >= 0)
                         continue;
                     icalparameter *param = icalproperty_get_first_parameter(prop, ICAL_PARTSTAT_PARAMETER);
                     omit_reply = !param || icalparameter_get_partstat(param) == ICAL_PARTSTAT_NEEDSACTION;
                     break;
                 }
             }
-            if (!omit_reply)
-                sched_reply(req->userid, *schedaddrp, oldical, ical);
+            if (!omit_reply && strarray_size(schedule_addresses))
+                sched_reply(req->userid, strarray_nth(schedule_addresses, 0), oldical, ical);
         }
     }
 
@@ -2198,7 +2169,7 @@ static int setcalendarevents_create(jmap_req_t *req,
 
     icalcomponent *ical = NULL;
     const char *calendarId = NULL;
-    char *schedule_address = NULL;
+    strarray_t schedule_addresses = STRARRAY_INITIALIZER;
 
     if ((uid = (char *) json_string_value(json_object_get(event, "uid")))) {
         /* Use custom iCalendar UID from request object */
@@ -2286,7 +2257,8 @@ static int setcalendarevents_create(jmap_req_t *req,
         const char *participant_id = json_string_value(jparticipantId);
         json_t *participants = json_object_get(event, "participants");
         json_t *participant = json_object_get(participants, participant_id);
-        schedule_address = xstrdupnull(json_string_value(json_object_get(participant, "email")));
+        const char *email = json_string_value(json_object_get(participant, "email"));
+        if (email) strarray_add(&schedule_addresses, email);
     }
     else if (JNOTNULL(jparticipantId)) {
         json_array_append_new(invalid, json_string("participantId"));
@@ -2301,7 +2273,7 @@ static int setcalendarevents_create(jmap_req_t *req,
     }
 
     /* Handle scheduling. */
-    r = setcalendarevents_schedule(req, &schedule_address,
+    r = setcalendarevents_schedule(req, &schedule_addresses,
                                    NULL, ical, JMAP_CREATE);
     if (r) goto done;
 
@@ -2321,7 +2293,7 @@ static int setcalendarevents_create(jmap_req_t *req,
     }
     else {
         r = caldav_store_resource(&txn, ical, mbox, resource, 0,
-                                  db, 0, httpd_userid, schedule_address);
+                                  db, 0, httpd_userid, &schedule_addresses);
     }
     mboxlist_entry_free(&txn.req_tgt.mbentry);
     spool_free_hdrcache(txn.req_hdrs);
@@ -2341,7 +2313,7 @@ static int setcalendarevents_create(jmap_req_t *req,
 done:
     if (mbox) jmap_closembox(req, &mbox);
     if (ical) icalcomponent_free(ical);
-    free(schedule_address);
+    strarray_fini(&schedule_addresses);
     free(resource);
     free(mboxname);
     free(uid);
@@ -2430,7 +2402,7 @@ static int setcalendarevents_apply_patch(json_t *event_patch,
                                          icalcomponent *oldical,
                                          const char *recurid,
                                          json_t *invalid,
-                                         char **schedule_address,
+                                         strarray_t *schedule_addresses,
                                          icalcomponent **newical,
                                          json_t *update,
                                          json_t **err)
@@ -2638,20 +2610,18 @@ static int setcalendarevents_apply_patch(json_t *event_patch,
         json_array_append_new(invalid, json_string("participantId"));
     }
     const char *participant_id = json_string_value(jparticipantId);
-    if (!participant_id && *schedule_address) {
+    if (!participant_id) {
         const char *key;
         json_t *participant;
         json_object_foreach(json_object_get(new_event, "participants"), key, participant) {
             const char *email = json_string_value(json_object_get(participant, "email"));
-            if (email && !strcmp(email, *schedule_address)) {
+            if (email && strarray_find_case(schedule_addresses, email, 0) >= 0) {
                 participant_id = key;
                 break;
             }
         }
     }
-    if (participant_id && !schedule_address) {
-        *schedule_address = xstrdup(participant_id);
-    }
+    if (participant_id) strarray_unshift(schedule_addresses, participant_id);
 
     /* Determine if to bump sequence */
     json_t *jdiff = jmap_patchobject_create(old_event, new_event);
@@ -2699,7 +2669,7 @@ static int setcalendarevents_update(jmap_req_t *req,
     icalcomponent *ical = NULL;
     struct index_record record;
     const char *calendarId = NULL;
-    char *schedule_address = NULL;
+    strarray_t schedule_addresses = STRARRAY_INITIALIZER;
 
     /* Validate calendarId */
     pe = jmap_readprop(event_patch, "calendarId", 0, invalid, "s", &calendarId);
@@ -2763,7 +2733,7 @@ static int setcalendarevents_update(jmap_req_t *req,
         goto done;
     }
     /* Load VEVENT from record, personalizing as needed. */
-    oldical = caldav_record_to_ical(mbox, cdata, httpd_userid, &schedule_address);
+    oldical = caldav_record_to_ical(mbox, cdata, httpd_userid, &schedule_addresses);
     if (!oldical) {
         syslog(LOG_ERR, "record_to_ical failed for record %u:%s",
                 cdata->dav.imap_uid, mbox->name);
@@ -2772,8 +2742,7 @@ static int setcalendarevents_update(jmap_req_t *req,
     }
     /* Apply patch */
     r = setcalendarevents_apply_patch(event_patch, oldical, eid->recurid,
-                                      invalid, &schedule_address, &ical,
-                                      update, err);
+                                      invalid, &schedule_addresses, &ical, update, err);
     if (json_array_size(invalid)) {
         r = 0;
         goto done;
@@ -2805,7 +2774,7 @@ static int setcalendarevents_update(jmap_req_t *req,
     }
 
     /* Handle scheduling. */
-    r = setcalendarevents_schedule(req, &schedule_address,
+    r = setcalendarevents_schedule(req, &schedule_addresses,
                                    oldical, ical, JMAP_UPDATE);
     if (r) goto done;
 
@@ -2853,7 +2822,7 @@ static int setcalendarevents_update(jmap_req_t *req,
     }
     else {
         r = caldav_store_resource(&txn, ical, mbox, resource, record.createdmodseq,
-                                  db, 0, httpd_userid, schedule_address);
+                                  db, 0, httpd_userid, &schedule_addresses);
     }
     transaction_free(&txn);
     if (r && r != HTTP_CREATED && r != HTTP_NO_CONTENT) {
@@ -2868,7 +2837,7 @@ done:
     if (dstmbox) jmap_closembox(req, &dstmbox);
     if (ical) icalcomponent_free(ical);
     if (oldical) icalcomponent_free(oldical);
-    free(schedule_address);
+    strarray_fini(&schedule_addresses);
     free(dstmboxname);
     free(resource);
     free(mboxname);
@@ -2891,7 +2860,7 @@ static int setcalendarevents_destroy(jmap_req_t *req,
     icalcomponent *oldical = NULL;
     icalcomponent *ical = NULL;
     struct index_record record;
-    char *schedule_address = NULL;
+    strarray_t schedule_addresses = STRARRAY_INITIALIZER;
 
     if (eid->recurid) {
         /* Destroying a recurrence instance is setting it excluded */
@@ -2948,7 +2917,7 @@ static int setcalendarevents_destroy(jmap_req_t *req,
         goto done;
     }
     /* Load VEVENT from record. */
-    oldical = record_to_ical(mbox, &record, &schedule_address);
+    oldical = record_to_ical(mbox, &record, &schedule_addresses);
     if (!oldical) {
         syslog(LOG_ERR, "record_to_ical failed for record %u:%s",
                 cdata->dav.imap_uid, mbox->name);
@@ -2957,7 +2926,7 @@ static int setcalendarevents_destroy(jmap_req_t *req,
     }
 
     /* Handle scheduling. */
-    r = setcalendarevents_schedule(req, &schedule_address,
+    r = setcalendarevents_schedule(req, &schedule_addresses,
                                    oldical, ical, JMAP_DESTROY);
     if (r) goto done;
 
@@ -2991,7 +2960,7 @@ static int setcalendarevents_destroy(jmap_req_t *req,
 done:
     if (mbox) jmap_closembox(req, &mbox);
     if (oldical) icalcomponent_free(oldical);
-    free(schedule_address);
+    strarray_fini(&schedule_addresses);
     free(resource);
     free(mboxname);
     return r;
@@ -4211,6 +4180,7 @@ static void _calendarevent_copy(jmap_req_t *req,
     icalcomponent *src_ical = NULL;
     json_t *dst_event = NULL;
     struct mailbox *src_mbox = NULL;
+    strarray_t schedule_addresses = STRARRAY_INITIALIZER;
     int r = 0;
 
     /* Read mandatory properties */
@@ -4248,8 +4218,7 @@ static void _calendarevent_copy(jmap_req_t *req,
     /* Read source event */
     r = jmap_openmbox(req, cdata->dav.mailbox, &src_mbox, /*rw*/0);
     if (r) goto done;
-    char *schedule_address = NULL;
-    src_ical = caldav_record_to_ical(src_mbox, cdata, httpd_userid, &schedule_address);
+    src_ical = caldav_record_to_ical(src_mbox, cdata, httpd_userid, &schedule_addresses);
     if (!src_ical) {
         syslog(LOG_ERR, "calendarevent_copy: can't convert %s to JMAP", src_id);
         r = IMAP_INTERNAL;
@@ -4292,6 +4261,7 @@ done:
         return;
     }
     jmap_closembox(req, &src_mbox);
+    strarray_fini(&schedule_addresses);
     if (src_ical) icalcomponent_free(src_ical);
     json_decref(dst_event);
     jmap_parser_fini(&myparser);
