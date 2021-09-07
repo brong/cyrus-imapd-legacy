@@ -1542,7 +1542,7 @@ EXPORTED int mboxlist_promote_intermediary(const char *mboxname)
     struct mailbox *mailbox = NULL;
     int r = 0;
 
-    assert_namespacelocked(mboxname);
+    struct mboxlock *namespacelock = mboxname_usernamespacelock(mboxname);
 
     r = mboxlist_lookup_allow_all(mboxname, &mbentry, NULL);
     if (r || !(mbentry->mbtype & MBTYPE_INTERMEDIATE)) goto done;
@@ -1586,6 +1586,7 @@ done:
     mailbox_close(&mailbox);
     mboxlist_entry_free(&mbentry);
     mboxlist_entry_free(&parent);
+    mboxname_release(&namespacelock);
     return r;
 }
 

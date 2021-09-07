@@ -131,7 +131,7 @@ static int fixmbox(const mbentry_t *mbentry,
 {
     int r;
 
-    /* if MBTYPE_RESERVED, unset it & call mboxlist_delete */
+    /* if MBTYPE_RESERVED, call mboxlist_delete */
     if (mbentry->mbtype & MBTYPE_RESERVE) {
         r = mboxlist_deletemailboxlock(mbentry->name, 1, NULL, NULL, NULL,
                                        MBOXLIST_DELETE_FORCE);
@@ -148,7 +148,24 @@ static int fixmbox(const mbentry_t *mbentry,
         return 0;
     }
 
-    /* clean out any legacy specialuse */
+    /* remove any intermediate records */
+    if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
+        r = mboxlist_promote_intermediary(mbentry->name);
+
+        if (r) {
+            /* log the error */
+            syslog(LOG_ERR,
+                   "could not promote intermediate mailbox '%s': %s",
+                   mbentry->name, error_message(r));
+        } else {
+            syslog(LOG_NOTICE,
+                   "promoted intermediate mailbox '%s'",
+                   mbentry->name);
+        }
+        return 0;
+    }
+
+    /* move any legacy specialuse to annotations */
     if (mbentry->legacy_specialuse) {
         char *userid = mboxname_to_userid(mbentry->name);
         if (userid) {
@@ -160,7 +177,7 @@ static int fixmbox(const mbentry_t *mbentry,
         }
         mbentry_t *copy = mboxlist_entry_copy(mbentry);
         xzfree(copy->legacy_specialuse);
-        mboxlist_updatelock(copy, /*localonly*/1);
+        mboxlist_update(copy, /*localonly*/1);
         mboxlist_entry_free(&copy);
     }
 
