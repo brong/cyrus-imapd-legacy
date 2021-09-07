@@ -422,36 +422,7 @@ static int find_p(const mbentry_t *mbentry, void *rock)
     }
 
     if (mbentry->mbtype & MBTYPE_LEGACY_DIRS) {
-        mbentry_t *mbentry_copy = NULL;
-
-        if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-            char *extname =
-                mboxname_to_external(mbentry->name, &reloc_namespace, NULL);
-            int r = 0;
-
-            if (!quiet) printf("\nPromoting intermediary: %s\n", extname);
-
-            if (!nochanges) {
-                struct mboxlock *namespacelock = mboxname_usernamespacelock(mbentry->name);
-                r = mboxlist_promote_intermediary(mbentry->name);
-                mboxname_release(&namespacelock);
-                if (r) {
-                    fprintf(stderr,
-                            "\tFailed to promote intermediary %s: %s\n",
-                            extname, error_message(r));
-                }
-                else {
-                    r = mboxlist_lookup(mbentry->name, &mbentry_copy, NULL);
-                }
-            }
-            free(extname);
-
-            if (r) return r;
-        }
-        else {
-            mbentry_copy = mboxlist_entry_copy(mbentry);
-        }
-
+        mbentry_t *mbentry_copy = mboxlist_entry_copy(mbentry);
         ptrarray_push(mboxlist, mbentry_copy);
     }
 

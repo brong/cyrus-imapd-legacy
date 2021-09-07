@@ -2693,17 +2693,13 @@ static void _mbox_update(jmap_req_t *req, struct mboxset_args *args,
             r = 0;
 
             /* Rename the mailbox. */
-            if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-                r = mboxlist_promote_intermediary(oldmboxname);
-                if (r) goto done;
-            }
             struct mboxevent *mboxevent = mboxevent_new(EVENT_MAILBOX_RENAME);
             r = mboxlist_renametree(oldmboxname, newmboxname,
                     NULL /* partition */, 0 /* uidvalidity */,
                     httpd_userisadmin, req->userid, httpd_authstate,
                     mboxevent,
                     0 /* local_only */, 0 /* forceuser */, 0 /* ignorequota */,
-                    1 /* keep_intermediaries */, 1 /* move_subscription */);
+                    1 /* move_subscription */);
             mboxevent_free(&mboxevent);
             mboxlist_entry_free(&mbentry);
             jmap_mboxlist_lookup(newmboxname, &mbentry, NULL);
@@ -2748,12 +2744,6 @@ static void _mbox_update(jmap_req_t *req, struct mboxset_args *args,
         set_annots = 1;
     }
     if (set_annots) {
-        if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-            r = mboxlist_promote_intermediary(mbentry->name);
-            if (r) goto done;
-            mboxlist_entry_free(&mbentry);
-            jmap_mboxlist_lookup(mboxname, &mbentry, NULL);
-        }
         if (!r) r = _mbox_set_annots(req, args, mboxname);
     }
 
@@ -3310,7 +3300,7 @@ static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
                 httpd_userisadmin, req->userid, httpd_authstate,
                 mboxevent,
                 0 /* local_only */, 0 /* forceuser */, 0 /* ignorequota */,
-                1 /* keep_intermediaries */, 1 /* move_subscription */);
+                1 /* move_subscription */);
         mboxevent_free(&mboxevent);
         if (r) {
             syslog(LOG_ERR, "jmap: mailbox rename failed half-way: old=%s tmp=%s new=%s: %s",

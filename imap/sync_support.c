@@ -3460,7 +3460,6 @@ int sync_apply_rename(struct dlist *kin, struct sync_state *sstate)
     if (!r) r = mboxlist_renamemailbox(mbentry, newmboxname, partition,
                                        uidvalidity, 1, sstate->userid,
                                        sstate->authstate, NULL, sstate->local_only, 1, 1,
-                                       1/*keep_intermediaries*/,
                                        0/*move_subscription*/,
                                        1/*silent*/);
 

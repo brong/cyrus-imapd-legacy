@@ -8265,14 +8265,6 @@ static void _email_append(jmap_req_t *req,
             goto done;
         }
 
-        /* Convert intermediary mailbox to real mailbox */
-        if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-            struct mboxlock *namespacelock = mboxname_usernamespacelock(mbentry->name);
-            r = mboxlist_promote_intermediary(mbentry->name);
-            mboxname_release(&namespacelock);
-            if (r) goto done;
-        }
-
         if (json_is_string(val)) {
             /* We flagged this mailboxId as the $snoozed mailbox */
             if (mboxname) free(mboxname);
@@ -11791,14 +11783,7 @@ static int _email_bulkupdate_open(jmap_req_t *req, struct email_bulkupdate *bulk
             struct mailbox *mbox = NULL;
             const mbentry_t *mbentry = jmap_mbentry_by_uniqueid(req, mboxrec->mbox_id);
             int r = 0;
-            if (mbentry && mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-                struct mboxlock *namespacelock = mboxname_usernamespacelock(mbentry->name);
-                r = mboxlist_promote_intermediary(mbentry->name);
-                mboxname_release(&namespacelock);
-            }
-            else if (!mbentry) {
-                r = IMAP_MAILBOX_NONEXISTENT;
-            }
+            if (!mbentry) r = IMAP_MAILBOX_NONEXISTENT;
             if (!r) r = jmap_openmbox(req, mboxrec->mboxname, &mbox, /*rw*/1);
             if (r) {
                 int j;
@@ -11867,13 +11852,7 @@ static int _email_bulkupdate_open(jmap_req_t *req, struct email_bulkupdate *bulk
             struct mailbox *mbox = NULL;
             const mbentry_t *mbentry = jmap_mbentry_by_uniqueid(req, mbox_id);
             if (mbentry) {
-                int r = 0;
-                if (mbentry->mbtype & MBTYPE_INTERMEDIATE) {
-                    struct mboxlock *namespacelock = mboxname_usernamespacelock(mbentry->name);
-                    r = mboxlist_promote_intermediary(mbentry->name);
-                    mboxname_release(&namespacelock);
-                }
-                if (!r) jmap_openmbox(req, mbentry->name, &mbox, /*rw*/1);
+                jmap_openmbox(req, mbentry->name, &mbox, /*rw*/1);
             }
             if (mbox) {
                 if (!hash_lookup(mailbox_uniqueid(mbox), &bulk->plans_by_mbox_id)) {
@@ -13305,24 +13284,14 @@ static void _email_copy(jmap_req_t *req, json_t *copy_email,
     /* Copy message record to mailboxes */
     char *dst_mboxname;
     while ((dst_mboxname = strarray_pop(&dst_mboxnames))) {
-        mbentry_t *mbentry = NULL;
-        r = jmap_mboxlist_lookup(dst_mboxname, &mbentry, NULL);
-        if (!r && (mbentry->mbtype & MBTYPE_INTERMEDIATE)) {
-            struct mboxlock *namespacelock = mboxname_usernamespacelock(mbentry->name);
-            r = mboxlist_promote_intermediary(mbentry->name);
-            mboxname_release(&namespacelock);
-        }
+        struct mailbox *dst_mbox = NULL;
+        r = jmap_openmbox(req, dst_mboxname, &dst_mbox, /*rw*/1);
         if (!r) {
-            struct mailbox *dst_mbox = NULL;
-            r = jmap_openmbox(req, dst_mboxname, &dst_mbox, /*rw*/1);
-            if (!r) {
-                r = _copy_msgrecord(httpd_authstate, req->accountid,
-                        &jmap_namespace, src_mbox, dst_mbox, src_mr);
-            }
-            jmap_closembox(req, &dst_mbox);
-            free(dst_mboxname);
+            r = _copy_msgrecord(httpd_authstate, req->accountid,
+                   &jmap_namespace, src_mbox, dst_mbox, src_mr);
         }
-        mboxlist_entry_free(&mbentry);
+        jmap_closembox(req, &dst_mbox);
+        free(dst_mboxname);
         if (r) goto done;
     }
 

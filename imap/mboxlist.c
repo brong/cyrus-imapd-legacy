@@ -1536,80 +1536,6 @@ EXPORTED int mboxlist_createmailboxcheck(const char *name, int mbtype __attribut
     return r;
 }
 
-/* PLEASE NOTE - ALWAYS CALL AFTER MAKING THE CHANGES, as this function
- * will check for children when deciding whether to create or remove
- * intermediate folders */
-EXPORTED int mboxlist_update_intermediaries(const char *frommboxname,
-                                            int mbtype, modseq_t modseq)
-{
-    mbentry_t *mbentry = NULL;
-    mbname_t *mbname = mbname_from_intname(frommboxname);
-    char *partition = NULL;
-    int r = 0;
-
-    /* not for deleted namespace */
-    if (mbname_isdeleted(mbname))
-        goto out;
-
-    /* only use intermediates for user mailboxes */
-    if (!mbname_userid(mbname))
-        goto out;
-
-    for (; strarray_size(mbname_boxes(mbname)); free(mbname_pop_boxes(mbname))) {
-
-        /* check for magic INBOX */
-        if (strarray_size(mbname_boxes(mbname)) == 1 &&
-            !strcmp(strarray_nth(mbname_boxes(mbname), 0), "INBOX")) {
-            /* don't generate magic INBOX intermediate, JMAP doesn't use it */
-            goto out;
-        }
-
-        const char *mboxname = mbname_intname(mbname);
-        char *dbname = mbname_dbname(mbname);
-
-        mboxlist_entry_free(&mbentry);
-        r = mboxlist_mylookup(dbname, &mbentry, NULL, 0, 1);
-        free(dbname);
-
-        if (r == IMAP_MAILBOX_NONEXISTENT) r = 0;
-        if (r) goto out;
-
-        /* we don't remove parents any more, so skip out immediately if we find an entry */
-        if (mbentry && !(mbentry->mbtype & MBTYPE_DELETED)) continue;
-
-        /* if there's no children, there's no need for intermediates */
-        if (!mboxlist_haschildren(mboxname))
-            continue;
-
-        syslog(LOG_NOTICE, "mboxlist: intermediate fill-in mailbox: %s", mboxname);
-
-        if (!partition) {
-            mboxlist_entry_free(&mbentry);
-            mboxlist_findparent_allow_all(mboxname, &mbentry);
-            partition = xstrdupnull(mbentry->partition);
-        }
-
-        mbentry_t newmbentry = MBENTRY_INITIALIZER;
-        newmbentry.name = (char *)mboxname;
-        newmbentry.partition = partition;
-        newmbentry.mbtype = mbtype;
-        newmbentry.createdmodseq = modseq;
-        newmbentry.foldermodseq = modseq;
-        int flags = MBOXLIST_CREATE_KEEP_INTERMEDIARIES; // avoid infinite looping!
-        r = mboxlist_createmailbox(&newmbentry, 0/*options*/, 0/*highestmodseq*/,
-                                   1/*isadmin*/, NULL/*userid*/, NULL/*authstate*/,
-                                   flags, NULL/*mailboxptr*/);
-        if (r) goto out;
-    }
-
-out:
-    mboxlist_entry_free(&mbentry);
-    mbname_free(&mbname);
-    free(partition);
-
-    return r;
-}
-
 EXPORTED int mboxlist_promote_intermediary(const char *mboxname)
 {
     mbentry_t *mbentry = NULL, *parent = NULL;
@@ -1764,11 +1690,6 @@ EXPORTED int mboxlist_createmailbox(const mbentry_t *mbentry,
         newmbentry->foldermodseq = foldermodseq ? foldermodseq : newmailbox->i.highestmodseq;
     }
     r = mboxlist_update_entry(mboxname, newmbentry, NULL);
-
-    if (!r && !(flags & MBOXLIST_CREATE_KEEP_INTERMEDIARIES)) {
-        /* create any missing intermediaries */
-        r = mboxlist_update_intermediaries(mboxname, mbtype, newmbentry->foldermodseq);
-    }
 
     if (r) {
         xsyslog(LOG_ERR, "DBERROR: failed to insert to mailboxes list",
@@ -1973,7 +1894,6 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin,
     int checkacl = flags & MBOXLIST_DELETE_CHECKACL;
     int localonly = flags & MBOXLIST_DELETE_LOCALONLY;
     int force = flags & MBOXLIST_DELETE_FORCE;
-    int keep_intermediaries = flags & MBOXLIST_DELETE_KEEP_INTERMEDIARIES;
     int unprotect_specialuse = flags & MBOXLIST_DELETE_UNPROTECT_SPECIALUSE;
 
     init_internal();
@@ -2046,7 +1966,6 @@ mboxlist_delayed_deletemailbox(const char *name, int isadmin,
                                mboxevent,
                                localonly /* local_only */,
                                force, 1,
-                               keep_intermediaries,
                                0 /* move_subscription */, 0 /* silent */);
 
     if (r) goto done;
@@ -2096,7 +2015,6 @@ EXPORTED int mboxlist_deletemailbox(const char *name, int isadmin,
     int checkacl = flags & MBOXLIST_DELETE_CHECKACL;
     int localonly = flags & MBOXLIST_DELETE_LOCALONLY;
     int force = flags & MBOXLIST_DELETE_FORCE;
-    int keep_intermediaries = flags & MBOXLIST_DELETE_KEEP_INTERMEDIARIES;
     int silent = flags & MBOXLIST_DELETE_SILENT;
     int unprotect_specialuse = flags & MBOXLIST_DELETE_UNPROTECT_SPECIALUSE;
 
@@ -2231,11 +2149,6 @@ EXPORTED int mboxlist_deletemailbox(const char *name, int isadmin,
         }
         r = mboxlist_update(newmbentry, /*localonly*/1);
 
-        /* any other updated intermediates get the same modseq */
-        if (!r && !keep_intermediaries) {
-            r = mboxlist_update_intermediaries(mbentry->name, mbentry->mbtype, newmbentry->foldermodseq);
-        }
-
         /* Bump the modseq of entries of mbtype. There's still a tombstone
          * for this mailbox, so don't bump the folderdeletedmodseq, yet. */
         if (!r) {
@@ -2343,7 +2256,6 @@ struct renmboxdata {
     int local_only;
     int ignorequota;
     int found;
-    int keep_intermediaries;
     int move_subscription;
 };
 
@@ -2382,7 +2294,6 @@ static int dorename(const mbentry_t *mbentry, void *rock)
                                text->authstate,
                                /*mboxevent*/NULL,
                                text->local_only, /*forceuser*/1, text->ignorequota,
-                               text->keep_intermediaries,
                                text->move_subscription, /*silent*/0);
 
     return r;
@@ -2394,7 +2305,7 @@ EXPORTED int mboxlist_renametree(const char *oldname, const char *newname,
                                  const struct auth_state *auth_state,
                                  struct mboxevent *mboxevent,
                                  int local_only, int forceuser, int ignorequota,
-                                 int keep_intermediaries, int move_subscription)
+                                 int move_subscription)
 {
     struct renmboxdata rock;
     memset(&rock, 0, sizeof(struct renmboxdata));
@@ -2406,7 +2317,6 @@ EXPORTED int mboxlist_renametree(const char *oldname, const char *newname,
     rock.userid = userid;
     rock.local_only = local_only;
     rock.ignorequota = ignorequota;
-    rock.keep_intermediaries = keep_intermediaries;
     rock.move_subscription = move_subscription;
     mbentry_t *mbentry = NULL;
     int r;
@@ -2430,7 +2340,7 @@ EXPORTED int mboxlist_renametree(const char *oldname, const char *newname,
                                auth_state,
                                mboxevent,
                                local_only, forceuser, ignorequota,
-                               keep_intermediaries, move_subscription, /*silent*/0);
+                               move_subscription, /*silent*/0);
     mboxlist_entry_free(&mbentry);
 
     // special-case only children exist
@@ -2454,7 +2364,7 @@ EXPORTED int mboxlist_renamemailbox(const mbentry_t *mbentry,
                                     const struct auth_state *auth_state,
                                     struct mboxevent *mboxevent,
                                     int local_only, int forceuser,
-                                    int ignorequota, int keep_intermediaries,
+                                    int ignorequota,
                                     int move_subscription, int silent)
 {
     int r;
@@ -2742,11 +2652,6 @@ EXPORTED int mboxlist_renamemailbox(const mbentry_t *mbentry,
  done: /* Commit or cleanup */
     if (!r && newmailbox)
         r = mailbox_commit(newmailbox);
-
-    if (!keep_intermediaries) {
-        if (!r) r = mboxlist_update_intermediaries(oldname, newmbentry->mbtype, newmbentry->foldermodseq);
-        if (!r) r = mboxlist_update_intermediaries(newname, newmbentry->mbtype, newmbentry->foldermodseq);
-    }
 
     if (r) {
         /* rollback DB changes if it was an mupdate failure */
