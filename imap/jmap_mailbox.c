@@ -2239,8 +2239,7 @@ struct mboxset {
 
 static void _mbox_create(jmap_req_t *req, struct mboxset_args *args,
                          enum mboxset_runmode mode,
-                         json_t **mbox, struct mboxset_result *result,
-                         strarray_t *update_intermediaries)
+                         json_t **mbox, struct mboxset_result *result)
 {
     char *mboxname = NULL;
     int r = 0;
@@ -2350,9 +2349,8 @@ static void _mbox_create(jmap_req_t *req, struct mboxset_args *args,
                 mboxname, error_message(r));
         goto done;
     }
-    strarray_add(update_intermediaries, mboxname);
 
-     /* invalidate ACL cache */
+    /* invalidate ACL cache */
     jmap_myrights_delete(req, mboxname);
     jmap_mbentry_cache_free(req);
 
@@ -2473,8 +2471,7 @@ static int _mbox_update_validate_serverset(jmap_req_t *req,
 
 static void _mbox_update(jmap_req_t *req, struct mboxset_args *args,
                          enum mboxset_runmode mode,
-                         struct mboxset_result *result,
-                         strarray_t *update_intermediaries)
+                         struct mboxset_result *result)
 {
     /* So many names... manage them in our own string pool */
     ptrarray_t strpool = PTRARRAY_INITIALIZER;
@@ -2710,8 +2707,6 @@ static void _mbox_update(jmap_req_t *req, struct mboxset_args *args,
             mboxevent_free(&mboxevent);
             mboxlist_entry_free(&mbentry);
             jmap_mboxlist_lookup(newmboxname, &mbentry, NULL);
-            strarray_add(update_intermediaries, oldmboxname);
-            strarray_add(update_intermediaries, newmboxname);
 
             /* Keep track of old IMAP name */
             if (!result->old_imapname)
@@ -2929,8 +2924,7 @@ done:
 static void _mbox_destroy(jmap_req_t *req, const char *mboxid,
                           struct mboxset *set,
                           enum mboxset_runmode mode,
-                          struct mboxset_result *result,
-                          strarray_t *update_intermediaries)
+                          struct mboxset_result *result)
 {
     int r = 0;
     mbentry_t *mbinbox = NULL, *mbentry = NULL;
@@ -3046,8 +3040,6 @@ static void _mbox_destroy(jmap_req_t *req, const char *mboxid,
         syslog(LOG_ERR, "jmap: mbox_destroy: can't unsubscribe %s:%s",
                 mbentry->name, error_message(r2));
     }
-
-    strarray_add(update_intermediaries, mbentry->name);
 
     /* invalidate ACL cache */
     jmap_myrights_delete(req, mbentry->name);
@@ -3220,8 +3212,7 @@ static struct mboxset_ops *_mboxset_newops(jmap_req_t *req, struct mboxset *set)
 
 static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
                          struct mboxset_ops *ops,
-                         enum mboxset_runmode mode,
-                         strarray_t *update_intermediaries)
+                         enum mboxset_runmode mode)
 {
     int i;
     strarray_t skipped_del = STRARRAY_INITIALIZER;
@@ -3240,7 +3231,7 @@ static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
         if (args->creation_id) {
             json_t *mbox = NULL;
             struct mboxset_result result = MBOXSET_RESULT_INITIALIZER;
-            _mbox_create(req, args, mode, &mbox, &result, update_intermediaries);
+            _mbox_create(req, args, mode, &mbox, &result);
             if (result.err) {
                 json_object_set(set->super.not_created,
                         args->creation_id, result.err);
@@ -3265,7 +3256,7 @@ static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
         /* Update */
         else {
             struct mboxset_result result = MBOXSET_RESULT_INITIALIZER;
-            _mbox_update(req, args, mode, &result, update_intermediaries);
+            _mbox_update(req, args, mode, &result);
             if (result.err) {
                 json_object_set(set->super.not_updated,
                         args->mbox_id, result.err);
@@ -3294,7 +3285,7 @@ static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
     for (i = 0; i < strarray_size(ops->del); i++) {
         const char *mbox_id = strarray_nth(ops->del, i);
         struct mboxset_result result = MBOXSET_RESULT_INITIALIZER;
-        _mbox_destroy(req, mbox_id, set, mode, &result, update_intermediaries);
+        _mbox_destroy(req, mbox_id, set, mode, &result);
         if (result.err) {
             json_object_set(set->super.not_destroyed, mbox_id, result.err);
         }
@@ -3320,8 +3311,6 @@ static void _mboxset_run(jmap_req_t *req, struct mboxset *set,
                 mboxevent,
                 0 /* local_only */, 0 /* forceuser */, 0 /* ignorequota */,
                 1 /* keep_intermediaries */, 1 /* move_subscription */);
-        strarray_add(update_intermediaries, tmp->tmp_imapname);
-        strarray_add(update_intermediaries, tmp->new_imapname);
         mboxevent_free(&mboxevent);
         if (r) {
             syslog(LOG_ERR, "jmap: mailbox rename failed half-way: old=%s tmp=%s new=%s: %s",
@@ -3873,23 +3862,22 @@ static void _mboxset(jmap_req_t *req, struct mboxset *set)
      * error.
      */
     struct mboxset_ops *ops = _mboxset_newops(req, set);
-    strarray_t update_intermediaries = STRARRAY_INITIALIZER;
 
     /* Apply Mailbox/set operations */
     if (ops->is_cyclic) {
         /* Fail for any invalid state */
-        _mboxset_run(req, set, ops, _MBOXSET_FAIL, &update_intermediaries);
+        _mboxset_run(req, set, ops, _MBOXSET_FAIL);
     }
     else {
-        _mboxset_run(req, set, ops, _MBOXSET_SKIP, &update_intermediaries);
+        _mboxset_run(req, set, ops, _MBOXSET_SKIP);
         if (ptrarray_size(ops->put) || strarray_size(ops->del)) {
             if (_mboxset_state_validate(req, set, ops)) {
                 /* Allow invalid interim state */
-                _mboxset_run(req, set, ops, _MBOXSET_INTERIM, &update_intermediaries);
+                _mboxset_run(req, set, ops, _MBOXSET_INTERIM);
             }
             else {
                 /* Fail for any invalid state */
-                _mboxset_run(req, set, ops, _MBOXSET_FAIL, &update_intermediaries);
+                _mboxset_run(req, set, ops, _MBOXSET_FAIL);
             }
         }
     }
@@ -3899,22 +3887,9 @@ static void _mboxset(jmap_req_t *req, struct mboxset *set)
     set->super.new_state = xstrdup(json_string_value(jstate));
     json_decref(jstate);
 
-    /* Prune intermediary mailbox trees without any children. Do this
-     * after we fetched the mailbox state, so clients are forced to
-     * resync their mailbox trees after the Mailbox/set. */
-    int i;
-    for (i = 0; i < strarray_size(&update_intermediaries); i++) {
-        const char *old_imapname = strarray_nth(&update_intermediaries, i);
-        /* XXX - we know these are mailboxes, so mbtype 0 is OK, but it's not an
-         * ideal interface */
-        mboxlist_update_intermediaries(old_imapname, 0, 0);
-        /* XXX error handling? */
-    }
-
     assert(ptrarray_size(ops->put) == 0);
     assert(strarray_size(ops->del) == 0);
     _mboxset_ops_free(ops);
-    strarray_fini(&update_intermediaries);
 }
 
 static int _mboxset_req_parse(jmap_req_t *req,
