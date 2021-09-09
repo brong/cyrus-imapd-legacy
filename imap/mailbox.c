@@ -1168,6 +1168,11 @@ EXPORTED const char *mailbox_quotaroot(const struct mailbox *mailbox)
     return mailbox->h.quotaroot;
 }
 
+EXPORTED mbentry_t *mailbox_mbentry(const struct mailbox *mailbox)
+{
+    return mailbox->mbentry;
+}
+
 EXPORTED void mailbox_index_dirty(struct mailbox *mailbox)
 {
     assert(mailbox_index_islocked(mailbox, 1));
