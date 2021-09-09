@@ -7364,7 +7364,7 @@ static void cmd_delete(char *tag, char *name, int localonly, int force)
             delete_user = mboxname_isusermailbox(mbname_intname(mbname), 1);
             int delflags = (1-force) ? MBOXLIST_DELETE_CHECKACL : 0;
 
-            if (!delete_user && mboxlist_haschildren(mbname_intname(mbname))) {
+            if (!delete_user && mboxlist_haschildren(mbentry)) {
                 r = IMAP_MAILBOX_HASCHILDREN;
             }
             else if (localonly || !mboxlist_delayed_delete_isenabled()) {

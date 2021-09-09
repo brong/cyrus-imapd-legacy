@@ -3545,7 +3545,7 @@ static int annotation_set_fuzzyalways(annotate_state_t *state,
     return annotation_set_todb(state, entry, maywrite);
 }
 
-EXPORTED int specialuse_validate(const char *mboxname, const char *userid,
+EXPORTED int specialuse_validate(const struct mailbox *mailbox, const char *userid,
                                  const char *src, struct buf *dest, int allow_dups)
 {
     const char *specialuse_extra_opt = config_getstring(IMAPOPT_SPECIALUSE_EXTRA);
@@ -3562,10 +3562,10 @@ EXPORTED int specialuse_validate(const char *mboxname, const char *userid,
         return 0;
     }
 
-    /* If there is a valid mboxname, we get the current specialuse annotations.
+    /* If there is a mailbox, we get the current specialuse annotations.
      */
-    if (mboxname) {
-        annotatemore_lookup(mboxname, "/specialuse", userid, &mbattribs);
+    if (mailbox) {
+        annotatemore_lookup(mailbox_name(mailbox), "/specialuse", userid, &mbattribs);
         if (mbattribs.len) {
             cur_attribs = strarray_split(buf_cstring(&mbattribs), NULL, 0);
         }
@@ -3592,12 +3592,14 @@ EXPORTED int specialuse_validate(const char *mboxname, const char *userid,
     for (i = 0; i < new_attribs->count; i++) {
         int skip_mbcheck = allow_dups;
         const char *item = strarray_nth(new_attribs, i);
+        const char *thisuse = NULL;
 
         for (j = 0; j < valid->count; j++) { /* can't use find here */
-            if (!strcasecmp(strarray_nth(valid, j), item))
+            thisuse = strarray_nth(valid, j);
+            if (!strcasecmp(thisuse, item))
                 break;
             /* or without the leading '\' */
-            if (!strcasecmp(strarray_nth(valid, j) + 1, item))
+            if (!strcasecmp(thisuse + 1, item))
                 break;
         }
 
@@ -3607,33 +3609,31 @@ EXPORTED int specialuse_validate(const char *mboxname, const char *userid,
         }
 
         if (cur_attribs &&
-            (strarray_find_case(cur_attribs, strarray_nth(valid, j), 0) >= 0)) {
+            (strarray_find_case(cur_attribs, thisuse, 0) >= 0)) {
             /* The mailbox has this specialuse attribute set already */
             skip_mbcheck = 1;
         }
 
         /* don't allow names that are already in use */
         if (!skip_mbcheck) {
-            char *mbname = mboxlist_find_specialuse(strarray_nth(valid, j),
-                                                    userid);
-            if (mbname) {
-                free(mbname);
+            char *mboxname = mboxlist_find_specialuse(thisuse, userid);
+            if (mboxname) {
+                free(mboxname);
                 r = IMAP_MAILBOX_SPECIALUSE;
                 goto done;
             }
         }
 
         /* some attributes may not be set on mailboxes containing children */
-        if (mboxname && config_getstring(IMAPOPT_SPECIALUSE_NOCHILDREN)) {
+        if (mailbox && config_getstring(IMAPOPT_SPECIALUSE_NOCHILDREN)) {
             strarray_t *forbidden = strarray_split(
                 config_getstring(IMAPOPT_SPECIALUSE_NOCHILDREN),
                 NULL,
                 STRARRAY_TRIM
             );
 
-            if (strarray_find(forbidden, strarray_nth(valid, j), 0) != -1
-                && mboxlist_haschildren(mboxname))
-            {
+            if (strarray_find_case(forbidden, thisuse, 0) >= 0
+                && mboxlist_haschildren(mailbox_mbentry(mailbox))) {
                 r = IMAP_MAILBOX_HASCHILDREN;
             }
 
@@ -3641,7 +3641,7 @@ EXPORTED int specialuse_validate(const char *mboxname, const char *userid,
         }
 
         /* normalise the value */
-        strarray_set(new_attribs, i, strarray_nth(valid, j));
+        strarray_set(new_attribs, i, thisuse);
     }
 
     strval = strarray_join(new_attribs, " ");
@@ -3672,7 +3672,7 @@ static int annotation_set_specialuse(annotate_state_t *state,
         goto done;
     }
 
-    r = specialuse_validate(mailbox_name(state->mailbox), state->userid,
+    r = specialuse_validate(state->mailbox, state->userid,
                             buf_cstring(&entry->priv), &res, 0);
     if (r) goto done;
 

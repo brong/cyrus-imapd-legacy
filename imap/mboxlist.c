@@ -2138,10 +2138,9 @@ EXPORTED int mboxlist_deletemailbox(const char *name, int isadmin,
 
     if (!isremote && !mboxname_isdeletedmailbox(name, NULL)) {
         /* store a DELETED marker */
-        int haschildren = mboxlist_haschildren(name);
         mbentry_t *newmbentry = mboxlist_entry_create();
         newmbentry->name = xstrdupnull(name);
-        newmbentry->mbtype |= haschildren ? MBTYPE_INTERMEDIATE : MBTYPE_DELETED;
+        newmbentry->mbtype = MBTYPE_DELETED;
         if (mailbox) {
             newmbentry->uniqueid = xstrdupnull(mailbox_uniqueid(mailbox));
             newmbentry->uidvalidity = mailbox->i.uidvalidity;
@@ -4499,11 +4498,11 @@ static int mboxlist_changequota(const mbentry_t *mbentry, void *rock)
     return 0;
 }
 
-EXPORTED int mboxlist_haschildren(const char *mboxname)
+EXPORTED int mboxlist_haschildren(const mbentry_t *mbentry)
 {
     int exists = 0;
 
-    mboxlist_mboxtree(mboxname, exists_cb, &exists, MBOXTREE_SKIP_ROOT);
+    mboxlist_mboxtree(mbentry->name, exists_cb, &exists, MBOXTREE_SKIP_ROOT);
 
     return exists;
 }

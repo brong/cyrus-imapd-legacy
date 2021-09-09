@@ -284,7 +284,7 @@ int annotate_getdb(const struct mailbox *mailbox, annotate_db_t **dbp);
 void annotate_putdb(annotate_db_t **dbp);
 
 /* Maybe this isn't the right place - move later */
-int specialuse_validate(const char *mboxname, const char *userid,
+int specialuse_validate(const struct mailbox *mailbox, const char *userid,
                         const char *src, struct buf *dest, int allow_dups);
 
 int annotatemore_upgrade(void);

@@ -378,7 +378,7 @@ int mboxlist_setquotas(const char *root,
 int mboxlist_unsetquota(const char *root);
 
 /* check for if this name has children */
-int mboxlist_haschildren(const char *mboxname);
+int mboxlist_haschildren(const mbentry_t *mbentry);
 
 /* open the mailboxes db */
 void mboxlist_open(const char *name);
