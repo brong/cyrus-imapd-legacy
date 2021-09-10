@@ -2795,6 +2795,15 @@ int sync_apply_mailbox(struct dlist *kin,
     dlist_getnum32(kin, "SINCE_CRC_ANNOT", &since_crcs.annot);
 
     options = sync_parse_options(options_str);
+    struct mboxlock *namespacelock = mboxname_usernamespacelock(mboxname);
+    if (!namespacelock) {
+        r = IMAP_MAILBOX_LOCKED;
+        xsyslog(LOG_ERR, "IOERROR: failed to usernamespacelock",
+                         "mailbox=<%s> uniqueid=<%s>",
+                         mboxname, uniqueid);
+        goto done;
+    }
+    // try again under lock
 
     struct mboxlock *namespacelock = mboxname_usernamespacelock(mboxname);
     if (!namespacelock) {
