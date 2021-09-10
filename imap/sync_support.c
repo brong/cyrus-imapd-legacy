@@ -2803,16 +2803,6 @@ int sync_apply_mailbox(struct dlist *kin,
                          mboxname, uniqueid);
         goto done;
     }
-    // try again under lock
-
-    struct mboxlock *namespacelock = mboxname_usernamespacelock(mboxname);
-    if (!namespacelock) {
-        r = IMAP_MAILBOX_LOCKED;
-        xsyslog(LOG_ERR, "IOERROR: failed to usernamespacelock",
-                         "mailbox=<%s> uniqueid=<%s>",
-                         mboxname, uniqueid);
-        goto done;
-    }
 
     r = mailbox_open_iwl(mboxname, &mailbox);
     if (!r) r = sync_mailbox_version_check(&mailbox);
