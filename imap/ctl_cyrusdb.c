@@ -177,7 +177,7 @@ static int fixmbox(const mbentry_t *mbentry,
         }
         mbentry_t *copy = mboxlist_entry_copy(mbentry);
         xzfree(copy->legacy_specialuse);
-        mboxlist_update(copy, /*localonly*/1);
+        mboxlist_updatelock(copy, /*localonly*/1);
         mboxlist_entry_free(&copy);
     }
 
