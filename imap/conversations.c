@@ -1991,6 +1991,12 @@ static int _guid_one(struct guid_foreach_rock *frock,
     if (r || err != p) return IMAP_INTERNAL;
     rec.foldernum = res;
 
+    // XXX: broken conversations DB, but we don't want to crash, so
+    // just skip if there's no matching folder
+    const char *val = strarray_nth(frock->state->folders, rec.foldernum);
+    if (!val) return 0; // missing?  Weird - we've requested past the end of the list
+    if (!strcmp(val, "-")) return 0;  // tombstone
+
     /* uid */
     r = parseuint32(p + 1, &err, &res);
     if (r) return IMAP_INTERNAL;
