@@ -141,6 +141,8 @@ RUN git config --global http.sslverify false && \
 
 WORKDIR /srv/cyrus-imapd.git
 
+RUN echo "me"
+RUN git fetch
 # only for now
 RUN git checkout origin/sync-proto-tooling
 
