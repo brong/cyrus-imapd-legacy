@@ -138,10 +138,12 @@ RUN git config --global http.sslverify false && \
     cyrus-imapd.git
 
 WORKDIR /srv/cyrus-imapd.git
-#RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
+# but only for now
+RUN git checkout origin/sync-proto-tooling
+RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
 
-RUN apt-get -y install libmojolicious-perl
+RUN apt-get -y install libmojolicious-perl curl libdigest-crc-perl jq
 EXPOSE 80
-#RUN /usr/cyrus/bin/master -p /var/run/cyrus/master.pid" -d -L /var/run/cyrus/log
-#CMD [ "/srv/cyrus-imapd.git/contrib/docker-test-server/webserver.pl" ]
+RUN /usr/cyrus/bin/master -p /var/run/cyrus/master.pid" -d -L /var/run/cyrus/log
+CMD [ "/srv/cyrus-imapd.git/contrib/docker-test-server/webserver.pl", "prefork", "-l", "http://*:80" ]
 
