@@ -6,7 +6,7 @@ use Mail::IMAPTalk;
 use Cyrus::SyncProto;
 use Cyrus::AccountSync;
 
-get '/' => sub => {
+get '/' => sub {
   my $c = shift;
   $c->render(text => "Basic test server - read JSON for existing users or put JSON users");
 };
@@ -48,3 +48,5 @@ sub _connect {
   my $sp = Cyrus::SyncProto->new($it);
   return Cyrus::AccountSync->new($sp);
 }
+
+app->start;
