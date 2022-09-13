@@ -109,8 +109,6 @@ RUN groupadd -r saslauth ; \
     useradd -c "Cyrus IMAP Server" -d /var/lib/imap \
     -g mail -G saslauth -s /bin/bash -r cyrus
 
-RUN service rsyslog start
-
 RUN cpanm install Term::ReadLine
 RUN cpanm install Mail::IMAPTalk Net::CalDAVTalk Net::CardDAVTalk
 RUN cpanm install Convert::Base64 File::LibMagic;
@@ -134,17 +132,21 @@ RUN ./build.sh
 
 RUN apt-get -y install libmojolicious-perl curl libdigest-crc-perl jq
 
+RUN echo "foo2"
+
 WORKDIR /srv
 RUN git config --global http.sslverify false && \
     git clone https://github.com/cyrusimap/cyrus-imapd.git \
     cyrus-imapd.git
 
 WORKDIR /srv/cyrus-imapd.git
-# but only for now
+
+# only for now
 RUN git checkout origin/sync-proto-tooling
+
 RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
 
 EXPOSE 80
-RUN /usr/cyrus/bin/master -p /var/run/cyrus/master.pid" -d -L /var/run/cyrus/log
-CMD [ "/srv/cyrus-imapd.git/contrib/docker-test-server/webserver.pl", "prefork", "-l", "http://*:80" ]
+EXPOSE 143
+ENTRYPOINT [ "/srv/cyrus-imapd.git/contrib/docker-test-server/entrypoint.sh" ]
 
