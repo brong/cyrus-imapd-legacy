@@ -132,6 +132,8 @@ RUN ./build.sh
 
 RUN apt-get -y install libmojolicious-perl curl libdigest-crc-perl jq
 
+RUN echo "redo"
+
 WORKDIR /srv
 RUN git config --global http.sslverify false && \
     git clone https://github.com/cyrusimap/cyrus-imapd.git \

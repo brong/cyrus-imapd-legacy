@@ -39,7 +39,7 @@ put '/:userid' => sub {
 sub _connect {
   my $it = Mail::IMAPTalk->new(
     Server => 'localhost',
-    Port => 143,
+    Port => 8143,
     Username => 'admin',
     Password => 'admin',
     AuthzUser => 'admin',
