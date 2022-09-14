@@ -132,8 +132,6 @@ RUN ./build.sh
 
 RUN apt-get -y install libmojolicious-perl curl libdigest-crc-perl jq
 
-RUN echo "foo2"
-
 WORKDIR /srv
 RUN git config --global http.sslverify false && \
     git clone https://github.com/cyrusimap/cyrus-imapd.git \
@@ -141,17 +139,10 @@ RUN git config --global http.sslverify false && \
 
 WORKDIR /srv/cyrus-imapd.git
 
-RUN echo "me"
-RUN git fetch
 # only for now
 RUN git checkout origin/sync-proto-tooling
 
 RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
-
-RUN echo "me2"
-
-RUN git fetch
-RUN git checkout origin/sync-proto-tooling
 
 EXPOSE 80
 EXPOSE 143
