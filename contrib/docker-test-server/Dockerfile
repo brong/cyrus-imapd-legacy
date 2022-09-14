@@ -148,6 +148,8 @@ RUN git checkout origin/sync-proto-tooling
 
 RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
 
+RUN echo "me2"
+
 RUN git fetch
 RUN git checkout origin/sync-proto-tooling
 
