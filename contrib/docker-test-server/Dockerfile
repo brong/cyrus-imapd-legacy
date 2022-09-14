@@ -144,7 +144,8 @@ RUN git checkout origin/sync-proto-tooling
 
 RUN /srv/cyrus-imapd.git/contrib/docker-test-server/setup.sh
 
-EXPOSE 80
-EXPOSE 143
+EXPOSE 8001
+EXPOSE 8080
+EXPOSE 8143
 ENTRYPOINT [ "/srv/cyrus-imapd.git/contrib/docker-test-server/entrypoint.sh" ]
 
