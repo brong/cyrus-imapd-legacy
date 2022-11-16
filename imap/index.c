@@ -222,6 +222,7 @@ static int index_rewrite_record(struct index_state *state,
     }
 
     im->record = *record;
+    memset(&im->record.crec, 0, sizeof(struct cacherecord));
 
     return 0;
 }
@@ -679,6 +680,7 @@ static void index_refresh_locked(struct index_state *state)
 
         /* copy all mutable fields */
         im->record = *record;
+        memset(&im->record.crec, 0, sizeof(struct cacherecord));
 
         /* re-calculate seen flags */
         if (state->internalseen)
