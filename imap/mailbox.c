@@ -144,7 +144,6 @@ struct mailboxlist {
     struct mailboxlist *next;
     char *name;
     struct mailbox m;
-    struct mboxlock *l;
     int nopen;
 };
 
@@ -971,15 +970,12 @@ static int mailbox_open_index(struct mailbox *mailbox)
     return 0;
 }
 
-static int mailbox_mboxlock_reopen(struct mailboxlist *listitem, int locktype, int index_locktype)
+static int mailbox_mboxlock_reopen(struct mailboxlist *listitem, int index_locktype)
 {
     struct mailbox *mailbox = &listitem->m;
-    uint32_t legacy_dirs = (mailbox_mbtype(mailbox) & MBTYPE_LEGACY_DIRS);
-    int r;
 
     mailbox_release_resources(mailbox);
 
-    mboxname_release(&listitem->l);
     mboxname_release(&mailbox->local_namespacelock);
 
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
@@ -994,10 +990,7 @@ static int mailbox_mboxlock_reopen(struct mailboxlist *listitem, int locktype, i
         free(userid);
     }
 
-    r = mboxname_lock(legacy_dirs ? mailbox_name(mailbox) : mailbox_uniqueid(mailbox), &listitem->l, locktype);
-    if (r) return r;
-
-    return r;
+    return 0;
 }
 
 /*
@@ -1022,8 +1015,6 @@ static int mailbox_open_advanced(const char *name,
     /* already open?  just use this one */
     if (listitem) {
         /* can't reuse an exclusive locked mailbox */
-        if (listitem->l->locktype == LOCK_EXCLUSIVE)
-            return IMAP_MAILBOX_LOCKED;
         if (locktype == LOCK_EXCLUSIVE)
             return IMAP_MAILBOX_LOCKED;
         /* can't reuse an already locked index */
@@ -1074,21 +1065,6 @@ static int mailbox_open_advanced(const char *name,
          */
         xsyslog(LOG_ERR, "mbentry has no uniqueid, needs reconstruct",
                          "mboxname=<%s>", name);
-    }
-
-    uint32_t legacy_dirs = (mbentry->mbtype & MBTYPE_LEGACY_DIRS);
-    r = mboxname_lock(legacy_dirs ? name : mbentry->uniqueid, &listitem->l, locktype);
-    if (r) {
-        /* locked is not an error - just means we asked for NONBLOCKING */
-        if (r != IMAP_MAILBOX_LOCKED)
-            xsyslog(LOG_ERR, "IOERROR: lock failed",
-                             "mailbox=<%s> error=<%s>",
-                             name, error_message(r));
-        if (mailbox->local_namespacelock)
-            mboxname_release(&mailbox->local_namespacelock);
-        mboxlist_entry_free(&mbentry);
-        remove_listitem(listitem);
-        return r;
     }
 
     if (!mbentry->name) mbentry->name = xstrdup(name);
@@ -1253,7 +1229,7 @@ EXPORTED int mailbox_setversion(struct mailbox *mailbox, int version)
         /* we need an exclusive lock on the listitem because we're renaming
          * index files, so release locks and then go full exclusive */
         mailbox_unlock_index(mailbox, NULL);
-        r = mailbox_mboxlock_reopen(listitem, LOCK_EXCLUSIVE, LOCK_EXCLUSIVE);
+        r = mailbox_mboxlock_reopen(listitem, LOCK_EXCLUSIVE);
 
         /* we need to re-open the index because we dropped the mboxname lock,
          * so the file may have changed */
@@ -1335,7 +1311,7 @@ EXPORTED void mailbox_close(struct mailbox **mailboxptr)
     }
 
     if (mailbox->i.options & OPT_MAILBOX_DELETED) {
-        int r = mailbox_mboxlock_reopen(listitem, LOCK_EXCLUSIVE, LOCK_EXCLUSIVE);
+        int r = mailbox_mboxlock_reopen(listitem, LOCK_EXCLUSIVE);
         if (!r) r = mailbox_open_index(mailbox);
         /* lock_internal so DELETED doesn't cause it to appear to be
          * NONEXISTENT - but we still need conversations so we can write changes! */
@@ -1366,8 +1342,6 @@ EXPORTED void mailbox_close(struct mailbox **mailboxptr)
     for (flag = 0; flag < MAX_USER_FLAGS; flag++) {
         xzfree(mailbox->h.flagname[flag]);
     }
-
-    if (listitem->l) mboxname_release(&listitem->l);
 
     if (mailbox->local_namespacelock)
         mboxname_release(&mailbox->local_namespacelock);
@@ -2518,7 +2492,7 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
             struct mailboxlist *listitem = find_listitem(mailbox_name(mailbox));
             assert(listitem);
             assert(&listitem->m == mailbox);
-            r = mailbox_mboxlock_reopen(listitem, LOCK_SHARED, locktype);
+            r = mailbox_mboxlock_reopen(listitem, locktype);
             if (locktype == LOCK_SHARED)
                 mailbox->is_readonly = 1;
             if (!r) r = mailbox_open_index(mailbox);
@@ -5734,15 +5708,6 @@ EXPORTED int mailbox_create(const char *name,
         free(userid);
     }
 
-    uint32_t legacy_dirs = (mbtype & MBTYPE_LEGACY_DIRS);
-    r = mboxname_lock(legacy_dirs ? name : uniqueid, &listitem->l, LOCK_EXCLUSIVE);
-    if (r) {
-        if (mailbox->local_namespacelock)
-            mboxname_release(&mailbox->local_namespacelock);
-        remove_listitem(listitem);
-        return r;
-    }
-
     // fill out the initial mbentry (XXX: pass it in from mboxlist.c)
     mailbox->mbentry = mboxlist_entry_create();
     mailbox->mbentry->name = xstrdup(name);
@@ -6909,12 +6874,6 @@ static int mailbox_reconstruct_create(const char *name, struct mailbox **mbptr)
     /* Start by looking up current data in mailbox list */
     /* XXX - no mboxlist entry?  Can we recover? */
     r = mboxlist_lookup(name, &mbentry, NULL);
-    if (r) goto done;
-
-    /* if we can't get an exclusive lock first try, there's something
-     * racy going on! */
-    uint32_t legacy_dirs = (mbentry->mbtype & MBTYPE_LEGACY_DIRS);
-    r = mboxname_lock(legacy_dirs ? name : mbentry->uniqueid, &listitem->l, LOCK_EXCLUSIVE);
     if (r) goto done;
 
     mailbox->mbentry = mboxlist_entry_copy(mbentry);
