@@ -540,17 +540,17 @@ static void subquery_post_enginesearch(const char *key, void *data, void *rock)
         }
 
         /* we only want to look at found UIDs */
-        if ((!qr->is_excluded && !bv_isset(&folder->found_uids, im->uid)) ||
-             (qr->is_excluded && bv_isset(&folder->found_uids, im->uid))) {
+        if ((!qr->is_excluded && !bv_isset(&folder->found_uids, im->record.uid)) ||
+             (qr->is_excluded && bv_isset(&folder->found_uids, im->record.uid))) {
             continue;
         }
 
         /* moot if already in the uids set */
-        if (bv_isset(&folder->uids, im->uid))
+        if (bv_isset(&folder->uids, im->record.uid))
             continue;
 
         /* can happen if we didn't "tellchanges" yet */
-        if ((im->internal_flags & FLAG_INTERNAL_EXPUNGED) && !query->want_expunged)
+        if ((im->record.internal_flags & FLAG_INTERNAL_EXPUNGED) && !query->want_expunged)
             continue;
 
         /* run the search program */
@@ -559,13 +559,13 @@ static void subquery_post_enginesearch(const char *key, void *data, void *rock)
 
         /* we have a new UID that needs to be merged in */
 
-        folder_add_uid(folder, im->uid);
-        folder_add_modseq(folder, im->modseq);
+        folder_add_uid(folder, im->record.uid);
+        folder_add_modseq(folder, im->record.modseq);
         if (query->sortcrit)
             msgno_list[nmsgs++] = msgno;
         /* track first and last for MIN/MAX queries */
-        if (!folder->first_modseq) folder->first_modseq = im->modseq;
-        folder->last_modseq = im->modseq;
+        if (!folder->first_modseq) folder->first_modseq = im->record.modseq;
+        folder->last_modseq = im->record.modseq;
     }
 
     /* msgno_list contains only the MSNs for newly
@@ -860,7 +860,7 @@ static int subquery_run_one_folder(search_query_t *query,
         }
 
         /* can happen if we didn't "tellchanges" yet */
-        if ((im->internal_flags & FLAG_INTERNAL_EXPUNGED) && !query->want_expunged)
+        if ((im->record.internal_flags & FLAG_INTERNAL_EXPUNGED) && !query->want_expunged)
             continue;
 
         /* run the search program */
@@ -882,18 +882,18 @@ static int subquery_run_one_folder(search_query_t *query,
         }
 
         /* moot if already in the uids set */
-        if (bv_isset(&folder->uids, im->uid))
+        if (bv_isset(&folder->uids, im->record.uid))
             continue;
 
-        folder_add_uid(folder, im->uid);
-        folder_add_modseq(folder, im->modseq);
+        folder_add_uid(folder, im->record.uid);
+        folder_add_modseq(folder, im->record.modseq);
 
         if (query->sortcrit)
             msgno_list[nmsgs++] = msgno;
 
         /* track first and last for MIN/MAX queries */
-        if (!folder->first_modseq) folder->first_modseq = im->modseq;
-        folder->last_modseq = im->modseq;
+        if (!folder->first_modseq) folder->first_modseq = im->record.modseq;
+        folder->last_modseq = im->record.modseq;
     }
 
     if (query->sortcrit && nmsgs)

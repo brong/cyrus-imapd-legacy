@@ -203,40 +203,7 @@ EXPORTED int index_reload_record(struct index_state *state,
                                  struct index_record *record)
 {
     struct index_map *im = &state->map[msgno-1];
-    int r = 0;
-    int i;
-
-    memset(record, 0, sizeof(struct index_record));
-    if (!im->recno) {
-        /* doh, gotta just fill in what we know */
-        record->uid = im->uid;
-    }
-    else {
-        record->recno = im->recno;
-        record->uid = im->uid;
-        r = mailbox_reload_index_record_dirty(state->mailbox, record);
-    }
-    /* NOTE: we have released the cyrus.index lock at this point, but are
-     * still holding the mailbox name relock.  This means nobody can rewrite
-     * the file under us - so the offsets are still guaranteed to be correct,
-     * and all the immutable fields are unchanged.  That said, we can get a
-     * read of a partially updated record which contains an invalid checksum
-     * due to incomplete concurrent changes to mutable fields.  That's why we
-     * used the _dirty API which ignores checksums.
-     * but other errors are still bad */
-    if (r) return r;
-
-    /* better be! */
-    assert(record->uid == im->uid);
-
-    /* restore mutable fields */
-    record->modseq = im->modseq;
-    record->system_flags = im->system_flags;
-    record->internal_flags = im->internal_flags;
-    record->cache_offset = im->cache_offset;
-    for (i = 0; i < MAX_USER_FLAGS/32; i++)
-        record->user_flags[i] = im->user_flags[i];
-
+    *record = im->record;
     return 0;
 }
 
@@ -246,22 +213,15 @@ static int index_rewrite_record(struct index_state *state,
                                 int silent)
 {
     struct index_map *im = &state->map[msgno-1];
-    int i;
 
-    assert(record->uid == im->uid);
+    assert(record->uid == im->record.uid);
 
     if (!silent) {
         int r = mailbox_rewrite_index_record(state->mailbox, record);
         if (r) return r;
     }
 
-    /* update tracking of mutable fields */
-    im->modseq = record->modseq;
-    im->system_flags = record->system_flags;
-    im->internal_flags = record->internal_flags;
-    im->cache_offset = record->cache_offset;
-    for (i = 0; i < MAX_USER_FLAGS/32; i++)
-        im->user_flags[i] = record->user_flags[i];
+    im->record = *record;
 
     return 0;
 }
@@ -415,28 +375,28 @@ EXPORTED int index_expunge(struct index_state *state, char *sequence,
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
 
-        if (im->internal_flags & FLAG_INTERNAL_EXPUNGED)
+        if (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED)
             continue; /* already expunged */
 
-        if (need_deleted && !(im->system_flags & FLAG_DELETED))
+        if (need_deleted && !(im->record.system_flags & FLAG_DELETED))
             continue; /* no \Deleted flag */
 
         /* if there is a sequence list, check it */
-        if (sequence && !seqset_ismember(seq, im->uid))
+        if (sequence && !seqset_ismember(seq, im->record.uid))
             continue; /* not in the list */
 
         /* load first once we know we have to process this one */
         if (index_reload_record(state, msgno, &record))
             continue;
 
-        oldmodseq = im->modseq;
+        oldmodseq = im->record.modseq;
 
         if (!im->isseen) {
             if (state->numunseen)
                 state->numunseen--;
             else
                 syslog(LOG_ERR, "IOERROR: numunseen underflow in expunge: %s %u",
-                       state->mboxname, im->uid);
+                       state->mboxname, im->record.uid);
             im->isseen = 1;
         }
 
@@ -445,7 +405,7 @@ EXPORTED int index_expunge(struct index_state *state, char *sequence,
                 state->numrecent--;
             else
                 syslog(LOG_ERR, "IOERROR: numrecent underflow in expunge: %s %u",
-                       state->mboxname, im->uid);
+                       state->mboxname, im->record.uid);
             im->isrecent = 0;
         }
 
@@ -460,7 +420,7 @@ EXPORTED int index_expunge(struct index_state *state, char *sequence,
 
         /* avoid telling again (equivalent to STORE FLAGS.SILENT) */
         if (im->told_modseq == oldmodseq)
-            im->told_modseq = im->modseq;
+            im->told_modseq = im->record.modseq;
 
         mboxevent_extract_record(mboxevent, state->mailbox, &record);
     }
@@ -498,7 +458,7 @@ static char *index_buildseen(struct index_state *state, const char *oldseenuids)
     outlist = seqset_init(0, SEQ_MERGE);
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        seqset_add(outlist, im->uid, im->isseen);
+        seqset_add(outlist, im->record.uid, im->isseen);
     }
 
     /* there may be future already seen UIDs that this process isn't
@@ -646,7 +606,6 @@ static void index_refresh_locked(struct index_state *state)
     struct index_map *im;
     uint32_t need_records;
     seqset_t *seenlist;
-    int i;
 
     /* need to start by having enough space for the entire index state
      * before telling of any expunges (which happens after this refresh
@@ -674,26 +633,26 @@ static void index_refresh_locked(struct index_state *state)
     while ((msg = mailbox_iter_step(iter))) {
         const struct index_record *record = msg_record(msg);
         im = &state->map[msgno-1];
-        while (msgno <= state->exists && im->uid < record->uid) {
+        while (msgno <= state->exists && im->record.uid < record->uid) {
             /* NOTE: this same logic is repeated below for messages
              * past the end of recno (repack removing the trailing
              * records).  Make sure to keep them in sync */
-            if (!(im->internal_flags & FLAG_INTERNAL_EXPUNGED)) {
+            if (!(im->record.internal_flags & FLAG_INTERNAL_EXPUNGED)) {
                 /* we don't even know the modseq of when it was wiped,
                  * but we can be sure it's since the last given highestmodseq,
                  * so simulate the lowest possible value.  This is fine for
                  * our told_modseq logic, and doesn't have to be exact because
                  * QRESYNC/CONDSTORE clients will see deletedmodseq and fall
                  * back to the inefficient codepath anyway */
-                im->modseq = state->highestmodseq + 1;
+                im->record.modseq = state->highestmodseq + 1;
             }
-            if (!delayed_modseq || im->modseq < delayed_modseq)
-                delayed_modseq = im->modseq - 1;
-            im->recno = 0;
+            if (!delayed_modseq || im->record.modseq < delayed_modseq)
+                delayed_modseq = im->record.modseq - 1;
+            im->record.recno = 0;
             /* simulate expunged flag so we get an EXPUNGE response and
              * tell about unlinked so we don't get IO errors trying to
              * find the file */
-            im->internal_flags |= FLAG_INTERNAL_EXPUNGED |
+            im->record.internal_flags |= FLAG_INTERNAL_EXPUNGED |
                 FLAG_INTERNAL_UNLINKED;
             im = &state->map[msgno++];
 
@@ -705,49 +664,43 @@ static void index_refresh_locked(struct index_state *state)
          * never been told to this connection, so it doesn't need to
          * get its own msgno */
         if (!state->want_expunged
-            && (msgno > state->exists || record->uid < im->uid)
+            && (msgno > state->exists || record->uid < im->record.uid)
             && (record->internal_flags & FLAG_INTERNAL_EXPUNGED))
             continue;
 
         /* make sure our UID map is consistent */
         if (msgno <= state->exists) {
-            assert(im->uid == record->uid);
+            assert(im->record.uid == record->uid);
         }
         else {
             memset(im, 0, sizeof(struct index_map));
-            im->uid = record->uid;
+            im->record.uid = record->uid;
         }
 
         /* copy all mutable fields */
-        im->recno = record->recno;
-        im->modseq = record->modseq;
-        im->system_flags = record->system_flags;
-        im->internal_flags = record->internal_flags;
-        im->cache_offset = record->cache_offset;
-        for (i = 0; i < MAX_USER_FLAGS/32; i++)
-            im->user_flags[i] = record->user_flags[i];
+        im->record = *record;
 
         /* re-calculate seen flags */
         if (state->internalseen)
-            im->isseen = (im->system_flags & FLAG_SEEN) ? 1 : 0;
+            im->isseen = (im->record.system_flags & FLAG_SEEN) ? 1 : 0;
         else
-            im->isseen = seqset_ismember(seenlist, im->uid) ? 1 : 0;
+            im->isseen = seqset_ismember(seenlist, im->record.uid) ? 1 : 0;
 
         /* for expunged records, just track the modseq */
-        if (im->internal_flags & FLAG_INTERNAL_EXPUNGED) {
+        if (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED) {
             num_expunged++;
             /* http://www.rfc-editor.org/errata_search.php?rfc=5162
              * Errata ID: 1809 - if there are expunged records we
              * aren't telling about, need to make the highestmodseq
              * be one lower so the client can safely resync */
-            if (!delayed_modseq || im->modseq < delayed_modseq)
-                delayed_modseq = im->modseq - 1;
+            if (!delayed_modseq || im->record.modseq < delayed_modseq)
+                delayed_modseq = im->record.modseq - 1;
         }
         else {
             if (msgno > state->exists) {
                 /* don't auto-tell new records */
-                im->told_modseq = im->modseq;
-                if (im->uid > recentuid) {
+                im->told_modseq = im->record.modseq;
+                if (im->record.uid > recentuid) {
                     /* mark recent if it's newly being added to the index and also
                      * greater than the recentuid - ensures only one session gets
                      * the \Recent flag for any one message */
@@ -789,12 +742,12 @@ static void index_refresh_locked(struct index_state *state)
         /* this is the same logic as the block above in the main loop,
          * see comments up there, and make sure the blocks are kept
          * in sync! */
-        if (!(im->internal_flags & FLAG_INTERNAL_EXPUNGED))
-            im->modseq = state->highestmodseq + 1;
-        if (!delayed_modseq || im->modseq < delayed_modseq)
-            delayed_modseq = im->modseq - 1;
-        im->recno = 0;
-        im->internal_flags |= FLAG_INTERNAL_EXPUNGED | FLAG_INTERNAL_UNLINKED;
+        if (!(im->record.internal_flags & FLAG_INTERNAL_EXPUNGED))
+            im->record.modseq = state->highestmodseq + 1;
+        if (!delayed_modseq || im->record.modseq < delayed_modseq)
+            delayed_modseq = im->record.modseq - 1;
+        im->record.recno = 0;
+        im->record.internal_flags |= FLAG_INTERNAL_EXPUNGED | FLAG_INTERNAL_UNLINKED;
         im = &state->map[msgno++];
         num_expunged++;
     }
@@ -877,9 +830,9 @@ EXPORTED void index_select(struct index_state *state, struct index_init *init)
         if (sequence) seq = _parse_sequence(state, sequence, 1);
         for (msgno = 1; msgno <= state->exists; msgno++) {
             im = &state->map[msgno-1];
-            if (sequence && !seqset_ismember(seq, im->uid))
+            if (sequence && !seqset_ismember(seq, im->record.uid))
                 continue;
-            if (im->modseq <= init->vanished.modseq)
+            if (im->record.modseq <= init->vanished.modseq)
                 continue;
             index_printflags(state, msgno, 1, 0);
         }
@@ -994,7 +947,7 @@ seqset_t *index_vanished(struct index_state *state,
             while ((msgno = seqset_getnext(msgnolist)) != 0) {
                 uid = seqset_getnext(uidlist);
                 /* first non-match, we'll start here */
-                if (state->map[msgno-1].uid != uid)
+                if (state->map[msgno-1].record.uid != uid)
                     break;
                 /* ok, they matched - so we can start after here */
                 prevuid = uid;
@@ -1062,7 +1015,7 @@ static int _fetch_setseen(struct index_state *state,
         state->numunseen--;
     else
         syslog(LOG_ERR, "IOERROR: unseen underflow on setseen: %s %u",
-               state->mboxname, im->uid);
+               state->mboxname, im->record.uid);
     state->seen_dirty = 1;
     im->isseen = 1;
 
@@ -1143,8 +1096,8 @@ EXPORTED void index_fetchresponses(struct index_state *state,
 
     for (msgno = start; msgno <= end; msgno++) {
         im = &state->map[msgno-1];
-        if (seq && !seqset_ismember(seq, usinguid ? im->uid : msgno)) {
-            if (im->told_modseq !=0 && im->modseq > im->told_modseq)
+        if (seq && !seqset_ismember(seq, usinguid ? im->record.uid : msgno)) {
+            if (im->told_modseq !=0 && im->record.modseq > im->told_modseq)
                 index_printflags(state, msgno, usinguid, 0);
             continue;
         }
@@ -1191,7 +1144,7 @@ EXPORTED int index_fetch(struct index_state *state,
 
         for (msgno = 1; msgno <= state->exists; msgno++) {
             im = &state->map[msgno-1];
-            if (!seqset_ismember(seq, usinguid ? im->uid : msgno))
+            if (!seqset_ismember(seq, usinguid ? im->record.uid : msgno))
                 continue;
             r = _fetch_setseen(state, mboxevent, msgno);
             if (r) break;
@@ -1330,22 +1283,22 @@ EXPORTED int index_store(struct index_state *state, char *sequence,
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        if (!seqset_ismember(seq, storeargs->usinguid ? im->uid : msgno))
+        if (!seqset_ismember(seq, storeargs->usinguid ? im->record.uid : msgno))
             continue;
 
         /* if it's expunged already, skip it now */
-        if ((im->internal_flags & FLAG_INTERNAL_EXPUNGED))
+        if ((im->record.internal_flags & FLAG_INTERNAL_EXPUNGED))
             continue;
 
         /* if it's changed already, skip it now */
-        if (im->modseq > storeargs->unchangedsince) {
+        if (im->record.modseq > storeargs->unchangedsince) {
             if (!storeargs->modified) {
                 uint32_t maxval = (storeargs->usinguid ?
                                    state->last_uid : state->exists);
                 storeargs->modified = seqset_init(maxval, SEQ_SPARSE);
             }
             seqset_add(storeargs->modified,
-                       (storeargs->usinguid ? im->uid : msgno),
+                       (storeargs->usinguid ? im->record.uid : msgno),
                        /*ismember*/1);
             continue;
         }
@@ -1465,7 +1418,7 @@ static void prefetch_messages(struct index_state *state,
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        if (!seqset_ismember(seq, usinguid ? im->uid : msgno))
+        if (!seqset_ismember(seq, usinguid ? im->record.uid : msgno))
             continue;
 
         if (index_reload_record(state, msgno, &record))
@@ -1520,11 +1473,11 @@ EXPORTED int index_run_annotator(struct index_state *state,
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        if (!seqset_ismember(seq, usinguid ? im->uid : msgno))
+        if (!seqset_ismember(seq, usinguid ? im->record.uid : msgno))
             continue;
 
         /* if it's expunged already, skip it now */
-        if ((im->internal_flags & FLAG_INTERNAL_EXPUNGED))
+        if ((im->record.internal_flags & FLAG_INTERNAL_EXPUNGED))
             continue;
 
         r = index_reload_record(state, msgno, &record);
@@ -1769,7 +1722,7 @@ EXPORTED int index_scan(struct index_state *state, const char *contents)
 EXPORTED uint32_t index_getuid(struct index_state *state, uint32_t msgno)
 {
     assert(msgno <= state->exists);
-    return state->map[msgno-1].uid;
+    return state->map[msgno-1].record.uid;
 }
 
 /* 'uid_list' is malloc'd string representing the hits from searchargs;
@@ -2280,7 +2233,7 @@ EXPORTED int index_convsort(struct index_state *state,
         struct index_map *im = &state->map[msg->msgno-1];
 
         /* can happen if we didn't "tellchanges" yet */
-        if (im->internal_flags & FLAG_INTERNAL_EXPUNGED)
+        if (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED)
             continue;
 
         /* run the search program against all messages */
@@ -2790,9 +2743,9 @@ EXPORTED int index_convupdates(struct index_state *state,
         int in_search = 0;
 
         in_search = index_search_evaluate(state, searchargs->root, msg->msgno);
-        is_deleted = !!(im->internal_flags & FLAG_INTERNAL_EXPUNGED);
-        is_new = (im->uid >= windowargs->uidnext);
-        was_deleted = is_deleted && (im->modseq <= windowargs->modseq);
+        is_deleted = !!(im->record.internal_flags & FLAG_INTERNAL_EXPUNGED);
+        is_new = (im->record.uid >= windowargs->uidnext);
+        was_deleted = is_deleted && (im->record.modseq <= windowargs->modseq);
 
         /* is this message a current exemplar? */
         if (!is_deleted &&
@@ -3034,7 +2987,7 @@ index_copy(struct index_state *state,
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        checkval = usinguid ? im->uid : msgno;
+        checkval = usinguid ? im->record.uid : msgno;
         if (!seqset_ismember(seq, checkval))
             continue;
         index_copysetup(state, msgno, &copyargs);
@@ -3232,7 +3185,7 @@ EXPORTED int index_copy_remote(struct index_state *state, char *sequence,
 
     for (msgno = 1; msgno <= state->exists; msgno++) {
         im = &state->map[msgno-1];
-        if (!seqset_ismember(seq, usinguid ? im->uid : msgno))
+        if (!seqset_ismember(seq, usinguid ? im->record.uid : msgno))
             continue;
         index_appendremote(state, msgno, pout);
     }
@@ -3839,7 +3792,7 @@ static void index_tellexpunge(struct index_state *state)
         im = &state->map[oldmsgno-1];
 
         /* inform about expunges */
-        if (im->internal_flags & FLAG_INTERNAL_EXPUNGED) {
+        if (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED) {
             state->exists--;
             state->num_expunged--;
             /* they never knew about this one, skip */
@@ -3847,7 +3800,7 @@ static void index_tellexpunge(struct index_state *state)
                 continue;
             state->oldexists--;
             if ((client_capa & CAPA_QRESYNC))
-                seqset_add(vanishedlist, im->uid, 1);
+                seqset_add(vanishedlist, im->record.uid, 1);
             else
                 prot_printf(state->out, "* %u EXPUNGE\r\n", msgno);
             continue;
@@ -3902,7 +3855,7 @@ EXPORTED void index_tellchanges(struct index_state *state, int canexpunge,
         im = &state->map[msgno-1];
 
         /* report if it's changed since last told */
-        if (im->modseq > im->told_modseq)
+        if (im->record.modseq > im->told_modseq)
             index_printflags(state, msgno, printuid, printmodseq);
     }
 }
@@ -3953,7 +3906,7 @@ static int index_fetchannotations(struct index_state *state,
     int r = 0;
 
     r = mailbox_get_annotate_state(state->mailbox,
-                                   state->map[msgno-1].uid,
+                                   state->map[msgno-1].record.uid,
                                    &astate);
     if (r) return r;
     annotate_state_set_auth(astate, fetchargs->isadmin,
@@ -4109,23 +4062,23 @@ static void index_fetchflags(struct index_state *state,
         prot_printf(state->out, "%c\\Recent", sepchar);
         sepchar = ' ';
     }
-    if (im->system_flags & FLAG_ANSWERED) {
+    if (im->record.system_flags & FLAG_ANSWERED) {
         prot_printf(state->out, "%c\\Answered", sepchar);
         sepchar = ' ';
     }
-    if (im->system_flags & FLAG_FLAGGED) {
+    if (im->record.system_flags & FLAG_FLAGGED) {
         prot_printf(state->out, "%c\\Flagged", sepchar);
         sepchar = ' ';
     }
-    if (im->system_flags & FLAG_DRAFT) {
+    if (im->record.system_flags & FLAG_DRAFT) {
         prot_printf(state->out, "%c\\Draft", sepchar);
         sepchar = ' ';
     }
-    if (im->system_flags & FLAG_DELETED) {
+    if (im->record.system_flags & FLAG_DELETED) {
         prot_printf(state->out, "%c\\Deleted", sepchar);
         sepchar = ' ';
     }
-    if (state->want_expunged && (im->internal_flags & FLAG_INTERNAL_EXPUNGED)) {
+    if (state->want_expunged && (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED)) {
         prot_printf(state->out, "%c\\Expunged", sepchar);
         sepchar = ' ';
     }
@@ -4135,7 +4088,7 @@ static void index_fetchflags(struct index_state *state,
     }
     for (flag = 0; flag < VECTOR_SIZE(state->flagname); flag++) {
         if ((flag & 31) == 0) {
-            flagmask = im->user_flags[flag/32];
+            flagmask = im->record.user_flags[flag/32];
         }
         if (state->flagname[flag] && (flagmask & (1<<(flag & 31)))) {
             prot_printf(state->out, "%c%s", sepchar, state->flagname[flag]);
@@ -4144,7 +4097,7 @@ static void index_fetchflags(struct index_state *state,
     }
     if (sepchar == '(') (void)prot_putc('(', state->out);
     (void)prot_putc(')', state->out);
-    im->told_modseq = im->modseq;
+    im->told_modseq = im->record.modseq;
 }
 
 static void index_printflags(struct index_state *state,
@@ -4158,9 +4111,9 @@ static void index_printflags(struct index_state *state,
      * Errata ID: 1807 - MUST send UID and MODSEQ to all
      * untagged FETCH unsolicited responses */
     if (usinguid || (client_capa & CAPA_QRESYNC))
-        prot_printf(state->out, " UID %u", im->uid);
+        prot_printf(state->out, " UID %u", im->record.uid);
     if (printmodseq || (client_capa & CAPA_CONDSTORE))
-        prot_printf(state->out, " MODSEQ (" MODSEQ_FMT ")", im->modseq);
+        prot_printf(state->out, " MODSEQ (" MODSEQ_FMT ")", im->record.modseq);
     prot_printf(state->out, ")\r\n");
 }
 
@@ -4204,11 +4157,11 @@ static int index_fetchreply(struct index_state *state, uint32_t msgno,
     struct body *body = NULL;
 
     /* Check the modseq against changedsince */
-    if (fetchargs->changedsince && im->modseq <= fetchargs->changedsince)
+    if (fetchargs->changedsince && im->record.modseq <= fetchargs->changedsince)
         return 0;
 
     /* skip missing records entirely */
-    if (!im->recno)
+    if (!im->record.recno)
         return 0;
 
     r = index_reload_record(state, msgno, &record);
@@ -4865,7 +4818,7 @@ static int index_storeflag(struct index_state *state,
 
     memset(modified_flags, 0, sizeof(struct index_modified_flags));
 
-    oldmodseq = im->modseq;
+    oldmodseq = im->record.modseq;
 
     /* Change \Seen flag.  This gets done on the index first and will only be
        copied into the record later if internalseen is set */
@@ -4882,7 +4835,7 @@ static int index_storeflag(struct index_state *state,
                 state->numunseen += (old - new);
             else
                 syslog(LOG_ERR, "IOERROR: numunseen underflow in storeflag: %s %u",
-                       state->mboxname, im->uid);
+                       state->mboxname, im->record.uid);
             im->isseen = new;
             state->seen_dirty = 1;
             dirty++;
@@ -5045,7 +4998,7 @@ static int index_storeflag(struct index_state *state,
      * as well in this case, it's simpler and not much more
      * bandwidth */
     if (!(client_capa & CAPA_CONDSTORE) && storeargs->silent && im->told_modseq == oldmodseq)
-        im->told_modseq = im->modseq;
+        im->told_modseq = im->record.modseq;
 
     return 0;
 }
@@ -5089,7 +5042,7 @@ static int index_store_annotation(struct index_state *state,
 
     /* if it's silent and unchanged, update the seen value */
     if (!(client_capa & CAPA_CONDSTORE) && storeargs->silent && im->told_modseq == oldmodseq)
-        im->told_modseq = im->modseq;
+        im->told_modseq = im->record.modseq;
 
 out:
     return r;
@@ -6126,7 +6079,7 @@ static int index_copysetup(struct index_state *state, uint32_t msgno,
     else
         copyargs->records[copyargs->nummsg].system_flags &= ~FLAG_SEEN;
 
-    if (state->want_expunged && (im->internal_flags & FLAG_INTERNAL_EXPUNGED)) {
+    if (state->want_expunged && (im->record.internal_flags & FLAG_INTERNAL_EXPUNGED)) {
         copyargs->records[copyargs->nummsg].system_flags &= ~FLAG_DELETED;
         copyargs->records[copyargs->nummsg].internal_flags &= ~FLAG_INTERNAL_EXPUNGED;
     }

@@ -268,19 +268,19 @@ static int dump_me(struct findall_data *data, void *rock)
         struct index_map *im = &state->map[msgno-1];
         struct index_record record;
 
-        while (im->uid > uids[i] && i < numuids)
+        while (im->record.uid > uids[i] && i < numuids)
             i++;
         if (i >= numuids)
             break;
 
-        if (im->uid < uids[i])
+        if (im->record.uid < uids[i])
             continue;
 
         /* got a match */
         i++;
         memset(&record, 0, sizeof(struct index_record));
-        record.recno = im->recno;
-        record.uid = im->uid;
+        record.recno = im->record.recno;
+        record.uid = im->record.uid;
         if (mailbox_reload_index_record(state->mailbox, &record))
             continue;
 
