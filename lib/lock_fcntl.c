@@ -91,6 +91,10 @@ static void printlocks(void)
             if (!haveuser) syslog(LOG_ERR, "LOCKERROR: CONV WITHOUT USER");
             if (havemb) syslog(LOG_ERR, "LOCKERROR: CONV INSIDE MB");
         }
+        if (strstr(item->filename, "xapianactive")) {
+            if (!haveuser) syslog(LOG_ERR, "LOCKERROR: XAPACTIVE WITHOUT USER");
+            if (havemb) syslog(LOG_ERR, "LOCKERROR: XAPACTIVE INSIDE MB");
+        }
         if (strstr(item->filename, "mailboxes.db")) {
             havemb = 1;
         }
