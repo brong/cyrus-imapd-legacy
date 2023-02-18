@@ -1941,13 +1941,6 @@ static int run_query(xapian_builder_t *bb)
     xq = opnode_to_query(bb->lock.db, root, bb->opts);
     if (!xq) goto out;
 
-    struct conversations_state *cstate = mailbox_get_cstate(bb->mailbox);
-    if (!cstate) {
-        syslog(LOG_INFO, "search_xapian: can't open conversations for %s",
-                mailbox_name(bb->mailbox));
-        r = IMAP_NOTFOUND;
-        goto out;
-    }
     // sort the response by GUID for more efficient later handling
     r = xapian_query_run(bb->lock.db, xq, xapian_run_cb, bb);
 
@@ -2088,6 +2081,13 @@ static search_builder_t *begin_search(struct mailbox *mailbox, int opts)
     if (r) return NULL;
 
     if (!mailbox) return NULL;
+
+    struct conversations_state *cstate = mailbox_get_cstate(mailbox);
+    if (!cstate) {
+        xsyslog(LOG_INFO, "can't open conversations", "mailbox=<%s>",
+                mailbox_name(mailbox));
+        return NULL;
+    }
 
     xapian_builder_t *bb = xzmalloc(sizeof(xapian_builder_t));
     bb->super.begin_boolean = begin_boolean;
@@ -2663,26 +2663,19 @@ static int begin_mailbox_update(search_text_receiver_t *rx,
         goto out;
     }
 
-    if (mboxname_isdeletedmailbox(mailbox_name(mailbox), NULL)) {
-        syslog(LOG_ERR, "Refusing to index deleted mailbox %s",
-                mailbox_name(mailbox));
-        r = IMAP_MAILBOX_NONEXISTENT;
-        goto out;
-    }
+    /* Do nothing if there is no userid */
+    userid = mboxname_to_userid(mailbox_name(mailbox));
+    if (!userid) goto out;
 
     /* make sure the conversations are open before we start indexing
      * to avoid deadlocking against the search state */
     struct conversations_state *cstate = mailbox_get_cstate(mailbox);
     if (!cstate) {
-        xsyslog(LOG_ERR, "can't open conversations", "mailbox=<%s>",
+        xsyslog(LOG_INFO, "can't open conversations", "mailbox=<%s>",
                 mailbox_name(mailbox));
         r = IMAP_MAILBOX_NOTSUPPORTED;
         goto out;
     }
-
-    /* Do nothing if there is no userid */
-    userid = mboxname_to_userid(mailbox_name(mailbox));
-    if (!userid) goto out;
 
     /* Get a shared namelock */
     namelock_fname = xapiandb_namelock_fname_from_userid(userid);
@@ -3010,6 +3003,13 @@ static int begin_mailbox_snippets(search_text_receiver_t *rx,
 
     tr->super.mailbox = mailbox;
     tr->super.mbname = mbname_from_intname(mailbox_name(mailbox));
+
+    struct conversations_state *cstate = mailbox_get_cstate(mailbox);
+    if (!cstate) {
+        xsyslog(LOG_INFO, "can't open conversations", "mailbox=<%s>",
+                mailbox_name(mailbox));
+        return IMAP_MAILBOX_NONEXISTENT;
+    }
 
     int r = xapiandb_lock_open(mailbox, &tr->lock);
     if (r) goto out;
