@@ -2518,11 +2518,7 @@ static int is_indexed_part(xapian_update_receiver_t *tr, const struct message_gu
     }
 
     struct conversations_state *cstate = mailbox_get_cstate(tr->super.mailbox);
-    if (!cstate) {
-        xsyslog(LOG_INFO, "can't open conversations", "mailbox=<%s>",
-                mailbox_name(tr->super.mailbox));
-        return 0;
-    }
+    if (!cstate) return 0;
 
     int ret = 0;
     char *guidrep = xstrdup(message_guid_encode(guid));
@@ -2845,11 +2841,7 @@ static uint8_t is_indexed(search_text_receiver_t *rx, message_t *msg)
     if (tr->mode == XAPIAN_DBW_CONVINDEXED) {
         /* Determine if msg is already indexed */
         struct conversations_state *cstate = mailbox_get_cstate(tr->super.mailbox);
-        if (!cstate) {
-            syslog(LOG_INFO, "search_xapian: can't open conversations for %s",
-                    mailbox_name(tr->super.mailbox));
-            return 0;
-        }
+        if (!cstate) return 0;
 
         char *guidrep = xstrdup(message_guid_encode(guid));
         struct is_indexed_rock rock = { tr, XAPIAN_WRAP_DOCTYPE_MSG };
@@ -3366,7 +3358,7 @@ static int create_filter(const strarray_t *srcpaths, const strarray_t *destpaths
     struct buf buf = BUF_INITIALIZER;
     int r = 0;
     int i;
-    struct conversations_state *cstate = NULL;
+    struct conversations_state *local_cstate = NULL;
 
     memset(filter, 0, sizeof(struct mbfilter));
     filter->destpaths = destpaths;
@@ -3413,17 +3405,21 @@ static int create_filter(const strarray_t *srcpaths, const strarray_t *destpaths
         /* assume a 4 million maximum records */
         bloom_init(&filter->bloom, 4000000, 0.01);
 
-        r = conversations_open_user(userid, 1/*shared*/, &cstate);
-        if (r) {
-            printf("ERROR: failed to open conversations for %s\n", userid);
-            goto done;
+        struct conversations_state *cstate = conversations_get_user(userid);
+        if (!cstate) {
+            r = conversations_open_user(userid, 1/*shared*/, &local_cstate);
+            if (r) {
+                printf("ERROR: failed to open conversations for %s\n", userid);
+                goto done;
+            }
+            cstate = local_cstate;
         }
 
         r = cyrusdb_foreach(cstate->db, "G", 1, NULL, bloomadd_cb, &filter->bloom, NULL);
     }
 
 done:
-    conversations_commit(&cstate);
+    conversations_commit(&local_cstate);
     buf_free(&buf);
 
     return r;
@@ -3804,6 +3800,7 @@ static int compact_dbs(const char *userid, const strarray_t *reindextiers,
     char *namelock_fname = NULL;
     int verbose = SEARCH_VERBOSE(flags);
     int created_something = 0;
+    struct conversations_state *cstate = NULL;
     int r = 0;
     int i;
 
@@ -3825,6 +3822,11 @@ static int compact_dbs(const char *userid, const strarray_t *reindextiers,
         if (verbose)
             printf("INVALID: unknown tier %s\n", desttier);
         goto out;
+    }
+
+    if (!conversations_get_user(userid)) {
+        r = conversations_open_user(userid, 1/*shared*/, &cstate);
+        if (r) goto out;
     }
 
     /* Generated the namelock filename */
@@ -4161,6 +4163,8 @@ out:
         mboxname_release(&xapiandb_namelock);
         xapiandb_namelock = NULL;
     }
+
+    conversations_commit(&cstate);
 
     mboxlist_entry_free(&mbentry);
     free(mboxname);
