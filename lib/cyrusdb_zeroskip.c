@@ -75,7 +75,11 @@ struct dbengine {
 struct dblist {
     struct dbengine *db;
     struct dblist *next;
+    char *fname;
+    int refcount;
 };
+
+static struct dblist *open_zeroskip;
 
 /****** INTERNAL FUNCTIONS ******/
 static int create_or_reuse_txn(struct dbengine *db,
@@ -158,8 +162,26 @@ static int cyrusdb_zeroskip_open(const char *fname,
     int zsdbflags = MODE_RDWR;
     zsdb_cmp_fn dbcmpfn = NULL;
     memtree_search_cb_t btcmpfn = NULL;
+    struct dblist *ent = NULL;
 
     dbe = (struct dbengine *) xzmalloc(sizeof(struct dbengine));
+
+    /* do we already have this DB open? */
+    for (ent = open_zeroskip; ent; ent = ent->next) {
+        if (strcmp(ent->fname, fname)) continue;
+        // XXX - we need to look and see if the the DB is already in a transaction
+        if (mytid) {
+            *mytid = xmalloc(sizeof(struct txn));
+            r = zsdb_transaction_begin(dbe->db, &(*mytid)->t);
+            if (r != ZS_OK) {
+                r = CYRUSDB_INTERNAL;
+                goto close_db;
+            }
+        }
+        ent->refcount++;
+        *ret = ent->db;
+        return 0;
+    }
 
     if (flags & CYRUSDB_CREATE)
         zsdbflags = MODE_CREATE;
@@ -183,6 +205,15 @@ static int cyrusdb_zeroskip_open(const char *fname,
     }
 
     *ret = dbe;
+
+    /* track this database in the open list */
+    ent = (struct dblist *) xzmalloc(sizeof(struct dblist));
+    ent->db = dbe;
+    ent->refcount = 1;
+    ent->next = open_zeroskip;
+    ent->fname = xstrdup(fname);
+    open_zeroskip = ent;
+
 
     if (mytid) {
         *mytid = xmalloc(sizeof(struct txn));
@@ -213,6 +244,21 @@ static int cyrusdb_zeroskip_close(struct dbengine *dbe)
     assert(dbe);
     assert(dbe->db);
 
+    /* remove this DB from the open list */
+    struct dblist *ent = open_zeroskip;
+    struct dblist *prev = NULL;
+    while (ent && ent->db != dbe) {
+        prev = ent;
+        ent = ent->next;
+    }
+    assert(ent);
+
+    if (--ent->refcount > 0) 
+        return 0;
+
+    if (prev) prev->next = ent->next;
+    else open_zeroskip = ent->next;
+
     r = zsdb_close(dbe->db);
     if (r) {
         r = CYRUSDB_INTERNAL;
@@ -222,7 +268,6 @@ static int cyrusdb_zeroskip_close(struct dbengine *dbe)
     zsdb_final(&dbe->db);
 
     free(dbe);
-    dbe = NULL;
 
  done:
     return r;
