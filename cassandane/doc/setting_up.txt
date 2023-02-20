@@ -101,6 +101,16 @@ at all.  This section documents those steps.
 
     # ulimit -c unlimited
 
+    If you're using sudo, you'll need to allow the core limits to
+    keep going through by maybe adding this to your /etc/sudoers file:
+
+    Defaults	rlimit_core=default
+
+    And on some systems, you'll want to make it not dump to an external
+    program like apport that discards cores:
+
+    # echo core > /proc/sys/kernel/core_pattern
+
 Now, to run Cassandane use this command
 
     gnb> cd ~/my/cassandane/workarea
