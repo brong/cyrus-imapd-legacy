@@ -269,6 +269,9 @@ static int cyrusdb_zeroskip_close(struct dbengine *dbe)
 
     free(dbe);
 
+    free(ent->fname);
+    free(ent);
+
  done:
     return r;
 }
