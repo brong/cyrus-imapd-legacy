@@ -86,34 +86,23 @@ static int create_or_reuse_txn(struct dbengine *db,
                                struct txn **curtidptr,
                                struct txn **newtidptr)
 {
-    struct txn *tid = NULL;
-
     assert(newtidptr);
-    tid = *newtidptr;
 
-    if (!curtidptr || !*curtidptr) {
-        /* New transaction */
-        int r;
-
-        tid = xcalloc(1, sizeof(struct txn));
-        r = zsdb_transaction_begin(db->db, &tid->t);
-        if (r != ZS_OK) {
-            free(tid);
-            tid = NULL;
-            *newtidptr = NULL;
-            return CYRUSDB_INTERNAL;
-        }
-    } else {
-        /* Existing transaction */
-        tid = *curtidptr;
+    // existing transaction?  Keep it
+    if (curtidptr && *curtidptr) {
+        *newtidptr = *curtidptr;
+        return CYRUSDB_OK;
     }
 
-    if (curtidptr)
-        *curtidptr = tid;
+    struct txn *tid = xzmalloc(sizeof(struct txn));
+    int r = zsdb_transaction_begin(db->db, &tid->t);
+    if (r == ZS_OK) {
+        *newtidptr = tid;
+        return CYRUSDB_OK;
+    }
 
-    *newtidptr = tid;
-
-    return CYRUSDB_OK;
+    free(tid);
+    return CYRUSDB_INTERNAL;
 }
 
 memtree_memcmp_fn(
