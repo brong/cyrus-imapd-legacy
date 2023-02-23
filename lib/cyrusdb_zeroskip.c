@@ -381,8 +381,7 @@ static int cyrusdb_zeroskip_foreach(struct dbengine *db,
     if (prefixlen) assert(prefix);
 
     r = create_or_reuse_txn(db, tidptr, &tid);
-    if (r)
-        goto done;
+    if (r) goto done;
 
     /* FIXME: The *ugly* typecasts  be removed as soon as we * update the
      * CyrusDB interfaces to support `unsigned char *` instead of * `char *`.
@@ -391,19 +390,9 @@ static int cyrusdb_zeroskip_foreach(struct dbengine *db,
                      (int (*)(void*, const unsigned char *, size_t , const unsigned char *, size_t))goodp,
                      (int (*)(void*, const unsigned char *, size_t , const unsigned char *, size_t))cb,
                      rock, tidptr ? &tid->t : NULL);
-    if (r != ZS_OK) {
-        r = CYRUSDB_IOERROR;
-        goto done;
-    }
-
-    if (tidptr) {
-        *tidptr = tid;
-    }
-
-    r = CYRUSDB_OK;
 
  done:
-    if (tid && (!tidptr || !*tidptr)) {
+    if (tid && !tidptr) {
         zsdb_transaction_end(&tid->t);
         free(tid);
         tid = NULL;
