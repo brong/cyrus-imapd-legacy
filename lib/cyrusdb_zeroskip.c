@@ -426,8 +426,7 @@ static int cyrusdb_zeroskip_store(struct dbengine *db,
     assert(key && keylen);
 
     r = create_or_reuse_txn(db, tidptr, &tid);
-    if (r)
-        goto done;
+    if (r) goto done;
 
     /* Acquire write lock */
     zsdb_write_lock_acquire(db->db, 0);
@@ -438,24 +437,19 @@ static int cyrusdb_zeroskip_store(struct dbengine *db,
     if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
         goto done;
-    } else if (r) {
+    }
+
+    if (r) {
         zsdb_abort(db->db, &tid->t);
         r = CYRUSDB_IOERROR;
         goto done;
     }
 
-    if (tidptr) {
-        *tidptr = tid;
-    }
-
-    if (r) r = CYRUSDB_IOERROR;
-    else   r = CYRUSDB_OK;
-
  done:
     /* Release write lock */
     zsdb_write_lock_release(db->db);
 
-    if (tid && (!tidptr || !*tidptr)) {
+    if (tid && !tidptr) {
         zsdb_transaction_end(&tid->t);
         free(tid);
         tid = NULL;
@@ -477,8 +471,7 @@ static int cyrusdb_zeroskip_delete(struct dbengine *db,
     assert(db);
 
     r = create_or_reuse_txn(db, tidptr, &tid);
-    if (r)
-        goto done;
+    if (r) goto done;
 
     /* Acquire write lock */
     zsdb_write_lock_acquire(db->db, 0);
@@ -492,18 +485,11 @@ static int cyrusdb_zeroskip_delete(struct dbengine *db,
         goto done;
     }
 
-    if (tidptr) {
-        *tidptr = tid;
-    }
-
-    if (r) r = CYRUSDB_IOERROR;
-    else   r = CYRUSDB_OK;
-
  done:
     /* Release write lock */
     zsdb_write_lock_release(db->db);
 
-    if (tid && (!tidptr || !*tidptr)) {
+    if (tid && !tidptr) {
         zsdb_transaction_end(&tid->t);
         free(tid);
         tid = NULL;
