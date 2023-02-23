@@ -283,32 +283,26 @@ static int cyrusdb_zeroskip_fetch(struct dbengine *db,
     if (datalen) *datalen = 0;
 
     r = create_or_reuse_txn(db, tidptr, &tid);
-    if (r)
-        goto done;
+    if (r) goto done;
 
     r = zsdb_fetch(db->db, (const unsigned char *)key, keylen,
                    (const unsigned char **)data, datalen,
                    tidptr ? &tid->t : NULL);
-    if (r == ZS_NOTFOUND){
+
+    if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
         if (data) *data = NULL;
         if (datalen) *datalen = 0;
-
         goto done;
+    }
 
-    } else if (r) {
+    if (r) {
         r = CYRUSDB_IOERROR;
         goto done;
     }
 
-    if (tidptr) {
-        *tidptr = tid;
-    }
-
-    r = CYRUSDB_OK;
-
  done:
-    if (tid && (!tidptr || !*tidptr)) {
+    if (tid && !tidptr) {
         zsdb_transaction_end(&tid->t);
         free(tid);
         tid = NULL;
@@ -322,9 +316,6 @@ static int cyrusdb_zeroskip_fetchlock(struct dbengine *db,
                                       const char **data, size_t *datalen,
                                       struct txn **tidptr)
 {
-    assert(key);
-    assert(keylen);
-
     /* TODO: LOCK??? */
     return cyrusdb_zeroskip_fetch(db, key, keylen,
                                   data, datalen,
