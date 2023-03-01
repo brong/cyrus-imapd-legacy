@@ -63,7 +63,7 @@
 #include "xstrlcpy.h"
 #include "xunlink.h"
 
-//#define DEBUGDB 1
+#define DEBUGDB 1
 
 /* Note that some of these may be undefined symbols
  * if libcyrus was not built with support for them */
@@ -231,11 +231,12 @@ EXPORTED int cyrusdb_fetch(struct db *db,
 {
     if (!db->backend->fetch)
         return CYRUSDB_NOTIMPLEMENTED;
+    int r = db->backend->fetch(db->engine, key, keylen,
+                               data, datalen, mytid);
 #ifdef DEBUGDB
-    syslog(LOG_NOTICE, "DEBUGDB fetch(%llx, %.*s)", (long long unsigned)db->engine, (int)keylen, key);
+    syslog(LOG_NOTICE, "DEBUGDB fetch(%llx, %.*s) => %.*s", (long long unsigned)db->engine, (int)keylen, key, datalen ? (int)*datalen : 0, data ? *data : "");
 #endif
-    return db->backend->fetch(db->engine, key, keylen,
-                              data, datalen, mytid);
+    return r;
 }
 
 EXPORTED int cyrusdb_fetchlock(struct db *db,
@@ -245,11 +246,12 @@ EXPORTED int cyrusdb_fetchlock(struct db *db,
 {
     if (!db->backend->fetchlock)
         return CYRUSDB_NOTIMPLEMENTED;
+    int r = db->backend->fetchlock(db->engine, key, keylen,
+                                   data, datalen, mytid);
 #ifdef DEBUGDB
-    syslog(LOG_NOTICE, "DEBUGDB fetchlock(%llx, %.*s)", (long long unsigned)db->engine, (int)keylen, key);
+    syslog(LOG_NOTICE, "DEBUGDB fetchlock(%llx, %.*s) => %.*s", (long long unsigned)db->engine, (int)keylen, key, datalen ? (int)*datalen : 0, data ? *data : "");
 #endif
-    return db->backend->fetchlock(db->engine, key, keylen,
-                                  data, datalen, mytid);
+    return r;
 }
 
 EXPORTED int cyrusdb_fetchnext(struct db *db,
@@ -595,6 +597,18 @@ EXPORTED const char *cyrusdb_detect(const char *fname)
     FILE *f;
     char buf[32];
     int n;
+    struct stat statbuf;
+    if (stat(fname, &statbuf))
+        return NULL;
+
+    if (S_ISDIR(statbuf.st_mode)) {
+        struct stat statbuf2;
+        char *zname = strconcat(fname, "/.zsdb", NULL);
+        int sres = stat(zname, &statbuf2);
+        free(zname);
+        if (!sres) return "zeroskip";
+        return NULL;
+    }
 
     f = fopen(fname, "r");
     if (!f) return NULL;

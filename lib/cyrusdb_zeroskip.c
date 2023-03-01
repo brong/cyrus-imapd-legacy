@@ -63,14 +63,13 @@
 
 struct txn {
     struct zsdb_txn *t;
-    unsigned iswritelocked : 1;
-    unsigned uncommitted : 1;
 };
 
 
 struct dbengine {
     struct zsdb *db;
     struct zsdb_txn *current_txn;
+    unsigned uncommitted : 1;
 };
 
 
@@ -85,39 +84,32 @@ static struct dblist *open_zeroskip;
 
 /****** INTERNAL FUNCTIONS ******/
 static int create_or_reuse_txn(struct dbengine *db,
-                               struct txn **curtidptr,
-                               struct txn **newtidptr)
+                               struct txn **tidptr)
 {
-    assert(newtidptr);
+    if (!tidptr) return 0;
+
+    int r;
 
     // existing transaction?  Keep it
-    if (curtidptr && *curtidptr) {
-        *newtidptr = *curtidptr;
-        return CYRUSDB_OK;
-    }
-
-    if (db->current_txn) return CYRUSDB_INTERNAL;
+    if (*tidptr) return CYRUSDB_OK;
 
     struct txn *tid = xzmalloc(sizeof(struct txn));
-    int r = zsdb_transaction_begin(db->db, &tid->t);
+
+    /* Acquire write lock */
+    r = zsdb_write_lock_acquire(db->db, 0);
     if (r != ZS_OK) {
+         free(tid);
+         return CYRUSDB_INTERNAL;
+    }
+
+    r = zsdb_transaction_begin(db->db, &tid->t);
+    if (r != ZS_OK) {
+        zsdb_write_lock_release(db->db);
         free(tid);
         return CYRUSDB_INTERNAL;
     }
 
-    // write lock?
-    if (curtidptr) {
-        /* Acquire write lock */
-        r = zsdb_write_lock_acquire(db->db, 0);
-        if (r != ZS_OK) {
-            zsdb_transaction_end(&tid->t);
-            free(tid);
-            return CYRUSDB_INTERNAL;
-        }
-        *curtidptr = tid;
-    }
-
-    *newtidptr = tid;
+    *tidptr = tid;
     db->current_txn = tid->t;
 
     return CYRUSDB_OK;
@@ -129,20 +121,23 @@ static int close_txn(struct dbengine *db, struct txn **tidptr)
     struct txn *tid = *tidptr;
 
     if (!tid) return 0;
-    if (tid->t != db->current_txn) return CYRUSDB_INTERNAL;
+    assert (tid->t == db->current_txn);
 
-    if (tid->iswritelocked) {
-        if (tid->uncommitted)
-            zsdb_abort(db->db, &tid->t);
-        /* Release write lock */
-        zsdb_write_lock_release(db->db);
+    if (db->uncommitted) {
+        syslog(LOG_ERR, "ZSERROR: UNCOMMITTED CHANGES ON CLOSE");
+        zsdb_abort(db->db, &tid->t);
+        db->current_txn = tid->t;
     }
 
-    zsdb_transaction_end(&tid->t);
+    if (tid->t) {
+        zsdb_transaction_end(&tid->t);
+        db->current_txn = tid->t;
+    }
     free(tid);
 
-    *tidptr = 0;
-    db->current_txn = NULL;
+    zsdb_write_lock_release(db->db);
+
+    *tidptr = NULL;
 
     return 0;
 }
@@ -190,12 +185,13 @@ static int cyrusdb_zeroskip_commit(struct dbengine *db, struct txn *tid)
     if (!tid) return 0;
     int r = 0;
 
-    if (tid->iswritelocked && tid->uncommitted) {
+    if (db->uncommitted) {
         assert(db->current_txn == tid->t);
-        tid->uncommitted = 0;
         r = zsdb_commit(db->db, &tid->t);
         if (r)
             zsdb_abort(db->db, &tid->t);
+        db->current_txn = tid->t;
+        db->uncommitted = 0;
     }
 
     int r2 = close_txn(db, &tid);
@@ -206,11 +202,14 @@ static int cyrusdb_zeroskip_commit(struct dbengine *db, struct txn *tid)
 static int cyrusdb_zeroskip_abort(struct dbengine *db, struct txn *tid)
 {
     assert(db);
-    assert(tid);
+    if (!tid) return 0;
+    int r = 0;
 
-    tid->uncommitted = 0;
-
-    int r = zsdb_abort(db->db, &tid->t);
+    if (db->uncommitted) {
+        r = zsdb_abort(db->db, &tid->t);
+        db->current_txn = tid->t;
+        db->uncommitted = 0;
+    }
     int r2 = close_txn(db, &tid);
 
     return r ? r : r2;
@@ -234,14 +233,9 @@ static int cyrusdb_zeroskip_open(const char *fname,
     for (ent = open_zeroskip; ent; ent = ent->next) {
         if (strcmp(ent->fname, fname)) continue;
         // XXX - we need to look and see if the the DB is already in a transaction
-        if (mytid) {
-            *mytid = xmalloc(sizeof(struct txn));
-            r = zsdb_transaction_begin(dbe->db, &(*mytid)->t);
-            if (r != ZS_OK) {
-                r = CYRUSDB_INTERNAL;
-                goto close_db;
-            }
-        }
+        r = create_or_reuse_txn(ent->db, mytid);
+        if (r != ZS_OK)
+            return CYRUSDB_INTERNAL;
         ent->refcount++;
         *ret = ent->db;
         return 0;
@@ -268,15 +262,13 @@ static int cyrusdb_zeroskip_open(const char *fname,
         goto finalise_db;
     }
 
-    *ret = dbe;
-
-    if (mytid) {
-        r = create_or_reuse_txn(dbe, mytid, mytid);
-        if (r != ZS_OK) {
-            r = CYRUSDB_INTERNAL;
-            goto close_db;
-        }
+    r = create_or_reuse_txn(dbe, mytid);
+    if (r != ZS_OK) {
+        r = CYRUSDB_INTERNAL;
+        goto close_db;
     }
+
+    *ret = dbe;
 
     /* track this database in the open list */
     ent = (struct dblist *) xzmalloc(sizeof(struct dblist));
@@ -305,7 +297,7 @@ static int cyrusdb_zeroskip_close(struct dbengine *dbe)
 
     assert(dbe);
     assert(dbe->db);
-    assert(!dbe->current_txn);
+    assert(!dbe->uncommitted);
 
     /* remove this DB from the open list */
     struct dblist *ent = open_zeroskip;
@@ -345,7 +337,6 @@ static int cyrusdb_zeroskip_fetch(struct dbengine *db,
                                   struct txn **tidptr)
 {
     int r = CYRUSDB_OK;
-    struct txn *tid = NULL;
 
     assert(db);
     assert(key);
@@ -356,12 +347,11 @@ static int cyrusdb_zeroskip_fetch(struct dbengine *db,
     if (data) *data = NULL;
     if (datalen) *datalen = 0;
 
-    r = create_or_reuse_txn(db, tidptr, &tid);
+    r = create_or_reuse_txn(db, tidptr);
     if (r) goto done;
 
     r = zsdb_fetch(db->db, (const unsigned char *)key, keylen,
-                   (const unsigned char **)data, datalen,
-                   tidptr ? &tid->t : NULL);
+                   (const unsigned char **)data, datalen);
 
     if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
@@ -376,8 +366,6 @@ static int cyrusdb_zeroskip_fetch(struct dbengine *db,
     }
 
  done:
-    if (!tidptr) close_txn(db, &tid);
-
     return r;
 }
 
@@ -399,20 +387,18 @@ static int cyrusdb_zeroskip_fetchnext(struct dbengine *db,
                                       struct txn **tidptr)
 {
     int r = CYRUSDB_OK;
-    struct txn *tid = NULL;
 
     assert(db);
 
     if (data) *data = NULL;
     if (datalen) *datalen = 0;
 
-    r = create_or_reuse_txn(db, tidptr, &tid);
+    r = create_or_reuse_txn(db, tidptr);
     if (r) goto done;
 
     r = zsdb_fetchnext(db->db, (const unsigned char *)key, keylen,
                        (const unsigned char **)foundkey, fklen,
-                       (const unsigned char **)data, datalen,
-                       &tid->t);
+                       (const unsigned char **)data, datalen);
 
     if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
@@ -427,8 +413,6 @@ static int cyrusdb_zeroskip_fetchnext(struct dbengine *db,
     }
 
  done:
-    if (!tidptr) close_txn(db, &tid);
-
     return r;
 }
 
@@ -439,14 +423,13 @@ static int cyrusdb_zeroskip_foreach(struct dbengine *db,
                                     struct txn **tidptr)
 {
     int r = CYRUSDB_OK;
-    struct txn *tid = NULL;
 
     assert(db);
     assert(cb);
 
     if (prefixlen) assert(prefix);
 
-    r = create_or_reuse_txn(db, tidptr, &tid);
+    r = create_or_reuse_txn(db, tidptr);
     if (r) goto done;
 
     /* FIXME: The *ugly* typecasts  be removed as soon as we * update the
@@ -455,11 +438,9 @@ static int cyrusdb_zeroskip_foreach(struct dbengine *db,
     r = zsdb_foreach(db->db, (unsigned char *)prefix, prefixlen,
                      (int (*)(void*, const unsigned char *, size_t , const unsigned char *, size_t))goodp,
                      (int (*)(void*, const unsigned char *, size_t , const unsigned char *, size_t))cb,
-                     rock, tidptr ? &tid->t : NULL);
+                     rock);
 
  done:
-    if (!tidptr) close_txn(db, &tid);
-
     return r;
 }
 
@@ -477,14 +458,13 @@ static int cyrusdb_zeroskip_store(struct dbengine *db,
     assert(key && keylen);
 
     // always get a writelock
-    r = create_or_reuse_txn(db, tidptr ? tidptr : &tid, &tid);
+    r = create_or_reuse_txn(db, tidptr ? tidptr : &tid);
     if (r) goto done;
 
-    tid->uncommitted = 1;
+    db->uncommitted = 1;
 
     r = zsdb_add(db->db, (const unsigned char *)key, keylen,
-                 (const unsigned char *)data, datalen,
-                 tidptr ? &tid->t : NULL);
+                 (const unsigned char *)data, datalen);
     if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
         goto done;
@@ -495,8 +475,8 @@ static int cyrusdb_zeroskip_store(struct dbengine *db,
     }
 
  done:
-    if (!tidptr) {
-        if (r) close_txn(db, tidptr);
+    if (tid) {
+        if (r) close_txn(db, &tid);
         else r = cyrusdb_zeroskip_commit(db, tid);
     }
 
@@ -516,12 +496,12 @@ static int cyrusdb_zeroskip_delete(struct dbengine *db,
     assert(db);
 
     // always get a writelock
-    r = create_or_reuse_txn(db, tidptr ? tidptr : &tid, &tid);
+    r = create_or_reuse_txn(db, tidptr ? tidptr : &tid);
     if (r) goto done;
 
-    tid->uncommitted = 1;
+    db->uncommitted = 1;
 
-    r = zsdb_remove(db->db, (const unsigned char *)key, keylen, &tid->t);
+    r = zsdb_remove(db->db, (const unsigned char *)key, keylen);
     if (r == ZS_NOTFOUND) {
         r = CYRUSDB_NOTFOUND;
         goto done;
@@ -532,8 +512,8 @@ static int cyrusdb_zeroskip_delete(struct dbengine *db,
     }
 
  done:
-    if (!tidptr) {
-        if (r) close_txn(db, tidptr);
+    if (tid) {
+        if (r) close_txn(db, &tid);
         else r = cyrusdb_zeroskip_commit(db, tid);
     }
 
