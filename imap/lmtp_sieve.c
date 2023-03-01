@@ -2319,10 +2319,13 @@ static int sieve_find_script(const char *user, const char *domain,
     if (script) {
         snprintf(fname, size, "%s/%s.bc", sievedir, script);
         sieve_script_rebuild(userid, sievedir, script);
+        buf_free(&buf);
+        return 0;
     }
-    buf_free(&buf);
 
-    return 0;
+    buf_free(&buf);
+    return -1;
+
 }
 
 int run_sieve(const mbname_t *mbname, sieve_interp_t *interp, deliver_data_t *msgdata)
