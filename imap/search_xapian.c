@@ -77,6 +77,8 @@
 /* generated headers are not necessarily in current directory */
 #include "imap/imap_err.h"
 
+#define DEBUG_ACTIVEFILE 0
+
 #define INDEXEDDB_VAL_VERSION   2 /* current version for entry value */
 #define INDEXEDDB_VERSION       2 /* current database version */
 #define INDEXEDDB_FNAME         "/cyrus.indexed.db"
@@ -250,6 +252,9 @@ static int activefile_write(struct mappedfile *mf, const strarray_t *new)
     if (r) goto done;
 
     towrite = strarray_join(new, " ");
+#ifdef DEBUG_ACTIVEFILE
+    syslog(LOG_NOTICE, "DEBUGACTIVEFILE write: %s %s", mappedfile_fname(mf), towrite);
+#endif
     nwritten = mappedfile_pwrite(newfile, towrite, strlen(towrite), 0);
     free(towrite);
     if (nwritten < 0) {
@@ -345,6 +350,14 @@ static int activefile_open(const char *mboxname, const char *partition,
         r = IMAP_MAILBOX_LOCKED;
         goto done;
     }
+
+#ifdef DEBUG_ACTIVEFILE
+    syslog(LOG_NOTICE, "DEBUGACTIVEFILE read: %s %.*s (%s)",
+           mappedfile_fname(*activefile), 
+           (int)mappedfile_size(*activefile), 
+           mappedfile_base(*activefile),
+           type == AF_LOCK_WRITE ? "write" : "read");
+#endif
 
     /* finally, read the contents */
     *ret = activefile_read(*activefile);
