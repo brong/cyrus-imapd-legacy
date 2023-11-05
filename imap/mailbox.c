@@ -3876,7 +3876,7 @@ static int mailbox_update_webdav(struct mailbox *mailbox,
         }
     }
     if (!buf_len(&resource))
-	buf_printf(&resource, "imapuid-%u", new->uid);
+        buf_printf(&resource, "imapuid-%u", new->uid);
 
     webdavdb = mailbox_open_webdav(mailbox);
 
