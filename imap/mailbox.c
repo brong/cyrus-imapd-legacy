@@ -2477,7 +2477,13 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
 
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
     if (userid) {
-        assert (user_isnamespacelocked(userid));
+        if (!user_isnamespacelocked(userid)) {
+            r = mailbox_relock(mailbox, LOCK_SHARED, locktype);
+            if (locktype == LOCK_SHARED)
+                mailbox->is_readonly = 1;
+            free(userid);
+            return r;
+        }
         free(userid);
     }
 
