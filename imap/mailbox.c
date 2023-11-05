@@ -2645,6 +2645,14 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
         }
     }
 
+    if (mailbox->local_cstate) {
+        int r = conversations_commit(&mailbox->local_cstate);
+        if (r) {
+            syslog(LOG_ERR, "IOERROR: Error committing to conversations database for mailbox %s: %s",
+                   mailbox_name(mailbox), error_message(r));
+	}
+    }
+
     /* release caches */
     int i;
     for (i = 0; i < mailbox->caches.count; i++) {
@@ -3072,15 +3080,6 @@ EXPORTED int mailbox_commit(struct mailbox *mailbox)
         mboxevent_set_access(mboxevent, NULL, NULL, "", mailbox_name(mailbox), 0);
         mboxevent_notify(&mboxevent);
         mboxevent_free(&mboxevent);
-    }
-
-    if (mailbox->local_cstate) {
-        r = conversations_commit(&mailbox->local_cstate);
-        if (r) {
-            syslog(LOG_ERR, "IOERROR: Error committing to conversations database for mailbox %s: %s",
-                   mailbox_name(mailbox), error_message(r));
-            return r;
-	}
     }
 
     /* remove all dirty flags! */
