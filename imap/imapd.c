@@ -8016,7 +8016,7 @@ static void cmd_delete(char *tag, char *name, int localonly, int force)
 
     if (!r && config_getswitch(IMAPOPT_DELETE_UNSUBSCRIBE)) {
         mboxlist_changesub(mbname_intname(mbname), imapd_userid, imapd_authstate,
-                           /* add */ 0, /* force */ 0, /* notify? */ 1);
+                           /* add */ 0, /* force */ 1, /* notify? */ 0, /*silent*/1);
     }
 
     mboxname_release(&namespacelock);
@@ -8120,7 +8120,7 @@ static int renmbox(const mbentry_t *mbentry, void *rock)
 
     if (!r && config_getswitch(IMAPOPT_DELETE_UNSUBSCRIBE)) {
         mboxlist_changesub(mbentry->name, imapd_userid, imapd_authstate,
-                           /* add */ 0, /* force */ 0, /* notify? */ 0);
+                           /* add */ 0, /* force */ 1, /* notify? */ 0, /*silent*/1);
     }
 
     oldextname =
@@ -8550,7 +8550,7 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location, 
 
         if (!r && config_getswitch(IMAPOPT_DELETE_UNSUBSCRIBE)) {
             mboxlist_changesub(oldmailboxname, imapd_userid, imapd_authstate,
-                               /* add */ 0, /* force */ 0, /* notify? */ 1);
+                               /* add */ 0, /* force */ 1, /* notify? */ 0, /*silent*/1);
         }
     }
 
@@ -9022,7 +9022,7 @@ static void cmd_changesub(char *tag, char *namespace, char *name, int add)
         }
         else {
             char *intname = mboxname_from_external(name, &imapd_namespace, imapd_userid);
-            r = mboxlist_changesub(intname, imapd_userid, imapd_authstate, add, force, 1);
+            r = mboxlist_changesub(intname, imapd_userid, imapd_authstate, add, force, 1, 0);
             free(intname);
         }
     }

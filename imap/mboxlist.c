@@ -2897,13 +2897,13 @@ EXPORTED int mboxlist_renamemailbox(const mbentry_t *mbentry,
     /* Move subscription */
     if (move_subscription) {
         int is_subscribed = mboxlist_checksub(oldname, userid) == 0;
-        int r2 = mboxlist_changesub(oldname, userid, auth_state, 0, 0, 0);
+        int r2 = mboxlist_changesub(oldname, userid, auth_state, 0, 0, 0, silent);
         if (r2) {
             syslog(LOG_ERR, "CHANGESUB: can't unsubscribe %s: %s",
                     oldname, error_message(r2));
         }
         if (is_subscribed) {
-            r2 = mboxlist_changesub(newname, userid, auth_state, 1, 0, 0);
+            r2 = mboxlist_changesub(newname, userid, auth_state, 1, 0, 0, silent);
             if (r2) {
                 syslog(LOG_ERR, "CHANGESUB: can't subscribe %s: %s",
                         newname, error_message(r2));
@@ -5134,7 +5134,7 @@ EXPORTED int mboxlist_checksub(const char *name, const char *userid)
  */
 EXPORTED int mboxlist_changesub(const char *name, const char *userid,
                                 const struct auth_state *auth_state,
-                                int add, int force, int notify)
+                                int add, int force, int notify, int silent)
 {
     struct buf key = BUF_INITIALIZER;
     mbentry_t *mbentry = NULL;
@@ -5186,7 +5186,7 @@ EXPORTED int mboxlist_changesub(const char *name, const char *userid,
     if (r) goto done;
 
     // bump the modseq on the folder if one exists
-    if (mbentry && !(mbentry->mbtype & MBTYPE_REMOTE)) {
+    if (!silent && mbentry && !(mbentry->mbtype & MBTYPE_REMOTE)) {
         struct mailbox *mailbox = NULL;
         r = mailbox_open_iwl(name, &mailbox);
         if (!r) {
