@@ -1008,16 +1008,17 @@ static int mailbox_open_advanced(const char *name,
         /* can't reuse an exclusive locked mailbox */
         if (listitem->l->locktype & LOCK_EXCLUSIVE)
             return IMAP_MAILBOX_LOCKED;
-        if (locktype & LOCK_EXCLUSIVE)
-            return IMAP_MAILBOX_LOCKED;
-        /* can't reuse an already locked index */
-        if (listitem->m.index_locktype)
+
+        /* can't promote a readonly index */
+        if (listitem->m.index_locktype == LOCK_SHARED && locktype == LOCK_EXCLUSIVE)
             return IMAP_MAILBOX_LOCKED;
 
         listitem->nopen++;
         mailbox = &listitem->m;
 
-        goto lockindex;
+        if (!listitem->m.index_locktype) goto lockindex;
+
+        goto done;
     }
 
     listitem = create_listitem(name);
@@ -1302,7 +1303,6 @@ EXPORTED void mailbox_close(struct mailbox **mailboxptr)
     /* open multiple times?  Just close this one */
     if (listitem->nopen > 1) {
         listitem->nopen--;
-        mailbox_unlock_index(mailbox, NULL);
         return;
     }
 
@@ -3075,6 +3075,15 @@ EXPORTED int mailbox_abort(struct mailbox *mailbox)
  */
 EXPORTED int mailbox_commit(struct mailbox *mailbox)
 {
+    struct mailboxlist *listitem;
+
+    listitem = find_listitem(mailbox_name(mailbox));
+    assert(listitem && &listitem->m == mailbox);
+
+    /* open multiple times?  we can't commit yet, so just skip committing */
+    if (listitem->nopen > 1)
+        return 0;
+
     /* XXX - ibuf for alignment? */
     static unsigned char buf[INDEX_HEADER_SIZE];
     int n, r;
