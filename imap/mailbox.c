@@ -933,18 +933,22 @@ static int mailbox_open_index(struct mailbox *mailbox, int index_locktype)
     return 0;
 }
 
-static int mailbox_mboxlock_reopen(struct mailbox *mailbox, int locktype, int index_locktype)
+
+static int mailbox_relock(struct mailbox *mailbox, int locktype, int index_locktype)
 {
     uint32_t legacy_dirs = (mailbox_mbtype(mailbox) & MBTYPE_LEGACY_DIRS);
     int r = 0;
 
-    assert(!mailbox->index_locktype);
-
-    mailbox_release_resources(mailbox);
-
-    mboxname_release(&mailbox->namelock);
-    mboxname_release(&mailbox->local_namespacelock);
-
+    if (mailbox->index_locktype == LOCK_SHARED && locktype == LOCK_EXCLUSIVE) {
+        mailbox_unlock_index(mailbox, NULL);
+        mailbox_release_resources(mailbox);
+        mboxname_release(&mailbox->namelock);
+        mboxname_release(&mailbox->local_namespacelock);
+        r = mboxname_lock(legacy_dirs ? mailbox_name(mailbox) : mailbox_uniqueid(mailbox), &mailbox->namelock, locktype);
+        if (r) return r;
+        r = mailbox_open_index(mailbox, index_locktype);
+        if (r) return r;
+    }
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
     if (userid) {
         int haslock = user_isnamespacelocked(userid);
@@ -957,21 +961,6 @@ static int mailbox_mboxlock_reopen(struct mailbox *mailbox, int locktype, int in
         }
         free(userid);
     }
-
-    r = mboxname_lock(legacy_dirs ? mailbox_name(mailbox) : mailbox_uniqueid(mailbox), &mailbox->namelock, locktype);
-    if (r) return r;
-
-    return r;
-}
-
-static int mailbox_relock(struct mailbox *mailbox, int locktype, int index_locktype)
-{
-    assert (mailbox->refcount == 1);
-    mailbox_unlock_index(mailbox, NULL);
-    int r = mailbox_mboxlock_reopen(mailbox, locktype, index_locktype);
-    if (r) return r;
-    r = mailbox_open_index(mailbox, index_locktype);
-    if (r) return r;
     r = mailbox_lock_index_internal(mailbox, index_locktype);
     return r;
 }
@@ -992,6 +981,7 @@ static int mailbox_open_advanced(const char *name,
     mbentry_t *mbentry = NULL;
     int r = 0;
 
+
     /* already open?  just use this one */
     if (mailbox) {
         /* can't reuse an exclusive locked mailbox */
@@ -1004,6 +994,10 @@ static int mailbox_open_advanced(const char *name,
 
         mailbox->refcount++;
 
+    	char *userid = mboxname_to_userid(name);
+        syslog(LOG_ERR, "REOPENING MAILBOX %s %d %d %d (%d) %d", mailbox_name(mailbox), mailbox->refcount, locktype, index_locktype, mailbox->index_locktype, user_isnamespacelocked(userid));
+	free(userid);
+
         if (!mailbox->index_locktype) goto lockindex;
 
         goto done;
@@ -1014,6 +1008,7 @@ static int mailbox_open_advanced(const char *name,
     // lock the user namespace FIRST before the mailbox namespace
     char *userid = mboxname_to_userid(name);
     int haslock = user_isnamespacelocked(userid);
+    syslog(LOG_ERR, "OPENING MAILBOX %s %d %d %d %d", name, 1, locktype, index_locktype, haslock);
     if (haslock) {
         if (index_locktype & LOCK_EXCLUSIVE) assert(haslock & LOCK_EXCLUSIVE);
     }
@@ -1245,6 +1240,8 @@ EXPORTED void mailbox_close(struct mailbox **mailboxptr)
     if (!mailbox) return;
 
     *mailboxptr = NULL;
+
+    syslog(LOG_ERR, "CLOSING MAILBOX %s %d", mailbox_name(mailbox), mailbox->refcount);
 
     /* open multiple times?  Just close this one */
     if (mailbox->refcount > 1) {
@@ -2475,14 +2472,20 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
 
     assert(mailbox->index_fd != -1);
 
+    // if we're already locked, don't need to lock again!
+    if (mailbox->index_locktype) {
+        if (mailbox->index_locktype == LOCK_SHARED && locktype != LOCK_SHARED)
+            return IMAP_MAILBOX_LOCKED;
+        return 0;
+    }
+
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
+    syslog(LOG_ERR, "LOCKING INDEX %s %d %d %d %d", mailbox_name(mailbox), mailbox->refcount, mailbox->index_locktype, locktype, user_isnamespacelocked(userid));
+
     if (userid) {
         if (!user_isnamespacelocked(userid)) {
-            r = mailbox_relock(mailbox, LOCK_SHARED, locktype);
-            if (locktype == LOCK_SHARED)
-                mailbox->is_readonly = 1;
             free(userid);
-            return r;
+            return mailbox_relock(mailbox, LOCK_SHARED, locktype);
         }
         free(userid);
     }
@@ -2527,6 +2530,7 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
     }
 
     mailbox->index_locktype = locktype;
+    mailbox->is_readonly = (locktype == LOCK_SHARED) ? 1 : 0;
     gettimeofday(&mailbox->starttime, 0);
 
     r = stat(header_fname, &sbuf);
@@ -2603,6 +2607,10 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
     int r;
     const char *index_fname = mailbox_meta_fname(mailbox, META_INDEX);
 
+    char *userid = mboxname_to_userid(mailbox_name(mailbox));
+    syslog(LOG_ERR, "UNLOCKING INDEX %s %d (%d) %d", mailbox_name(mailbox), mailbox->refcount, mailbox->index_locktype, user_isnamespacelocked(userid));
+    free(userid);
+
     if (mailbox->refcount > 1)
         return;
 
@@ -2656,7 +2664,7 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
         if (r) {
             syslog(LOG_ERR, "IOERROR: Error committing to conversations database for mailbox %s: %s",
                    mailbox_name(mailbox), error_message(r));
-	}
+        }
     }
 
     /* release caches */
@@ -2966,6 +2974,9 @@ HIDDEN int mailbox_commit_quota(struct mailbox *mailbox)
 EXPORTED int mailbox_abort(struct mailbox *mailbox)
 {
     int r;
+
+    // we can't abort with additional references, just have to die
+    assert(mailbox->refcount == 1);
 
 #ifdef WITH_DAV
     r = mailbox_abort_dav(mailbox);
@@ -5800,11 +5811,10 @@ EXPORTED int mailbox_create(const char *name,
 
     /* needs to be an exclusive namelock to create a mailbox */
     char *userid = mboxname_to_userid(name);
-    if (userid) {
-        int haslock = user_isnamespacelocked(userid);
-        assert(haslock == LOCK_EXCLUSIVE);
-        free(userid);
-    }
+    int haslock = user_isnamespacelocked(userid);
+    syslog(LOG_ERR, "CREATING MAILBOX %s", name);
+    assert(haslock == LOCK_EXCLUSIVE);
+    free(userid);
 
     uint32_t legacy_dirs = (mbtype & MBTYPE_LEGACY_DIRS);
     r = mboxname_lock(legacy_dirs ? name : uniqueid, &mailbox->namelock, LOCK_EXCLUSIVE);
