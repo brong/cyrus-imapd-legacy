@@ -1035,8 +1035,7 @@ static int mailbox_open_advanced(const char *name,
         r = IMAP_MAILBOX_NONEXISTENT;
 
     if (r) {
-        if (mailbox->local_namespacelock)
-            mboxname_release(&mailbox->local_namespacelock);
+        mboxname_release(&mailbox->local_namespacelock);
         mboxlist_entry_free(&mbentry);
         remove_listitem(mailbox);
         return r;
@@ -1059,8 +1058,7 @@ static int mailbox_open_advanced(const char *name,
             xsyslog(LOG_ERR, "IOERROR: lock failed",
                              "mailbox=<%s> error=<%s>",
                              name, error_message(r));
-        if (mailbox->local_namespacelock)
-            mboxname_release(&mailbox->local_namespacelock);
+        mboxname_release(&mailbox->local_namespacelock);
         mboxlist_entry_free(&mbentry);
         remove_listitem(mailbox);
         return r;
@@ -1279,11 +1277,8 @@ EXPORTED void mailbox_close(struct mailbox **mailboxptr)
         xzfree(mailbox->h.flagname[flag]);
     }
 
-    if (mailbox->namelock)
-        mboxname_release(&mailbox->namelock);
-
-    if (mailbox->local_namespacelock)
-        mboxname_release(&mailbox->local_namespacelock);
+    mboxname_release(&mailbox->namelock);
+    mboxname_release(&mailbox->local_namespacelock);
 
     remove_listitem(mailbox);
 }
@@ -2676,9 +2671,7 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
     ptrarray_fini(&mailbox->caches);
 
     // release the namespacelock here
-    if (mailbox->local_namespacelock) {
-        mboxname_release(&mailbox->local_namespacelock);
-    }
+    mboxname_release(&mailbox->local_namespacelock);
 }
 
 static char *mailbox_header_data_cstring(struct mailbox *mailbox)
@@ -5819,8 +5812,7 @@ EXPORTED int mailbox_create(const char *name,
     uint32_t legacy_dirs = (mbtype & MBTYPE_LEGACY_DIRS);
     r = mboxname_lock(legacy_dirs ? name : uniqueid, &mailbox->namelock, LOCK_EXCLUSIVE);
     if (r) {
-        if (mailbox->local_namespacelock)
-            mboxname_release(&mailbox->local_namespacelock);
+        mboxname_release(&mailbox->local_namespacelock);
         remove_listitem(mailbox);
         return r;
     }
