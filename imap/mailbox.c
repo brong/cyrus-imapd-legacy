@@ -6545,9 +6545,6 @@ HIDDEN int mailbox_rename_nocopy(struct mailbox *oldmailbox,
     return r;
 }
 
-/* if 'userid' is set, we perform the funky RENAME INBOX INBOX.old
-   semantics, regardless of whether or not the name of the mailbox is
-   'user.foo'.*/
 /* requires a write-locked oldmailbox pointer, since we delete it
    immediately afterwards */
 /* This function ONLY WORKS if the type is legacy */
@@ -6581,6 +6578,7 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
     if (!uidvalidity)
         uidvalidity = mboxname_nextuidvalidity(newname, oldmailbox->i.uidvalidity);
 
+    /* zero means mailbox_create will set it */
     modseq_t highestmodseq = silent ? oldmailbox->i.highestmodseq : 0;
 
     /* Create new mailbox */
@@ -6610,21 +6608,9 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
                            NULL : mailbox_uniqueid(newmailbox));
     if (r) goto fail;
 
-    /* cyrus.header has been copied with old uniqueid.
-       make a copy of new uniqueid so we can reset it */
-    newuniqueid = xstrdup(mailbox_uniqueid(newmailbox));
-
-    /* Re-open index file  */
-    r = mailbox_open_index(newmailbox, LOCK_EXCLUSIVE);
+    /* we have new files in place, so redo all the locks */
+    r = mailbox_relock(newmailbox, LOCK_EXCLUSIVE, LOCK_EXCLUSIVE);
     if (r) goto fail;
-
-    /* Re-lock index */
-    r = mailbox_lock_index_internal(newmailbox, LOCK_EXCLUSIVE);
-
-    /* Reset new uniqueid */
-    free(newmailbox->h.uniqueid);
-    newmailbox->h.uniqueid = xstrdup(newuniqueid);
-    newmailbox->header_dirty = 1;
 
     /* update mailbox annotations if necessary */
     r = annotate_rename_mailbox(oldmailbox, newmailbox);
