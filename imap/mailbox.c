@@ -245,6 +245,7 @@ static struct mailbox *create_listitem()
     open_mailboxes = item;
 
     item->refcount = 1;
+    item->lockname = xstrdup(lockname);
     gettimeofday(&item->starttime, 0);
 
 #if defined ENABLE_OBJECTSTORE
@@ -255,12 +256,12 @@ static struct mailbox *create_listitem()
     return item;
 }
 
-static struct mailbox *find_listitem(const char *name)
+static struct mailbox *find_listitem(const char *lockname)
 {
     struct mailbox *item;
 
     for (item = open_mailboxes; item; item = item->next) {
-        if (!strcmp(name, mailbox_name(item)))
+        if (!strcmp(lockname, item->lockname))
             return item;
     }
 
@@ -279,6 +280,7 @@ static void remove_listitem(struct mailbox *remitem)
             else
                 open_mailboxes = item->next;
 
+            free(remitem->lockname);
             free(remitem);
 
 #if defined ENABLE_OBJECTSTORE
@@ -936,7 +938,6 @@ static int mailbox_open_index(struct mailbox *mailbox, int index_locktype)
 
 static int mailbox_relock(struct mailbox *mailbox, int locktype, int index_locktype)
 {
-    uint32_t legacy_dirs = (mailbox_mbtype(mailbox) & MBTYPE_LEGACY_DIRS);
     int r = 0;
 
     if (mailbox->index_locktype == LOCK_SHARED && locktype == LOCK_EXCLUSIVE) {
@@ -944,7 +945,7 @@ static int mailbox_relock(struct mailbox *mailbox, int locktype, int index_lockt
         mailbox_release_resources(mailbox);
         mboxname_release(&mailbox->namelock);
         mboxname_release(&mailbox->local_namespacelock);
-        r = mboxname_lock(legacy_dirs ? mailbox_name(mailbox) : mailbox_uniqueid(mailbox), &mailbox->namelock, locktype);
+        r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
         if (r) return r;
         r = mailbox_open_index(mailbox, index_locktype);
         if (r) return r;
@@ -1051,7 +1052,8 @@ static int mailbox_open_advanced(const char *name,
     }
 
     uint32_t legacy_dirs = (mbentry->mbtype & MBTYPE_LEGACY_DIRS);
-    r = mboxname_lock(legacy_dirs ? name : mbentry->uniqueid, &mailbox->namelock, locktype);
+    mailbox->lockname = xstrdup(legacy_dirs ? name : mbentry->uniqueid);
+    r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
     if (r) {
         /* locked is not an error - just means we asked for NONBLOCKING */
         if (r != IMAP_MAILBOX_LOCKED)
@@ -2490,14 +2492,18 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
         if (mailbox->is_readonly)
             return IMAP_MAILBOX_LOCKED;
         r = lock_blocking(mailbox->index_fd, index_fname);
+    if (r) abort();
     }
     else if (locktype == LOCK_SHARED) {
         r = lock_shared(mailbox->index_fd, index_fname);
+    if (r) abort();
     }
     else {
         /* this function does not support nonblocking locks */
         fatal("invalid locktype for index", EX_SOFTWARE);
     }
+
+    if (r) abort();
 
     if (!r) {
         if (fstat(mailbox->index_fd, &sbuf) != 0) {
@@ -5797,7 +5803,8 @@ EXPORTED int mailbox_create(const char *name,
     assert(uniqueid);
 
     /* if we already have this name open then that's an error too */
-    mailbox = find_listitem(name);
+    uint32_t legacy_dirs = (mbtype & MBTYPE_LEGACY_DIRS);
+    mailbox = find_listitem(legacy_dirs ? name : uniqueid);
     if (mailbox) return IMAP_MAILBOX_LOCKED;
 
     mailbox = create_listitem();
@@ -5809,8 +5816,8 @@ EXPORTED int mailbox_create(const char *name,
     assert(haslock == LOCK_EXCLUSIVE);
     free(userid);
 
-    uint32_t legacy_dirs = (mbtype & MBTYPE_LEGACY_DIRS);
-    r = mboxname_lock(legacy_dirs ? name : uniqueid, &mailbox->namelock, LOCK_EXCLUSIVE);
+    mailbox->lockname = xstrdup(legacy_dirs ? name : uniqueid);
+    r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
     if (r) {
         mboxname_release(&mailbox->local_namespacelock);
         remove_listitem(mailbox);

@@ -313,6 +313,7 @@ struct mailbox {
 
     /* refcounting */
     int refcount;
+    char *lockname;
     struct mboxlock *namelock;
     struct mailbox *next;
 };
