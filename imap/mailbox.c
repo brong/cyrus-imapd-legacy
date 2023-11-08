@@ -245,7 +245,6 @@ static struct mailbox *create_listitem()
     open_mailboxes = item;
 
     item->refcount = 1;
-    item->lockname = xstrdup(lockname);
     gettimeofday(&item->starttime, 0);
 
 #if defined ENABLE_OBJECTSTORE
@@ -895,13 +894,17 @@ static void mailbox_release_resources(struct mailbox *mailbox)
     if (mailbox->i.dirty)
         abort();
 
+    syslog(LOG_ERR, "CLOSING mailbox->header_fd %s %d", mailbox->lockname, mailbox->header_fd);
     /* just close the header */
     xclose(mailbox->header_fd);
+    syslog(LOG_ERR, "CLOSING B mailbox->header_fd %s %d", mailbox->lockname, mailbox->header_fd);
 
     /* release and unmap index */
     if (mailbox->index_base)
         map_free(&mailbox->index_base, &mailbox->index_len);
+    syslog(LOG_ERR, "CLOSING mailbox->index_fd %s %d", mailbox->lockname, mailbox->index_fd);
     xclose(mailbox->index_fd);
+    syslog(LOG_ERR, "CLOSING B mailbox->index_fd %s %d", mailbox->lockname, mailbox->index_fd);
     mailbox->index_locktype = 0; /* lock was released by closing fd */
 
     /* release caches */
@@ -928,7 +931,9 @@ static int mailbox_open_index(struct mailbox *mailbox, int index_locktype)
     if (!fname)
         return IMAP_MAILBOX_BADNAME;
 
+    syslog(LOG_ERR, "OPENING INDEX %s %d", mailbox->lockname, mailbox->index_fd);
     mailbox->index_fd = open(fname, openflags, 0);
+    syslog(LOG_ERR, "OPENING INDEX B %s %d", mailbox->lockname, mailbox->index_fd);
     if (mailbox->index_fd == -1)
         return IMAP_IOERROR;
 
@@ -940,16 +945,14 @@ static int mailbox_relock(struct mailbox *mailbox, int locktype, int index_lockt
 {
     int r = 0;
 
-    if (mailbox->index_locktype == LOCK_SHARED && locktype == LOCK_EXCLUSIVE) {
-        mailbox_unlock_index(mailbox, NULL);
-        mailbox_release_resources(mailbox);
-        mboxname_release(&mailbox->namelock);
-        mboxname_release(&mailbox->local_namespacelock);
-        r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
-        if (r) return r;
-        r = mailbox_open_index(mailbox, index_locktype);
-        if (r) return r;
-    }
+    mailbox_unlock_index(mailbox, NULL);
+    mailbox_release_resources(mailbox);
+    mboxname_release(&mailbox->namelock);
+    mboxname_release(&mailbox->local_namespacelock);
+    r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
+    if (r) return r;
+    r = mailbox_open_index(mailbox, index_locktype);
+    if (r) return r;
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
     if (userid) {
         int haslock = user_isnamespacelocked(userid);
@@ -2477,7 +2480,7 @@ static int mailbox_lock_index_internal(struct mailbox *mailbox, int locktype)
     }
 
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
-    syslog(LOG_ERR, "LOCKING INDEX %s %d %d %d %d", mailbox_name(mailbox), mailbox->refcount, mailbox->index_locktype, locktype, user_isnamespacelocked(userid));
+    syslog(LOG_ERR, "LOCKING INDEX %s %d %d %d %d", mailbox->lockname, mailbox->refcount, mailbox->index_locktype, locktype, user_isnamespacelocked(userid));
 
     if (userid) {
         if (!user_isnamespacelocked(userid)) {
@@ -2609,7 +2612,7 @@ EXPORTED void mailbox_unlock_index(struct mailbox *mailbox, struct statusdata *s
     const char *index_fname = mailbox_meta_fname(mailbox, META_INDEX);
 
     char *userid = mboxname_to_userid(mailbox_name(mailbox));
-    syslog(LOG_ERR, "UNLOCKING INDEX %s %d (%d) %d", mailbox_name(mailbox), mailbox->refcount, mailbox->index_locktype, user_isnamespacelocked(userid));
+    syslog(LOG_ERR, "UNLOCKING INDEX %s %d (%d) %d", mailbox->lockname, mailbox->refcount, mailbox->index_locktype, user_isnamespacelocked(userid));
     free(userid);
 
     if (mailbox->refcount > 1)
@@ -5817,7 +5820,7 @@ EXPORTED int mailbox_create(const char *name,
     free(userid);
 
     mailbox->lockname = xstrdup(legacy_dirs ? name : uniqueid);
-    r = mboxname_lock(mailbox->lockname, &mailbox->namelock, locktype);
+    r = mboxname_lock(mailbox->lockname, &mailbox->namelock, LOCK_EXCLUSIVE);
     if (r) {
         mboxname_release(&mailbox->local_namespacelock);
         remove_listitem(mailbox);
